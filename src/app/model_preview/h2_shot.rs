@@ -13,6 +13,7 @@ use super::*;
 use crate::core::format::TagNameIndex;
 use crate::core::game::GameId;
 use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
+use std::collections::HashMap;
 use std::ffi::{CString, c_char, c_void};
 
 #[link(name = "OpenGL", kind = "framework")]
@@ -45,7 +46,13 @@ fn headless_gl() -> glow::Context {
 }
 
 fn shot_game() -> GameId {
-    if std::env::var_os("H2_SHOT_CE").is_some() { GameId::HaloCe } else { GameId::Halo2 }
+    if std::env::var_os("H2_SHOT_CE").is_some() {
+        GameId::HaloCe
+    } else if std::env::var_os("H2_SHOT_H3").is_some() {
+        GameId::Halo3
+    } else {
+        GameId::Halo2
+    }
 }
 
 struct Shot {
@@ -94,6 +101,9 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let textures = materials::resolve_model_textures(source, &data.preview.materials);
     let with_passes = textures.iter().filter(|t| t.h2_layers.iter().any(|l| !l.is_empty())).count();
     eprintln!("{}: {} materials, {with_passes} with passes", shot.model, textures.len());
+    for (material, texture) in data.preview.materials.iter().zip(textures.iter()) {
+        eprintln!("NOTE MAT {} h3 {} {:?}", material.shader_path, texture.h3.is_some(), texture.error);
+    }
     data.textures = Some(Arc::new(textures));
     let mut state = ModelPreviewState::default();
     reset_model_preview_selection(&mut state, &data, default_variant_index(&data));
@@ -230,4 +240,83 @@ fn h2_shot() {
         };
         render(&gl, &mut renderer, &source, &shot);
     }
+}
+
+/// Every template of a family through translation and the driver. Set
+/// `H3_SWEEP=<limit>` and `BLAM_TEST_H3EK` to the tags folder.
+#[test]
+fn h3_sweep() {
+    use super::h3_shaders::{H3Sources, VERTEX_RIGID, VERTEX_SKINNED, read_h3_definition};
+    let Ok(limit) = std::env::var("H3_SWEEP") else {
+        return;
+    };
+    let limit: usize = limit.parse().unwrap();
+    let root = std::env::var("BLAM_TEST_H3EK").unwrap();
+    let family = std::env::var("H3_FAMILY").unwrap_or_else(|_| "shader".to_owned());
+    let source = TagSource::LooseFolder {
+        root: root.clone().into(),
+        game: Some(GameId::Halo3),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let gl = headless_gl();
+    let definition = read_h3_definition(&source, &format!("shaders\\{family}")).unwrap();
+    let mut sources = H3Sources::new(&source);
+    let folder = format!("{root}/shaders/{family}_templates");
+    let mut templates: Vec<String> = std::fs::read_dir(&folder)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter_map(|name| name.strip_suffix(".render_method_template").map(str::to_owned))
+        .collect();
+    templates.sort();
+    let (mut good, mut translation, mut compile) = (0, 0, 0);
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for template in templates.iter().take(limit) {
+        let options: Vec<usize> = template.split('_').filter_map(|digit| digit.parse().ok()).collect();
+        for entry in &definition.entry_points {
+            for vertex_type in [VERTEX_RIGID, VERTEX_SKINNED] {
+                match sources.translate_entry(&definition, &options, entry, vertex_type) {
+                    Err(error) => {
+                        translation += 1;
+                        let key: String = error.chars().take(140).collect();
+                        if *seen.entry(key.clone()).and_modify(|count| *count += 1).or_insert(1) == 1 {
+                            eprintln!("NOTE TR {template} {entry}: {key}");
+                        }
+                    }
+                    Ok((vertex, pixel)) => {
+                        let mut failed = false;
+                        for (kind, text) in
+                            [(glow::VERTEX_SHADER, &vertex.source), (glow::FRAGMENT_SHADER, &pixel.source)]
+                        {
+                            unsafe {
+                                let shader = gl.create_shader(kind).unwrap();
+                                gl.shader_source(shader, text);
+                                gl.compile_shader(shader);
+                                if !gl.get_shader_compile_status(shader) {
+                                    failed = true;
+                                    let log = gl.get_shader_info_log(shader);
+                                    let first = log.lines().next().unwrap_or("").to_owned();
+                                    if let Some(line) = first.split(':').nth(2).and_then(|n| n.trim().parse::<usize>().ok()) {
+                                        let bad = text.lines().nth(line - 1).unwrap_or("");
+                                        let key: String = first.chars().skip(8).filter(|c| !c.is_ascii_digit()).take(70).collect();
+                                        if *seen.entry(key).and_modify(|count| *count += 1).or_insert(1) == 1 {
+                                            eprintln!("NOTE GL {template} {entry}: {first}\n    {}", bad.chars().take(170).collect::<String>());
+                                        }
+                                    }
+                                }
+                                gl.delete_shader(shader);
+                            }
+                        }
+                        if failed { compile += 1 } else { good += 1 }
+                    }
+                }
+            }
+        }
+    }
+    let mut common: Vec<_> = seen.into_iter().collect();
+    common.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    for (error, count) in common.iter().take(12) {
+        eprintln!("NOTE TOP {count} {error}");
+    }
+    eprintln!("NOTE SWEEP good {good} translation {translation} compile {compile}");
 }

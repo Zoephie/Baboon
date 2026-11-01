@@ -34,6 +34,9 @@ mod h2_lights;
 pub(in crate::app) mod h2_passes;
 pub(in crate::app) mod h2_prt;
 pub(in crate::app) mod h2_stage;
+pub(crate) mod h3_lights;
+pub(in crate::app) mod h3_prt;
+pub(crate) mod h3_shaders;
 mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
@@ -108,6 +111,11 @@ pub(crate) struct RenderModelPreview {
     /// Halo 2 sphere lights on the object and what it holds.
     pub h2_point_lights: Vec<h2_lights::H2PointLight>,
     pub h2_gel_lights: Vec<h2_lights::H2GelLight>,
+    pub h3_prt: Option<h3_prt::H3Prt>,
+    /// The model's own `shield impact parameter override`.
+    pub h3_shield: Option<Arc<h3_shaders::H3ShieldSettings>>,
+    pub h3_lights: Vec<h3_lights::H3Light>,
+    pub h3_flares: Vec<h3_lights::H3FlareAt>,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,
     /// Halo CE: the antennas among the object's widgets.
@@ -1481,7 +1489,7 @@ fn draw_model_view_settings_menu(
             ui.checkbox(&mut state.show_backfaces, "Render Backfaces");
             ui.checkbox(&mut state.h2_game_shaders, "Game Shaders")
                 .on_hover_text(
-                    "Draw Halo CE and Halo 2 opaque materials through the game's own \
+                    "Draw Halo CE, Halo 2 and Halo 3 materials through the game's own \
                      shaders, lit by its default lighting.",
                 );
             ui.add_enabled(
@@ -1498,33 +1506,33 @@ fn draw_model_view_settings_menu(
                 egui::Checkbox::new(&mut state.h2_light_follows_camera, "Light Follows Camera"),
             )
             .on_hover_text(
-                "Keep the main light of Halo 2 models beside the viewer as you orbit. \
-                 This is the preview's own. Off, it stays fixed to the model.",
+                "Keep the main light of Halo 2 and Halo 3 models beside the viewer as you \
+                 orbit. This is the preview's own. Off, it stays fixed to the model.",
             );
             ui.add_enabled(
                 state.h2_game_shaders,
                 egui::Checkbox::new(&mut state.h2_active_camo, "Active Camo"),
             )
             .on_hover_text(
-                "Draw a Halo 2 model through its active camouflage, for the models \
-                 that have it.",
+                "Draw a Halo 2 or Halo 3 model through its active camouflage, for \
+                 the models that have it.",
             );
             ui.add_enabled(
                 state.h2_game_shaders,
                 egui::Checkbox::new(&mut state.h2_bloom, "Bloom"),
             )
             .on_hover_text(
-                "Add the glow of Halo 2 materials with a bloom pass. The blur is \
-                 the game's, but the strength is this preview's own: the game's \
-                 follows the exposure of the whole scene.",
+                "Add the glow of Halo 2 and Halo 3 materials with a bloom pass. The \
+                 blur is Halo 2's, and its strength is this preview's own: the \
+                 game's follows the exposure of the whole scene.",
             );
             ui.add_enabled(
                 state.h2_game_shaders,
                 egui::Checkbox::new(&mut state.h2_self_shadow, "Self Shadow"),
             )
             .on_hover_text(
-                "Shadow Halo 2 models from their main light. The game draws no such \
-                 shadow on these paths, so this is the preview's own.",
+                "Shadow Halo 2 and Halo 3 models from their main light. Halo 3 uses the \
+                 game's own shadow pass; Halo 2's is the preview's, as the game draws none here.",
             );
         },
     );

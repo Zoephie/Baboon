@@ -210,13 +210,16 @@ fn read_h2_antenna(
     const PIXELS: f32 = 100.0;
     let tag = load_referenced_tag_from_source(source, path, "antenna", b"ant!").ok()?;
     let root = tag.root();
-    let name = root.read_string_id("attachment marker name")?;
+    let name = root
+        .read_string_id("attachment marker name")
+        .or_else(|| root.read_string("attachment marker name"))?;
     let marker = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name))?;
     let bitmap_path = root.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty())?;
     let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
     let falloff = root.read_real("falloff pixels").unwrap_or(0.0);
     let cutoff = root.read_real("cutoff pixels").unwrap_or(0.0);
-    let alpha = ((PIXELS - cutoff) / (falloff - cutoff)).clamp(0.0, 1.0);
+    // Halo 3 bakes these out of the tags it ships.
+    let alpha = if falloff == cutoff { 1.0 } else { ((PIXELS - cutoff) / (falloff - cutoff)).clamp(0.0, 1.0) };
     let mut vertices = Vec::new();
     for vertex in elements(root, "vertices") {
         let sequence = vertex.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
@@ -861,6 +864,7 @@ impl H2FlareAt {
                 alpha: 0.0,
                 image: 0,
                 highlight: None,
+                tint: None,
                 depth_tested: false,
             }
         };
@@ -979,6 +983,7 @@ impl H2FlareAt {
                 alpha,
                 image: reflection.image,
                 highlight: Some((1.0 - reflection.modulation).clamp(0.0, 1.0)),
+                tint: None,
                 depth_tested: reflection.flags & OCCLUDED_BY_SOLID_OBJECTS != 0,
             });
         }

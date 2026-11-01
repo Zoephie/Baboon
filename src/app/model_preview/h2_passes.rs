@@ -64,9 +64,11 @@ pub(crate) enum H2Layer {
     /// Not the game's: see `h2_shadow_passes`.
     ShadowCaster,
     ShadowMask,
+    /// Halo 3's `shadow_apply`, darkening what the lit pass drew.
+    ShadowApply,
 }
 
-pub(crate) const H2_LAYER_COUNT: usize = 22;
+pub(crate) const H2_LAYER_COUNT: usize = 23;
 
 /// The sphere lights `render_lights` falls back on with nothing else lighting
 /// the scene: a warm key and a cool fill.
@@ -117,6 +119,7 @@ impl H2Layer {
         Self::Bloom,
         Self::ShadowCaster,
         Self::ShadowMask,
+        Self::ShadowApply,
     ];
 
     /// The tag's `layer` option.
@@ -138,7 +141,7 @@ impl H2Layer {
             Self::Hologram => "hologram",
             Self::ActiveCamo => "active camo",
             Self::Bloom => "bloom",
-            Self::ShadowCaster | Self::ShadowMask | Self::ShieldDamaged | Self::Overshield => "",
+            Self::ShadowCaster | Self::ShadowMask | Self::ShadowApply | Self::ShieldDamaged | Self::Overshield => "",
             Self::Transparent => TRANSPARENT_LAYER,
         }
     }
@@ -184,7 +187,7 @@ impl H2Layer {
 /// The passes behind the preview's own key light shadow. Under the default
 /// lights the game draws no shadows at all: layers 10 and 11 only run for a
 /// light object that casts them.
-pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 2] {
+pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 3] {
     let pass = |stage, fragment: String, compare, write| H2DrawPass {
         stage,
         fragment,
@@ -240,8 +243,75 @@ void main() {{
                 false,
             ),
         ),
+        (
+            H2Layer::ShadowApply,
+            H2DrawPass {
+                depth_bias: H3_SHADOW_APPLY_BIAS,
+                channels: [true; 4],
+                blend: Some(H2Blend {
+                    equation: H2BlendEquation::Add,
+                    source: H2BlendFactor::Zero,
+                    destination: H2BlendFactor::SrcAlpha,
+                    constant: [0; 4],
+                }),
+                ..pass(
+                    H2VertexStage::ShadowMask,
+                    format!("{H2_GLSL_VERSION}{H3_SHADOW_APPLY}"),
+                    // The lit pass's depth is another program's: near, not equal.
+                    H2Compare::LessOrEqual,
+                    false,
+                )
+            },
+        ),
     ]
 }
+
+const H3_SHADOW_APPLY_BIAS: f32 = -0.00002;
+
+/// `shadow_apply`'s pixel shader at `_shadow_mode_bilinear3x3`, in the preview's
+/// box: one object filling the map, so at full alpha.
+const H3_SHADOW_APPLY: &str = "in vec4 v_tc0;
+uniform sampler2D u_shadow_map;
+uniform sampler2D u_normal_target;
+uniform vec3 u_shadow_toward;
+uniform float u_shadow_size;
+out vec4 color;
+float closer(ivec2 texel, ivec2 offset, float depth) {
+    return step(depth, texelFetch(u_shadow_map, texel + offset, 0).r);
+}
+void main() {
+    vec3 place = v_tc0.xyz * 0.5 + 0.5;
+    vec3 normal = texelFetch(u_normal_target, ivec2(gl_FragCoord.xy), 0).xyz * 2.0 - 1.0;
+    float cosine = dot(normal, u_shadow_toward);
+    float falloff = clamp(place.z * 2.0 - 1.0, 0.0, 1.0);
+    falloff *= falloff;
+    float darkness = (1.0 - falloff * falloff) * clamp(cosine, 0.0, 1.0);
+    float darken = 1.0;
+    vec2 pixel = place.xy * u_shadow_size;
+    if (darkness > 0.001 && all(greaterThan(pixel, vec2(1.0))) && all(lessThan(pixel, vec2(u_shadow_size - 2.0)))) {
+        cosine = max(cosine, 0.24253562);
+        float slope = sqrt(1.0 - cosine * cosine) / cosine + 0.2;
+        float depth_bias = slope * 1.41421356 / u_shadow_size;
+        vec4 biased = place.z - depth_bias * vec4(1.0, 4.47213595, 3.0, 5.09901951);
+        ivec2 t = ivec2(floor(pixel));
+        vec2 f = fract(pixel);
+        vec2 r = 1.0 - f;
+        float lit = r.x * r.y * closer(t, ivec2(-1, -1), biased.z)
+            + r.y * closer(t, ivec2(0, -1), biased.y)
+            + f.x * r.y * closer(t, ivec2(1, -1), biased.z)
+            + r.x * closer(t, ivec2(-1, 0), biased.y)
+            + closer(t, ivec2(0, 0), biased.x)
+            + f.x * closer(t, ivec2(1, 0), biased.y)
+            + r.x * f.y * closer(t, ivec2(-1, 1), biased.z)
+            + f.y * closer(t, ivec2(0, 1), biased.y)
+            + f.x * f.y * closer(t, ivec2(1, 1), biased.z);
+        lit *= 0.25;
+        darken = clamp(1.01 - darkness + lit * darkness, 0.0, 1.0);
+        darken *= darken;
+    }
+    color = vec4(0.0, 0.0, 0.0, darken);
+}
+";
 
 /// Stands in for the direct light on the object path, where a shadow leaves
 /// the pass only its ambient, indirect and reflected light.
@@ -509,7 +579,12 @@ pub(super) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction
 
 /// The same for a `mapping_function` of another name.
 pub(super) fn tag_function_at(holder: &TagStruct<'_>, name: &str) -> Option<TagFunction> {
-    let data = holder.field_path(&format!("{name}/data"))?.as_block()?;
+    let field = holder.field_path(&format!("{name}/data"))?;
+    // Later engines keep the bytes as one blob, in their own encoding.
+    if let Some(data) = field.as_data() {
+        return TagFunction::parse(data).ok();
+    }
+    let data = field.as_block()?;
     let bytes: Vec<u8> = (0..data.len())
         .filter_map(|index| data.element(index))
         .filter_map(|byte| byte.read_int_any("Value").map(|value| value as i8 as u8))

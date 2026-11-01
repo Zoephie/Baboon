@@ -105,6 +105,7 @@ pub(super) fn draw_model_viewport(
     let visible_batches = visible_batch_indices(&preview, state);
     let skinning_rows = animation_skinning_rows(data, state);
     let time = ui.input(|input| input.time % H2_TIME_WRAP) as f32;
+    let h2_values = h2_function_values_for(data, &state.h2_function_inputs, time);
     let frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
@@ -134,8 +135,16 @@ pub(super) fn draw_model_viewport(
             || h2_functions_move(data, &state.h2_function_inputs, time)
             || data.preview.h2_flares.iter().any(|at| at.animates())
             || data.preview.h2_point_lights.iter().any(|light| light.animates())
-            || data.preview.h2_gel_lights.iter().any(|light| light.animates()),
-        h2_values: h2_function_values_for(data, &state.h2_function_inputs, time),
+            || data.preview.h2_gel_lights.iter().any(|light| light.animates())
+            || data.preview.h3_lights.iter().any(|light| light.animates())
+            || data.preview.h3_flares.iter().any(|at| at.animates())
+            || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
+                texture.h3.as_ref().is_some_and(|material| {
+                    material.animations.iter().any(|animation| animation.moves())
+                        || (material.shield.is_some() && h3_draw::h3_shield_showing(h2_values.as_ref()))
+                })
+            }),
+        h2_values,
         h2_attached_values: h2_attached_values(data, time),
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
@@ -804,14 +813,25 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
     let passes = textures.flat_map(|texture| texture.h2_layers.iter().flatten());
     let flares = data.preview.h2_flares.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
     let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == 0);
+    let h3_lights = data.preview.h3_lights.iter().filter(|light| light.object == 0);
+    let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == 0);
     let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == 0);
+    let h3 = data.textures.iter().flat_map(|textures| textures.iter());
+    let h3 = h3.filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
+    let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
     let flares = flares
+        .chain(h3)
+        .chain(h3_lights.flat_map(|light| light.inputs()))
+        .chain(h3_flares.map(|at| at.scale_name()))
         .chain(lights.map(|light| light.scale_name()))
         .chain(gels.map(|light| light.scale_name()))
         .filter(|name| !name.is_empty());
     // `sub_6C18F0` gates the shield overlay on this itself.
+    let textures = data.textures.iter().flat_map(|textures| textures.iter());
+    let h3_shield = textures.filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
     let shield = data.preview.materials.iter().any(|m| m.shield == Some(H2Layer::ShieldDamaged));
-    let gate = shield.then_some("current_shield_damage");
+    let gate = (shield || h3_shield).then_some("current_shield_damage");
+    let gate = gate.into_iter().chain(h3_shield.then_some(h3_draw::H3_OVERSHIELD));
     for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares).chain(gate) {
         if !names.iter().any(|known| known == name) {
             names.push(name.to_owned());
@@ -854,7 +874,8 @@ fn h2_function_values_for(
     let flares = data.preview.h2_flares.iter().any(|at| !at.scale_name().is_empty())
         || data.preview.h2_point_lights.iter().any(|light| !light.scale_name().is_empty())
         || data.preview.h2_gel_lights.iter().any(|light| !light.scale_name().is_empty());
-    (data.h2_object_functions.is_some() || flares).then(|| h2_function_values(data, set, time))
+    let h3 = data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| texture.h3.is_some());
+    (data.h2_object_functions.is_some() || flares || h3).then(|| h2_function_values(data, set, time))
 }
 
 fn h2_functions_move(
@@ -1081,6 +1102,8 @@ fn paint_model_gl(
 #[cfg(all(test, target_os = "macos"))]
 #[path = "h2_shot.rs"]
 mod h2_shot;
+#[path = "h3_draw.rs"]
+mod h3_draw;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -1454,6 +1477,12 @@ unsafe fn bind_preview_vertex_layout(
 const H2_SHADOW_MAP_SIZE: i32 = 2048;
 /// Past the units a pass's own samplers take.
 const H2_SHADOW_MAP_UNIT: u32 = 8;
+const H3_NORMAL_TARGET_UNIT: u32 = 9;
+/// `c_rasterizer::render_globals.k_shadow_resolution`.
+pub(super) const H3_SHADOW_MAP_SIZE: i32 = 512;
+/// `set_shadow_generate_mode`'s bias, the second in depth units.
+const H3_SHADOW_SLOPE_BIAS: f32 = 1.414;
+const H3_SHADOW_DEPTH_BIAS: f32 = 0.003;
 
 /// A depth texture and the framebuffer to fill it through.
 unsafe fn h2_shadow_map(gl: &glow::Context) -> Option<(glow::NativeFramebuffer, glow::NativeTexture)> {
@@ -1612,6 +1641,7 @@ struct ModelGpuSlot {
     /// Each of `h2_gel_lights`' gels, of `gel_geometry`.
     gel_textures: Vec<Option<glow::NativeTexture>>,
     gel_geometry: Option<u64>,
+    h3_textures: h3_draw::H3SlotTextures,
     flare_geometry: Option<u64>,
     antenna_textures: Vec<Option<glow::NativeTexture>>,
 }
@@ -1656,6 +1686,7 @@ impl ModelGpuSlot {
                 flare_textures: Vec::new(),
                 gel_textures: Vec::new(),
                 gel_geometry: None,
+                h3_textures: Default::default(),
                 flare_geometry: None,
                 antenna_textures: Vec::new(),
             })
@@ -1709,6 +1740,18 @@ impl ModelGpuSlot {
                 None => {
                     gl.disable_vertex_attrib_array(PRT_CLUSTER_ATTRIBUTE);
                     gl.disable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
+                }
+            }
+            if let Some(prt) = &frame.preview.h3_prt {
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
+                gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&prt.vertices), glow::STATIC_DRAW);
+                let stride = std::mem::size_of::<[f32; h3_prt::COEFFICIENTS]>() as i32;
+                for (index, attribute) in h3_draw::PRT_ATTRIBUTES.into_iter().enumerate() {
+                    gl.enable_vertex_attrib_array(attribute);
+                    // The first holds a fourth for the linear shader, in the
+                    // second's first place.
+                    let size = if index == 0 { 4 } else { 3 };
+                    gl.vertex_attrib_pointer_f32(attribute, size, glow::FLOAT, false, stride, index as i32 * 12);
                 }
             }
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
@@ -2119,10 +2162,14 @@ in vec2 v_uv;
 uniform sampler2D u_map;
 uniform vec4 u_color;
 uniform float u_highlight;
+uniform vec2 u_tint;
 out vec4 out_color;
 void main() {
     vec4 map = texture(u_map, v_uv);
-    if (u_highlight < 0.0) {
+    if (u_tint.y > 0.0) {
+        vec4 lifted = pow(map, vec4(u_tint.y)) * map;
+        out_color = vec4((lifted.rgb * u_tint.x + map.rgb * u_color.rgb) * u_color.a, 1.0);
+    } else if (u_highlight < 0.0) {
         out_color = vec4(u_color.rgb * map.rgb, u_color.a * map.a);
     } else {
         // The pixel shader of `sub_92E4A0`, read from its bytecode.
@@ -2140,6 +2187,7 @@ struct CeFlareGl {
     buffer: glow::NativeBuffer,
     color: Option<glow::NativeUniformLocation>,
     highlight: Option<glow::NativeUniformLocation>,
+    tint: Option<glow::NativeUniformLocation>,
     map: Option<glow::NativeUniformLocation>,
     /// A patch's samples past the depth buffer, and in all.
     queries: [glow::NativeQuery; 2],
@@ -2149,6 +2197,8 @@ struct ModelGlRenderer {
     ce_flares: Option<CeFlareGl>,
     /// Whether this context can draw Halo 2 passes; see `H2_GLSL_VERSION`.
     h2_supported: bool,
+    /// Whether this context can draw Halo 3's: the translated shaders want GLSL 4.10.
+    h3_supported: bool,
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.
     h2_programs: HashMap<(H2VertexStage, String), Option<H2GlProgram>>,
@@ -2159,6 +2209,14 @@ struct ModelGlRenderer {
     h2_target: Option<H2Target>,
     h2_scene: Option<H2Target>,
     h2_frame_copy: Option<H2Target>,
+    h3_targets: Option<h3_draw::H3Targets>,
+    /// The light drawing now, and its gel.
+    h3_light: Option<(h3_lights::H3LitLight, Option<glow::NativeTexture>)>,
+    /// Linked passes by their address; none for one that failed.
+    h3_programs: HashMap<usize, Option<h3_draw::H3Program>>,
+    h3_composite_program: Option<glow::NativeProgram>,
+    h3_bloom_program: Option<glow::NativeProgram>,
+    h3_empty_vertices: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
     h2_bloom: Option<H2Bloom>,
@@ -2248,6 +2306,7 @@ impl ModelGlRenderer {
             Ok(Self {
                 ce_flares: None,
                 h2_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
+                h3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                 h2_programs: HashMap::new(),
                 h2_black_cube: upload_black_cube(gl),
                 h2_black_volume: upload_solid_volume(gl, [0, 0, 0, 255]),
@@ -2256,6 +2315,12 @@ impl ModelGlRenderer {
                 h2_target: None,
                 h2_scene: None,
                 h2_frame_copy: None,
+                h3_targets: None,
+                h3_light: None,
+                h3_programs: HashMap::new(),
+                h3_composite_program: None,
+                h3_bloom_program: None,
+                h3_empty_vertices: None,
                 h2_gel: None,
                 h2_bloom: None,
                 h2_shadow_map: None,
@@ -2408,6 +2473,10 @@ impl ModelGlRenderer {
                 gl.uniform_1_f32(Some(&self.unlit), 0.0);
                 self.prepare_h2_programs(gl, frame);
                 self.draw_batches(gl, frame, false, &self.slots[slot].materials);
+                if self.h3_draws(frame) {
+                    let order = frame.visible_batches.clone();
+                    self.draw_h3(gl, frame, slot, &order);
+                }
                 if frame.game_shaders && self.h2_camo_on(frame) {
                     let order = frame.visible_batches.clone();
                     self.copy_h2_frame(gl, frame, &order);
@@ -2526,7 +2595,8 @@ impl ModelGlRenderer {
                 && !(preview.ce_lights.is_empty()
                     && preview.ce_antennas.is_empty()
                     && preview.h2_antennas.is_empty()
-                    && preview.h2_flares.is_empty())
+                    && preview.h2_flares.is_empty()
+                    && preview.h3_flares.is_empty())
             {
                 self.draw_ce_flares(gl, frame, slot);
             }
@@ -2572,6 +2642,7 @@ impl ModelGlRenderer {
                     .chain(frame.preview.h2_flares.iter().map(|at| {
                         at.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect()
                     }))
+                    .chain(frame.preview.h3_flares.iter().map(|at| vec![upload_h2_image(gl, at.image())]))
                     .collect();
                 for texture in uploaded.antenna_textures.drain(..).flatten() {
                     gl.delete_texture(texture);
@@ -2630,6 +2701,21 @@ impl ModelGlRenderer {
                 let textures = &uploaded.flare_textures[index];
                 draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
             }
+            let first_h3 = frame.preview.ce_lights.len() + frame.preview.h2_flares.len();
+            for (index, at) in frame.preview.h3_flares.iter().enumerate() {
+                let values = frame.h2_values_of_object(at.object);
+                let occlusion = match at.occlusion_patch(values, bones, &view) {
+                    None => Some(1.0),
+                    Some(patch) => ce_flare_occlusion(gl, flares, camera, &view, &patch),
+                };
+                let Some(occlusion) = occlusion else {
+                    continue;
+                };
+                if let Some(sprite) = at.sprite(values, bones, &view, frame.time, occlusion, 0) {
+                    let textures = &uploaded.flare_textures[first_h3 + index];
+                    draw_flare_sprites(gl, flares, camera, &view, &[sprite], textures);
+                }
+            }
             let first_h2 = frame.preview.ce_lights.len();
             for (index, at) in frame.preview.h2_flares.iter().enumerate() {
                 let occlusion = match at.occlusion_patches(bones, &view) {
@@ -2680,6 +2766,9 @@ impl ModelGlRenderer {
     }
 
     fn h2_replaces_slots(&self, frame: &ModelGpuFrame, material: usize) -> bool {
+        if frame.game_shaders && self.h3_material(frame, material).is_some() {
+            return true;
+        }
         if self.h2_material_ready(frame, material, H2Layer::Transparent) {
             return true;
         }
@@ -2878,15 +2967,25 @@ impl ModelGlRenderer {
             let Some((framebuffer, _)) = self.h2_shadow_map else {
                 return false;
             };
+            let h3 = self.h3_draws(frame);
+            let size = if h3 { H3_SHADOW_MAP_SIZE } else { H2_SHADOW_MAP_SIZE };
             let state = H2FramebufferState::capture(gl);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.viewport(0, 0, H2_SHADOW_MAP_SIZE, H2_SHADOW_MAP_SIZE);
             gl.disable(glow::SCISSOR_TEST);
             gl.depth_mask(true);
             gl.clear_depth_f32(1.0);
             gl.clear(glow::DEPTH_BUFFER_BIT);
+            gl.viewport(0, 0, size, size);
+            if h3 {
+                gl.enable(glow::POLYGON_OFFSET_FILL);
+                gl.polygon_offset(H3_SHADOW_SLOPE_BIAS, H3_SHADOW_DEPTH_BIAS * (1 << 24) as f32);
+            }
             self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowCaster, None);
+            gl.disable(glow::POLYGON_OFFSET_FILL);
             state.restore(gl);
+            if h3 {
+                return true;
+            }
             gl.clear_stencil(0);
             gl.clear(glow::STENCIL_BUFFER_BIT);
             gl.enable(glow::STENCIL_TEST);
@@ -2917,6 +3016,10 @@ impl ModelGlRenderer {
             gl.clear(glow::COLOR_BUFFER_BIT);
             gl.color_mask(true, true, true, true);
             self.draw_h2_passes(gl, frame, slot, order, H2Layer::Bloom, None);
+            if self.h3_draws(frame) {
+                self.h3_bloom_mask(gl);
+                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            }
             if self.h2_bloom.is_none() {
                 self.h2_bloom = H2Bloom::new(gl, H2_GLSL_VERSION);
             }
@@ -3169,6 +3272,16 @@ impl ModelGlRenderer {
                     gl.bind_texture(glow::TEXTURE_2D, Some(map));
                     let location = program.location(gl, "u_shadow_map");
                     gl.uniform_1_i32(location.as_ref(), H2_SHADOW_MAP_UNIT as i32);
+                }
+                if let Some(normal) = self.h3_normal_target() {
+                    gl.active_texture(glow::TEXTURE0 + H3_NORMAL_TARGET_UNIT);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(normal));
+                    let location = program.location(gl, "u_normal_target");
+                    gl.uniform_1_i32(location.as_ref(), H3_NORMAL_TARGET_UNIT as i32);
+                    let location = program.location(gl, "u_shadow_toward");
+                    gl.uniform_3_f32_slice(location.as_ref(), &toward);
+                    let location = program.location(gl, "u_shadow_size");
+                    gl.uniform_1_f32(location.as_ref(), H3_SHADOW_MAP_SIZE as f32);
                 }
             }
             for (name, axis) in [
@@ -4443,17 +4556,9 @@ pub(super) fn render_model_to_preview(
         ..Default::default()
     };
 
-    for region in &model.regions {
-        for permutation in &region.permutations {
-            let first_mesh = permutation.mesh_index.max(0) as usize;
-            let mesh_count = permutation.mesh_count.max(0) as usize;
-            for mesh_index in first_mesh..first_mesh.saturating_add(mesh_count) {
-                let Some(mesh) = render_meshes.get(mesh_index) else {
-                    continue;
-                };
-                append_render_mesh_to_preview(&mut preview, mesh, &region.name, &permutation.name);
-            }
-        }
+    for (region, permutation, mesh_index) in preview_mesh_order(model, render_meshes.len()) {
+        let (region, permutation) = (&model.regions[region], &model.regions[region].permutations[permutation]);
+        append_render_mesh_to_preview(&mut preview, &render_meshes[mesh_index], &region.name, &permutation.name);
     }
 
     if preview.vertices.is_empty() {
@@ -4474,6 +4579,25 @@ pub(super) fn render_model_to_preview(
     }
 
     preview
+}
+
+/// The meshes a preview holds, in the order its vertices lie: by region and
+/// permutation, which is not the tag's. Anything parallel to the vertices has
+/// to walk this too. Each is a region, permutation and mesh index.
+pub(super) fn preview_mesh_order(model: &RenderModel, mesh_count: usize) -> Vec<(usize, usize, usize)> {
+    let mut order = Vec::new();
+    for (region_index, region) in model.regions.iter().enumerate() {
+        for (permutation_index, permutation) in region.permutations.iter().enumerate() {
+            let first_mesh = permutation.mesh_index.max(0) as usize;
+            let count = permutation.mesh_count.max(0) as usize;
+            for mesh_index in first_mesh..first_mesh.saturating_add(count) {
+                if mesh_index < mesh_count {
+                    order.push((region_index, permutation_index, mesh_index));
+                }
+            }
+        }
+    }
+    order
 }
 
 /// Append one render mesh without flattening every triangle into three unique
@@ -4814,6 +4938,8 @@ unsafe fn draw_flare_sprites(
             let [red, green, blue] = sprite.color;
             gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, sprite.alpha);
             gl.uniform_1_f32(flares.highlight.as_ref(), sprite.highlight.unwrap_or(-1.0));
+            let [modulation, power] = sprite.tint.unwrap_or([0.0; 2]);
+            gl.uniform_2_f32(flares.tint.as_ref(), modulation, power);
             if sprite.depth_tested {
                 gl.enable(glow::DEPTH_TEST);
                 gl.depth_func(glow::LEQUAL);
@@ -4843,6 +4969,7 @@ unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<C
             buffer,
             color: gl.get_uniform_location(program, "u_color"),
             highlight: gl.get_uniform_location(program, "u_highlight"),
+            tint: gl.get_uniform_location(program, "u_tint"),
             map: gl.get_uniform_location(program, "u_map"),
             queries: [gl.create_query().ok()?, gl.create_query().ok()?],
         })

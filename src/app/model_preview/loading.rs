@@ -353,6 +353,27 @@ pub(super) fn load_model_preview(
         let model = model.as_ref().unwrap_or(model_tag);
         let mut data = load_model_preview(model, entry, names, Some(source), settings)?;
         data.default_variant = object_default_variant(model_tag);
+        if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3), .. }) {
+            data.h2_change_colors = read_h2_change_colors(model_tag);
+            data.h2_object_functions = super::h2_functions::read_h2_object_functions(model_tag);
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            let frame = |marker: &RenderModelPreviewMarker| {
+                let place = super::attachment::MarkerFrame {
+                    axes: marker.axes,
+                    position: marker.position,
+                    node: marker.node_index,
+                };
+                (place, marker.node_index.max(0) as usize)
+            };
+            preview.h3_shield = model
+                .root()
+                .read_tag_ref_path("shield impact parameter override")
+                .filter(|path| !path.is_empty())
+                .and_then(|path| super::materials::read_h3_shield_settings(source, &path));
+            preview.h3_lights = super::h3_lights::read_h3_lights(source, model_tag, 0, &preview.markers, frame);
+            preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, frame);
+            preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
+        }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = read_h2_change_colors(model_tag);
             data.h2_object_functions = super::h2_functions::read_h2_object_functions(model_tag);
@@ -369,6 +390,12 @@ pub(super) fn load_model_preview(
             (preview.h2_flares, preview.h2_point_lights, preview.h2_gel_lights) = found;
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &markers);
             preview.markers = markers;
+        }
+        let weapons_family = matches!(
+            source,
+            TagSource::LooseFolder { game: Some(GameId::Halo2 | GameId::Halo3), .. }
+        );
+        if weapons_family {
             if model_tag.header.group_tag == u32::from_be_bytes(*b"bipd") {
                 let known = settings.h2_equippable.as_deref();
                 let weapons = super::h2_weapons::unit_weapons(source, model_tag, known);
@@ -702,6 +729,8 @@ pub(in crate::app) fn build_render_preview(
         }
     }
     preview.h2_prt = read_h2_prt(render_tag, &render_model, &render_meshes, &h2_prt_lights())
+        .filter(|prt| prt.vertices.len() == preview.vertices.len());
+    preview.h3_prt = super::h3_prt::read_h3_prt(render_tag, &render_model, &render_meshes)
         .filter(|prt| prt.vertices.len() == preview.vertices.len());
     append_model_errors(render_tag, &mut preview, ModelPreviewLayer::Render);
     Ok(preview)

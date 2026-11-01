@@ -523,15 +523,27 @@ pub(super) fn attach_h2_weapon(
             preview.weapon_ik.extend(points);
         }
     }
-    let (flares, lights, gels) =
-        super::h2_lights::read_h2_flares(source, &weapon, owner, &attached.markers, |marker| {
-            (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
-        });
-    preview.h2_flares.extend(flares);
-    preview.h2_point_lights.extend(lights);
-    preview.h2_gel_lights.extend(gels);
+    let frame = |marker: &RenderModelPreviewMarker| {
+        (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
+    };
+    if blam_tags::game::Game::of(&weapon) == blam_tags::game::Game::Halo3 {
+        let markers = &attached.markers;
+        let lights = super::h3_lights::read_h3_lights(source, &weapon, owner, markers, frame);
+        let flares = super::h3_lights::read_h3_flares(source, &weapon, owner, markers, frame);
+        preview.h3_lights.extend(lights);
+        preview.h3_flares.extend(flares);
+    } else {
+        let (flares, lights, gels) =
+            super::h2_lights::read_h2_flares(source, &weapon, owner, &attached.markers, frame);
+        preview.h2_flares.extend(flares);
+        preview.h2_point_lights.extend(lights);
+        preview.h2_gel_lights.extend(gels);
+    }
     // No weapon in the kit has PRT of its own.
     if let Some(prt) = preview.h2_prt.as_mut() {
+        prt.pad(attached.vertices.len());
+    }
+    if let Some(prt) = preview.h3_prt.as_mut() {
         prt.pad(attached.vertices.len());
     }
     merge_attached(preview, attached, parent, child, owner, tag_path::name(path));

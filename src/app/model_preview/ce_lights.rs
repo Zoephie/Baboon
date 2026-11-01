@@ -249,6 +249,8 @@ pub(crate) struct CeSprite {
     pub(crate) image: usize,
     /// Halo 2: how strongly the map's brightest parts run to white.
     pub(crate) highlight: Option<f32>,
+    /// Halo 3: how the map's own color adds, and the power that takes it to.
+    pub(crate) tint: Option<[f32; 2]>,
     /// Halo 2: whether the world's depth hides it.
     pub(crate) depth_tested: bool,
 }
@@ -349,6 +351,7 @@ impl CeLight {
             alpha: 0.0,
             image: 0,
             highlight: None,
+            tint: None,
             depth_tested: false,
         })
     }
@@ -461,6 +464,7 @@ impl CeLight {
                 alpha,
                 image: reflection.image,
                 highlight: None,
+                tint: None,
                 depth_tested: false,
             });
         }
