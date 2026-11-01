@@ -3157,7 +3157,10 @@ impl ModelGlRenderer {
             if !cursor_advanced && !frame.preview.h3_particles.is_empty() {
                 let systems = &frame.preview.h3_particles;
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
-                uploaded.h3_particles.advance(systems, values, &mut uploaded.h3_onsets, bones, view.eye, frame.time);
+                // The grid, or under the object if that hangs below it.
+                let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
+                let ground = lowest.fold(0.0, f32::min);
+                uploaded.h3_particles.advance(systems, values, &mut uploaded.h3_onsets, bones, view.eye, ground, frame.time);
             }
             if !cursor_advanced && !frame.preview.h3_strips.is_empty() {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();

@@ -311,6 +311,8 @@ pub(crate) struct H3ParticleLook {
     model: Option<Vec<Vec<blam_tags::ParticleVertex>>>,
     /// `bitmap authored vertically`: a quarter turn, for what is not a mesh.
     vertical: bool,
+    /// `dies on structure collision`.
+    dies_on_ground: bool,
     /// `tint from lightmap`.
     tint_from_lightmap: bool,
     double_sided: bool,
@@ -592,6 +594,11 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         intensity_fades: flagged("intensity affects alpha"),
         model,
         vertical: flagged("bitmap authored vertically"),
+        dies_on_ground: root
+            .read_flag_names("main flags")
+            .unwrap_or_default()
+            .iter()
+            .any(|(_, name)| name.starts_with("dies on structure collision")),
         tint_from_lightmap: flagged("tint from lightmap"),
         double_sided: flagged("double-sided"),
         attachments: elements(root, "attachments")
@@ -600,7 +607,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
                 let trigger = match attachment.read_enum_name("trigger").as_deref() {
                     Some("birth") => H3ParticleTrigger::Birth,
                     Some("death") => H3ParticleTrigger::Death,
-                    // Collisions need a world to hit.
+                    Some("collision") => H3ParticleTrigger::Collision,
                     _ => return None,
                 };
                 let (group, path) = attachment.read_tag_ref_with_group("type")?;
@@ -678,6 +685,66 @@ struct H3ParticleFlock {
     maximum_velocity: H3ParticleProperty,
     maximum_acceleration: H3ParticleProperty,
 }
+
+/// `update_particles_collider`'s two, against the preview's ground.
+#[derive(Debug)]
+struct H3ParticleCollider {
+    elasticity: H3ParticleProperty,
+    friction: H3ParticleProperty,
+}
+
+fn read_collider(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
+    let movement = emitter.descend("particle movement")?;
+    let template = movement
+        .read_tag_ref_path("template")
+        .filter(|path| !path.is_empty())
+        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+    let own = elements(movement, "movements");
+    let held = template.as_ref().map(|tag| tag.root());
+    let collides = |holder: Option<TagStruct<'_>>| {
+        let flags = holder.and_then(|holder| holder.read_flag_names("flags")).unwrap_or_default();
+        flags.iter().any(|(_, name)| name.starts_with("collide with structure"))
+    };
+    if !collides(Some(movement)) && !collides(held) {
+        return None;
+    }
+    let movements = if own.is_empty() { held.map_or(Vec::new(), |root| elements(root, "movements")) } else { own };
+    let entry = movements.into_iter().find(|entry| entry.read_enum_name("type").as_deref() == Some("collider"))?;
+    let mut by_id = |id: i128| {
+        let parameters = elements(entry, "parameters");
+        let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
+        H3ParticleProperty::named(found, "property", seeds)
+    };
+    let friction = by_id(0)?;
+    Some(H3ParticleCollider { elasticity: by_id(1)?, friction })
+}
+
+/// What a particle does to itself where its step crosses the ground, which
+/// runs along `up` and lies `height` below its frame's origin: the part of its
+/// velocity into the ground bounces, and the part along it drags.
+fn bounce(
+    position: [f32; 3],
+    velocity: [f32; 3],
+    (up, height): ([f32; 3], f32),
+    dt: f32,
+    elasticity: f32,
+    friction: f32,
+) -> Option<([f32; 3], [f32; 3])> {
+    let before = dot(up, position) + height;
+    let after = before + dot(up, velocity) * dt;
+    if before < 0.0 || after >= 0.0 {
+        return None;
+    }
+    let share = before / (before - after) * dt;
+    let keep = 1.0 - friction;
+    let into = dot(velocity, up);
+    let place = std::array::from_fn(|axis| position[axis] + velocity[axis] * share + up[axis] * PUSH_OUT);
+    let along: [f32; 3] = std::array::from_fn(|axis| velocity[axis] - up[axis] * into);
+    Some((place, std::array::from_fn(|axis| keep * along[axis] - elasticity * up[axis] * into)))
+}
+
+/// `update_particles_collider`'s `push_out_distance`.
+const PUSH_OUT: f32 = 0.005;
 
 fn read_flock(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleFlock> {
     let movement = emitter.descend("particle movement")?;
@@ -765,11 +832,12 @@ struct H3ParticlePhysics {
     rotational_friction: Option<H3ParticleProperty>,
 }
 
-/// `e_particle_attachment_type`, of what can happen without a world.
+/// `e_particle_attachment_type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum H3ParticleTrigger {
     Birth,
     Death,
+    Collision,
 }
 
 /// `emission_axis_enum`, for what turns about an axis of its own.
@@ -840,6 +908,7 @@ struct H3Emitter {
     black_point: H3ParticleProperty,
     physics: Option<H3ParticlePhysics>,
     flock: Option<H3ParticleFlock>,
+    collider: Option<H3ParticleCollider>,
 }
 
 fn read_physics(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
@@ -895,6 +964,7 @@ fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter>
     let axis_angle = property("emission axis angle")?;
     let physics = read_physics(source, emitter, &mut seeds);
     let flock = read_flock(source, emitter, &mut seeds);
+    let collider = read_collider(source, emitter, &mut seeds);
     let scroll = emitter.read_vec2("uv scrolling");
     Some(H3Emitter {
         axis: H3ParticleAxis::named(&emitter.read_enum_name("particle axis (for models)").unwrap_or_default()),
@@ -906,7 +976,7 @@ fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter>
         axis_angle,
         scroll: [scroll.i, scroll.j],
         shape, offset, direction, radius, angle, starting, most, rate, lifespan, acceleration, speed,
-        rotation, rotation_rate, size, scale, tint, alpha, black_point, physics, flock,
+        rotation, rotation_rate, size, scale, tint, alpha, black_point, physics, flock, collider,
     })
 }
 
@@ -1222,6 +1292,8 @@ fn emit(shape: H3EmissionShape, radius: f32, angle_degrees: f32, random: &mut Ra
 struct Particle {
     /// Unique among its emitter's, for what follows it.
     id: u64,
+    /// In contact, so that a collision's attachments play once.
+    colliding: bool,
     axis: [f32; 3],
     age: f32,
     inverse_lifespan: f32,
@@ -1311,51 +1383,52 @@ fn step_location(
     origin: [f32; 3],
     axes: [[f32; 3]; 3],
     now: f32,
+    ground: f32,
     births: &mut Vec<(u64, [f32; 3], [f32; 3])>,
     deaths: &mut Vec<(u64, [f32; 3], [f32; 3])>,
+    hits: &mut Vec<(u64, [f32; 3], [f32; 3])>,
     tracks: &mut Vec<H3ParticleTrack>,
 ) {
     tracks.clear();
     for (at, (emitter, running)) in system.emitters.iter().zip(emitters).enumerate() {
+        // What was made outlives its event, and goes on falling and landing.
+        let rest = H3ParticleState { system_age: 1.0, game_time: now.rem_euclid(1.0), ..Default::default() };
+        let frame = emitter_frame(emitter, origin, axes, state.as_ref().unwrap_or(&rest));
+        let home = if system.world { origin } else { [0.0; 3] };
+        // The ground, in whichever frame the particles live.
+        let plane = if system.world {
+            ([0.0, 0.0, 1.0], -ground)
+        } else {
+            (std::array::from_fn(|row| frame.1[row][2]), frame.0[2] - ground)
+        };
         if let Some(mut state) = state {
             let random = &mut running.random;
             state.system_seeds = std::array::from_fn(|at| {
                 let mut seeded = Random(at as u32 + 1 + random.0 / 7);
                 seeded.next()
             });
-            let frame = emitter_frame(emitter, origin, axes, &state);
             emitter.pulse(&system.look, state, running, STEP, frame, system.world, births, at);
-            let home = if system.world { origin } else { [0.0; 3] };
-            emitter.step(state, &mut running.particles, STEP, home, deaths);
-            if !(system.attached.is_empty() && system.carried.is_empty()) {
-                let (offset, turned) = frame;
-                let to_world = |vector: [f32; 3]| -> [f32; 3] {
-                    std::array::from_fn(|axis| (0..3).map(|row| turned[row][axis] * vector[row]).sum())
-                };
-                tracks.extend(running.particles.iter().map(|particle| {
-                    let (place, velocity) = if system.world {
-                        (particle.position, particle.velocity)
-                    } else {
-                        let moved = to_world(particle.position);
-                        (std::array::from_fn(|axis| offset[axis] + moved[axis]), to_world(particle.velocity))
-                    };
-                    H3ParticleTrack { id: particle.id, place, velocity }
-                }));
-            }
+            let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
+            emitter.step(state, &mut running.particles, STEP, home, deaths, ground);
         } else {
             // The next run of its event is a new location's, with its burst.
             running.started = false;
-            let rest = H3ParticleState {
-                system_age: 1.0,
-                game_time: now.rem_euclid(1.0),
-                ..Default::default()
+            let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
+            emitter.step(rest, &mut running.particles, STEP, home, deaths, ground);
+        }
+        if !(system.attached.is_empty() && system.carried.is_empty()) {
+            let (offset, turned) = frame;
+            let to_world = |vector: [f32; 3]| -> [f32; 3] {
+                std::array::from_fn(|axis| (0..3).map(|row| turned[row][axis] * vector[row]).sum())
             };
-            emitter.step(rest, &mut running.particles, STEP, [0.0; 3], deaths);
-            // A location's frame is gone with its state: what follows stays put.
-            tracks.extend(running.particles.iter().map(|particle| H3ParticleTrack {
-                id: particle.id,
-                place: if system.world { particle.position } else { origin },
-                velocity: particle.velocity,
+            tracks.extend(running.particles.iter().map(|particle| {
+                let (place, velocity) = if system.world {
+                    (particle.position, particle.velocity)
+                } else {
+                    let moved = to_world(particle.position);
+                    (std::array::from_fn(|axis| offset[axis] + moved[axis]), to_world(particle.velocity))
+                };
+                H3ParticleTrack { id: particle.id, place, velocity }
             }));
         }
     }
@@ -1467,6 +1540,7 @@ impl H3Emitter {
             let axis = self.axis.pick(self.reference_axis, self.axis_angle.scalar(&particle_state), random);
             running.particles.push(Particle {
                 id,
+                colliding: false,
                 axis,
                 age: 0.0,
                 inverse_lifespan: 1.0 / self.lifespan.scalar(&particle_state).max(0.01),
@@ -1492,9 +1566,31 @@ impl H3Emitter {
         dt: f32,
         home: [f32; 3],
         ended: &mut Vec<(u64, [f32; 3], [f32; 3])>,
+        ground: Option<(([f32; 3], f32), bool, &mut Vec<(u64, [f32; 3], [f32; 3])>)>,
     ) {
         if let Some(flock) = &self.flock {
             flock.update(particles, state, home, dt);
+        }
+        if let (Some(collider), Some((plane, dies, hits))) = (&self.collider, ground) {
+            for particle in particles.iter_mut() {
+                let state = H3ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..state };
+                let (elasticity, friction) = (collider.elasticity.scalar(&state), collider.friction.scalar(&state));
+                match bounce(particle.position, particle.velocity, plane, dt, elasticity, friction) {
+                    Some((place, velocity)) => {
+                        particle.position = place;
+                        particle.velocity = velocity;
+                        particle.rotation_rate *= 1.0 - friction;
+                        if !particle.colliding {
+                            hits.push((particle.id, place, velocity));
+                            particle.colliding = true;
+                        }
+                        if dies {
+                            particle.age = 1.0;
+                        }
+                    }
+                    None => particle.colliding = false,
+                }
+            }
         }
         particles.retain_mut(|particle| {
             particle.age += particle.inverse_lifespan * dt;
@@ -1669,6 +1765,7 @@ impl H3ParticleField {
         onsets: &mut H3EffectOnsets,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
+        ground: f32,
         time: f32,
     ) {
         if self.running.len() != systems.len() || self.time.is_none_or(|last| time < last) {
@@ -1684,7 +1781,7 @@ impl H3ParticleField {
             now += STEP;
             let mut spawned = Vec::new();
             for (index, system) in systems.iter().enumerate() {
-                let (mut births, mut deaths) = (Vec::new(), Vec::new());
+                let (mut births, mut deaths, mut hits) = (Vec::new(), Vec::new(), Vec::new());
                 if system.child {
                     let mut runs = std::mem::take(&mut self.instances[index]);
                     let mut no_tracks = Vec::new();
@@ -1706,7 +1803,7 @@ impl H3ParticleField {
                         }
                         let state = (age < system.times.once()).then(|| system_state_stepped(system, None, now, run.start)).flatten();
                         let state = with_lod(system, state, run.origin, eye);
-                        step_location(system, &mut run.running, state, run.origin, run.axes, now, &mut births, &mut deaths, &mut no_tracks);
+                        step_location(system, &mut run.running, state, run.origin, run.axes, now, ground, &mut births, &mut deaths, &mut hits, &mut no_tracks);
                         age < system.times.once() || run.running.iter().any(|running| !running.particles.is_empty())
                     });
                     self.instances[index] = runs;
@@ -1717,14 +1814,18 @@ impl H3ParticleField {
                 let state = system_state_stepped(system, scope.as_ref(), now, onset);
                 let (origin, axes) = location(system, bones);
                 let state = with_lod(system, state, origin, eye);
-                step_location(system, &mut self.running[index], state, origin, axes, now, &mut births, &mut deaths, &mut self.tracks[index]);
+                step_location(system, &mut self.running[index], state, origin, axes, now, ground, &mut births, &mut deaths, &mut hits, &mut self.tracks[index]);
                 let off = !system.scale_by.is_empty()
                     && !scope.as_ref().and_then(|values| values.get(&system.scale_by)).is_some_and(|value| *value > 0.0);
                 if system.die_with_effect && (off || system.times.is_over(now - onset)) {
                     self.running[index].iter_mut().for_each(|running| running.particles.clear());
                 }
                 for (trigger, offset) in &system.attached {
-                    let events = if *trigger == H3ParticleTrigger::Birth { &births } else { &deaths };
+                    let events = match trigger {
+                        H3ParticleTrigger::Birth => &births,
+                        H3ParticleTrigger::Death => &deaths,
+                        H3ParticleTrigger::Collision => &hits,
+                    };
                     let follow = *trigger == H3ParticleTrigger::Birth;
                     spawned.extend(events.iter().map(|&(id, place, velocity)| {
                         ((index + offset, index), follow.then_some(id), (place, velocity), system.world, origin, axes)
@@ -2130,6 +2231,30 @@ mod tests {
         assert_eq!(lod_amount(lod, 50.0), 1.0);
         assert_eq!(lod_amount(lod, 90.0), 0.5);
         assert_eq!(lod_amount(lod, 150.0), 0.0);
+    }
+
+    #[test]
+    fn a_particle_falling_through_the_ground_bounces_off_it() {
+        let ground = ([0.0, 0.0, 1.0], 0.0);
+        let (place, velocity) = bounce([0.0, 0.0, 0.1], [1.0, 0.0, -2.0], ground, 0.1, 0.5, 0.25).unwrap();
+        assert!((place[2] - PUSH_OUT).abs() < 1e-6, "{place:?}");
+        assert!((place[0] - 0.05).abs() < 1e-6, "stopped where it met: {place:?}");
+        assert_eq!(velocity, [0.75, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_step_that_stays_above_or_below_the_ground_meets_nothing() {
+        let ground = ([0.0, 0.0, 1.0], 0.0);
+        assert_eq!(bounce([0.0, 0.0, 1.0], [0.0, 0.0, -1.0], ground, 0.1, 0.5, 0.5), None);
+        assert_eq!(bounce([0.0, 0.0, -1.0], [0.0, 0.0, -1.0], ground, 0.1, 0.5, 0.5), None);
+        assert_eq!(bounce([0.0, 0.0, 0.1], [0.0, 0.0, 5.0], ground, 0.1, 0.5, 0.5), None);
+    }
+
+    #[test]
+    fn the_ground_is_found_from_a_lifted_frame_too() {
+        // A frame 2 above the ground: its origin is 2 up from the plane.
+        let hit = bounce([0.0, 0.0, -1.9], [0.0, 0.0, -2.0], ([0.0, 0.0, 1.0], 2.0), 0.1, 0.0, 0.0);
+        assert!(hit.is_some());
     }
 
     #[test]
