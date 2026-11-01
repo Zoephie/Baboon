@@ -107,7 +107,9 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     data.textures = Some(Arc::new(textures));
     let mut state = ModelPreviewState::default();
     state.h2_light_follows_camera = std::env::var_os("H2_SHOT_FIXED_LIGHT").is_none();
-    reset_model_preview_selection(&mut state, &data, default_variant_index(&data));
+    let variant = std::env::var("H2_SHOT_VARIANT").ok();
+    let variant = variant.and_then(|name| data.variants.iter().position(|variant| variant.name == name));
+    reset_model_preview_selection(&mut state, &data, variant.or(default_variant_index(&data)));
     state.h2_game_shaders = shot.shaders;
     state.h2_default_lights = shot.lights;
     state.yaw = shot.yaw;

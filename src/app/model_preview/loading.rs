@@ -578,6 +578,7 @@ pub(super) fn load_model_preview(
     // physics shapes froze the frame every time a toggle rebuilt the merge.
     // `maybe_request_model_overlays` builds them once on a worker after this
     // load lands, and the toggles are draw-time filters from then on.
+    preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names);
     Ok(model_preview_data(
         render_entry.key,
         normalized,
@@ -730,7 +731,13 @@ pub(in crate::app) fn build_render_preview(
     }
     preview.h2_prt = read_h2_prt(render_tag, &render_model, &render_meshes, &h2_prt_lights())
         .filter(|prt| prt.vertices.len() == preview.vertices.len());
+    // Instances draw `static_lighting_sh`, with no transfer of their own.
+    let instance_vertices = preview.instances.vertex_count;
     preview.h3_prt = super::h3_prt::read_h3_prt(render_tag, &render_model, &render_meshes)
+        .map(|mut prt| {
+            prt.pad(instance_vertices);
+            prt
+        })
         .filter(|prt| prt.vertices.len() == preview.vertices.len());
     append_model_errors(render_tag, &mut preview, ModelPreviewLayer::Render);
     Ok(preview)

@@ -116,6 +116,7 @@ pub(crate) struct RenderModelPreview {
     pub h3_shield: Option<Arc<h3_shaders::H3ShieldSettings>>,
     pub h3_lights: Vec<h3_lights::H3Light>,
     pub h3_flares: Vec<h3_lights::H3FlareAt>,
+    pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,
     /// Halo CE: the antennas among the object's widgets.
@@ -126,6 +127,23 @@ pub(crate) struct RenderModelPreview {
 pub(crate) struct RenderModelPreviewRegion {
     pub name: String,
     pub permutations: Vec<String>,
+}
+
+/// A render model's instance placements: pieces the instance mesh draws one
+/// subpart at a time, which a variant chooses by group rather than by region.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenderModelInstances {
+    /// Placement names, which instance groups match against.
+    pub names: Vec<String>,
+    /// Which placement each of its batches draws.
+    pub batches: HashMap<usize, usize>,
+    pub vertex_count: usize,
+    /// Each permutation's `instance mask`, by region and name.
+    pub masks: HashMap<(String, String), u128>,
+    /// The placements each variant's instance group chooses.
+    pub variants: Vec<u128>,
+    /// Regions with no mesh of their own in any permutation.
+    pub empty_regions: std::collections::HashSet<String>,
 }
 
 /// One vertex as the GL program consumes it. `#[repr(C)]` because the whole

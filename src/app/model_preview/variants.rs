@@ -34,6 +34,32 @@ mod tests {
     }
 
     #[test]
+    fn a_group_chooses_by_part_of_a_name_through_its_subgroups() {
+        let member = |subgroup, instances: &str, probability| InstanceGroupMember {
+            subgroup,
+            instances: instances.to_owned(),
+            probability,
+        };
+        let placements: Vec<_> =
+            ["%shin_guard_left", "%shin_guard_right", "%hand_guard", "%wrist"].map(str::to_owned).into();
+        let groups = [
+            InstanceGroup {
+                choose_all: true,
+                members: vec![member(None, "shin_guard", 0.0), member(Some(1), "", 0.0)],
+            },
+            InstanceGroup {
+                choose_all: false,
+                members: vec![member(None, "wrist", 0.1), member(None, "hand", 0.6), member(None, "shin", 0.6)],
+            },
+            InstanceGroup { choose_all: false, members: vec![member(None, "wrist", 0.0)] },
+        ];
+        assert_eq!(instance_group_mask(&groups, 0, &placements, 0), 0b0111);
+        assert_eq!(instance_group_mask(&groups, 1, &placements, 0), 0b0100, "the first of the likeliest");
+        assert_eq!(instance_group_mask(&groups, 2, &placements, 0), 0, "nothing can be rolled");
+        assert_eq!(instance_group_mask(&groups, 9, &placements, 0), 0);
+    }
+
+    #[test]
     fn the_likeliest_entry_wins_and_the_first_breaks_a_tie() {
         let entries = [entry(Some("a"), 1.0), entry(Some("b"), 2.0), entry(Some("c"), 2.0)];
         assert_eq!(likeliest_entry(&entries), Some(&entries[1]));
@@ -264,6 +290,81 @@ pub(super) fn read_model_variants(tag: &TagFile) -> Vec<ModelVariantPreview> {
     out
 }
 
+/// One `instance groups` entry of a `.model`.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct InstanceGroup {
+    choose_all: bool,
+    members: Vec<InstanceGroupMember>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InstanceGroupMember {
+    subgroup: Option<usize>,
+    instances: String,
+    probability: f32,
+}
+
+/// The tag's masks are left to `tool`, which matches a member's name anywhere
+/// in a placement's.
+fn member_mask(member: &InstanceGroupMember, placements: &[String]) -> u128 {
+    if member.instances.is_empty() {
+        return 0;
+    }
+    let matching = placements.iter().enumerate().filter(|(_, name)| name.contains(&member.instances));
+    matching.filter(|(index, _)| *index < 128).fold(0, |mask, (index, _)| mask | 1 << index)
+}
+
+/// `model_instance_group_choose_instances`, which rolls for a `choose one`
+/// group. A preview shows its likeliest member, the first breaking a tie.
+fn instance_group_mask(groups: &[InstanceGroup], group: usize, placements: &[String], depth: usize) -> u128 {
+    let Some(group) = groups.get(group).filter(|_| depth <= groups.len()) else {
+        return 0;
+    };
+    let likeliest = group.members.iter().filter(|member| member.probability > 0.0).fold(
+        None::<&InstanceGroupMember>,
+        |best, member| match best {
+            Some(best) if best.probability >= member.probability => Some(best),
+            _ => Some(member),
+        },
+    );
+    let chosen: Vec<_> = if group.choose_all { group.members.iter().collect() } else { likeliest.into_iter().collect() };
+    chosen.iter().fold(0, |mask, member| {
+        let subgroup = member.subgroup.map_or(0, |subgroup| {
+            instance_group_mask(groups, subgroup, placements, depth + 1)
+        });
+        mask | subgroup | member_mask(member, placements)
+    })
+}
+
+/// What each variant chooses of `placements`, in the tag's order.
+pub(super) fn read_variant_instances(tag: &TagFile, placements: &[String]) -> Vec<u128> {
+    let root = tag.root();
+    let Some(variants) = root.field_path("variants").and_then(|field| field.as_block()) else {
+        return Vec::new();
+    };
+    let groups: Vec<InstanceGroup> = super::ce_attachments::elements(root, "instance groups")
+        .iter()
+        .map(|group| InstanceGroup {
+            choose_all: group.read_enum_name("choice").as_deref() == Some("choose all members"),
+            members: super::ce_attachments::elements(*group, "member list")
+                .iter()
+                .map(|member| InstanceGroupMember {
+                    subgroup: usize::try_from(member.read_int_any("subgroup").unwrap_or(-1)).ok(),
+                    instances: member.read_string_id("instances").unwrap_or_default(),
+                    probability: member.read_real("probability").unwrap_or(0.0),
+                })
+                .collect(),
+        })
+        .collect();
+    (0..variants.len())
+        .map(|index| {
+            let group = variants.element(index).and_then(|variant| variant.read_int_any("instance group"));
+            let group = group.and_then(|group| usize::try_from(group).ok());
+            group.map_or(0, |group| instance_group_mask(&groups, group, placements, 0))
+        })
+        .collect()
+}
+
 /// The variant to select on load: the one an object names, else one literally
 /// named `default`, else the first (the canonical entry — `chief`, `minor`,
 /// `minor_scl`). `None` for models with no variants (CE gbxmodels), which fall
@@ -333,7 +434,10 @@ pub(super) fn compute_variant_selection(
             Some(name) if region.permutations.contains(name) => (true, name.clone()),
             // The game resolves a name the render model lacks to no permutation.
             Some(_) => (false, default_permutation(region)),
-            None => (!hidden && !region.permutations.is_empty(), default_permutation(region)),
+            None => {
+                let empty = data.preview.instances.empty_regions.contains(&region.name);
+                (!hidden && !empty && !region.permutations.is_empty(), default_permutation(region))
+            }
         };
         selections.insert(
             region.name.clone(),

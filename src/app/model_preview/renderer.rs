@@ -288,6 +288,7 @@ pub(super) fn visible_batch_indices(
             .find(|batch| batch.layer == layer && batch.region_name == region)
             .map(|batch| batch.permutation_name.as_str())
     };
+    let instances = visible_instances(preview, state);
     preview
         .batches
         .iter()
@@ -295,6 +296,9 @@ pub(super) fn visible_batch_indices(
         .filter_map(|(index, batch)| {
             if !model_layer_visible(state, batch.layer) {
                 return None;
+            }
+            if let Some(instance) = preview.instances.batches.get(&index) {
+                return (instances >> instance & 1 != 0).then_some(index);
             }
             let selection = state.region_selections.get(&batch.region_name)?;
             if !selection.enabled {
@@ -311,6 +315,18 @@ pub(super) fn visible_batch_indices(
             .then_some(index)
         })
         .collect()
+}
+
+/// `model_compute_instance_bitfield_visible`: what the selected permutations
+/// allow of what the variant's instance group chose.
+fn visible_instances(preview: &RenderModelPreview, state: &ModelPreviewState) -> u128 {
+    let instances = &preview.instances;
+    let chosen = state.selected_variant.and_then(|variant| instances.variants.get(variant));
+    let allowed = state.region_selections.iter().filter(|(_, selection)| selection.enabled);
+    let allowed = allowed.filter_map(|(region, selection)| {
+        instances.masks.get(&(region.clone(), selection.permutation.clone()))
+    });
+    chosen.copied().unwrap_or(0) & allowed.fold(0, |mask, permutation| mask | permutation)
 }
 
 fn model_layer_visible(state: &ModelPreviewState, layer: ModelPreviewLayer) -> bool {
@@ -4181,6 +4197,7 @@ mod tests {
             ],
             indices: vec![0, 1, 2, 0, 2, 3],
             parts: vec![part(0), part(3)],
+            subparts: Vec::new(),
             rigid_node_index: None,
             water_data: None,
             prt_vertex_type: Default::default(),
@@ -4564,7 +4581,6 @@ pub(super) fn render_model_to_preview(
         regions: model
             .regions
             .iter()
-            .filter(|region| region.permutations.iter().any(|permutation| permutation.mesh_index >= 0))
             .map(|region| RenderModelPreviewRegion {
                 name: region.name.clone(),
                 permutations: region
@@ -4597,6 +4613,8 @@ pub(super) fn render_model_to_preview(
         let (region, permutation) = (&model.regions[region], &model.regions[region].permutations[permutation]);
         append_render_mesh_to_preview(&mut preview, &render_meshes[mesh_index], &region.name, &permutation.name);
     }
+
+    append_instances_to_preview(&mut preview, model, render_meshes);
 
     if preview.vertices.is_empty() {
         preview.bounds_min = [0.0; 3];
@@ -4638,6 +4656,101 @@ pub(super) fn preview_mesh_order(model: &RenderModel, mesh_count: usize) -> Vec<
         }
     }
     order
+}
+
+/// `render_object_context_instances`: each placement draws its subpart of the
+/// instance mesh, carried from there into the model by its own transform and
+/// riding its node from then on. A mirrored one winds backward.
+fn append_instances_to_preview(
+    preview: &mut RenderModelPreview,
+    model: &RenderModel,
+    render_meshes: &[RenderMesh],
+) {
+    let instances = &mut preview.instances;
+    instances.empty_regions = model
+        .regions
+        .iter()
+        .filter(|region| region.permutations.iter().all(|permutation| permutation.mesh_index < 0))
+        .map(|region| region.name.clone())
+        .collect();
+    for region in &model.regions {
+        for permutation in &region.permutations {
+            let mask = permutation.instance_mask.iter().rev().fold(0u128, |mask, word| mask << 32 | *word as u128);
+            instances.masks.insert((region.name.clone(), permutation.name.clone()), mask);
+        }
+    }
+    instances.names = model.instance_placements.iter().map(|placement| placement.name.clone()).collect();
+    let Some(mesh) = model.instance_mesh_index.and_then(|mesh| render_meshes.get(mesh)) else {
+        return;
+    };
+    let first_vertex = preview.vertices.len();
+    for (instance, (placement, subpart)) in model.instance_placements.iter().zip(&mesh.subparts).enumerate() {
+        let (Some(part), Ok(node)) = (mesh.parts.get(subpart.part_index as usize), usize::try_from(placement.node_index)) else {
+            continue;
+        };
+        let start = subpart.index_start as usize;
+        let Some(source) = mesh.indices.get(start..start + subpart.index_count as usize) else {
+            continue;
+        };
+        let scale = placement.scale;
+        let axes = [placement.forward, placement.left, placement.up].map(vector3_to_array);
+        let turned = |[x, y, z]: [f32; 3]| -> [f32; 3] {
+            std::array::from_fn(|axis| axes[0][axis] * x + axes[1][axis] * y + axes[2][axis] * z)
+        };
+        let direction = |vector: [f32; 3]| turned(vector).map(|value| value * scale.signum());
+        let origin = point3_to_array(placement.position);
+        let vertex_base = preview.vertices.len() as u32;
+        let mut remapped = HashMap::new();
+        let mut indices = Vec::with_capacity(source.len());
+        for &index in source {
+            let next = vertex_base + remapped.len() as u32;
+            let at = *remapped.entry(index).or_insert(next);
+            if at == next {
+                let Some(vertex) = mesh.vertices.get(index as usize) else {
+                    continue;
+                };
+                let placed = turned(point3_to_array(vertex.position));
+                let position = std::array::from_fn(|axis| placed[axis] * scale + origin[axis]);
+                expand_preview_bounds_local(&mut preview.bounds_min, &mut preview.bounds_max, position);
+                preview.vertices.push(RenderModelPreviewVertex {
+                    position,
+                    normal: direction(vector3_to_array(vertex.normal)),
+                    texcoord: [vertex.texcoord.x, vertex.texcoord.y],
+                    tangent: direction(vector3_to_array(vertex.tangent)),
+                    binormal: direction(vector3_to_array(vertex.binormal)),
+                    node_indices: [node as f32, 0.0, 0.0, 0.0],
+                    node_weights: [1.0, 0.0, 0.0, 0.0],
+                });
+            }
+            indices.push(at);
+        }
+        if scale < 0.0 {
+            indices.chunks_exact_mut(3).for_each(|triangle| triangle.swap(1, 2));
+        }
+        let index_start = preview.indices.len() as u32;
+        preview.indices.extend_from_slice(&indices);
+        instances_batch(preview, instance, part.material_index, index_start, indices.len() as u32);
+    }
+    preview.instances.vertex_count = preview.vertices.len() - first_vertex;
+}
+
+fn instances_batch(
+    preview: &mut RenderModelPreview,
+    instance: usize,
+    material_index: u16,
+    index_start: u32,
+    index_count: u32,
+) {
+    preview.instances.batches.insert(preview.batches.len(), instance);
+    preview.batches.push(RenderModelPreviewBatch {
+        region_name: String::new(),
+        permutation_name: String::new(),
+        material_index,
+        index_start,
+        index_count,
+        flat_color: None,
+        layer: ModelPreviewLayer::Render,
+    });
 }
 
 /// Append one render mesh without flattening every triangle into three unique
