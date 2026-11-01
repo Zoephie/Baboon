@@ -35,8 +35,8 @@ void main() {
     place = gl_FragCoord.xy * target_texel;
     vec3 result;
     if (mode == 0) {
-        // `downsample_4x4_block_bloom`, which the LDR pass repeats: this target
-        // holds both.
+        // `downsample_4x4_block_bloom`. Its LDR pass takes the larger of the two,
+        // and clamped colors never pass this, so it has nothing to add.
         vec3 mean = (at(vec2(-1.0, -1.0)) + at(vec2(1.0, -1.0))
             + at(vec2(-1.0, 1.0)) + at(vec2(1.0, 1.0))) / 4.0 + 0.00000001;
         float intensity = dot(mean, vec3(0.299, 0.587, 0.114));

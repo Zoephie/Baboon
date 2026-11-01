@@ -28,8 +28,12 @@ pub(super) const H3_OVERSHIELD: &str = "object_overshield_amount";
 const DECAL_SLOPE_BIAS: f32 = -0.5;
 const DECAL_DEPTH_BIAS: f32 = -0.000005;
 
-/// `final_composite`'s default `tone_curve_constants`.
-const TONE_CURVE: [f32; 4] = [1.493_801_6, 1.004_149_4, 0.0, -0.15];
+/// `final_composite`'s `tone_curve_constants` at a white point of one: the
+/// numbers in its comment are the curve before this scale.
+const TONE_CURVE: [f32; 4] = {
+    let scale = 1.493_801_6;
+    [1.493_801_6 / scale, 1.004_149_4 * scale, 0.0, -0.15 * scale * scale * scale]
+};
 
 /// `get_render_exposure` at no stops and a white point of one.
 const EXPOSURE: f32 = 0.669_432_94;
@@ -867,7 +871,23 @@ impl ModelGlRenderer {
                 }
                 self.h3_light = None;
             }
+            let mut bloom = None;
             if frame.active_camo {
+                // Camo shows what is behind it, which the game blooms the same
+                // with or without the object. A preview's backdrop has no bloom
+                // of its own, so what camo hides is left dark for it.
+                if frame.bloom {
+                    gl.blend_func(glow::ZERO, glow::ZERO);
+                    for (batch, material) in &batches {
+                        if let Some(pass) = material.camo.as_ref() {
+                            self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                        }
+                    }
+                    bloom = self.h3_built_bloom(gl, accumulation_target, accumulation, size);
+                    gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                    gl.enable(glow::DEPTH_TEST);
+                    gl.enable(glow::BLEND);
+                }
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
                 for (batch, material) in &batches {
                     if let Some(pass) = material.camo.as_ref() {
@@ -886,7 +906,9 @@ impl ModelGlRenderer {
                 gl.color_mask(true, true, true, true);
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            let bloom = if frame.bloom { self.h3_built_bloom(gl, framebuffer, accumulation, size) } else { None };
+            if frame.bloom && bloom.is_none() {
+                bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size);
+            }
             self.h3_composite(gl, accumulation, bloom);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
@@ -1164,6 +1186,19 @@ mod tests {
         even.iter_mut().for_each(|channel| channel[1..].fill(0.0));
         let contrast = |probe: &[[f32; 9]; 3]| dominant_light(probe).2;
         assert!(contrast(&DEFAULT_PROBE) > contrast(&even), "{}", contrast(&even));
+    }
+
+    #[test]
+    fn the_tone_curve_takes_white_to_white() {
+        let [limit, first, second, third] = TONE_CURVE;
+        let toned = |value: f32| {
+            let value = value.min(limit);
+            ((value * third + second) * value + first) * value
+        };
+        assert!((limit - 1.0).abs() < 1e-5);
+        assert!((toned(1.0) - 1.0).abs() < 1e-4, "{}", toned(1.0));
+        assert!((toned(0.5) - 0.6875).abs() < 1e-3, "{}", toned(0.5));
+        assert!((toned(3.0) - 1.0).abs() < 1e-4, "{}", toned(3.0));
     }
 
     #[test]
