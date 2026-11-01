@@ -137,6 +137,11 @@ impl H3EffectTimes {
         (age >= 0.0).then_some(age)
     }
 
+    /// Whether a run that does not loop has finished.
+    pub(super) fn is_over(&self, time: f32) -> bool {
+        self.once && time >= self.once()
+    }
+
     /// How long a run that does not loop takes.
     pub(super) fn once(&self) -> f32 {
         let lengths = self.events.iter().map(|event| event.length());
@@ -295,6 +300,16 @@ impl H3ObjectEffect {
         if marker == REPLACE { self.marker.clone() } else { marker }
     }
 
+    /// `use parent position but world orientation`.
+    pub(super) fn oriented(place: MarkerFrame, effect: TagStruct<'_>) -> MarkerFrame {
+        let flags = effect.read_flag_names("flags").unwrap_or_default();
+        if flags.iter().any(|(_, name)| name.starts_with(WORLD_ORIENTATION)) {
+            MarkerFrame { axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], ..place }
+        } else {
+            place
+        }
+    }
+
     pub(super) fn times_of(&self, effect: TagStruct<'_>) -> H3EffectTimes {
         H3EffectTimes { once: self.once, ..H3EffectTimes::read(effect) }
     }
@@ -354,6 +369,8 @@ pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3O
     }
     with_nested_effects(source, effects)
 }
+
+const WORLD_ORIENTATION: &str = "use parent position but world orientation";
 
 /// How deep an effect's parts may name further effects: the tags go one down.
 const MOST_NESTING: usize = 3;

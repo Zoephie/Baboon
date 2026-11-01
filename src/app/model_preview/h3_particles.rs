@@ -13,7 +13,7 @@ use super::ce_lights::CeFlareView;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;
-use super::h3_effects::{H3EffectTimes, h3_object_effects, part_markers, part_runs_by};
+use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_markers, part_runs_by};
 use super::h3_shaders::{H3Blend, read_h3_definition};
 use super::materials::{H3Bitmap, read_h3_bitmap};
 use super::renderer::H3_EXPOSURE;
@@ -916,6 +916,7 @@ pub(crate) struct H3ParticleSystem {
     /// Started by a particle, at the particle: nothing of its own runs it.
     child: bool,
     hidden: bool,
+    die_with_effect: bool,
 }
 
 /// What a tag's `particle system` holds, wherever it ends up.
@@ -923,6 +924,8 @@ pub(crate) struct H3ParticleSystem {
 struct H3SystemParts {
     /// `don't render system`: it still runs, for what its particles start.
     hidden: bool,
+    /// `particles die when effect ends`.
+    die_with_effect: bool,
     sort_bias: f32,
     world: bool,
     near_range: f32,
@@ -950,6 +953,7 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
     let cutoff = if flagged("override near fade") { real("near fade override") } else { real("near fade cutoff") };
     Some(H3SystemParts {
         hidden: flagged("don't render system"),
+        die_with_effect: flagged("particles die when effect ends"),
         sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
         world: system.read_enum_name("coordinate system").as_deref() == Some("world"),
         // As `1 / range` comes out on the card.
@@ -1031,6 +1035,7 @@ pub(super) fn read_h3_particles(
                 let children = read_attached_parts(source, &parts.look);
                 for marker in part_markers(markers, &name, object_effect.once) {
                     let (place, node) = frame(marker);
+                    let place = H3ObjectEffect::oriented(place, effect.root());
                     let attached = children.iter().enumerate().map(|(at, child)| (child.0, at + 1)).collect();
                     let parts = parts.clone();
                     systems.push(H3ParticleSystem {
@@ -1053,6 +1058,7 @@ pub(super) fn read_h3_particles(
                         attached,
                         child: false,
                         hidden: parts.hidden,
+                        die_with_effect: parts.die_with_effect,
                     });
                     for (_, parts, times, event) in &children {
                         let parts = parts.clone();
@@ -1076,6 +1082,7 @@ pub(super) fn read_h3_particles(
                             attached: Vec::new(),
                             child: true,
                             hidden: parts.hidden,
+                            die_with_effect: parts.die_with_effect,
                         });
                     }
                 }
@@ -1578,6 +1585,11 @@ impl H3ParticleField {
                 let state = system_state_stepped(system, scope.as_ref(), now, onset);
                 let (origin, axes) = location(system, bones);
                 step_location(system, &mut self.running[index], state, origin, axes, now, &mut births, &mut deaths);
+                let off = !system.scale_by.is_empty()
+                    && !scope.as_ref().and_then(|values| values.get(&system.scale_by)).is_some_and(|value| *value > 0.0);
+                if system.die_with_effect && (off || system.times.is_over(now - onset)) {
+                    self.running[index].iter_mut().for_each(|running| running.particles.clear());
+                }
                 for (trigger, offset) in &system.attached {
                     let events = if *trigger == H3ParticleTrigger::Birth { &births } else { &deaths };
                     spawned.extend(events.iter().map(|event| (index + offset, *event, system.world, origin, axes)));
