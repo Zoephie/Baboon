@@ -358,7 +358,14 @@ fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
         "v_TEXCOORD7 = hlsl_result.prt_ravi_diff;",
         "v_TEXCOORD7 = hlsl_result.prt_ravi_diff;\n    v_TEXCOORD7.x = min(v_TEXCOORD7.x, 1.0);",
     );
-    H3Pass { vertex: source, pixel: pixel.source, uniforms, textures }
+    // The game's camo reads the frame ahead of its tone curve; the preview's
+    // copy of what lies behind has been through it. This is that curve undone,
+    // the root of `1.5x - 0.5x^3`.
+    let pixel_source = pixel.source.replace(
+        "vec3 l_true_scene_color = l_ldr_color.xyz;",
+        "vec3 l_true_scene_color = 2.0 * sin(asin(clamp(l_ldr_color.xyz, 0.0, 1.0)) / 3.0);",
+    );
+    H3Pass { vertex: source, pixel: pixel_source, uniforms, textures }
 }
 
 impl H3Sources {
