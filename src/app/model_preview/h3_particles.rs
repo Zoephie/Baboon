@@ -87,8 +87,7 @@ impl H3ParticleInput {
             Self::Seed(seed) => state.seeds[seed % SEEDS],
             Self::SystemSeed(seed) => state.system_seeds[seed % SYSTEM_SEEDS],
             Self::EmissionTime => state.emission_time,
-            // A preview is always as near as a system's detail goes.
-            Self::Lod => 1.0,
+            Self::Lod => state.lod,
             Self::GameTime => state.game_time,
             Self::EffectA => state.effect_a,
             Self::EffectB => state.effect_b,
@@ -112,6 +111,24 @@ struct H3ParticleState {
     effect_b: f32,
     rotation: f32,
     location_seed: f32,
+    lod: f32,
+}
+
+/// `c_particle_system_definition::calc_lod_amount`: distances in, out, and how
+/// far each fades over. None for `lod always 1.0`.
+fn lod_amount(lod: Option<[f32; 4]>, distance: f32) -> f32 {
+    let Some([near, far, near_feather, far_feather]) = lod else {
+        return 1.0;
+    };
+    if distance <= near || distance >= far {
+        0.0
+    } else if distance < near + near_feather {
+        (distance - near) / near_feather
+    } else if distance > far - far_feather {
+        (far - distance) / far_feather
+    } else {
+        1.0
+    }
 }
 
 /// `c_editable_property_base`, with what `interpolate` runs between.
@@ -918,6 +935,7 @@ pub(crate) struct H3ParticleSystem {
     child: bool,
     hidden: bool,
     die_with_effect: bool,
+    lod: Option<[f32; 4]>,
 }
 
 /// What a tag's `particle system` holds, wherever it ends up.
@@ -927,6 +945,7 @@ struct H3SystemParts {
     hidden: bool,
     /// `particles die when effect ends`.
     die_with_effect: bool,
+    lod: Option<[f32; 4]>,
     sort_bias: f32,
     world: bool,
     near_range: f32,
@@ -955,6 +974,12 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
     Some(H3SystemParts {
         hidden: flagged("don't render system"),
         die_with_effect: flagged("particles die when effect ends"),
+        lod: {
+            let out = real("LOD out distance");
+            (!flagged("lod always 1.0") && !flagged("ignore lod") && out > 0.0).then(|| {
+                [real("LOD in distance"), out, real("LOD feather in delta"), real("LOD feather out delta")]
+            })
+        },
         sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
         world: system.read_enum_name("coordinate system").as_deref() == Some("world"),
         // As `1 / range` comes out on the card.
@@ -1061,6 +1086,7 @@ pub(super) fn read_h3_particles(
                         child: false,
                         hidden: parts.hidden,
                         die_with_effect: parts.die_with_effect,
+                        lod: parts.lod,
                     });
                     for (_, parts, times, event) in &children {
                         let parts = parts.clone();
@@ -1085,6 +1111,7 @@ pub(super) fn read_h3_particles(
                             child: true,
                             hidden: parts.hidden,
                             die_with_effect: parts.die_with_effect,
+                            lod: parts.lod,
                         });
                     }
                 }
@@ -1287,6 +1314,18 @@ fn system_state(
         location_seed: system.location_seed,
         ..Default::default()
     })
+}
+
+/// `calc_lod_amount` from the camera. Nothing pulses at none.
+fn with_lod(
+    system: &H3ParticleSystem,
+    state: Option<H3ParticleState>,
+    origin: [f32; 3],
+    eye: [f32; 3],
+) -> Option<H3ParticleState> {
+    let away = minus(origin, eye);
+    let lod = lod_amount(system.lod, dot(away, away).sqrt());
+    state.filter(|_| lod > 0.0).map(|state| H3ParticleState { lod, ..state })
 }
 
 /// `system_state` for a step ending at `time`, and for an event that came and
@@ -1556,6 +1595,7 @@ impl H3ParticleField {
         values: impl Fn(u8) -> Option<H2FunctionValues>,
         onsets: &mut H3EffectOnsets,
         bones: Option<&[[f32; 4]]>,
+        eye: [f32; 3],
         time: f32,
     ) {
         if self.running.len() != systems.len() || self.time.is_none_or(|last| time < last) {
@@ -1576,6 +1616,7 @@ impl H3ParticleField {
                     runs.retain_mut(|run| {
                         let age = now - run.start;
                         let state = (age < system.times.once()).then(|| system_state_stepped(system, None, now, run.start)).flatten();
+                        let state = with_lod(system, state, run.origin, eye);
                         step_location(system, &mut run.running, state, run.origin, run.axes, now, &mut births, &mut deaths);
                         age < system.times.once() || run.running.iter().any(|running| !running.particles.is_empty())
                     });
@@ -1586,6 +1627,7 @@ impl H3ParticleField {
                 let onset = onsets.of(system.object, &system.scale_by, scope.as_ref(), now);
                 let state = system_state_stepped(system, scope.as_ref(), now, onset);
                 let (origin, axes) = location(system, bones);
+                let state = with_lod(system, state, origin, eye);
                 step_location(system, &mut self.running[index], state, origin, axes, now, &mut births, &mut deaths);
                 let off = !system.scale_by.is_empty()
                     && !scope.as_ref().and_then(|values| values.get(&system.scale_by)).is_some_and(|value| *value > 0.0);
@@ -1695,6 +1737,10 @@ impl H3ParticleSystem {
                 effect_a: system_state(system, values, time, onset).map_or(0.0, |state| state.effect_a),
                 effect_b: system_state(system, values, time, onset).map_or(1.0, |state| state.effect_b),
                 location_seed: system.location_seed,
+                lod: {
+                    let away = minus(origin, view.eye);
+                    lod_amount(system.lod, dot(away, away).sqrt())
+                },
                 ..Default::default()
             };
             // `calc_matrix`, or none for what already lies in the world.
@@ -1971,6 +2017,17 @@ mod tests {
         lighting[0] = [16.0 * scale, 8.0 * scale, 0.0, 0.0];
         let tint = lightmap_tint(&lighting);
         assert!((tint[0] - 2.0).abs() < 1e-5, "{tint:?}");
+    }
+
+    #[test]
+    fn detail_fades_in_and_out_across_its_feathers() {
+        let lod = Some([10.0, 100.0, 10.0, 20.0]);
+        assert_eq!(lod_amount(None, 1000.0), 1.0, "always");
+        assert_eq!(lod_amount(lod, 5.0), 0.0);
+        assert_eq!(lod_amount(lod, 15.0), 0.5);
+        assert_eq!(lod_amount(lod, 50.0), 1.0);
+        assert_eq!(lod_amount(lod, 90.0), 0.5);
+        assert_eq!(lod_amount(lod, 150.0), 0.0);
     }
 
     #[test]

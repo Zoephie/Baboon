@@ -3157,7 +3157,7 @@ impl ModelGlRenderer {
             if !cursor_advanced && !frame.preview.h3_particles.is_empty() {
                 let systems = &frame.preview.h3_particles;
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
-                uploaded.h3_particles.advance(systems, values, &mut uploaded.h3_onsets, bones, frame.time);
+                uploaded.h3_particles.advance(systems, values, &mut uploaded.h3_onsets, bones, view.eye, frame.time);
             }
             if !cursor_advanced && !frame.preview.h3_strips.is_empty() {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
