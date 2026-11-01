@@ -54,6 +54,15 @@ impl H3Prt {
         self.vertices.resize(self.vertices.len() + count, [0.0; COEFFICIENTS]);
     }
 
+    /// Take on an attached object's own, after everything so far.
+    pub(crate) fn append(&mut self, other: &H3Prt) {
+        let base = self.vertices.len() as u32;
+        // What was padded on has no mesh, and must not read as `other`'s first.
+        self.meshes.push((base, H3PrtKind::None));
+        self.vertices.extend_from_slice(&other.vertices);
+        self.meshes.extend(other.meshes.iter().map(|(end, kind)| (end + base, *kind)));
+    }
+
     /// What the mesh holding `vertex` baked.
     pub(crate) fn kind_at(&self, vertex: u32) -> H3PrtKind {
         let found = self.meshes.iter().find(|(end, _)| vertex < *end);
@@ -227,6 +236,26 @@ mod tests {
     fn a_mesh_two_permutations_share_appears_twice() {
         let per_mesh = [(vec![[0.0; COEFFICIENTS]], H3PrtKind::Ambient)];
         assert_eq!(in_preview_order(&per_mesh, [0, 0].into_iter()).vertices.len(), 2);
+    }
+
+    #[test]
+    fn an_attached_object_keeps_its_transfer_and_padding_stays_empty() {
+        let mut prt = in_preview_order(
+            &[(vec![[0.25; COEFFICIENTS]; 2], H3PrtKind::Linear)],
+            [0].into_iter(),
+        );
+        prt.pad(3);
+        let other = in_preview_order(
+            &[(vec![[0.5; COEFFICIENTS]; 4], H3PrtKind::Ambient)],
+            [0].into_iter(),
+        );
+        prt.append(&other);
+        assert_eq!(prt.vertices.len(), 9);
+        assert_eq!(prt.vertices[5][0], 0.5);
+        assert_eq!(prt.kind_at(1), H3PrtKind::Linear);
+        assert_eq!(prt.kind_at(4), H3PrtKind::None, "padding");
+        assert_eq!(prt.kind_at(5), H3PrtKind::Ambient);
+        assert_eq!(prt.kind_at(9), H3PrtKind::None);
     }
 
     #[test]

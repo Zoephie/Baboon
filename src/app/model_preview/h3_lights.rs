@@ -11,7 +11,8 @@ use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeFlareView, CeSprite, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::{H2Image, tag_function_at};
-use super::materials::decode_h2_image;
+use super::renderer::H3_EXPOSURE as EXPOSURE;
+use super::materials::{H3Bitmap, read_h3_bitmap};
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
@@ -303,6 +304,9 @@ pub(crate) struct H3Flare {
     near_fade: [f32; 2],
     far_fade: [f32; 2],
     tests_occlusion: bool,
+    /// `falloff function`, a transition's table index as it stands: the tag
+    /// labels its enum in reverse, so 4 reads "very early" and is very late.
+    falloff: u8,
     occlusion_offset: f32,
     occlusion_toward_eye: bool,
     inner_scale: i128,
@@ -315,7 +319,7 @@ pub(crate) struct H3Flare {
     aspect: [f32; 2],
     time_brightness: Option<Arc<TagFunction>>,
     time_rotation: Option<Arc<TagFunction>>,
-    image: Arc<H2Image>,
+    bitmap: H3Bitmap,
 }
 
 /// A flare at a marker of the object it is attached to.
@@ -325,7 +329,7 @@ pub(crate) struct H3FlareAt {
     node: usize,
     position: [f32; 3],
     forward: [f32; 3],
-    marker_scale: f32,
+    only_under: Option<(String, String)>,
     scale_by: String,
     /// Set for a flare an attached effect draws.
     by_effect: Option<H3EffectScale>,
@@ -364,8 +368,8 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
     let override_map = reflection.read_tag_ref_path("bitmapOverride").filter(|bitmap| !bitmap.is_empty());
     let bitmap = override_map.or(bitmap)?;
     let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
-    let image = decode_h2_image(source, &bitmap, SamplerKind::Texture2D, index)?;
-    let (width, height) = match &image {
+    let bitmap = read_h3_bitmap(source, &bitmap, index as i16, SamplerKind::Texture2D)?;
+    let (width, height) = match &*bitmap.0 {
         H2Image::Flat(image) => (image.width as f32, image.height as f32),
         _ => (1.0, 1.0),
     };
@@ -386,6 +390,7 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         near_fade: [fade("near fade begin distance"), fade("near fade end distance")],
         far_fade: [fade("near fade distance"), fade("far fade distance")],
         tests_occlusion: flags & NO_OCCLUSION_TEST == 0,
+        falloff: root.read_int_any("falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
         occlusion_offset: fade("occlusion offset distance"),
         occlusion_toward_eye: root.read_int_any("occlusion offset direction") == Some(OFFSET_TOWARD_EYE),
         inner_scale: root.read_int_any("occlusion inner radius scale").unwrap_or(0),
@@ -398,7 +403,7 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         aspect,
         time_brightness: block_function(root, "time brightness"),
         time_rotation: block_function(root, "time rotation"),
-        image: Arc::new(image),
+        bitmap,
     })
 }
 
@@ -430,8 +435,7 @@ pub(super) fn read_h3_flares(
                 node,
                 position: place.position,
                 forward: place.axes[0],
-                // An effect hands `lens_flares_create` a scale of its own.
-                marker_scale: if by_effect.is_some() { 1.0 } else { marker.scale },
+                only_under: marker.only_under.clone(),
                 scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
                 by_effect,
                 flare: Arc::clone(&flare),
@@ -477,6 +481,18 @@ fn marker_of(holder: TagStruct<'_>, field: &str) -> String {
     holder.read_string_id(field).or_else(|| holder.read_string(field)).unwrap_or_default()
 }
 
+/// `k_minimum_visible_lens_flare`.
+const MINIMUM_VISIBLE: f32 = 0.05;
+
+/// What `lens_flares_render` and `sub_180296A74` make of the share of a flare's
+/// patch that passed: too little draws nothing, the rest takes the falloff.
+fn occlusion_fraction(falloff: u8, tested: bool, visible: f32) -> f32 {
+    if tested && visible <= MINIMUM_VISIBLE {
+        return 0.0;
+    }
+    blam_tags::tag_function::transition_function_evaluate(falloff, visible)
+}
+
 impl H3EffectScale {
     /// `attachments_update` runs the effect only while the function is on.
     fn of(self, value: f32) -> f32 {
@@ -489,12 +505,24 @@ impl H3EffectScale {
 }
 
 impl H3FlareAt {
+    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
+        self.only_under.as_ref()
+    }
+
+    /// Follow the regions `merge_attached` renames for what `name` brings.
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
+        self
+    }
+
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
 
-    pub(crate) fn image(&self) -> &Arc<H2Image> {
-        &self.flare.image
+    pub(crate) fn bitmap(&self) -> &H3Bitmap {
+        &self.flare.bitmap
     }
 
     pub(crate) fn animates(&self) -> bool {
@@ -515,7 +543,9 @@ impl H3FlareAt {
 
     fn radius(&self, scale: f32) -> f32 {
         let [lower, upper] = self.flare.radius;
-        self.marker_scale * ((upper - lower) * scale + lower)
+        // `lens_flares_create` takes the marker matrix's scale, which is the
+        // object's. The marker's own `scale` is its `radius`, and many are 0.
+        (upper - lower) * scale + lower
     }
 
     /// `lens_flare_render_occlusion`'s patch, or none for a flare without one.
@@ -569,7 +599,7 @@ impl H3FlareAt {
         if distance <= 0.0 {
             return None;
         }
-        let mut corona = occlusion;
+        let mut corona = occlusion_fraction(flare.falloff, flare.tests_occlusion, occlusion);
         let [far_begin, far_end] = flare.far_fade;
         if far_begin != far_end {
             corona *= ((distance - far_end) / (far_begin - far_end)).clamp(0.0, 1.0);
@@ -605,7 +635,8 @@ impl H3FlareAt {
             extent: [radius * flare.aspect[0], radius * flare.aspect[1]],
             rotation,
             color: flare.color,
-            alpha: brightness,
+            // `lens_flare.hlsl` lights itself by `ILLUM_EXPOSURE`.
+            alpha: brightness * EXPOSURE,
             image,
             highlight: None,
             tint: Some([flare.modulation, flare.tint_power]),
@@ -617,6 +648,17 @@ impl H3FlareAt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_half_hidden_flare_follows_its_falloff_table() {
+        // `0x1808A0E70`'s row 4 in `halo3.dll`: 10 of 255 at entry 460.
+        let hidden = occlusion_fraction(4, true, 460.0 / 1023.0);
+        assert!((hidden - 10.0 / 255.0).abs() < 0.01, "{hidden}");
+        assert_eq!(occlusion_fraction(4, true, 1.0), 1.0);
+        assert_eq!(occlusion_fraction(0, true, 0.5), 0.5, "linear takes no table");
+        assert_eq!(occlusion_fraction(0, true, MINIMUM_VISIBLE), 0.0, "too little to draw");
+        assert_eq!(occlusion_fraction(0, false, 0.02), 0.02, "only a tested share has a floor");
+    }
 
     #[test]
     fn an_effects_flare_burns_whole_while_its_function_is_on() {

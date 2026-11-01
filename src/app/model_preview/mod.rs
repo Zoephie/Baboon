@@ -259,6 +259,9 @@ pub(crate) struct RenderModelPreviewMarker {
     pub position: [f32; 3],
     pub axes: [[f32; 3]; 3],
     pub scale: f32,
+    /// The region and permutation it belongs to, if it belongs to only one:
+    /// `render_model_get_markers_by_group_index` skips it under any other.
+    pub only_under: Option<(String, String)>,
 }
 
 /// One skeleton node, carried so animation playback can run forward

@@ -115,6 +115,15 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     state.yaw = shot.yaw;
     state.pitch = shot.pitch;
     state.perspective = true;
+    // `H2_SHOT_FOCUS=x,y,z` orbits that point, at `H2_SHOT_SCALE` times the fit.
+    if let Ok(focus) = std::env::var("H2_SHOT_FOCUS") {
+        let point: Vec<f32> = focus.split(',').map(|axis| axis.parse().unwrap()).collect();
+        let (center, _) = preview_center_radius(&data.preview);
+        state.focus = std::array::from_fn(|axis| point[axis] - center[axis]);
+    }
+    if let Ok(scale) = std::env::var("H2_SHOT_SCALE") {
+        state.scale = scale.parse().unwrap();
+    }
     state.weapon = settings.weapon.clone();
     state.secondary_weapon = settings.secondary_weapon.clone();
     if let Ok(clip) = std::env::var("H2_SHOT_CLIP") {
@@ -125,7 +134,14 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
     let camera = PreviewCamera::new(&data, &state, rect);
     let preview = Arc::clone(&data.preview);
-    let visible_batches = visible_batch_indices(&preview, &state);
+    let mut visible_batches = visible_batch_indices(&preview, &state);
+    // `H2_SHOT_HIDE=a,b` leaves out the materials whose shaders end in these.
+    if let Ok(hidden) = std::env::var("H2_SHOT_HIDE") {
+        visible_batches.retain(|&batch| {
+            let material = preview.batches[batch].material_index as usize;
+            !hidden.split(',').any(|name| preview.materials[material].shader_path.ends_with(name))
+        });
+    }
     let time = std::env::var("H2_SHOT_TIME").map_or(0.0, |time| time.parse().unwrap());
     let frame = ModelGpuFrame {
         preview,
@@ -158,6 +174,8 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         },
         object_moves: object_functions(&data).any(|functions| functions.move_at_rest()),
         h2_attached_values: super::h2_attached_values(&data, time),
+        h3_flares_shown: super::h3_flares_shown(&data.preview, &state),
+        h2_flares_shown: super::h2_flares_shown(&data.preview, &state),
         h2_values: {
             let mut set = state.h2_function_inputs.clone();
             if let Ok(pairs) = std::env::var("H2_SHOT_FUNCTIONS") {

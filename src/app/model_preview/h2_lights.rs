@@ -15,7 +15,7 @@ use super::h2_functions::H2FunctionValues;
 use super::h2_passes::{
     H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
 };
-use super::materials::decode_h2_image;
+use super::materials::{H3Bitmap, decode_h2_image, read_h3_bitmap};
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
@@ -130,6 +130,47 @@ struct H2AntennaVertex {
     /// World units per width of the bitmap: `antenna_new` runs the sprite the
     /// length of the link.
     scale: f32,
+    /// What of the bitmap's width a sprite runs along.
+    covered: f32,
+    /// Where along the curve this link ends, for an antenna that has one.
+    hermite_t: f32,
+}
+
+/// Halo 3's antenna: one curve through two points, with each link a stretch of
+/// it, as `antenna_get_hermite_vectors` sets it up.
+#[derive(Debug, Clone, Copy)]
+struct H3AntennaCurve {
+    total_length: f32,
+    point_of_bend: f32,
+    starting_bend: f32,
+    ending_bend: f32,
+}
+
+impl H3AntennaCurve {
+    /// `c_hermite::evaluate`, at rest: `antenna_update`'s spring has the far
+    /// end straight out of the marker, with no gravity or motion on it.
+    fn points(&self, origin: [f32; 3], direction: [f32; 3], at: impl Iterator<Item = f32>) -> Vec<[f32; 3]> {
+        let along = |distance: f32| -> [f32; 3] {
+            std::array::from_fn(|axis| origin[axis] + direction[axis] * distance)
+        };
+        let end = along(self.total_length);
+        let bend = along(self.total_length * self.point_of_bend);
+        let start_tangent = direction.map(|axis| axis * self.starting_bend);
+        let end_tangent: [f32; 3] =
+            std::array::from_fn(|axis| (end[axis] - bend[axis]) * self.ending_bend);
+        let mut points = vec![origin];
+        points.extend(at.map(|t| -> [f32; 3] {
+            let (square, cube) = (t * t, t * t * t);
+            let h1 = 2.0 * cube - 3.0 * square + 1.0;
+            let h2 = -2.0 * cube + 3.0 * square;
+            let h3 = cube - 2.0 * square + t;
+            let h4 = cube - square;
+            std::array::from_fn(|axis| {
+                h1 * origin[axis] + h2 * end[axis] + h3 * start_tangent[axis] + h4 * end_tangent[axis]
+            })
+        }));
+        points
+    }
 }
 
 /// A `widget` that hangs a line of sprites from a marker.
@@ -139,6 +180,9 @@ pub(crate) struct H2Antenna {
     position: [f32; 3],
     forward: [f32; 3],
     vertices: Vec<H2AntennaVertex>,
+    curve: Option<H3AntennaCurve>,
+    /// Halo 3 reads its bitmap as the card would.
+    pub(crate) h3_bitmap: Option<H3Bitmap>,
     pub(crate) image: Arc<H2Image>,
 }
 
@@ -169,25 +213,31 @@ impl H2Antenna {
     pub(crate) fn quads(&self, bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> Vec<CeAntennaQuad> {
         let (mut origin, mut direction) = posed_on(self.node, self.position, self.forward, bones);
         let mut points = vec![origin];
-        for vertex in &self.vertices {
-            let link = aimed(vertex.offset, direction);
-            origin = std::array::from_fn(|axis| origin[axis] + link[axis]);
-            direction = link;
-            points.push(origin);
+        if let Some(curve) = &self.curve {
+            points = curve.points(origin, direction, self.vertices.iter().map(|vertex| vertex.hermite_t));
+        } else {
+            for vertex in &self.vertices {
+                let link = aimed(vertex.offset, direction);
+                origin = std::array::from_fn(|axis| origin[axis] + link[axis]);
+                direction = link;
+                points.push(origin);
+            }
         }
         let quad = |(index, vertex): (usize, &H2AntennaVertex)| {
             let (start, end) = (points[index], points[index + 1]);
             let link: [f32; 3] = std::array::from_fn(|axis| end[axis] - start[axis]);
             let length = dot(link, link).sqrt().max(UNSET);
             let link = link.map(|axis| axis / length);
+            // `get_vertex_scale_by_distance`: a short link is a thin one too.
+            let scale = if self.curve.is_some() { length / vertex.covered } else { vertex.scale };
             let across = cross(view.forward, link);
             let width = dot(across, across).sqrt().max(UNSET);
             let across = across.map(|axis| axis / width);
             let [left, right, top, bottom] = vertex.rect;
             let [x, y] = vertex.registration;
             let corner = |u: f32, v: f32| {
-                let along = (u - (x + left)) * vertex.scale;
-                let side = (top + y - v) * vertex.scale;
+                let along = (u - (x + left)) * scale;
+                let side = (top + y - v) * scale;
                 let place: [f32; 3] =
                     std::array::from_fn(|axis| start[axis] + link[axis] * along - across[axis] * side);
                 [place[0], place[1], place[2], u, v]
@@ -220,13 +270,21 @@ fn read_h2_antenna(
     let cutoff = root.read_real("cutoff pixels").unwrap_or(0.0);
     // Halo 3 bakes these out of the tags it ships.
     let alpha = if falloff == cutoff { 1.0 } else { ((PIXELS - cutoff) / (falloff - cutoff)).clamp(0.0, 1.0) };
+    let curve = root.field("point of bend").is_some().then(|| H3AntennaCurve {
+        total_length: root.read_real("runtime total length").unwrap_or(0.0),
+        point_of_bend: root.read_real("point of bend").unwrap_or(0.0),
+        starting_bend: root.read_real("starting bend").unwrap_or(0.0),
+        ending_bend: root.read_real("ending bend").unwrap_or(0.0),
+    });
     let mut vertices = Vec::new();
     for vertex in elements(root, "vertices") {
         let sequence = vertex.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
         let (rect, registration, _, covered) = antenna_sprite(&bitmap, sequence)?;
         let length = vertex.read_real("length").unwrap_or(0.0);
         let angles = vertex.read_euler2d("angles");
-        let [red, green, blue, _] = argb(vertex, "color");
+        let [red, green, blue, own_alpha] = argb(vertex, "color");
+        // `antenna_render_proper` hands `build_sprite` the color as it stands.
+        let alpha = if curve.is_some() { own_alpha } else { alpha };
         vertices.push(H2AntennaVertex {
             offset: [
                 angles.yaw.cos() * length * angles.pitch.sin(),
@@ -237,14 +295,19 @@ fn read_h2_antenna(
             rect,
             registration,
             scale: length / covered,
+            covered,
+            hermite_t: vertex.read_real("hermite t").unwrap_or(0.0),
         });
     }
     let image = decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, 0)?;
+    let h3_bitmap = curve.and_then(|_| read_h3_bitmap(source, &bitmap_path, 0, SamplerKind::Texture2D));
     Some(H2Antenna {
         node: marker.node_index.max(0) as usize,
         position: marker.position,
         forward: marker.axes[0],
         vertices,
+        curve,
+        h3_bitmap,
         image: Arc::new(image),
     })
 }
@@ -323,6 +386,8 @@ pub(crate) struct H2FlareAt {
     position: [f32; 3],
     forward: [f32; 3],
     marker_scale: f32,
+    /// The region and permutation its marker belongs to, if only one.
+    only_under: Option<(String, String)>,
     /// `primary scale`, a name the object's functions answer to.
     scale_by: String,
     /// `change color`: which of the four, if any.
@@ -587,6 +652,7 @@ pub(super) fn read_h2_flares(
                 position: place.position,
                 forward: place.axes[0],
                 marker_scale: marker.scale,
+                only_under: marker.only_under.clone(),
                 scale_by: scale_by.clone(),
                 change_color: change_color.ok(),
                 light: light.clone(),
@@ -812,6 +878,18 @@ pub(crate) fn overbrighten(light: &H2DefaultLight) -> (H2DefaultLight, usize) {
 }
 
 impl H2FlareAt {
+    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
+        self.only_under.as_ref()
+    }
+
+    /// Follow the regions `merge_attached` renames for what `name` brings.
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
+        self
+    }
+
     /// The function that scales it, which sliders and frames must answer for.
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
@@ -1024,6 +1102,7 @@ mod tests {
             position: [2.0, 0.0, 0.0],
             forward: [-1.0, 0.0, 0.0],
             marker_scale: 3.0,
+            only_under: None,
             scale_by: "power".to_owned(),
             change_color: None,
             light: None,
@@ -1208,6 +1287,23 @@ mod tests {
         assert!(close(aimed([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]));
         assert!(close(aimed([0.0, 0.0, 1.0], [0.0, -1.0, 0.0]), [0.0, -1.0, 0.0]));
         assert!(close(aimed([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]), [0.0, 0.0, -1.0]));
+    }
+
+    #[test]
+    fn a_halo_3_antenna_rests_along_its_marker_with_links_as_the_curve_spaces_them() {
+        let curve = H3AntennaCurve {
+            total_length: 0.25,
+            point_of_bend: 0.1,
+            starting_bend: 0.3,
+            ending_bend: 0.2,
+        };
+        let points = curve.points([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.05, 0.11, 1.0].into_iter());
+        assert_eq!(points[0], [1.0, 0.0, 0.0]);
+        assert!(points.iter().all(|point| point[0] == 1.0 && point[1] == 0.0));
+        assert!((points[3][2] - 0.25).abs() < 1e-6);
+        // Faster off the marker than a straight line through the tag's `t`.
+        assert!((points[1][2] - 0.05 * 0.25).abs() > 0.001, "{points:?}");
+        assert!((points[1][2] - 0.015243).abs() < 0.00001, "{points:?}");
     }
 
     #[test]

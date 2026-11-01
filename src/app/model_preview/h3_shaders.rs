@@ -439,6 +439,8 @@ pub(crate) struct H3Texture {
     pub(crate) uniform: String,
     pub(crate) image: Arc<H2Image>,
     pub(crate) texels: H3Texels,
+    /// The levels past `image`, as the bitmap stores them.
+    pub(crate) mips: Arc<Vec<H2Image>>,
     /// What the tag asks of the sampler; none for the engine's own textures.
     pub(crate) sampler: Option<H3Sampler>,
     /// The bitmap's other images, in order with `image` standing at its index,
@@ -560,7 +562,14 @@ impl H3Animation {
     /// `evaluate_function`: an object's named values, or else time around a
     /// period, which only a periodic function runs past 1.
     fn sample(&self, time: f32, values: Option<&H2FunctionValues>) -> (f32, f32) {
-        let named = |name: &str| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
+        // `object_get_function_value`: no name at all reads full, so a parameter
+        // with an input and no range runs on its function's upper curve.
+        let named = |name: &str| {
+            if name.is_empty() {
+                return 1.0;
+            }
+            values.and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+        };
         let timed = self.input == "unique_id";
         if !timed && (!self.input.is_empty() || !self.range.is_empty()) {
             return (named(&self.input), named(&self.range));
@@ -607,6 +616,32 @@ impl H3Animation {
 #[cfg(test)]
 mod texel_tests {
     use super::*;
+
+    fn animation(input: &str, range: &str) -> H3Animation {
+        H3Animation {
+            uniform: String::new(),
+            writes: H3Animated::First,
+            function: blam_tags::TagFunction::parse(&[0; 32]).unwrap(),
+            input: input.to_owned(),
+            range: range.to_owned(),
+            period: 1.0,
+        }
+    }
+
+    #[test]
+    fn an_empty_name_beside_a_named_one_reads_full() {
+        let values = H2FunctionValues::from([("power".to_owned(), 0.25), ("heat".to_owned(), 0.5)]);
+        let values = Some(&values);
+        assert_eq!(animation("power", "").sample(0.0, values), (0.25, 1.0));
+        assert_eq!(animation("", "heat").sample(0.0, values), (1.0, 0.5));
+        assert_eq!(animation("power", "heat").sample(0.0, values), (0.25, 0.5));
+        assert_eq!(animation("missing", "").sample(0.0, values), (0.0, 1.0));
+    }
+
+    #[test]
+    fn nothing_named_runs_on_time() {
+        assert_eq!(animation("", "").sample(0.25, None), (0.25, 0.0));
+    }
 
     #[test]
     fn the_dxgi_tables_signed_formats_read_signed_whatever_the_curve() {

@@ -413,6 +413,12 @@ pub(super) fn load_model_preview(
                 data.h2_weapons = Some(weapons);
             }
         }
+        if weapons_family {
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            let attached =
+                super::h2_weapons::attach_variant_objects(source, model, &mut data.variants, preview);
+            data.h2_attached.extend(attached);
+        }
         return Ok(data);
     }
 

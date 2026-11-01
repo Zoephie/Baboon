@@ -10,6 +10,8 @@ use super::h2_passes::{
 use super::h2_bloom::H2Bloom;
 use super::h2_passes::{H2Clock, h2_prt_lights};
 use super::h2_stage::H2VertexStage;
+use super::h3_shaders::H3Sampler;
+use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
@@ -135,6 +137,8 @@ pub(super) fn draw_model_viewport(
         object_moves: object_moves(data, &state.h2_function_inputs, time, h2_values.as_ref()),
         h2_values,
         h2_attached_values: h2_attached_values(data, time),
+        h3_flares_shown: h3_flares_shown(&data.preview, state),
+        h2_flares_shown: h2_flares_shown(&data.preview, state),
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
@@ -328,6 +332,23 @@ fn visible_instances(preview: &RenderModelPreview, state: &ModelPreviewState) ->
         instances.masks.get(&(region.clone(), selection.permutation.clone()))
     });
     chosen.copied().unwrap_or(0) & allowed.fold(0, |mask, permutation| mask | permutation)
+}
+
+/// Which of the preview's Halo 3 flares have a marker under what is selected.
+fn h3_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+    let shown = |only| marker_active(only, &state.region_selections);
+    preview.h3_flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+}
+
+/// The same of Halo 2's.
+fn h2_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+    let shown = |only| marker_active(only, &state.region_selections);
+    preview.h2_flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+}
+
+fn marker_active(only: &(String, String), selections: &HashMap<String, ModelRegionSelection>) -> bool {
+    let selection = selections.get(&only.0);
+    selection.is_some_and(|selection| selection.enabled && selection.permutation == only.1)
 }
 
 fn model_layer_visible(state: &ModelPreviewState, layer: ModelPreviewLayer) -> bool {
@@ -786,6 +807,8 @@ struct ModelGpuFrame {
     h2_values: Option<h2_functions::H2FunctionValues>,
     /// What a held weapon's own functions read, by owner.
     h2_attached_values: Vec<(u8, h2_functions::H2FunctionValues)>,
+    h3_flares_shown: Vec<bool>,
+    h2_flares_shown: Vec<bool>,
     /// Each object's point lights this frame, in step with `object_states`.
     ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
     /// Draw opaque Halo 2 materials through their passes.
@@ -1136,6 +1159,7 @@ fn paint_model_gl(
 mod h2_shot;
 #[path = "h3_bloom.rs"]
 mod h3_bloom;
+pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
 #[path = "h3_draw.rs"]
 mod h3_draw;
 
@@ -2237,6 +2261,8 @@ struct ModelGlRenderer {
     /// every frame and the material keeps drawing as it did.
     h2_programs: HashMap<(H2VertexStage, String), Option<H2GlProgram>>,
     h2_black_cube: Option<glow::NativeTexture>,
+    /// What Halo 3's composite reads with no bloom built.
+    h3_no_bloom: Option<glow::NativeTexture>,
     h2_black_volume: Option<glow::NativeTexture>,
     h2_white_volume: Option<glow::NativeTexture>,
     h2_normalization_cube: Option<glow::NativeTexture>,
@@ -2343,6 +2369,7 @@ impl ModelGlRenderer {
                 h3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                 h2_programs: HashMap::new(),
                 h2_black_cube: upload_black_cube(gl),
+                h3_no_bloom: upload_black_flat(gl),
                 h2_black_volume: upload_solid_volume(gl, [0, 0, 0, 255]),
                 h2_white_volume: upload_solid_volume(gl, [255; 4]),
                 h2_normalization_cube: upload_normalization_cube(gl),
@@ -2623,15 +2650,7 @@ impl ModelGlRenderer {
                 gl.uniform_1_f32(Some(&self.unlit), 1.0);
                 self.draw_batches(gl, frame, true, &self.slots[slot].materials);
             }
-            let preview = &frame.preview;
-            if frame.game_shaders
-                && self.h2_supported
-                && !(preview.ce_lights.is_empty()
-                    && preview.ce_antennas.is_empty()
-                    && preview.h2_antennas.is_empty()
-                    && preview.h2_flares.is_empty()
-                    && preview.h3_flares.is_empty())
-            {
+            if !self.h3_draws(frame) && self.draws_object_sprites(frame) {
                 self.draw_ce_flares(gl, frame, slot);
             }
 
@@ -2652,8 +2671,21 @@ impl ModelGlRenderer {
     /// patch whose share of pixels past the depth buffer scales the flare. The
     /// game reads that a frame late and eases it; a pane paints on demand, so
     /// this waits for the answer.
-    unsafe fn draw_ce_flares(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    /// Whether a frame has flares or antennas to draw.
+    fn draws_object_sprites(&self, frame: &ModelGpuFrame) -> bool {
+        let preview = &frame.preview;
+        frame.game_shaders
+            && self.h2_supported
+            && !(preview.ce_lights.is_empty()
+                && preview.ce_antennas.is_empty()
+                && preview.h2_antennas.is_empty()
+                && preview.h2_flares.is_empty()
+                && preview.h3_flares.is_empty())
+    }
+
+    pub(super) unsafe fn draw_ce_flares(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         unsafe {
+            let h3 = self.h3_draws(frame);
             if self.ce_flares.is_none() {
                 self.ce_flares = ce_flare_gl(gl, self.program);
             }
@@ -2676,7 +2708,10 @@ impl ModelGlRenderer {
                     .chain(frame.preview.h2_flares.iter().map(|at| {
                         at.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect()
                     }))
-                    .chain(frame.preview.h3_flares.iter().map(|at| vec![upload_h2_image(gl, at.image())]))
+                    .chain(frame.preview.h3_flares.iter().map(|at| {
+                        let (image, texels, mips) = at.bitmap();
+                        vec![h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)]
+                    }))
                     .collect();
                 for texture in uploaded.antenna_textures.drain(..).flatten() {
                     gl.delete_texture(texture);
@@ -2685,9 +2720,18 @@ impl ModelGlRenderer {
                     .preview
                     .ce_antennas
                     .iter()
-                    .map(|antenna| &antenna.image)
-                    .chain(frame.preview.h2_antennas.iter().map(|antenna| &antenna.image))
-                    .map(|image| upload_h2_image(gl, image))
+                    .map(|antenna| upload_h2_image(gl, &antenna.image))
+                    .chain(frame.preview.h2_antennas.iter().map(|antenna| match &antenna.h3_bitmap {
+                        // `build_sprite`.
+                        Some((image, texels, mips)) => {
+                            let sampler = H3Sampler {
+                                address: [BitmapAddressMode::Clamp; 2],
+                                filter: BitmapFilterMode::Bilinear,
+                            };
+                            h3_draw::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
+                        }
+                        None => upload_h2_image(gl, &antenna.image),
+                    }))
                     .collect();
                 uploaded.flare_geometry = Some(frame.geometry_id);
             }
@@ -2707,6 +2751,20 @@ impl ModelGlRenderer {
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             // `global_shader_effect_alpha_blended`, among the model's depth.
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            // Halo 3's target is composited over the background by its alpha,
+            // so what covers it has to say so.
+            if h3 {
+                gl.color_mask(true, true, true, true);
+                gl.blend_func_separate(
+                    glow::SRC_ALPHA,
+                    glow::ONE_MINUS_SRC_ALPHA,
+                    glow::ONE,
+                    glow::ONE_MINUS_SRC_ALPHA,
+                );
+            }
+            // Plain color times map, not what the last flare left set.
+            gl.uniform_1_f32(flares.highlight.as_ref(), -1.0);
+            gl.uniform_2_f32(flares.tint.as_ref(), 0.0, 0.0);
             for (quads, texture) in preview_antennas(frame, &uploaded.antenna_textures, bones, &view) {
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                 for quad in quads {
@@ -2720,6 +2778,7 @@ impl ModelGlRenderer {
                     gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                 }
             }
+            gl.color_mask(true, true, true, false);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE);
             for (index, light) in frame.preview.ce_lights.iter().enumerate() {
                 let state = frame.object_states.get(usize::from(light.object));
@@ -2737,6 +2796,9 @@ impl ModelGlRenderer {
             }
             let first_h3 = frame.preview.ce_lights.len() + frame.preview.h2_flares.len();
             for (index, at) in frame.preview.h3_flares.iter().enumerate() {
+                if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
+                    continue;
+                }
                 let values = frame.h2_values_of_object(at.object);
                 let occlusion = match at.occlusion_patch(values, bones, &view) {
                     None => Some(1.0),
@@ -2752,6 +2814,9 @@ impl ModelGlRenderer {
             }
             let first_h2 = frame.preview.ce_lights.len();
             for (index, at) in frame.preview.h2_flares.iter().enumerate() {
+                if !frame.h2_flares_shown.get(index).copied().unwrap_or(true) {
+                    continue;
+                }
                 let occlusion = match at.occlusion_patches(bones, &view) {
                     None => [1.0; 2],
                     Some((outer, inner)) => {
@@ -3702,6 +3767,21 @@ mod tests {
     }
 
     #[test]
+    fn a_marker_of_one_permutation_goes_with_that_permutation() {
+        let selections = HashMap::from([(
+            "f_hull".to_owned(),
+            ModelRegionSelection { enabled: true, permutation: "base".to_owned() },
+        )]);
+        let of = |region: &str, permutation: &str| (region.to_owned(), permutation.to_owned());
+        assert!(marker_active(&of("f_hull", "base"), &selections));
+        assert!(!marker_active(&of("f_hull", "minor"), &selections));
+        assert!(!marker_active(&of("hull", "base"), &selections));
+        let mut off = selections.clone();
+        off.get_mut("f_hull").unwrap().enabled = false;
+        assert!(!marker_active(&of("f_hull", "base"), &off));
+    }
+
+    #[test]
     fn marker_transform_uses_its_animated_bone() {
         let marker = RenderModelPreviewMarker {
             name: "weapon".to_owned(),
@@ -3709,6 +3789,7 @@ mod tests {
             position: [1.0, 2.0, 3.0],
             scale: 1.0,
             axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            only_under: None,
         };
         let rows = vec![
             [1.0, 0.0, 0.0, 99.0],
@@ -4631,11 +4712,18 @@ pub(super) fn render_model_to_preview(
                 position: transform_preview_marker_position(marker, &node_world),
                 scale: marker.scale,
                 axes: transform_preview_marker_axes(marker, &node_world),
+                only_under: marker_permutation(model, marker),
             });
         }
     }
 
     preview
+}
+
+fn marker_permutation(model: &RenderModel, marker: &blam_tags::render_model::Marker) -> Option<(String, String)> {
+    let region = model.regions.get(usize::try_from(marker.region_index).ok()?)?;
+    let permutation = region.permutations.get(usize::try_from(marker.permutation_index).ok()?)?;
+    Some((region.name.clone(), permutation.name.clone()))
 }
 
 /// The meshes a preview holds, in the order its vertices lie: by region and
@@ -5222,6 +5310,19 @@ unsafe fn upload_normalization_cube(gl: &glow::Context) -> Option<glow::NativeTe
 
 /// A 1x1 black cube, for passes whose cube map is not read: a reflection
 /// that adds nothing.
+unsafe fn upload_black_flat(gl: &glow::Context) -> Option<glow::NativeTexture> {
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        let black = glow::PixelUnpackData::Slice(Some(&[0, 0, 0, 255]));
+        gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, black);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        Some(texture)
+    }
+}
+
 unsafe fn upload_black_cube(gl: &glow::Context) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;

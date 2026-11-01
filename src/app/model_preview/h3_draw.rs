@@ -36,7 +36,7 @@ const TONE_CURVE: [f32; 4] = {
 };
 
 /// `get_render_exposure` at no stops and a white point of one.
-const EXPOSURE: f32 = 0.669_432_94;
+pub(in crate::app) const EXPOSURE: f32 = 0.669_432_94;
 
 /// `setup_default_lighting`'s light straight down, in white.
 const DOMINANT_DIRECTION: [f32; 4] = [0.0, 0.0, -1.0, 1.0];
@@ -394,8 +394,9 @@ fn frame_value(frame: &ModelGpuFrame, name: &str, size: [i32; 2]) -> Option<H3Va
         "ps_global_render_pixel_size" => floats([1.0 / width, 1.0 / height, 0.0, 0.0]),
         "ps_global_viewport_res_multipliers" => floats([1.0, 1.0, 0.0, 0.0]),
         "ps_global_viewport_bounds_uv" => floats([0.0, 0.0, 1.0, 1.0]),
-        // `render_object_context`: fully on, at unit screen scale.
-        "k_ps_active_camo_factor" => floats([1.0, 1.0, 1.0, 0.0]),
+        // `render_object_context`: fully on, at unit screen scale. Its screen
+        // runs down and this one up, so the refraction's Y turns over.
+        "k_ps_active_camo_factor" => floats([1.0, 1.0, -1.0, 0.0]),
         _ => None,
     }
 }
@@ -516,7 +517,7 @@ impl ModelGlRenderer {
             let settings = frame.preview.h3_shield.as_ref().or(global.map(|shield| &shield.settings));
             if let Some(settings) = settings {
                 for texture in &settings.textures {
-                    if let Some(found) = upload_h2_image_linear(gl, &texture.image, texture.texels, texture.sampler) {
+                    if let Some(found) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
                         uploaded.shield.insert(texture.uniform.clone(), found);
                     }
                 }
@@ -525,17 +526,17 @@ impl ModelGlRenderer {
                 .preview
                 .h3_lights
                 .iter()
-                .map(|light| light.gel.as_ref().and_then(|gel| upload_h2_image_linear(gl, gel, H3Texels::Srgb, None)))
+                .map(|light| light.gel.as_ref().and_then(|gel| upload_h2_image_linear(gl, gel, H3Texels::Srgb, &[], None)))
                 .collect();
             for textures in frame.textures.iter().flat_map(|textures| textures.iter()) {
                 let mut map = HashMap::new();
                 if let Some(material) = &textures.h3 {
                     for texture in &material.textures {
-                        if let Some(uploaded) = upload_h2_image_linear(gl, &texture.image, texture.texels, texture.sampler) {
+                        if let Some(uploaded) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
                             map.insert(texture.uniform.clone(), uploaded);
                         }
                         for (at, image) in texture.frames.iter().enumerate() {
-                            if let Some(uploaded) = upload_h2_image_linear(gl, image, texture.texels, texture.sampler) {
+                            if let Some(uploaded) = upload_h2_image_linear(gl, image, texture.texels, &[], texture.sampler) {
                                 map.insert(frame_key(&texture.uniform, at), uploaded);
                             }
                         }
@@ -738,6 +739,8 @@ impl ModelGlRenderer {
 
     /// The object's passes, between the preview's own draw and the scene's end.
     pub(super) unsafe fn draw_h3(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, order: &[usize]) {
+        // Direct3D 11 always filters across a cube's faces; OpenGL has to be asked.
+        unsafe { gl.enable(glow::TEXTURE_CUBE_MAP_SEAMLESS) };
         let Some(scene) = self.h2_scene.as_ref() else {
             return;
         };
@@ -768,7 +771,7 @@ impl ModelGlRenderer {
             }
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             gl.disable(glow::BLEND);
-            gl.disable(glow::CULL_FACE);
+            h3_set_cull(gl, frame);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
@@ -818,7 +821,7 @@ impl ModelGlRenderer {
             };
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
             gl.disable(glow::BLEND);
-            gl.disable(glow::CULL_FACE);
+            h3_set_cull(gl, frame);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
@@ -839,7 +842,7 @@ impl ModelGlRenderer {
                 gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
                 gl.enable(glow::DEPTH_TEST);
                 gl.depth_func(glow::LEQUAL);
-                gl.disable(glow::CULL_FACE);
+                h3_set_cull(gl, frame);
             }
             gl.enable(glow::BLEND);
             gl.depth_mask(false);
@@ -905,6 +908,11 @@ impl ModelGlRenderer {
                 }
                 gl.color_mask(true, true, true, true);
             }
+            // `c_player_view::render`: after the transparents, before the bloom
+            // and the tone curve, so these are in the same light as the scene.
+            if self.draws_object_sprites(frame) {
+                self.draw_ce_flares(gl, frame, slot);
+            }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             if frame.bloom && bloom.is_none() {
                 bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size);
@@ -925,7 +933,7 @@ impl ModelGlRenderer {
     ) -> Option<glow::NativeTexture> {
         unsafe {
             if self.h3_bloom.is_none() {
-                self.h3_bloom = H3Bloom::new(gl);
+                self.h3_bloom = H3Bloom::new(gl, self.h3_no_bloom);
             }
             let vertices = self.h3_empty_array(gl);
             self.h3_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size)
@@ -951,7 +959,7 @@ impl ModelGlRenderer {
             let location = gl.get_uniform_location(program, "accumulation");
             gl.uniform_1_i32(location.as_ref(), 0);
             gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, bloom);
+            gl.bind_texture(glow::TEXTURE_2D, bloom.or(self.h3_no_bloom));
             let location = gl.get_uniform_location(program, "bloom");
             gl.uniform_1_i32(location.as_ref(), 1);
             gl.active_texture(glow::TEXTURE0);
@@ -970,6 +978,20 @@ impl ModelGlRenderer {
     unsafe fn h3_empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
         unsafe {
             *self.h3_empty_vertices.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
+        }
+    }
+}
+
+/// `c_object_renderer::render_albedo` and its like: `_cull_mode_cw` throughout.
+/// Tags lean on it, storing some faces twice with opposite winding, and with
+/// both drawn the back one takes the depth tie and its lighting with it.
+unsafe fn h3_set_cull(gl: &glow::Context, frame: &ModelGpuFrame) {
+    unsafe {
+        if frame.show_backfaces {
+            gl.disable(glow::CULL_FACE);
+        } else {
+            gl.enable(glow::CULL_FACE);
+            gl.cull_face(glow::BACK);
         }
     }
 }
@@ -1084,10 +1106,11 @@ fn signed_bytes(rgba: &[u8], texels: H3Texels) -> Cow<'_, [u8]> {
 }
 
 /// `upload_h2_image` with an sRGB format, for the curve the card decodes.
-unsafe fn upload_h2_image_linear(
+pub(super) unsafe fn upload_h2_image_linear(
     gl: &glow::Context,
     image: &H2Image,
     texels: H3Texels,
+    mips: &[H2Image],
     sampler: Option<H3Sampler>,
 ) -> Option<glow::NativeTexture> {
     let (format, kind) = match texels {
@@ -1122,6 +1145,17 @@ unsafe fn upload_h2_image_linear(
                     glow::PixelUnpackData::Slice(Some(&signed_bytes(&image.rgba, texels))),
                 );
                 finish(glow::TEXTURE_2D);
+                for (level, mip) in mips.iter().enumerate() {
+                    if let H2Image::Flat(mip) = mip {
+                        let rgba = signed_bytes(&mip.rgba, texels);
+                        let (width, height) = (mip.width as i32, mip.height as i32);
+                        let pixels = glow::PixelUnpackData::Slice(Some(&rgba));
+                        gl.tex_image_2d(glow::TEXTURE_2D, level as i32 + 1, format, width, height, 0, glow::RGBA, kind, pixels);
+                    }
+                }
+                if !mips.is_empty() {
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, mips.len() as i32);
+                }
                 let wrap = |repeat: bool| if repeat { glow::REPEAT } else { glow::CLAMP_TO_EDGE } as i32;
                 gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, wrap(image.repeat_x));
                 gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, wrap(image.repeat_y));
@@ -1145,6 +1179,20 @@ unsafe fn upload_h2_image_linear(
                     );
                 }
                 finish(glow::TEXTURE_CUBE_MAP);
+                for (level, mip) in mips.iter().enumerate() {
+                    if let H2Image::Cube { size, faces } = mip {
+                        for (face, rgba) in faces.iter().enumerate() {
+                            let rgba = signed_bytes(rgba, texels);
+                            let target = glow::TEXTURE_CUBE_MAP_POSITIVE_X + face as u32;
+                            let side = *size as i32;
+                            let pixels = glow::PixelUnpackData::Slice(Some(&rgba));
+                            gl.tex_image_2d(target, level as i32 + 1, format, side, side, 0, glow::RGBA, kind, pixels);
+                        }
+                    }
+                }
+                if !mips.is_empty() {
+                    gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, glow::TEXTURE_MAX_LEVEL, mips.len() as i32);
+                }
                 if let Some(sampler) = sampler {
                     h3_apply_sampler(gl, glow::TEXTURE_CUBE_MAP, sampler);
                 }

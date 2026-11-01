@@ -188,7 +188,7 @@ struct ResolveCaches {
     h3_shield: Option<Option<Arc<H3Shield>>>,
     h3_sources: Option<H3Sources>,
     /// Images decoded for Halo 3 passes, with whether each is sRGB.
-    h3_images: HashMap<(String, i16, usize), Option<(Arc<H2Image>, H3Texels)>>,
+    h3_images: HashMap<(String, i16, usize), Option<H3Bitmap>>,
     definitions: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
     options: HashMap<String, Option<Arc<RenderMethodOption>>>,
     /// Decoded bitmaps by `(path, image index)`. Shared maps are common —
@@ -399,17 +399,70 @@ fn h3_image(
     index: i16,
     kind: SamplerKind,
     caches: &mut ResolveCaches,
-) -> Option<(Arc<H2Image>, H3Texels)> {
+) -> Option<H3Bitmap> {
     let key = (path.to_owned(), index, kind as usize);
     if let Some(found) = caches.h3_images.get(&key) {
         return found.clone();
     }
+    let found = read_h3_bitmap(source, path, index, kind);
+    caches.h3_images.insert(key, found.clone());
+    found
+}
+
+/// One image of a bitmap, what its texels mean, and its stored mips.
+pub(super) type H3Bitmap = (Arc<H2Image>, H3Texels, Arc<Vec<H2Image>>);
+
+/// Levels past the top, as the tag stores them. None when `image` was not
+/// decoded at the tag's own size, since these would not continue it.
+fn h3_stored_mips(tag: &TagFile, index: usize, image: &H2Image) -> Option<Vec<H2Image>> {
+    let bitmap = blam_tags::bitmap::Bitmap::new(tag).ok()?;
+    let stored = bitmap.image(index)?;
+    let (width, height) = (stored.width(), stored.height());
+    let side = |size: u32, level: u32| (size >> level).max(1) as usize;
+    let levels = 1..stored.mipmap_levels();
+    match image {
+        H2Image::Flat(top) if top.width == width as usize && top.height == height as usize => levels
+            .map(|level| {
+                let data = crate::app::editor::build_bitmap_preview(tag, index, level as usize).ok()?;
+                let (width, height) = (side(width, level), side(height, level));
+                (data.width as usize == width && data.height as usize == height).then(|| {
+                    H2Image::Flat(TextureImage {
+                        rgba: data.rgba,
+                        width,
+                        height,
+                        repeat_x: top.repeat_x,
+                        repeat_y: top.repeat_y,
+                        scale: top.scale,
+                    })
+                })
+            })
+            .collect(),
+        H2Image::Cube { size, .. } if *size == width as usize => {
+            let format = stored.format().ok()?;
+            levels
+                .map(|level| {
+                    let edge = side(width, level);
+                    let face = |face: u32| {
+                        let data = stored.cube_face_level_bytes(level, face).ok()?;
+                        let palette = bitmap.p8_palette();
+                        blam_tags::bitmap::decode::decode_to_rgba8(format, edge as u32, edge as u32, data, palette).ok()
+                    };
+                    let faces = [face(0)?, face(1)?, face(2)?, face(3)?, face(4)?, face(5)?];
+                    Some(H2Image::Cube { size: edge, faces })
+                })
+                .collect()
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: SamplerKind) -> Option<H3Bitmap> {
     let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok();
     // `render_method_submit`: an index past the last image takes the last.
     let images = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len());
     let index = (index.max(0) as usize).min(images.saturating_sub(1)) as i16;
     let image = decode_h2_image(source, path, kind, index as usize);
-    let found = image.map(|image| {
+    image.map(|image| {
         // `c_rasterizer_texture_ref::allocate`: xRGB and sRGB curves.
         let curve = tag.as_ref().and_then(|tag| {
             elements(tag.root(), "bitmaps*").get(index.max(0) as usize)?.read_int_any("curve")
@@ -425,10 +478,9 @@ fn h3_image(
             };
             H3Texels::of(format, srgb)
         });
-        (Arc::new(image), texels)
-    });
-    caches.h3_images.insert(key, found.clone());
-    found
+        let mips = tag.as_ref().and_then(|tag| h3_stored_mips(tag, index.max(0) as usize, &image));
+        (Arc::new(image), texels, Arc::new(mips.unwrap_or_default()))
+    })
 }
 
 /// A map's `_xform`: its scale, then its offset. A shader's animators override
@@ -667,7 +719,7 @@ fn prepare_h3_material(
                 TextureKind::Volume => SamplerKind::Volume,
                 _ => SamplerKind::Texture2D,
             };
-            let Some((image, texels)) = h3_image(source, &path, index, kind, caches) else {
+            let Some((image, texels, mips)) = h3_image(source, &path, index, kind, caches) else {
                 continue;
             };
             let animated = material.animations.iter().any(|animation| {
@@ -678,12 +730,12 @@ fn prepare_h3_material(
                 let count = tag.as_ref().map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
                 (0..count)
                     .filter_map(|at| h3_image(source, &path, at as i16, kind, caches))
-                    .map(|(image, _)| image)
+                    .map(|(image, _, _)| image)
                     .collect()
             } else {
                 Vec::new()
             };
-            material.textures.push(H3Texture { uniform: uniform.clone(), image, texels, sampler, frames });
+            material.textures.push(H3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
         }
     }
     Ok(material)
@@ -724,7 +776,14 @@ pub(super) fn read_h3_shield_settings(source: &TagSource, path: &str) -> Option<
     ] {
         let bitmap = root.read_tag_ref_path(field).filter(|bitmap| !bitmap.is_empty())?;
         let image = Arc::new(decode_h2_image(source, &bitmap, SamplerKind::Texture2D, 0)?);
-        textures.push(H3Texture { uniform: uniform.to_owned(), image, texels: H3Texels::Linear, sampler: None, frames: Vec::new() });
+        textures.push(H3Texture {
+            uniform: uniform.to_owned(),
+            image,
+            texels: H3Texels::Linear,
+            mips: Arc::default(),
+            sampler: None,
+            frames: Vec::new(),
+        });
     }
     Some(Arc::new(H3ShieldSettings { values, textures }))
 }

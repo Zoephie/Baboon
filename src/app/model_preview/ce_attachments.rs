@@ -654,6 +654,7 @@ mod tests {
             position: [1.0, 2.0, 3.0],
             scale: 1.0,
             axes: MarkerFrame::ORIGIN.axes,
+            only_under: None,
         });
         assert_eq!(MarkerFrame::find(&preview, ""), MarkerFrame::ORIGIN);
         assert_eq!(MarkerFrame::find(&preview, "missing"), MarkerFrame::ORIGIN);

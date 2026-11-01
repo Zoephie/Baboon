@@ -148,11 +148,13 @@ impl Levels {
 pub(super) struct H3Bloom {
     program: glow::NativeProgram,
     levels: Option<Levels>,
+    /// What a pass adding nothing leaves bound, as `added` is sampled regardless.
+    nothing: Option<glow::NativeTexture>,
 }
 
 impl H3Bloom {
-    pub(super) unsafe fn new(gl: &glow::Context) -> Option<Self> {
-        unsafe { Some(Self { program: screen_program(gl, FRAGMENT)?, levels: None }) }
+    pub(super) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
+        unsafe { Some(Self { program: screen_program(gl, FRAGMENT)?, levels: None, nothing }) }
     }
 
     /// One step of the chain, drawing `source` through `mode` into `target`.
@@ -170,7 +172,7 @@ impl H3Bloom {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
             gl.viewport(0, 0, target.size[0], target.size[1]);
             gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, added);
+            gl.bind_texture(glow::TEXTURE_2D, added.or(self.nothing));
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(source.0));
             gl.uniform_1_i32(uniform("mode").as_ref(), mode);
