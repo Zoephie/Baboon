@@ -1,12 +1,14 @@
 //! Halo 3's attached effects, as `effect_new_looping` runs them on an object at
 //! rest: what each event's parts are, and where they go.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
 use super::attachment::MarkerFrame;
 use super::ce_attachments::{elements, object_block};
+use super::h2_functions::H2FunctionValues;
 use super::*;
 use crate::core::source::TagSource;
 
@@ -115,9 +117,60 @@ impl H3EffectTimes {
         None
     }
 
+    /// How long a run that does not loop takes.
+    pub(super) fn once(&self) -> f32 {
+        let lengths = self.events.iter().map(|event| event.length());
+        if self.parallel { lengths.fold(0.0, f32::max) } else { lengths.sum() }
+    }
+
+    /// Seconds since `index` began, for what outlasts its normalized age. An
+    /// effect that only ticks over has been running all along.
+    pub(super) fn elapsed(&self, index: usize, time: f32) -> Option<f32> {
+        self.age(index, time)?;
+        if !self.moves() {
+            return Some(time);
+        }
+        let event = *self.events.get(index)?;
+        let before: f32 = if self.parallel {
+            0.0
+        } else {
+            self.events.iter().take(index).map(|event| event.length()).sum()
+        };
+        let cycle: f32 = if self.parallel {
+            self.events.iter().map(|event| event.length()).fold(0.0, f32::max)
+        } else {
+            self.events.iter().map(|event| event.length()).sum()
+        };
+        Some((time.rem_euclid(cycle.max(ONE_TICK)) - before - event.delay).max(0.0))
+    }
+
     /// Whether the event's age or its being on changes as time passes.
     pub(super) fn moves(&self) -> bool {
         self.events.len() > 1 || self.events.iter().any(|event| event.delay > 0.0 || event.duration > ONE_TICK)
+    }
+}
+
+/// When each attachment's function last came on: `attachments_update` makes
+/// the effect then, so its events run from there. What was on from the first
+/// frame has run all along.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct H3EffectOnsets(HashMap<(u8, String), (bool, f32)>);
+
+impl H3EffectOnsets {
+    pub(crate) fn of(&mut self, object: u8, name: &str, values: Option<&H2FunctionValues>, time: f32) -> f32 {
+        if name.is_empty() {
+            return 0.0;
+        }
+        let on = values.and_then(|values| values.get(name)).is_some_and(|value| *value > 0.0);
+        let seen = self.0.entry((object, name.to_owned())).or_insert((on, 0.0));
+        if on && !seen.0 {
+            seen.1 = time;
+        }
+        seen.0 = on;
+        if seen.1 > time {
+            seen.1 = 0.0;
+        }
+        seen.1
     }
 }
 
@@ -129,6 +182,8 @@ pub(super) struct H3EffectPart<'a> {
     pub(super) path: String,
     /// The marker its location resolves to, by name.
     pub(super) marker: String,
+    /// `secondary location (beams)`, by name.
+    pub(super) secondary_marker: Option<String>,
     /// `A scales values` takes in the attachment's scale.
     pub(super) scaled: bool,
     pub(super) times: Arc<H3EffectTimes>,
@@ -189,10 +244,12 @@ pub(super) fn for_each_attached_part(
                 if marker == REPLACE {
                     marker = marker_name(attachment, "marker");
                 }
+                let secondary = usize::try_from(part.read_block_index("secondary location (beams)")).ok();
+                let secondary_marker = secondary.and_then(|at| locations.get(at)).map(|at| marker_name(*at, "marker name"));
                 let scales = part.read_flag_names("A scales values").unwrap_or_default();
                 let scaled = scales.iter().any(|(_, name)| name == PART_SCALE);
                 let times = Arc::clone(&times);
-                visit(H3EffectPart { attachment, part, group, path, marker, scaled, times, event: at });
+                visit(H3EffectPart { attachment, part, group, path, marker, secondary_marker, scaled, times, event: at });
             }
         }
     }
@@ -249,6 +306,29 @@ mod tests {
     fn times(events: &[([f32; 2], [f32; 2])], loop_start: usize, parallel: bool) -> H3EffectTimes {
         let events = events.iter().map(|(delay, duration)| H3EventTime::of(*delay, *duration)).collect();
         H3EffectTimes { events, loop_start, parallel }
+    }
+
+    #[test]
+    fn an_effect_restarts_each_time_its_function_comes_on() {
+        let mut onsets = H3EffectOnsets::default();
+        let values = |value: f32| H2FunctionValues::from([("on".to_owned(), value)]);
+        let of = |onsets: &mut H3EffectOnsets, value, time| onsets.of(0, "on", Some(&values(value)), time);
+        assert_eq!(of(&mut onsets, 1.0, 5.0), 0.0, "on from the start");
+        assert_eq!(of(&mut onsets, 0.0, 6.0), 0.0);
+        assert_eq!(of(&mut onsets, 1.0, 7.0), 7.0);
+        assert_eq!(of(&mut onsets, 1.0, 8.0), 7.0);
+        assert_eq!(of(&mut onsets, 1.0, 2.0), 0.0, "the clock went back");
+        assert_eq!(onsets.of(0, "", None, 9.0), 0.0);
+    }
+
+    #[test]
+    fn seconds_run_from_an_events_delay_and_a_tick_runs_from_the_start() {
+        let two = times(&[([1.0, 1.0], [2.0, 2.0]), ([0.0, 0.0], [3.0, 3.0])], 0, false);
+        assert_eq!(two.elapsed(0, 0.5), None);
+        assert_eq!(two.elapsed(0, 2.5), Some(1.5));
+        assert_eq!(two.elapsed(1, 4.0), Some(1.0));
+        let tick = times(&[([0.0, 0.0], [0.0, 0.0])], 0, false);
+        assert_eq!(tick.elapsed(0, 7.0), Some(7.0));
     }
 
     #[test]

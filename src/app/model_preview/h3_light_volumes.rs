@@ -199,6 +199,7 @@ pub(crate) struct H3VolumeDefinition {
     brightness_ratio: f32,
     blend: H3Blend,
     bitmap: H3Bitmap,
+    sort_layer: i32,
 }
 
 /// A volume at a marker of the object it is attached to.
@@ -257,6 +258,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         brightness_ratio: element.read_real("brightness ratio").unwrap_or(1.0),
         blend: definition.blend(&options),
         bitmap: read_h3_bitmap(source, &map, 0, SamplerKind::Texture2D)?,
+        sort_layer: super::h3_particles::h3_sort_layer(shader),
     })
 }
 
@@ -357,6 +359,10 @@ impl H3LightVolumeAt {
         [&self.scale_by, &self.secondary_by]
     }
 
+    pub(crate) fn scale_name(&self) -> &str {
+        &self.scale_by
+    }
+
     /// Whether it changes with time alone.
     pub(crate) fn animates(&self) -> bool {
         let volume = &*self.definition;
@@ -377,12 +383,16 @@ impl H3LightVolumeAt {
         &self.definition.bitmap
     }
 
+    pub(crate) fn sort_layer(&self) -> i32 {
+        self.definition.sort_layer
+    }
+
     pub(crate) fn blend(&self) -> H3Blend {
         self.definition.blend
     }
 
     /// The states this frame, or none while its event is not running.
-    fn state(&self, values: Option<&H2FunctionValues>, time: f32) -> Option<H3VolumeState> {
+    fn state(&self, values: Option<&H2FunctionValues>, time: f32, onset: f32) -> Option<H3VolumeState> {
         let read = |name: &str, none: f32| {
             if name.is_empty() {
                 return none;
@@ -397,7 +407,7 @@ impl H3LightVolumeAt {
         Some(H3VolumeState {
             percentile: 0.0,
             game_time: time.rem_euclid(1.0),
-            age: self.times.age(self.event, time)?,
+            age: self.times.age(self.event, time - onset)?,
             seeds: self.seeds,
             effect_a,
             effect_b: read(&self.secondary_by, 1.0),
@@ -411,8 +421,9 @@ impl H3LightVolumeAt {
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
+        onset: f32,
     ) -> Vec<CeAntennaQuad> {
-        let Some(mut state) = self.state(values, time) else {
+        let Some(mut state) = self.state(values, time, onset) else {
             return Vec::new();
         };
         let volume = &*self.definition;

@@ -63,6 +63,10 @@ impl H3Channel {
 /// A `light` at the marker an object attaches it to.
 #[derive(Debug, Clone)]
 pub(crate) struct H3Light {
+    /// When its effect's event runs, for a light an attached effect makes.
+    event: Option<(Arc<H3EffectTimes>, usize)>,
+    /// `destroy light after`, seconds from then.
+    destroy_after: f32,
     pub(crate) object: u8,
     node: usize,
     position: [f32; 3],
@@ -160,6 +164,10 @@ impl H3Light {
             .any(|channel| channel.input.is_empty() && channel.function.as_constant().is_none())
     }
 
+    pub(crate) fn scale_name(&self) -> &str {
+        &self.scale_by
+    }
+
     /// The light this frame, or none while it is out.
     pub(crate) fn lit(
         &self,
@@ -167,7 +175,14 @@ impl H3Light {
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         time: f32,
+        onset: f32,
     ) -> Option<H3LitLight> {
+        if let Some((times, event)) = &self.event {
+            let elapsed = times.elapsed(*event, time - onset)?;
+            if self.destroy_after > 0.0 && elapsed >= self.destroy_after {
+                return None;
+            }
+        }
         let (input, range) = self.color.sample(values, time);
         let color = self.color.function.evaluate_color(input, range);
         let (input, range) = self.intensity.sample(values, time);
@@ -235,6 +250,7 @@ fn read_h3_light(source: &TagSource, path: &str) -> Option<H3LightTag> {
         .map(Arc::new);
     Some(H3LightTag {
         frustum: root.read_int_any("type") == Some(FRUSTUM),
+        destroy_after: root.read_real("destroy light after").unwrap_or(0.0),
         maximum_distance: root.read_real("maximum distance").unwrap_or(0.0),
         near_width: root.read_real("frustum near width").unwrap_or(0.0),
         height_scale: root.read_real("frustum height scale").unwrap_or(1.0),
@@ -250,6 +266,7 @@ fn read_h3_light(source: &TagSource, path: &str) -> Option<H3LightTag> {
 
 /// A `light`, before a marker places it.
 struct H3LightTag {
+    destroy_after: f32,
     frustum: bool,
     maximum_distance: f32,
     near_width: f32,
@@ -282,7 +299,10 @@ pub(super) fn read_h3_lights(
                            node: usize,
                            only_under: Option<(String, String)>,
                            attachment: TagStruct<'_>,
-                           by_effect: Option<H3EffectScale>| H3Light {
+                           by_effect: Option<H3EffectScale>,
+                           event: Option<(Arc<H3EffectTimes>, usize)>| H3Light {
+        event,
+        destroy_after: tag.destroy_after,
         object: owner,
         node,
         position: place.position,
@@ -320,7 +340,7 @@ pub(super) fn read_h3_lights(
             continue;
         };
         let (place, node) = frame(marker);
-        lights.push(place_light(tag, place, node, None, attachment, None));
+        lights.push(place_light(tag, place, node, None, attachment, None, None));
     }
     for_each_attached_part(source, object, |part| {
         if part.group != light_group {
@@ -336,7 +356,8 @@ pub(super) fn read_h3_lights(
             let place = part_frame(&place, offset, yaw, pitch);
             let by_effect = Some(H3EffectScale { scaled: part.scaled });
             let only_under = marker.only_under.clone();
-            lights.push(place_light(tag, place, node, only_under, part.attachment, by_effect));
+            let event = Some((Arc::clone(&part.times), part.event));
+            lights.push(place_light(tag, place, node, only_under, part.attachment, by_effect, event));
         }
     });
     lights
@@ -545,6 +566,11 @@ impl H3FlareAt {
 
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
+    }
+
+    /// Whether its event's clock runs from when `scale_name` came on.
+    pub(crate) fn event_time(&self, time: f32, onset: f32) -> f32 {
+        if self.event.is_some() { time - onset } else { time }
     }
 
     pub(crate) fn bitmap(&self) -> &H3Bitmap {

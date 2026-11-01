@@ -507,6 +507,8 @@ pub(crate) struct H3Material {
     /// unless its `render_pass` puts it after the lights.
     pub(crate) decal: bool,
     pub(crate) after_lighting: bool,
+    /// `sort layer`, for what blends.
+    pub(crate) sort_layer: i32,
     /// `static_prt_ambient`, `_linear` and `_quadratic`.
     pub(crate) prt: [Option<Arc<H3Pass>>; 3],
     pub(crate) camo: Option<Arc<H3Pass>>,

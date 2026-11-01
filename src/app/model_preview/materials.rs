@@ -356,6 +356,7 @@ fn resolve_one_material(
     let values = Values {
         resolved: resolved.as_ref(),
         method: &render_method,
+        sort_layer: shader.root().descend("render_method").map_or(2, super::h3_particles::h3_sort_layer),
     };
     let mut textures = MaterialTextures {
         used_shader_parameters_only: resolved.is_none(),
@@ -596,6 +597,7 @@ fn prepare_h3_material(
         lit,
         decal,
         after_lighting: definition.after_lighting(&options),
+        sort_layer: values.sort_layer,
         prt,
         camo,
         dynamic_light,
@@ -1419,6 +1421,8 @@ fn cached_h2_template(
 struct Values<'a> {
     resolved: Option<&'a ResolvedRenderMethod>,
     method: &'a RenderMethod,
+    /// `render_method`'s `sort layer`, by option name.
+    sort_layer: i32,
 }
 
 impl Values<'_> {

@@ -74,7 +74,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let TagSource::LooseFolder { root, .. } = source else { unreachable!() };
     // A sky has a render_model and nothing above it.
     let file = root.join(format!("{}.model", shot.model.replace('\\', "/")));
-    let (extension, group) = if let Ok(kind) = std::env::var("H2_SHOT_OBJECT") { if kind == "giant" { ("giant", b"gint") } else if kind == "equipment" { ("equipment", b"eqip") } else if kind == "weapon" { ("weapon", b"weap") } else if kind == "vehicle" { ("vehicle", b"vehi") } else { ("biped", b"bipd") } } else if std::env::var_os("H2_SHOT_BIPED").is_some() {
+    let (extension, group) = if let Ok(kind) = std::env::var("H2_SHOT_OBJECT") { if kind == "scenery" { ("scenery", b"scen") } else if kind == "crate" { ("crate", b"bloc") } else if kind == "giant" { ("giant", b"gint") } else if kind == "equipment" { ("equipment", b"eqip") } else if kind == "weapon" { ("weapon", b"weap") } else if kind == "vehicle" { ("vehicle", b"vehi") } else { ("biped", b"bipd") } } else if std::env::var_os("H2_SHOT_BIPED").is_some() {
         ("biped", b"bipd")
     } else if shot_game() == GameId::HaloCe {
         ("gbxmodel", b"mod2")
@@ -178,6 +178,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         h3_lights_shown: super::h3_lights_shown(&data.preview, &state),
         h3_volumes_shown: super::h3_volumes_shown(&data.preview, &state),
         h3_systems_shown: super::h3_systems_shown(&data.preview, &state),
+        h3_strips_shown: super::h3_strips_shown(&data.preview, &state),
         h2_flares_shown: super::h2_flares_shown(&data.preview, &state),
         h2_values: {
             let mut set = state.h2_function_inputs.clone();

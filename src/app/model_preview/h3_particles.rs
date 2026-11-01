@@ -12,6 +12,7 @@ use super::ce_attachments::{elements, object_block};
 use super::ce_lights::CeFlareView;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
+use super::h3_effects::H3EffectOnsets;
 use super::h3_effects::{H3EffectTimes, MOST_MARKERS, marker_name, part_runs_by};
 use super::h3_shaders::{H3Blend, read_h3_definition};
 use super::materials::{H3Bitmap, read_h3_bitmap};
@@ -24,6 +25,9 @@ use crate::core::source::TagSource;
 const STEP: f32 = 1.0 / 30.0;
 /// Seconds run before the first frame, so a held pose has its particles.
 const PRE_ROLL: f32 = 6.0;
+/// `s_sprite_frame_list`'s room.
+const MOST_FRAMES: usize = 15;
+
 /// `global_gravity_get`, in world units a second squared.
 const GRAVITY: f32 = 4.171_259_4;
 /// The most an emitter keeps alive, whatever its tag allows.
@@ -47,6 +51,7 @@ enum H3ParticleInput {
     EffectA,
     EffectB,
     Rotation,
+    LocationSeed,
     Other,
 }
 
@@ -69,6 +74,7 @@ impl H3ParticleInput {
             "effect a scale" => Self::EffectA,
             "effect b scale" => Self::EffectB,
             "particle rotation" => Self::Rotation,
+            "location random" => Self::LocationSeed,
             _ => Self::Other,
         }
     }
@@ -86,6 +92,7 @@ impl H3ParticleInput {
             Self::EffectA => state.effect_a,
             Self::EffectB => state.effect_b,
             Self::Rotation => state.rotation,
+            Self::LocationSeed => state.location_seed,
             Self::Random | Self::SystemRandom | Self::Other => 0.0,
         }
     }
@@ -103,6 +110,7 @@ struct H3ParticleState {
     effect_a: f32,
     effect_b: f32,
     rotation: f32,
+    location_seed: f32,
 }
 
 /// `c_editable_property_base`, with what `interpolate` runs between.
@@ -192,7 +200,7 @@ impl H3ParticleProperty {
 }
 
 /// A point, a vector, or a radius and angles, whichever a property has.
-fn read_ends(property: TagStruct<'_>) -> [[f32; 3]; 2] {
+pub(super) fn read_ends(property: TagStruct<'_>) -> [[f32; 3]; 2] {
     let end = |name: &str| -> [f32; 3] {
         if let Some(angled) = property.descend(name) {
             let angles = angled.read_euler2d("Euler angles");
@@ -205,6 +213,7 @@ fn read_ends(property: TagStruct<'_>) -> [[f32; 3]; 2] {
         match property.field(name).and_then(|field| field.value()) {
             Some(TagFieldData::RealPoint3d(point)) => [point.x, point.y, point.z],
             Some(TagFieldData::RealVector3d(vector)) => [vector.i, vector.j, vector.k],
+            Some(TagFieldData::RealPoint2d(point)) => [point.x, point.y, 0.0],
             _ => [0.0; 3],
         }
     };
@@ -220,6 +229,8 @@ enum H3Billboard {
     ScreenPerpendicular,
     ScreenVertical,
     ScreenHorizontal,
+    LocalVertical,
+    LocalHorizontal,
     World,
     VelocityHorizontal,
 }
@@ -228,12 +239,14 @@ impl H3Billboard {
     fn named(name: &str) -> Self {
         match name {
             "camera facing" => Self::CameraFacing,
-            "parallel to direction" | "screen parallel" => Self::ScreenParallel,
-            "perpendicular to direction" | "screen perpendicular" => Self::ScreenPerpendicular,
-            "vertical" | "screen vertical" | "local vertical" => Self::ScreenVertical,
-            "horizontal" | "screen horizontal" | "local horizontal" => Self::ScreenHorizontal,
-            "world" => Self::World,
-            "velocity horizontal" => Self::VelocityHorizontal,
+            "parallel to direction" => Self::ScreenParallel,
+            "perpendicular to direction" => Self::ScreenPerpendicular,
+            "vertical" => Self::ScreenVertical,
+            "horizontal" => Self::ScreenHorizontal,
+            "local vertical" => Self::LocalVertical,
+            "local horizontal" => Self::LocalHorizontal,
+            "world (particle models)" => Self::World,
+            "velocity horizontal (particle models)" => Self::VelocityHorizontal,
             _ => Self::ScreenFacing,
         }
     }
@@ -257,7 +270,7 @@ impl H3ParticleAlbedo {
             "diffuse_plus_sprite_alpha" => Self::DiffuseSpriteAlpha,
             "palettized" => Self::Palette,
             "palettized_plus_billboard_alpha" => Self::PaletteBillboardAlpha,
-            "palettized_plus_sprite_alpha" => Self::PaletteSpriteAlpha,
+            "palettized_plus_sprite_alpha" | "palettized_plus_alpha" => Self::PaletteSpriteAlpha,
             _ => Self::Diffuse,
         }
     }
@@ -273,6 +286,16 @@ pub(crate) struct H3ParticleLook {
     intensity_fades: bool,
     one_shot: bool,
     backwards: bool,
+    /// `attachments`: effects its particles start, by what starts them.
+    attachments: Vec<(H3ParticleTrigger, String)>,
+    /// `s_mesh_variant_list`: what `Model` draws in place of a quad.
+    model: Option<Vec<Vec<blam_tags::ParticleVertex>>>,
+    /// `fade when viewed edge-on`: `1 / range` and the cutoff, in radians.
+    edge_fade: Option<[f32; 2]>,
+    /// `motion blur`'s stretch.
+    blur_aspect: Option<f32>,
+    /// The postprocess's: at 1, a hemisphere.
+    curvature: f32,
     /// `m_sprite`: the quad's corner and size in its own units.
     corner: [f32; 4],
     /// `m_frames`: left, top, width and height.
@@ -284,6 +307,43 @@ pub(crate) struct H3ParticleLook {
     frame: H3ParticleProperty,
     rate: H3ParticleProperty,
     palette: H3ParticleProperty,
+    pub(crate) shader: Arc<H3SpriteShader>,
+}
+
+/// The `lighting` option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum H3ParticleLighting {
+    None,
+    Ambient,
+    Directional,
+}
+
+/// `ravi_order_0` and `ravi_order_3`, of `calculate_and_set_ravi_constants`'
+/// ten: the ambient, or what comes from `normal`.
+fn ravi(lighting: H3ParticleLighting, normal: [f32; 3], constants: &[[f32; 4]; 10]) -> [f32; 3] {
+    const C1: f32 = 0.429_043;
+    const C2: f32 = 0.511_664;
+    const C4: f32 = 0.886_227;
+    let product = |a: [f32; 3], b: [f32; 4]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let [x, y, z] = normal;
+    std::array::from_fn(|channel| {
+        let ambient = C4 * constants[0][channel];
+        let value = if lighting == H3ParticleLighting::Ambient {
+            ambient
+        } else {
+            let linear = product(normal, constants[1 + channel]);
+            let first = product([x * y, y * z, z * x], constants[4 + channel]);
+            let [a, b, c, d] = constants[7 + channel];
+            let second = x * x * a + y * y * b + z * z * c + d / 3.0;
+            ambient - 2.0 * C2 * linear - 2.0 * C1 * first - C1 * second
+        };
+        value / std::f32::consts::PI
+    })
+}
+
+/// What particles, beams and contrails ask of a shader alike.
+#[derive(Debug)]
+pub(crate) struct H3SpriteShader {
     pub(crate) albedo: H3ParticleAlbedo,
     pub(crate) blend: H3Blend,
     pub(crate) black_point: bool,
@@ -291,56 +351,53 @@ pub(crate) struct H3ParticleLook {
     /// `depth_fade_range`, with the `depth_fade` option on.
     pub(crate) depth_fade: Option<f32>,
     pub(crate) add: [f32; 3],
+    /// Whether the pixel is lit, as `per_pixel_ravi_order_3` is.
+    pub(crate) lit_pixels: bool,
+    /// `sort layer`: `transparent_layer_and_z_sort_proc` goes by this first.
+    pub(crate) sort_layer: i32,
+    /// `distortion_scale`, for what bends the scene instead of covering it.
+    pub(crate) distortion: Option<f32>,
+    lighting: H3ParticleLighting,
+    /// `starting_uv_scale` and `ending_uv_scale`.
+    uv_scale: [f32; 2],
     pub(crate) base_map: Option<H3Bitmap>,
     pub(crate) alpha_map: Option<H3Bitmap>,
     pub(crate) palette_map: Option<H3Bitmap>,
 }
 
-fn parameter<'a>(shader: TagStruct<'a>, name: &str) -> Option<TagStruct<'a>> {
-    let parameters = elements(shader, "parameters");
-    parameters.into_iter().find(|parameter| parameter.read_string_id("parameter name").as_deref() == Some(name))
-}
-
-fn read_map(source: &TagSource, shader: TagStruct<'_>, name: &str) -> Option<H3Bitmap> {
-    let path = parameter(shader, name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
-}
-
-/// `postprocess_frame_animation`: `first + 1`'s sprites, in the bitmap's terms.
-fn read_frames(source: &TagSource, shader: TagStruct<'_>, first: usize) -> (Vec<[f32; 4]>, [f32; 4]) {
-    let whole = (vec![[0.0, 0.0, 1.0, 1.0]], [-1.0, -1.0, 2.0, 2.0]);
-    let tag = parameter(shader, "base_map")
-        .and_then(|base| base.read_tag_ref_path("bitmap"))
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "bitmap", b"bitm").ok());
-    let Some(tag) = tag else {
-        return whole;
-    };
-    let sequences = elements(tag.root(), "sequences");
-    if sequences.is_empty() {
-        return whole;
+impl H3SpriteShader {
+    #[cfg(test)]
+    pub(crate) fn blank() -> Self {
+        Self {
+            albedo: H3ParticleAlbedo::Diffuse,
+            blend: H3Blend::Additive,
+            black_point: false,
+            frame_blend: false,
+            depth_fade: None,
+            add: [0.0; 3],
+            lit_pixels: false,
+            sort_layer: 2,
+            distortion: None,
+            lighting: H3ParticleLighting::None,
+            uv_scale: [1.0; 2],
+            base_map: None,
+            alpha_map: None,
+            palette_map: None,
+        }
     }
-    let rect = |sprite: &TagStruct<'_>| {
-        let read = |name: &str| sprite.read_real(name).unwrap_or(0.0);
-        let (left, right, top, bottom) = (read("left"), read("right"), read("top"), read("bottom"));
-        [left, top, right - left, bottom - top]
-    };
-    let frames: Vec<_> = elements(sequences[(first + 1) % sequences.len()], "sprites").iter().map(rect).collect();
-    let frames = if frames.is_empty() { whole.0 } else { frames };
-    let sized = |[_, _, width, height]: [f32; 4]| {
-        if width <= height { [-1.0 * width / height, -1.0, 2.0 * width / height, 2.0] } else { [-1.0, -1.0 * height / width, 2.0, 2.0 * height / width] }
-    };
-    let corner = sized(frames[0]);
-    (frames, corner)
 }
 
-fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
-    let tag = load_referenced_tag_from_source(source, path, "particle", b"prt3").ok()?;
-    let root = tag.root();
-    // Those drawn from a mesh wait on the rest of the model path.
-    if root.read_tag_ref_path("Model").is_some_and(|model| !model.is_empty()) {
-        return None;
+/// `sort layer`, by option name: what is unset is `normal`.
+pub(super) fn h3_sort_layer(shader: TagStruct<'_>) -> i32 {
+    match shader.read_enum_name("sort layer").as_deref() {
+        Some("pre-pass") => 1,
+        Some("post-pass") => 3,
+        _ => 2,
     }
-    let shader = root.descend("actual shader?")?;
+}
+
+/// A sprite system's `actual shader?`, by its options' names.
+pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> Option<H3SpriteShader> {
     let definition = shader.read_tag_ref_path("definition").filter(|path| !path.is_empty())?;
     let definition = read_h3_definition(source, &definition)?;
     let options: Vec<usize> = elements(shader, "options")
@@ -348,39 +405,13 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         .map(|option| option.read_int_any("short").unwrap_or(0).max(0) as usize)
         .collect();
     let chosen = |category: &str| definition.chosen(category, &options).unwrap_or_default().to_owned();
-    if chosen("specialized_rendering").starts_with("distortion") {
-        return None;
-    }
-    let flags = root.read_flag_names("appearance flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
-    let animation = root.read_flag_names("animation flags").unwrap_or_default();
-    let animated = |wanted: &str| animation.iter().any(|(_, name)| name.starts_with(wanted));
-    let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
-    let (frames, corner) = read_frames(source, shader, first);
-    let mut seeds = SeedAllocator::default();
     let add = parameter(shader, "self_illum_color")
         .filter(|_| chosen("self_illumination") == "constant_color")
         .and_then(|parameter| elements(parameter, "animated parameters").first().copied())
         .and_then(|animated| tag_function_at(&animated, "function"))
         .map(|function| function.evaluate_color(0.0, 0.0))
         .map_or([0.0; 3], |color| [color.red, color.green, color.blue]);
-    Some(H3ParticleLook {
-        billboard: H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default()),
-        flip_u: flagged("random u mirror"),
-        flip_v: flagged("random v mirror"),
-        random_rotation: flagged("random starting rotation"),
-        intensity_fades: flagged("intensity affects alpha"),
-        one_shot: animated("one shot"),
-        backwards: animated("can animate backwards"),
-        corner,
-        frames,
-        aspect: H3ParticleProperty::named(root, "aspect ratio", &mut seeds)?,
-        color: H3ParticleProperty::named(root, "color", &mut seeds)?,
-        intensity: H3ParticleProperty::named(root, "intensity", &mut seeds)?,
-        alpha: H3ParticleProperty::named(root, "alpha", &mut seeds)?,
-        frame: H3ParticleProperty::named(root, "frame index", &mut seeds)?,
-        rate: H3ParticleProperty::named(root, "animation rate", &mut seeds)?,
-        palette: H3ParticleProperty::named(root, "palette animation", &mut seeds)?,
+    Some(H3SpriteShader {
         albedo: H3ParticleAlbedo::named(&chosen("albedo")),
         blend: definition.blend(&options),
         black_point: chosen("black_point") == "on",
@@ -393,9 +424,183 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
             range.max(1e-4)
         }),
         add,
+        lit_pixels: chosen("lighting") == "per_pixel_ravi_order_3",
+        sort_layer: h3_sort_layer(shader),
+        distortion: chosen("specialized_rendering").starts_with("distortion").then(|| {
+            parameter(shader, "distortion_scale")
+                .and_then(|parameter| elements(parameter, "animated parameters").first().copied())
+                .and_then(|animated| tag_function_at(&animated, "function"))
+                .map_or(1.0, |function| function.evaluate(0.0, 0.0))
+        }),
+        lighting: match chosen("lighting").as_str() {
+            "per_vertex_ravi_order_0" => H3ParticleLighting::Ambient,
+            "per_pixel_ravi_order_3" => H3ParticleLighting::Directional,
+            _ => H3ParticleLighting::None,
+        },
+        uv_scale: ["starting_uv_scale", "ending_uv_scale"].map(|name| {
+            parameter(shader, name)
+                .and_then(|parameter| elements(parameter, "animated parameters").first().copied())
+                .and_then(|animated| tag_function_at(&animated, "function"))
+                .map_or(1.0, |function| function.evaluate(0.0, 0.0))
+        }),
         base_map: read_map(source, shader, "base_map"),
         alpha_map: read_map(source, shader, "alpha_map"),
         palette_map: read_map(source, shader, "palette"),
+    })
+}
+
+fn parameter<'a>(shader: TagStruct<'a>, name: &str) -> Option<TagStruct<'a>> {
+    let parameters = elements(shader, "parameters");
+    parameters.into_iter().find(|parameter| parameter.read_string_id("parameter name").as_deref() == Some(name))
+}
+
+fn read_map(source: &TagSource, shader: TagStruct<'_>, name: &str) -> Option<H3Bitmap> {
+    let path = parameter(shader, name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
+    read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
+}
+
+/// `postprocess_frame_animation`'s `m_sprite`, from a sprite's left, right, top
+/// and bottom, its registration point, and the particle's `center offset`.
+fn sprite_corner(rect: [f32; 4], center: [f32; 2], offset: [f32; 2], plate_aspect: f32) -> [f32; 4] {
+    let [left, right, top, bottom] = rect;
+    let (width, height) = (right - left, bottom - top);
+    let (mut scale_x, mut scale_y) = (1.0, 1.0);
+    if width <= height {
+        scale_x = width / height;
+    } else {
+        scale_y = height / width;
+    }
+    scale_x *= plate_aspect;
+    let shift_x = 2.0 * (center[0] + offset[0]) / width - 1.0;
+    let shift_y = 2.0 * (center[1] - offset[1]) / height - 1.0;
+    let (x, y) = ((-1.0 - shift_x) * scale_x, (-1.0 - shift_y) * scale_y);
+    [x, y, (1.0 - shift_x) * scale_x - x, (1.0 - shift_y) * scale_y - y]
+}
+
+/// `postprocess_frame_animation`: the quad from the first sequence's sprite at
+/// the starting frame, and the frames from `first + 1`'s, manual ones first.
+fn read_frames(
+    source: &TagSource,
+    shader: TagStruct<'_>,
+    first: usize,
+    offset: [f32; 2],
+    start: f32,
+    one_shot: bool,
+) -> (Vec<[f32; 4]>, [f32; 4]) {
+    let whole = vec![[0.0, 0.0, 1.0, 1.0]];
+    let tag = parameter(shader, "base_map")
+        .and_then(|base| base.read_tag_ref_path("bitmap"))
+        .and_then(|path| load_referenced_tag_from_source(source, &path, "bitmap", b"bitm").ok());
+    let Some(tag) = tag else {
+        return (whole, sprite_corner([0.0, 1.0, 0.0, 1.0], [0.5, 0.5], offset, 1.0));
+    };
+    let plate_aspect = elements(tag.root(), "bitmaps").first().map_or(1.0, |image| {
+        let size = |name: &str| image.read_int_any(name).unwrap_or(1) as f32;
+        size("width") / size("height")
+    });
+    let read = |sprite: &TagStruct<'_>, name: &str| sprite.read_real(name).unwrap_or(0.0);
+    let sequences = elements(tag.root(), "sequences");
+    let (mut rect, mut center) = ([0.0, 1.0, 0.0, 1.0], [0.5, 0.5]);
+    if let Some(sequence) = sequences.get(first % sequences.len().max(1)) {
+        let sprites = elements(*sequence, "sprites");
+        let count = if one_shot { sprites.len().saturating_sub(1) } else { sprites.len() };
+        if count > 0 {
+            let sprite = sprites[(count as f32 * start).floor() as i32 as usize % sprites.len()];
+            rect = ["left", "right", "top", "bottom"].map(|name| read(&sprite, name));
+            let registration = sprite.read_point2d("registration point");
+            center = [registration.x, registration.y];
+        }
+    }
+    let manual = elements(tag.root(), "manual_sequences");
+    let listed = if manual.is_empty() { sequences } else { manual };
+    let frames: Vec<[f32; 4]> = listed
+        .get((first + 1) % listed.len().max(1))
+        .map(|sequence| elements(*sequence, "sprites"))
+        .unwrap_or_default()
+        .iter()
+        .take(MOST_FRAMES)
+        .map(|sprite| {
+            let [left, right, top, bottom] = ["left", "right", "top", "bottom"].map(|name| read(sprite, name));
+            [left, top, right - left, bottom - top]
+        })
+        .collect();
+    let frames = if frames.is_empty() {
+        vec![[rect[0], rect[2], rect[1] - rect[0], rect[3] - rect[2]]]
+    } else {
+        frames
+    };
+    (frames, sprite_corner(rect, center, offset, plate_aspect))
+}
+
+/// A `particle_model`'s meshes, each a triangle list.
+fn read_particle_mesh(source: &TagSource, path: &str) -> Option<Vec<Vec<blam_tags::ParticleVertex>>> {
+    let tag = load_referenced_tag_from_source(source, path, "particle_model", b"pmdf").ok()?;
+    let meshes = blam_tags::particle_model_meshes(&tag, "particle_model").ok()?;
+    let triangles = |mesh: &blam_tags::ParticleObjectMesh| {
+        mesh.indices.iter().filter_map(|index| mesh.vertices.get(*index as usize).copied()).collect::<Vec<_>>()
+    };
+    let meshes: Vec<_> = meshes.iter().map(triangles).filter(|mesh: &Vec<_>| !mesh.is_empty()).collect();
+    (!meshes.is_empty()).then_some(meshes)
+}
+
+fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
+    let tag = load_referenced_tag_from_source(source, path, "particle", b"prt3").ok()?;
+    let root = tag.root();
+    let model = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
+        Some(model) => Some(read_particle_mesh(source, &model)?),
+        None => None,
+    };
+    let shader = root.descend("actual shader?")?;
+    let flags = root.read_flag_names("appearance flags").unwrap_or_default();
+    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let animation = root.read_flag_names("animation flags").unwrap_or_default();
+    let animated = |wanted: &str| animation.iter().any(|(_, name)| name.starts_with(wanted));
+    let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
+    let offset = root.read_point2d("center offset");
+    let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
+    let (frames, corner) = read_frames(source, shader, first, [offset.x, offset.y], start, animated("one shot"));
+    let mut seeds = SeedAllocator::default();
+    Some(H3ParticleLook {
+        billboard: H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default()),
+        flip_u: flagged("random u mirror"),
+        flip_v: flagged("random v mirror"),
+        random_rotation: flagged("random starting rotation"),
+        intensity_fades: flagged("intensity affects alpha"),
+        model,
+        attachments: elements(root, "attachments")
+            .iter()
+            .filter_map(|attachment| {
+                let trigger = match attachment.read_enum_name("trigger").as_deref() {
+                    Some("birth") => H3ParticleTrigger::Birth,
+                    Some("death") => H3ParticleTrigger::Death,
+                    // Collisions need a world to hit.
+                    _ => return None,
+                };
+                let (group, path) = attachment.read_tag_ref_with_group("type")?;
+                (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then_some((trigger, path))
+            })
+            .collect(),
+        edge_fade: flagged("fade when viewed edge-on").then(|| {
+            let real = |name: &str| root.read_real(name).unwrap_or(0.0);
+            let range = real("angle fade range");
+            let range = if range < 0.0001 { 30.0 } else { range };
+            let radians = std::f32::consts::PI / 180.0;
+            [(range * radians).recip(), real("angle fade cutoff") * radians]
+        }),
+        blur_aspect: flagged("motion blur").then(|| root.read_real("motion blur aspect scale").unwrap_or(0.0)),
+        curvature: root.read_real("curvature").unwrap_or(0.0).clamp(0.0, 1.0) * 0.9999,
+        one_shot: animated("one shot"),
+        backwards: animated("can animate backwards"),
+        corner,
+        frames,
+        aspect: H3ParticleProperty::named(root, "aspect ratio", &mut seeds)?,
+        color: H3ParticleProperty::named(root, "color", &mut seeds)?,
+        intensity: H3ParticleProperty::named(root, "intensity", &mut seeds)?,
+        alpha: H3ParticleProperty::named(root, "alpha", &mut seeds)?,
+        frame: H3ParticleProperty::named(root, "frame index", &mut seeds)?,
+        rate: H3ParticleProperty::named(root, "animation rate", &mut seeds)?,
+        palette: H3ParticleProperty::named(root, "palette animation", &mut seeds)?,
+        shader: Arc::new(read_sprite_shader(source, shader)?),
     })
 }
 
@@ -410,6 +615,9 @@ enum H3EmissionShape {
     Halo,
     Debris,
     Line,
+    ImpactContour,
+    ImpactArea,
+    Breakable,
 }
 
 impl H3EmissionShape {
@@ -423,7 +631,9 @@ impl H3EmissionShape {
             "halo" => Self::Halo,
             "debris" => Self::Debris,
             "line" => Self::Line,
-            // Rectangles want an impact to size them, and breakables a surface.
+            "impact contour" => Self::ImpactContour,
+            "impact area" => Self::ImpactArea,
+            "breakable surface" => Self::Breakable,
             _ => return None,
         })
     }
@@ -431,15 +641,159 @@ impl H3EmissionShape {
 
 /// `set_shader_update_state`'s three, each off without a physics controller.
 #[derive(Debug)]
+struct H3ParticleFlock {
+    separation_distance: H3ParticleProperty,
+    separation_weight: H3ParticleProperty,
+    cohesion_distance: H3ParticleProperty,
+    cohesion_weight: H3ParticleProperty,
+    alignment_weight: H3ParticleProperty,
+    minimum_velocity: H3ParticleProperty,
+    maximum_velocity: H3ParticleProperty,
+    maximum_acceleration: H3ParticleProperty,
+}
+
+fn read_flock(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleFlock> {
+    let movement = emitter.descend("particle movement")?;
+    let template = movement
+        .read_tag_ref_path("template")
+        .filter(|path| !path.is_empty())
+        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+    let own = elements(movement, "movements");
+    let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
+    let swarm = movements.into_iter().find(|entry| entry.read_enum_name("type").as_deref() == Some("swarm"))?;
+    let mut by_id = |id: i128| {
+        let parameters = elements(swarm, "parameters");
+        let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
+        H3ParticleProperty::named(found, "property", seeds)
+    };
+    Some(H3ParticleFlock {
+        separation_distance: by_id(0)?,
+        separation_weight: by_id(1)?,
+        cohesion_distance: by_id(2)?,
+        cohesion_weight: by_id(3)?,
+        alignment_weight: by_id(4)?,
+        minimum_velocity: by_id(6)?,
+        maximum_velocity: by_id(7)?,
+        maximum_acceleration: by_id(8)?,
+    })
+}
+
+impl H3ParticleFlock {
+    /// `update_particles_flocking`. Avoidance is of a world the preview lacks.
+    fn update(&self, particles: &mut [Particle], base: H3ParticleState, home: [f32; 3], dt: f32) {
+        let places: Vec<([f32; 3], [f32; 3])> = particles.iter().map(|particle| (particle.position, particle.velocity)).collect();
+        for (at, particle) in particles.iter_mut().enumerate() {
+            let state = H3ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..base };
+            let distance_to = |other: &([f32; 3], [f32; 3])| {
+                let delta = minus(other.0, particle.position);
+                dot(delta, delta)
+            };
+            let neighbors = places.iter().enumerate().filter(|(index, _)| *index != at).map(|(_, neighbor)| neighbor);
+            let neighbor = neighbors.min_by(|a, b| distance_to(a).total_cmp(&distance_to(b)));
+            let mut force = [0.0; 3];
+            let mut add = |amount: [f32; 3]| force = std::array::from_fn(|axis| force[axis] + amount[axis]);
+            if let Some((place, velocity)) = neighbor {
+                let weight = self.separation_weight.scalar(&state);
+                if weight != 0.0 {
+                    let away = minus(particle.position, *place);
+                    let ratio = dot(away, away).sqrt() / self.separation_distance.scalar(&state).max(0.1);
+                    let scale = if ratio < 1.0 { -ratio * weight } else { weight };
+                    add(unit(away).map(|axis| axis * scale));
+                }
+                let (mine, theirs) = (unit(particle.velocity), unit(*velocity));
+                let weight = self.alignment_weight.scalar(&state);
+                add(minus(theirs, mine).map(|axis| axis * weight));
+            }
+            let reach = self.cohesion_distance.scalar(&state);
+            if reach > 0.0 {
+                let toward = minus(home, particle.position);
+                let weight = self.cohesion_weight.scalar(&state) * dot(toward, toward).sqrt() / reach;
+                add(unit(toward).map(|axis| axis * weight));
+            }
+            let mut change = force.map(|axis| axis * dt);
+            let most = self.maximum_acceleration.scalar(&state);
+            if dot(change, change).sqrt() > most {
+                change = unit(change).map(|axis| axis * most);
+            }
+            let eased: [f32; 3] = std::array::from_fn(|axis| {
+                (particle.velocity[axis] + change[axis]) * 0.25 + particle.velocity[axis] * 0.75
+            });
+            let (low, high) = (self.minimum_velocity.scalar(&state), self.maximum_velocity.scalar(&state));
+            let speed = dot(eased, eased).sqrt();
+            particle.velocity = if speed > high {
+                unit(eased).map(|axis| axis * high)
+            } else if speed < low {
+                unit(eased).map(|axis| axis * low)
+            } else {
+                eased
+            };
+        }
+    }
+}
+
+#[derive(Debug)]
 struct H3ParticlePhysics {
     gravity: Option<H3ParticleProperty>,
     air_friction: Option<H3ParticleProperty>,
     rotational_friction: Option<H3ParticleProperty>,
 }
 
+/// `e_particle_attachment_type`, of what can happen without a world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum H3ParticleTrigger {
+    Birth,
+    Death,
+}
+
+/// `emission_axis_enum`, for what turns about an axis of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum H3ParticleAxis {
+    Constant,
+    Cone,
+    Disc,
+    Globe,
+}
+
+impl H3ParticleAxis {
+    fn named(name: &str) -> Self {
+        match name {
+            "cone" => Self::Cone,
+            "disc" => Self::Disc,
+            "globe" => Self::Globe,
+            _ => Self::Constant,
+        }
+    }
+
+    /// `initialize_particle`'s, about `reference` of x, y and z.
+    fn pick(self, reference: usize, angle: f32, random: &mut Random) -> [f32; 3] {
+        let [i, j, k] = match self {
+            Self::Constant => [1.0, 0.0, 0.0],
+            Self::Cone => {
+                let cone = random.range(0.0, angle.to_radians());
+                let turn = random.range(0.0, std::f32::consts::TAU);
+                [cone.cos(), turn.sin() * cone.sin(), turn.cos() * cone.sin()]
+            }
+            Self::Disc => {
+                let turn = random.range(0.0, std::f32::consts::TAU);
+                [0.0, turn.sin(), turn.cos()]
+            }
+            Self::Globe => random.direction(),
+        };
+        match reference {
+            1 => [k, i, j],
+            2 => [j, k, i],
+            _ => [i, j, k],
+        }
+    }
+}
+
 #[derive(Debug)]
 struct H3Emitter {
     shape: H3EmissionShape,
+    scroll: [f32; 2],
+    axis: H3ParticleAxis,
+    reference_axis: usize,
+    axis_angle: H3ParticleProperty,
     offset: H3ParticleProperty,
     direction: H3ParticleProperty,
     radius: H3ParticleProperty,
@@ -458,6 +812,7 @@ struct H3Emitter {
     alpha: H3ParticleProperty,
     black_point: H3ParticleProperty,
     physics: Option<H3ParticlePhysics>,
+    flock: Option<H3ParticleFlock>,
 }
 
 fn read_physics(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
@@ -510,10 +865,21 @@ fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter>
         property("particle alpha")?,
         property("particle alpha black point")?,
     );
+    let axis_angle = property("emission axis angle")?;
     let physics = read_physics(source, emitter, &mut seeds);
+    let flock = read_flock(source, emitter, &mut seeds);
+    let scroll = emitter.read_vec2("uv scrolling");
     Some(H3Emitter {
+        axis: H3ParticleAxis::named(&emitter.read_enum_name("particle axis (for models)").unwrap_or_default()),
+        reference_axis: match emitter.read_enum_name("particle reference axis").as_deref() {
+            Some("y") => 1,
+            Some("z") => 2,
+            _ => 0,
+        },
+        axis_angle,
+        scroll: [scroll.i, scroll.j],
         shape, offset, direction, radius, angle, starting, most, rate, lifespan, acceleration, speed,
-        rotation, rotation_rate, size, scale, tint, alpha, black_point, physics,
+        rotation, rotation_rate, size, scale, tint, alpha, black_point, physics, flock,
     })
 }
 
@@ -528,17 +894,89 @@ pub(crate) struct H3ParticleSystem {
     scale_by: String,
     secondary_by: String,
     sort_bias: f32,
+    /// `coordinate system`: particles left where they were made.
+    world: bool,
+    location_seed: f32,
     near_range: f32,
     near_cutoff: f32,
     times: Arc<H3EffectTimes>,
     event: usize,
     pub(crate) look: Arc<H3ParticleLook>,
     emitters: Vec<Arc<H3Emitter>>,
+    /// What its particles start: how far along the list each system lies.
+    attached: Vec<(H3ParticleTrigger, usize)>,
+    /// Started by a particle, at the particle: nothing of its own runs it.
+    child: bool,
+}
+
+/// What a tag's `particle system` holds, wherever it ends up.
+#[derive(Clone)]
+struct H3SystemParts {
+    sort_bias: f32,
+    world: bool,
+    near_range: f32,
+    near_cutoff: f32,
+    look: Arc<H3ParticleLook>,
+    emitters: Vec<Arc<H3Emitter>>,
+}
+
+fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3SystemParts> {
+    let flags = system.read_flag_names("flags").unwrap_or_default();
+    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    if flagged("don't render system") || !part_runs_by(system, "environment", "disposition") {
+        return None;
+    }
+    let look = system.read_tag_ref_path("particle").filter(|path| !path.is_empty())?;
+    let look = read_look(source, &look).map(Arc::new)?;
+    let emitters: Vec<_> = elements(system, "emitters")
+        .iter()
+        .filter_map(|emitter| read_emitter(source, *emitter).map(Arc::new))
+        .collect();
+    if emitters.is_empty() {
+        return None;
+    }
+    let real = |field: &str| system.read_real(field).unwrap_or(0.0);
+    let cutoff = if flagged("override near fade") { real("near fade override") } else { real("near fade cutoff") };
+    Some(H3SystemParts {
+        sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
+        world: system.read_enum_name("coordinate system").as_deref() == Some("world"),
+        // As `1 / range` comes out on the card.
+        near_range: real("near fade range").recip(),
+        near_cutoff: cutoff,
+        look,
+        emitters,
+    })
+}
+
+/// The systems of the effects a look's particles start, and their events.
+fn read_attached_parts(
+    source: &TagSource,
+    look: &H3ParticleLook,
+) -> Vec<(H3ParticleTrigger, H3SystemParts, Arc<H3EffectTimes>, usize)> {
+    let mut parts = Vec::new();
+    for (trigger, path) in &look.attachments {
+        let Ok(effect) = load_referenced_tag_from_source(source, path, "effect", b"effe") else {
+            continue;
+        };
+        let times = Arc::new(H3EffectTimes::read(effect.root()));
+        for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
+            for system in elements(event, "particle systems") {
+                if let Some(read) = read_system_parts(source, system) {
+                    parts.push((*trigger, read, Arc::clone(&times), at));
+                }
+            }
+        }
+    }
+    parts
 }
 
 impl H3ParticleSystem {
     pub(crate) fn only_under(&self) -> Option<&(String, String)> {
         self.only_under.as_ref()
+    }
+
+    pub(crate) fn scale_name(&self) -> &str {
+        &self.scale_by
     }
 
     pub(crate) fn scale_names(&self) -> [&str; 2] {
@@ -580,11 +1018,6 @@ pub(super) fn read_h3_particles(
         let times = Arc::new(H3EffectTimes::read(effect.root()));
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for system in elements(event, "particle systems") {
-                let flags = system.read_flag_names("flags").unwrap_or_default();
-                let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
-                if flagged("don't render system") || !part_runs_by(system, "environment", "disposition") {
-                    continue;
-                }
                 let location = usize::try_from(system.read_block_index("location")).ok();
                 let Some(location) = location.and_then(|location| locations.get(location)) else {
                     continue;
@@ -593,41 +1026,59 @@ pub(super) fn read_h3_particles(
                 if name == "replace" {
                     name = marker_name(attachment, "marker");
                 }
-                let Some(look) = system.read_tag_ref_path("particle").filter(|path| !path.is_empty()) else {
+                let Some(parts) = read_system_parts(source, system) else {
                     continue;
                 };
-                let Some(look) = read_look(source, &look).map(Arc::new) else {
-                    continue;
-                };
-                let emitters: Vec<_> = elements(system, "emitters")
-                    .iter()
-                    .filter_map(|emitter| read_emitter(source, *emitter).map(Arc::new))
-                    .collect();
-                if emitters.is_empty() {
-                    continue;
-                }
-                let real = |field: &str| system.read_real(field).unwrap_or(0.0);
-                let cutoff = if flagged("override near fade") { real("near fade override") } else { real("near fade cutoff") };
-                let range = real("near fade range");
+                let children = read_attached_parts(source, &parts.look);
                 let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
                 for marker in named.take(MOST_MARKERS) {
                     let (place, node) = frame(marker);
+                    let attached = children.iter().enumerate().map(|(at, child)| (child.0, at + 1)).collect();
+                    let scale = |name: &str| attachment.read_string_id(name).unwrap_or_default();
+                    let parts = parts.clone();
                     systems.push(H3ParticleSystem {
                         node,
                         position: place.position,
                         axes: place.axes,
                         only_under: marker.only_under.clone(),
                         object: owner,
-                        scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
-                        secondary_by: attachment.read_string_id("secondary scale").unwrap_or_default(),
-                        sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
-                        near_range: if range > 0.0 { 1.0 / range } else { 0.0 },
-                        near_cutoff: cutoff,
+                        scale_by: scale("primary scale"),
+                        secondary_by: scale("secondary scale"),
+                        sort_bias: parts.sort_bias,
+                        world: parts.world,
+                        location_seed: (systems.len() as f32 * 0.618_034).fract(),
+                        near_range: parts.near_range,
+                        near_cutoff: parts.near_cutoff,
                         times: Arc::clone(&times),
                         event: at,
-                        look: Arc::clone(&look),
-                        emitters: emitters.clone(),
+                        look: parts.look,
+                        emitters: parts.emitters,
+                        attached,
+                        child: false,
                     });
+                    for (_, parts, times, event) in &children {
+                        let parts = parts.clone();
+                        systems.push(H3ParticleSystem {
+                            node,
+                            position: place.position,
+                            axes: place.axes,
+                            only_under: marker.only_under.clone(),
+                            object: owner,
+                            scale_by: String::new(),
+                            secondary_by: String::new(),
+                            sort_bias: parts.sort_bias,
+                            world: parts.world,
+                            location_seed: (systems.len() as f32 * 0.618_034).fract(),
+                            near_range: parts.near_range,
+                            near_cutoff: parts.near_cutoff,
+                            times: Arc::clone(times),
+                            event: *event,
+                            look: parts.look,
+                            emitters: parts.emitters,
+                            attached: Vec::new(),
+                            child: true,
+                        });
+                    }
                 }
             }
         }
@@ -686,12 +1137,26 @@ fn emit(shape: H3EmissionShape, radius: f32, angle_degrees: f32, random: &mut Ra
             (random.direction().map(|axis| axis * radius), velocity)
         }
         H3EmissionShape::Debris => ([0.0, sin_turn * radius, cos_turn * radius], [0.0, 0.0, 1.0]),
-        H3EmissionShape::Line => ([random.range(-radius, radius), 0.0, 0.0], spread(angle)),
+        H3EmissionShape::Line => ([0.0, random.range(-radius, radius), 0.0], spread(angle)),
+        // An attached effect has no impact, whose size is all that spreads these.
+        H3EmissionShape::ImpactContour => {
+            let cone = angle;
+            let sign = if random.next() < 0.5 { -1.0 } else { 1.0 };
+            let side = cone.sin() * sign;
+            ([0.0; 3], if random.next() < 0.5 { [cone.cos(), side, 0.0] } else { [cone.cos(), 0.0, side] })
+        }
+        H3EmissionShape::ImpactArea => {
+            let cone = angle;
+            let (sin, cos) = random.range(0.0, std::f32::consts::TAU).sin_cos();
+            ([0.0; 3], [cone.cos(), sin * cone.sin(), cos * cone.sin()])
+        }
+        H3EmissionShape::Breakable => ([0.0; 3], [0.0; 3]),
     }
 }
 
 #[derive(Debug, Clone)]
 struct Particle {
+    axis: [f32; 3],
     age: f32,
     inverse_lifespan: f32,
     position: [f32; 3],
@@ -720,6 +1185,76 @@ pub(crate) struct H3ParticleField {
     time: Option<f32>,
     /// Per system, per emitter.
     running: Vec<Vec<RunningEmitter>>,
+    /// Per system, what particles have started of it.
+    instances: Vec<Vec<H3ChildInstance>>,
+}
+
+/// `effect_new_attached_from_particle`: one run of a system, where a particle was.
+#[derive(Debug, Clone)]
+struct H3ChildInstance {
+    origin: [f32; 3],
+    axes: [[f32; 3]; 3],
+    start: f32,
+    running: Vec<RunningEmitter>,
+}
+
+/// What starts at once: flak throws dozens.
+const MOST_INSTANCES: usize = 32;
+
+fn fresh_emitters(system: &H3ParticleSystem, seed: u32) -> Vec<RunningEmitter> {
+    let emitters = system.emitters.iter().enumerate();
+    emitters
+        .map(|(index, _)| RunningEmitter {
+            particles: Vec::new(),
+            accumulator: 0.0,
+            started: false,
+            random: Random(seed.wrapping_mul(977) ^ (index as u32).wrapping_mul(131)),
+        })
+        .collect()
+}
+
+/// A location's axes, looking along what a particle was doing.
+fn axes_along(forward: [f32; 3]) -> [[f32; 3]; 3] {
+    let forward = if dot(forward, forward) > 0.0 { unit(forward) } else { [1.0, 0.0, 0.0] };
+    let reference = if forward[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
+    let left = unit(cross(reference, forward));
+    [forward, left, cross(forward, left)]
+}
+
+/// One step of one location, returning what its particles started and ended.
+#[allow(clippy::too_many_arguments)]
+fn step_location(
+    system: &H3ParticleSystem,
+    emitters: &mut [RunningEmitter],
+    state: Option<H3ParticleState>,
+    origin: [f32; 3],
+    axes: [[f32; 3]; 3],
+    now: f32,
+    births: &mut Vec<([f32; 3], [f32; 3])>,
+    deaths: &mut Vec<([f32; 3], [f32; 3])>,
+) {
+    for (emitter, running) in system.emitters.iter().zip(emitters) {
+        if let Some(mut state) = state {
+            let random = &mut running.random;
+            state.system_seeds = std::array::from_fn(|at| {
+                let mut seeded = Random(at as u32 + 1 + random.0 / 7);
+                seeded.next()
+            });
+            let frame = emitter_frame(emitter, origin, axes, &state);
+            emitter.pulse(&system.look, state, running, STEP, frame, system.world, births);
+            let home = if system.world { origin } else { [0.0; 3] };
+            emitter.step(state, &mut running.particles, STEP, home, deaths);
+        } else {
+            // The next run of its event is a new location's, with its burst.
+            running.started = false;
+            let rest = H3ParticleState {
+                system_age: 1.0,
+                game_time: now.rem_euclid(1.0),
+                ..Default::default()
+            };
+            emitter.step(rest, &mut running.particles, STEP, [0.0; 3], deaths);
+        }
+    }
 }
 
 /// The states of a system this step, or none while it should not emit.
@@ -727,6 +1262,7 @@ fn system_state(
     system: &H3ParticleSystem,
     values: Option<&H2FunctionValues>,
     time: f32,
+    onset: f32,
 ) -> Option<H3ParticleState> {
     let read = |name: &str| {
         if name.is_empty() { 1.0 } else { values.and_then(|values| values.get(name)).copied().unwrap_or(0.0) }
@@ -736,17 +1272,27 @@ fn system_state(
         return None;
     }
     Some(H3ParticleState {
-        system_age: system.times.age(system.event, time)?,
+        system_age: system.times.age(system.event, time - onset)?,
         game_time: time.rem_euclid(1.0),
         effect_a,
         effect_b: read(&system.secondary_by),
+        location_seed: system.location_seed,
         ..Default::default()
     })
 }
 
 impl H3Emitter {
     /// `c_particle_emitter::pulse` and `spawn_particle`.
-    fn pulse(&self, look: &H3ParticleLook, state: H3ParticleState, running: &mut RunningEmitter, dt: f32) {
+    fn pulse(
+        &self,
+        look: &H3ParticleLook,
+        state: H3ParticleState,
+        running: &mut RunningEmitter,
+        dt: f32,
+        frame: ([f32; 3], [[f32; 3]; 3]),
+        world: bool,
+        started: &mut Vec<([f32; 3], [f32; 3])>,
+    ) {
         running.accumulator = running.accumulator.fract();
         if !running.started {
             running.started = true;
@@ -775,7 +1321,19 @@ impl H3Emitter {
             let speed = self.speed.scalar(&particle_state);
             let speed = if speed == 0.0 { 0.001 } else { speed };
             velocity = velocity.map(|axis| axis / length * speed);
+            let (offset, turned) = frame;
+            let to_world = |vector: [f32; 3]| -> [f32; 3] {
+                std::array::from_fn(|axis| (0..3).map(|at| turned[at][axis] * vector[at]).sum())
+            };
+            let placed = {
+                let moved = to_world(position);
+                std::array::from_fn(|axis| offset[axis] + moved[axis])
+            };
+            started.push((placed, to_world(velocity)));
+            let (position, velocity) = if world { (placed, to_world(velocity)) } else { (position, velocity) };
+            let axis = self.axis.pick(self.reference_axis, self.axis_angle.scalar(&particle_state), random);
             running.particles.push(Particle {
+                axis,
                 age: 0.0,
                 inverse_lifespan: 1.0 / self.lifespan.scalar(&particle_state).max(0.01),
                 position,
@@ -793,10 +1351,21 @@ impl H3Emitter {
     }
 
     /// `update_particle_state`, a step at a time.
-    fn step(&self, state: H3ParticleState, particles: &mut Vec<Particle>, dt: f32) {
+    fn step(
+        &self,
+        state: H3ParticleState,
+        particles: &mut Vec<Particle>,
+        dt: f32,
+        home: [f32; 3],
+        ended: &mut Vec<([f32; 3], [f32; 3])>,
+    ) {
+        if let Some(flock) = &self.flock {
+            flock.update(particles, state, home, dt);
+        }
         particles.retain_mut(|particle| {
             particle.age += particle.inverse_lifespan * dt;
             if particle.age >= 1.0 {
+                ended.push((particle.position, particle.velocity));
                 return false;
             }
             let state = H3ParticleState {
@@ -840,10 +1409,18 @@ pub(crate) struct H3ParticleVertex {
     pub(crate) color: [f32; 4],
     /// Frame blend, palette row and black point.
     pub(crate) extra: [f32; 3],
+    /// What a distortion's map leans along: its tangent and binormal, at scale.
+    pub(crate) lean: [[f32; 3]; 2],
+    /// `per_pixel_ravi_order_3`'s normal, bent as `surface_basis` bends it.
+    pub(crate) normal: [f32; 3],
 }
 
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+fn minus(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|axis| a[axis] - b[axis])
 }
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -856,7 +1433,13 @@ fn unit(a: [f32; 3]) -> [f32; 3] {
 }
 
 /// `billboard_basis`.
-fn billboard(style: H3Billboard, place: [f32; 3], velocity: [f32; 3], view: &CeFlareView) -> [[f32; 3]; 2] {
+fn billboard(
+    style: H3Billboard,
+    place: [f32; 3],
+    velocity: [f32; 3],
+    local: [[f32; 3]; 3],
+    view: &CeFlareView,
+) -> [[f32; 3]; 2] {
     let eye: [f32; 3] = std::array::from_fn(|axis| place[axis] - view.eye[axis]);
     match style {
         H3Billboard::ScreenFacing => [view.right, view.up],
@@ -880,6 +1463,8 @@ fn billboard(style: H3Billboard, place: [f32; 3], velocity: [f32; 3], view: &CeF
             let up = [0.0, 0.0, 1.0];
             [up, unit(cross(up, eye))]
         }
+        H3Billboard::LocalVertical => [local[2], unit(cross(local[2], eye))],
+        H3Billboard::LocalHorizontal => [local[0], local[1]],
         H3Billboard::ScreenHorizontal | H3Billboard::World => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
         H3Billboard::VelocityHorizontal => {
             let along = unit(velocity);
@@ -899,9 +1484,35 @@ fn frame_variant(input: f32, count: usize, one_shot: bool, backwards: bool) -> f
     if backwards { count - variant } else { variant }
 }
 
-/// `frame_texcoord`, with no scroll.
-fn sprite_uv(frame: [f32; 4], uv: [f32; 2]) -> [f32; 2] {
-    [uv[0] * frame[2] + frame[0], uv[1] * frame[3] + frame[1]]
+/// `surface_basis`, for a distortion: its corners lean away as a dome's would.
+fn curved_lean(lean: [[f32; 3]; 2], plane: [[f32; 3]; 2], offset: [f32; 2], curvature: f32) -> [[f32; 3]; 2] {
+    let norm = (offset[0] * offset[0] + offset[1] * offset[1]).sqrt() + 0.0001;
+    let [x, y] = offset.map(|side| side / norm);
+    let axis = std::array::from_fn(|axis| -y * plane[0][axis] + x * plane[1][axis]);
+    let rotation = axis_rotation(axis, curvature * std::f32::consts::FRAC_PI_2);
+    lean.map(|side| std::array::from_fn(|column| (0..3).map(|row| side[row] * rotation[row][column]).sum()))
+}
+
+/// `matrix3x3_rotation_from_axis_and_angle`.
+fn axis_rotation(axis: [f32; 3], angle: f32) -> [[f32; 3]; 3] {
+    let (sin, cos) = angle.sin_cos();
+    let [x, y, z] = axis;
+    let rest = axis.map(|value| value * (1.0 - cos));
+    [
+        [rest[0] * x + cos, rest[1] * x + sin * z, rest[2] * x - sin * y],
+        [rest[0] * y - sin * z, rest[1] * y + cos, rest[2] * y + sin * x],
+        [rest[0] * z + sin * y, rest[1] * z - sin * x, rest[2] * z + cos],
+    ]
+}
+
+/// `frame_texcoord`.
+fn sprite_uv(frame: [f32; 4], uv: [f32; 2], scroll: [f32; 2], scale: f32) -> [f32; 2] {
+    let [left, top, width, height] = frame;
+    let shrink = 0.5 * (1.0 - scale);
+    [
+        uv[0] * width * scale + scroll[0] * width.abs() + left + shrink * width,
+        uv[1] * height * scale + scroll[1] * height.abs() + top + shrink * height,
+    ]
 }
 
 impl H3ParticleField {
@@ -911,24 +1522,13 @@ impl H3ParticleField {
         &mut self,
         systems: &[Arc<H3ParticleSystem>],
         values: impl Fn(u8) -> Option<H2FunctionValues>,
+        onsets: &mut H3EffectOnsets,
+        bones: Option<&[[f32; 4]]>,
         time: f32,
     ) {
         if self.running.len() != systems.len() || self.time.is_none_or(|last| time < last) {
-            self.running = systems
-                .iter()
-                .enumerate()
-                .map(|(at, system)| {
-                    let emitters = system.emitters.iter().enumerate();
-                    emitters
-                        .map(|(index, _)| RunningEmitter {
-                            particles: Vec::new(),
-                            accumulator: 0.0,
-                            started: false,
-                            random: Random((at as u32).wrapping_mul(977) ^ (index as u32).wrapping_mul(131)),
-                        })
-                        .collect()
-                })
-                .collect();
+            self.running = systems.iter().enumerate().map(|(at, system)| fresh_emitters(system, at as u32)).collect();
+            self.instances = vec![Vec::new(); systems.len()];
             self.time = Some(time - PRE_ROLL);
         }
         let Some(mut now) = self.time else {
@@ -936,27 +1536,54 @@ impl H3ParticleField {
         };
         while now + STEP <= time {
             now += STEP;
-            for (system, emitters) in systems.iter().zip(&mut self.running) {
-                let values = values(system.object);
-                let state = system_state(system, values.as_ref(), now);
-                for (emitter, running) in system.emitters.iter().zip(emitters) {
-                    if let Some(mut state) = state {
-                        let random = &mut running.random;
-                        state.system_seeds = std::array::from_fn(|at| {
-                            let mut seeded = Random(at as u32 + 1 + random.0 / 7);
-                            seeded.next()
-                        });
-                        emitter.pulse(&system.look, state, running, STEP);
-                        emitter.step(state, &mut running.particles, STEP);
-                    } else {
-                        let rest = H3ParticleState {
-                            system_age: 1.0,
-                            game_time: now.rem_euclid(1.0),
-                            ..Default::default()
-                        };
-                        emitter.step(rest, &mut running.particles, STEP);
-                    }
+            let mut spawned = Vec::new();
+            for (index, system) in systems.iter().enumerate() {
+                let (mut births, mut deaths) = (Vec::new(), Vec::new());
+                if system.child {
+                    let mut runs = std::mem::take(&mut self.instances[index]);
+                    runs.retain_mut(|run| {
+                        let age = now - run.start;
+                        let state = (age < system.times.once()).then(|| system_state(system, None, now, run.start)).flatten();
+                        step_location(system, &mut run.running, state, run.origin, run.axes, now, &mut births, &mut deaths);
+                        age < system.times.once() || run.running.iter().any(|running| !running.particles.is_empty())
+                    });
+                    self.instances[index] = runs;
+                    continue;
                 }
+                let scope = values(system.object);
+                let onset = onsets.of(system.object, &system.scale_by, scope.as_ref(), now);
+                let state = system_state(system, scope.as_ref(), now, onset);
+                let (origin, axes) = location(system, bones);
+                step_location(system, &mut self.running[index], state, origin, axes, now, &mut births, &mut deaths);
+                for (trigger, offset) in &system.attached {
+                    let events = if *trigger == H3ParticleTrigger::Birth { &births } else { &deaths };
+                    spawned.extend(events.iter().map(|event| (index + offset, *event, system.world, origin, axes)));
+                }
+            }
+            for (index, (place, velocity), world, origin, axes) in spawned {
+                let Some(system) = systems.get(index) else {
+                    continue;
+                };
+                let runs = &mut self.instances[index];
+                if runs.len() >= MOST_INSTANCES {
+                    continue;
+                }
+                // What a death reports lies wherever its particle lived.
+                let turn = |vector: [f32; 3]| -> [f32; 3] {
+                    std::array::from_fn(|axis| (0..3).map(|at| axes[at][axis] * vector[at]).sum())
+                };
+                let (place, velocity) = if world {
+                    (place, velocity)
+                } else {
+                    (std::array::from_fn(|axis| origin[axis] + turn(place)[axis]), turn(velocity))
+                };
+                let seed = (runs.len() as u32 + 1).wrapping_mul(index as u32 + 1).wrapping_add((now * 30.0) as u32);
+                runs.push(H3ChildInstance {
+                    origin: place,
+                    axes: axes_along(velocity),
+                    start: now,
+                    running: fresh_emitters(system, seed),
+                });
             }
         }
         self.time = Some(now);
@@ -970,23 +1597,69 @@ impl H3ParticleField {
         values: Option<&H2FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
+        lighting: &[[f32; 4]; 10],
         time: f32,
+        onset: f32,
     ) -> Vec<H3ParticleVertex> {
         let mut vertices = Vec::new();
+        if system.child {
+            for run in self.instances.get(index).into_iter().flatten() {
+                let at = (run.origin, run.axes, run.start);
+                system.vertices_at(&run.running, at, values, view, lighting, time, &mut vertices);
+            }
+            return vertices;
+        }
         let Some(running) = self.running.get(index) else {
             return vertices;
         };
         let (origin, axes) = location(system, bones);
+        system.vertices_at(running, (origin, axes, onset), values, view, lighting, time, &mut vertices);
+        vertices
+    }
+
+    /// Where a system's sort goes, for one whose place a particle chose.
+    pub(crate) fn distance(
+        &self,
+        index: usize,
+        system: &H3ParticleSystem,
+        bones: Option<&[[f32; 4]]>,
+        view: &CeFlareView,
+    ) -> f32 {
+        let run = self.instances.get(index).and_then(|runs| runs.first());
+        match run.filter(|_| system.child) {
+            Some(run) => dot(view.forward, minus(run.origin, view.eye)) - system.sort_bias * 0.05,
+            None => system.distance(bones, view),
+        }
+    }
+}
+
+impl H3ParticleSystem {
+    /// A location's quads, at the end of `vertices`.
+    #[allow(clippy::too_many_arguments)]
+    fn vertices_at(
+        &self,
+        running: &[RunningEmitter],
+        (origin, axes, onset): ([f32; 3], [[f32; 3]; 3], f32),
+        values: Option<&H2FunctionValues>,
+        view: &CeFlareView,
+        lighting: &[[f32; 4]; 10],
+        time: f32,
+        vertices: &mut Vec<H3ParticleVertex>,
+    ) {
+        let system = self;
         let look = &*system.look;
         for (emitter, running) in system.emitters.iter().zip(running) {
             let base = H3ParticleState {
-                system_age: system.times.age(system.event, time).unwrap_or(1.0),
+                system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
                 game_time: time.rem_euclid(1.0),
-                effect_a: system_state(system, values, time).map_or(0.0, |state| state.effect_a),
-                effect_b: system_state(system, values, time).map_or(1.0, |state| state.effect_b),
+                effect_a: system_state(system, values, time, onset).map_or(0.0, |state| state.effect_a),
+                effect_b: system_state(system, values, time, onset).map_or(1.0, |state| state.effect_b),
+                location_seed: system.location_seed,
                 ..Default::default()
             };
-            let (offset, turned) = emitter_frame(emitter, origin, axes, &base);
+            // `calc_matrix`, or none for what already lies in the world.
+            const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+            let (offset, turned) = if system.world { ([0.0; 3], IDENTITY) } else { emitter_frame(emitter, origin, axes, &base) };
             for particle in &running.particles {
                 let state = H3ParticleState {
                     age: particle.age,
@@ -1005,8 +1678,12 @@ impl H3ParticleField {
                 };
                 let velocity = to_world(particle.velocity);
                 let size = emitter.size.scalar(&state) * emitter.scale.scalar(&state);
-                let aspect = look.aspect.scalar(&state);
-                let basis = billboard(look.billboard, place, velocity, view);
+                let mut aspect = look.aspect.scalar(&state);
+                if let Some(stretch) = look.blur_aspect {
+                    // A baseline of 30, not the frame rate. The preview's observer is still.
+                    aspect += dot(velocity, velocity).sqrt() * stretch / (30.0 * size);
+                }
+                let basis = billboard(look.billboard, place, velocity, turned, view);
                 let manual = emitter.rotation.scalar(&state).rem_euclid(1.0);
                 let (sin, cos) = (std::f32::consts::TAU * (particle.rotation + manual)).sin_cos();
                 let tint = emitter.tint.color(&state);
@@ -1017,28 +1694,53 @@ impl H3ParticleField {
                     alpha *= intensity;
                 }
                 let eye: [f32; 3] = std::array::from_fn(|axis| place[axis] - view.eye[axis]);
-                alpha *= (system.near_range * (dot(view.forward, eye) - system.near_cutoff)).clamp(0.0, 1.0);
-                let light = if look.blend == H3Blend::Multiply { 1.0 } else { H3_EXPOSURE };
+                let near = system.near_range * (dot(view.forward, eye) - system.near_cutoff);
+                alpha *= if near.is_nan() { 0.0 } else { near.clamp(0.0, 1.0) };
+                let light = if look.shader.blend == H3Blend::Multiply { 1.0 } else { H3_EXPOSURE };
                 let rgb: [f32; 3] = std::array::from_fn(|axis| {
                     (tint[axis] * color[axis]).clamp(0.0, 1.0) * intensity * light
                 });
+                let shading = look.shader.lighting;
+                let normal_at = |planar: [f32; 2], spun: [[f32; 3]; 2]| -> [f32; 3] {
+                    let normal = unit(cross(spun[0], spun[1]));
+                    if shading == H3ParticleLighting::None {
+                        return normal;
+                    }
+                    let tangent = (look.curvature * std::f32::consts::FRAC_PI_2).tan();
+                    let bent: [f32; 3] = if tangent > 0.0 {
+                        let plane: [f32; 3] = std::array::from_fn(|axis| spun[0][axis] * planar[0] + spun[1][axis] * planar[1]);
+                        let plane = unit(plane);
+                        std::array::from_fn(|axis| normal[axis] + plane[axis])
+                    } else {
+                        normal
+                    };
+                    unit(bent)
+                };
+                // `per_vertex_ravi_order_0` on the vertex; order 3 on the pixel.
+                let lit_by = |normal: [f32; 3]| {
+                    if shading == H3ParticleLighting::Ambient { ravi(shading, normal, lighting) } else { [1.0; 3] }
+                };
                 let count = look.frames.len();
                 let frame_at = particle.frame + look.frame.scalar(&state).rem_euclid(1.0);
                 let frame = frame_variant(frame_at, count, look.one_shot, look.backwards && particle.flip[2]);
                 let first = look.frames[frame.floor().rem_euclid(count as f32) as usize % count];
                 let second = look.frames[(frame + 1.0).floor().rem_euclid(count as f32) as usize % count];
-                let blend = if look.frame_blend { frame.fract() } else { 0.0 };
+                let blend = if look.shader.frame_blend { frame.fract() } else { 0.0 };
+                let scroll = emitter.scroll.map(|rate| rate * time);
+                let [from, to] = look.shader.uv_scale;
+                let uv_scale = |at: f32| (from + (to - from) * at / 2.0).recip();
+                let (first_scale, second_scale) =
+                    if look.shader.frame_blend { (uv_scale(1.0 + blend), uv_scale(blend)) } else { (1.0, 1.0) };
                 let black = emitter.black_point.scalar(&state).clamp(0.0, 0.9999);
                 let palette = look.palette.scalar(&state).clamp(0.0, 0.9999);
                 let [x, y, width, height] = look.corner;
-                let corner = |shift: [f32; 2]| {
-                    let planar = [(shift[0] * width + x) * aspect, shift[1] * height + y];
-                    let turned_x = planar[0] * cos - planar[1] * sin;
-                    let turned_y = planar[0] * sin + planar[1] * cos;
-                    let spot: [f32; 3] = std::array::from_fn(|axis| {
-                        place[axis] + (basis[0][axis] * turned_x + basis[1][axis] * turned_y) * size
-                    });
-                    let mut uv = [shift[0], 1.0 - shift[1]];
+                let at_spot = |spot: [f32; 3], mut uv: [f32; 2], normal: [f32; 3], lit: [f32; 3], lean: [[f32; 3]; 2]| {
+                    let mut faded = alpha;
+                    if let Some([range, cutoff]) = look.edge_fade {
+                        let toward = unit(minus(spot, view.eye));
+                        let angle = std::f32::consts::FRAC_PI_2 - dot(toward, normal).abs().min(1.0).acos();
+                        faded *= (range * (angle - cutoff)).clamp(0.0, 1.0);
+                    }
                     if look.flip_u && particle.flip[0] {
                         uv[0] = 1.0 - uv[0];
                     }
@@ -1047,18 +1749,55 @@ impl H3ParticleField {
                     }
                     H3ParticleVertex {
                         place: spot,
-                        sprite: sprite_uv(first, uv),
-                        next_sprite: sprite_uv(second, uv),
+                        sprite: sprite_uv(first, uv, scroll, first_scale),
+                        next_sprite: sprite_uv(second, uv, scroll, second_scale),
                         billboard: uv,
-                        color: [rgb[0], rgb[1], rgb[2], alpha],
+                        color: [rgb[0] * lit[0], rgb[1] * lit[1], rgb[2] * lit[2], faded],
                         extra: [blend, palette, black],
+                        lean,
+                        normal,
                     }
+                };
+                if let Some(meshes) = &look.model {
+                    let angle = std::f32::consts::TAU * (particle.rotation + manual);
+                    let variant = frame_variant(frame_at, meshes.len(), look.one_shot, look.backwards && particle.flip[2]);
+                    let mesh = &meshes[variant.floor().rem_euclid(meshes.len() as f32) as usize % meshes.len()];
+                    let plane = [basis[0], basis[1], cross(basis[0], basis[1])];
+                    let plane = axis_rotation(particle.axis, angle).map(|row| -> [f32; 3] {
+                        std::array::from_fn(|axis| (0..3).map(|at| row[at] * plane[at][axis]).sum())
+                    });
+                    let along = |vector: [f32; 3]| -> [f32; 3] {
+                        std::array::from_fn(|axis| (0..3).map(|at| vector[at] * plane[at][axis]).sum())
+                    };
+                    for vertex in mesh {
+                        let at = [vertex.position.x * aspect, vertex.position.y, vertex.position.z];
+                        let moved = along(at);
+                        let spot = std::array::from_fn(|axis| place[axis] + moved[axis] * size);
+                        let normal = unit(along([vertex.normal.i, vertex.normal.j, vertex.normal.k]));
+                        let lit = lit_by(normal);
+                        let lean = [plane[0], plane[1]].map(|side| side.map(|axis| axis * size * width));
+                        vertices.push(at_spot(spot, [vertex.texcoord.x, vertex.texcoord.y], normal, lit, lean));
+                    }
+                    continue;
+                }
+                let corner = |shift: [f32; 2]| {
+                    let planar = [(shift[0] * width + x) * aspect, shift[1] * height + y];
+                    let spun: [[f32; 3]; 2] = [
+                        std::array::from_fn(|axis| cos * basis[0][axis] + sin * basis[1][axis]),
+                        std::array::from_fn(|axis| -sin * basis[0][axis] + cos * basis[1][axis]),
+                    ];
+                    let spot: [f32; 3] = std::array::from_fn(|axis| {
+                        place[axis] + (spun[0][axis] * planar[0] + spun[1][axis] * planar[1]) * size
+                    });
+                    let lean = [spun[0].map(|axis| axis * size * width), spun[1].map(|axis| axis * size * height)];
+                    let lean = if look.shader.distortion.is_some() { curved_lean(lean, spun, planar, look.curvature) } else { lean };
+                    let normal = normal_at(planar, spun);
+                    at_spot(spot, shift, normal, lit_by(normal), lean)
                 };
                 let quad = [corner([0.0, 0.0]), corner([1.0, 0.0]), corner([1.0, 1.0]), corner([0.0, 1.0])];
                 vertices.extend([quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
             }
         }
-        vertices
     }
 }
 
@@ -1116,6 +1855,77 @@ impl H3ParticleSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_line_runs_along_y_and_a_breakable_has_nothing_of_its_own() {
+        let mut random = Random(3);
+        let (place, _) = emit(H3EmissionShape::Line, 2.0, 0.0, &mut random);
+        assert_eq!(place[0], 0.0);
+        assert!(place[1].abs() <= 2.0 && place[1] != 0.0);
+        assert_eq!(emit(H3EmissionShape::Breakable, 2.0, 30.0, &mut random), ([0.0; 3], [0.0; 3]));
+    }
+
+    #[test]
+    fn an_impact_with_no_size_sprays_from_one_point_at_its_angle() {
+        let mut random = Random(5);
+        for shape in [H3EmissionShape::ImpactContour, H3EmissionShape::ImpactArea] {
+            let (place, velocity) = emit(shape, 9.0, 60.0, &mut random);
+            assert_eq!(place, [0.0; 3]);
+            assert!((velocity[0] - 0.5).abs() < 1e-5);
+            assert!((dot(velocity, velocity) - 1.0).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn a_flat_distortion_keeps_its_lean_and_a_curved_one_tilts_it() {
+        let plane = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        assert_eq!(curved_lean(plane, plane, [1.0, 0.0], 0.0)[0], plane[0]);
+        let curved = curved_lean(plane, plane, [1.0, 0.0], 0.5);
+        assert!(curved[0][2].abs() > 0.5, "{curved:?}");
+        assert!((curved[1][1] - 1.0).abs() < 1e-3, "the axis itself stays: {curved:?}");
+    }
+
+    #[test]
+    fn a_particles_axes_look_along_it_and_a_still_one_gets_a_default() {
+        let axes = axes_along([0.0, 2.0, 0.0]);
+        assert_eq!(axes[0], [0.0, 1.0, 0.0]);
+        assert!(dot(axes[1], axes[0]).abs() < 1e-6 && dot(axes[2], axes[0]).abs() < 1e-6);
+        assert_eq!(axes_along([0.0; 3])[0], [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_turn_about_x_carries_y_to_z_and_leaves_x() {
+        let turned = axis_rotation([1.0, 0.0, 0.0], std::f32::consts::FRAC_PI_2);
+        assert!((turned[0][0] - 1.0).abs() < 1e-6);
+        assert!((turned[1][2] - 1.0).abs() < 1e-6, "{turned:?}");
+        assert!((turned[2][1] + 1.0).abs() < 1e-6, "{turned:?}");
+    }
+
+    #[test]
+    fn a_reference_axis_rotates_the_picked_axis_round() {
+        let mut random = Random(1);
+        assert_eq!(H3ParticleAxis::Constant.pick(0, 0.0, &mut random), [1.0, 0.0, 0.0]);
+        assert_eq!(H3ParticleAxis::Constant.pick(1, 0.0, &mut random), [0.0, 1.0, 0.0]);
+        assert_eq!(H3ParticleAxis::Constant.pick(2, 0.0, &mut random), [0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_whole_sprite_sits_around_its_place_and_an_offset_pins_its_edge() {
+        let whole = [0.0, 1.0, 0.0, 1.0];
+        assert_eq!(sprite_corner(whole, [0.5, 0.5], [0.0, 0.0], 1.0), [-1.0, -1.0, 2.0, 2.0]);
+        // `blast_wave_half`: the left edge at the origin.
+        assert_eq!(sprite_corner(whole, [0.5, 0.5], [-0.5, 0.0], 1.0), [0.0, -1.0, 2.0, 2.0]);
+        // The sign of y is the other way.
+        assert_eq!(sprite_corner(whole, [0.5, 0.5], [0.0, -0.5], 1.0), [-1.0, -2.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn a_narrow_sprite_narrows_and_a_wide_plate_widens() {
+        let narrow = sprite_corner([0.0, 0.5, 0.0, 1.0], [0.25, 0.5], [0.0, 0.0], 1.0);
+        assert_eq!(narrow, [-0.5, -1.0, 1.0, 2.0]);
+        let wide = sprite_corner([0.0, 1.0, 0.0, 1.0], [0.5, 0.5], [0.0, 0.0], 2.0);
+        assert_eq!(wide, [-2.0, -1.0, 4.0, 2.0]);
+    }
 
     #[test]
     fn inputs_read_by_their_names_with_or_without_the_second_spelling() {

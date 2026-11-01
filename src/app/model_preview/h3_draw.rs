@@ -64,6 +64,20 @@ void main() {
 }
 ";
 
+const DISTORTION_FRAGMENT: &str = "#version 410 core
+uniform sampler2D scene;
+uniform sampler2D displacement;
+out vec4 color;
+void main() {
+    vec2 lean = texelFetch(displacement, ivec2(gl_FragCoord.xy), 0).xy;
+    if (lean == vec2(0.0)) {
+        discard;
+    }
+    vec2 place = gl_FragCoord.xy / vec2(textureSize(scene, 0));
+    color = texture(scene, place + vec2(lean.x, -lean.y));
+}
+";
+
 const COMPOSITE_FRAGMENT: &str = "#version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
@@ -97,6 +111,11 @@ pub(super) struct H3Targets {
     /// A copy of the depth, for what fades against it.
     depth_copy: glow::NativeTexture,
     depth_copy_framebuffer: glow::NativeFramebuffer,
+    /// `apply_distortions`' two: how far each pixel leans, and what it reads.
+    distortion: glow::NativeTexture,
+    distortion_framebuffer: glow::NativeFramebuffer,
+    scene_copy: glow::NativeTexture,
+    scene_copy_framebuffer: glow::NativeFramebuffer,
 }
 
 pub(super) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Option<glow::NativeProgram> {
@@ -201,6 +220,14 @@ impl H3Targets {
             );
             gl.draw_buffers(&[glow::NONE]);
             gl.read_buffer(glow::NONE);
+            let distortion = target_texture(gl, size, glow::RG16F)?;
+            let distortion_framebuffer = gl.create_framebuffer().ok()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(distortion_framebuffer));
+            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(distortion), 0);
+            let scene_copy = target_texture(gl, size, glow::RGBA16F)?;
+            let scene_copy_framebuffer = gl.create_framebuffer().ok()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene_copy_framebuffer));
+            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(scene_copy), 0);
             Some(Self {
                 size,
                 albedo_framebuffer,
@@ -211,6 +238,10 @@ impl H3Targets {
                 behind,
                 depth_copy,
                 depth_copy_framebuffer,
+                distortion,
+                distortion_framebuffer,
+                scene_copy,
+                scene_copy_framebuffer,
             })
         }
     }
@@ -220,7 +251,17 @@ impl H3Targets {
             gl.delete_framebuffer(self.albedo_framebuffer);
             gl.delete_framebuffer(self.accumulation_framebuffer);
             gl.delete_framebuffer(self.depth_copy_framebuffer);
-            for texture in [self.albedo, self.normal, self.accumulation, self.behind, self.depth_copy] {
+            gl.delete_framebuffer(self.distortion_framebuffer);
+            gl.delete_framebuffer(self.scene_copy_framebuffer);
+            for texture in [
+                self.albedo,
+                self.normal,
+                self.accumulation,
+                self.behind,
+                self.depth_copy,
+                self.distortion,
+                self.scene_copy,
+            ] {
                 gl.delete_texture(texture);
             }
         }
@@ -390,6 +431,11 @@ fn frame_probe(frame: &ModelGpuFrame) -> [[f32; 9]; 3] {
     }
     let [x, y, _] = h2_camera_light(frame.camera.yaw, frame.camera.pitch);
     turned_probe(y.atan2(x) - probe_heading())
+}
+
+/// What a particle's `lighting` option reads.
+pub(super) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
+    lighting_constants(&frame_probe(frame))
 }
 
 /// What the rasterizer's globals hold for an object here, by uniform name.
@@ -899,7 +945,8 @@ impl ModelGlRenderer {
                 }
                 let values = frame.h2_values_of_object(light.object);
                 let colors = if light.object == 0 { frame.change_colors } else { [[1.0; 3]; 4] };
-                let Some(lit) = light.lit(values, &colors, bones, frame.time) else {
+                let onset = self.slots[slot].h3_onsets.of(light.object, light.scale_name(), values, frame.time);
+                let Some(lit) = light.lit(values, &colors, bones, frame.time, onset) else {
                     continue;
                 };
                 self.h3_light = Some((lit, self.slots[slot].h3_textures.gels.get(index).copied().flatten()));
@@ -922,11 +969,20 @@ impl ModelGlRenderer {
                     gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
                     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                     self.h3_depth_copy = Some(targets.depth_copy);
+                    // `submit_distortions`.
+                    self.h3_distorted = false;
+                    if frame.preview.h3_particles.iter().any(|system| system.look.shader.distortion.is_some()) {
+                        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.distortion_framebuffer));
+                        gl.clear_color(0.0, 0.0, 0.0, 0.0);
+                        gl.clear(glow::COLOR_BUFFER_BIT);
+                        self.draw_ce_flares(gl, frame, slot, SpriteStage::Distortions);
+                        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
+                    }
                 }
             }
             let mut blended: Vec<_> = blended
                 .into_iter()
-                .map(|(batch, material)| (batch_distance(frame, batch), batch, material))
+                .map(|(batch, material)| (h3_layered_distance(material.sort_layer, batch_distance(frame, batch)), batch, material))
                 .collect();
             blended.sort_by(|(a, ..), (b, ..)| b.total_cmp(a));
             for (distance, batch, material) in blended {
@@ -949,6 +1005,10 @@ impl ModelGlRenderer {
             }
             if sprites {
                 self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                if self.h3_distorted {
+                    self.h3_apply_distortions(gl, accumulation_target, size);
+                    gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                }
             }
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, true);
@@ -1020,6 +1080,42 @@ impl ModelGlRenderer {
         }
     }
 
+    /// `apply_distortions`: each pixel the distortions leaned reads the scene
+    /// from where they leaned it.
+    unsafe fn h3_apply_distortions(
+        &mut self,
+        gl: &glow::Context,
+        accumulation_target: glow::NativeFramebuffer,
+        size: [i32; 2],
+    ) {
+        unsafe {
+            if self.h3_distortion_program.is_none() {
+                self.h3_distortion_program = screen_program(gl, DISTORTION_FRAGMENT);
+            }
+            let (Some(program), Some(targets)) = (self.h3_distortion_program, self.h3_targets.as_ref()) else {
+                return;
+            };
+            let [width, height] = size;
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(accumulation_target));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.scene_copy_framebuffer));
+            gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
+            gl.use_program(Some(program));
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(targets.scene_copy));
+            gl.uniform_1_i32(gl.get_uniform_location(program, "scene").as_ref(), 0);
+            gl.active_texture(glow::TEXTURE1);
+            gl.bind_texture(glow::TEXTURE_2D, Some(targets.distortion));
+            gl.uniform_1_i32(gl.get_uniform_location(program, "displacement").as_ref(), 1);
+            gl.active_texture(glow::TEXTURE0);
+            gl.disable(glow::DEPTH_TEST);
+            gl.disable(glow::BLEND);
+            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            gl.enable(glow::DEPTH_TEST);
+        }
+    }
+
     unsafe fn h3_composite(
         &mut self,
         gl: &glow::Context,
@@ -1061,6 +1157,27 @@ impl ModelGlRenderer {
         }
     }
 }
+
+#[cfg(test)]
+mod layer_tests {
+    use super::h3_layered_distance;
+
+    #[test]
+    fn a_later_layer_draws_after_however_far_it_lies() {
+        let far_post = h3_layered_distance(3, 500.0);
+        let near_normal = h3_layered_distance(2, 1.0);
+        assert!(far_post < near_normal);
+        assert!(h3_layered_distance(2, 5.0) > h3_layered_distance(2, 1.0));
+    }
+}
+
+/// A distance to sort by, far first, that puts `sort layer` before it.
+pub(super) fn h3_layered_distance(layer: i32, distance: f32) -> f32 {
+    distance - layer as f32 * SORT_LAYER_SPAN
+}
+
+/// More than any preview is deep.
+const SORT_LAYER_SPAN: f32 = 1e6;
 
 /// How far along the view a batch's middle lies, as sprites measure theirs.
 fn batch_distance(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch) -> f32 {
