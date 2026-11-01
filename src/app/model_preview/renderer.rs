@@ -2442,11 +2442,14 @@ impl ModelGlRenderer {
                         let Some(light) = point.lit(values, bones, frame.time) else {
                             continue;
                         };
+                        let (light, draws) = h2_lights::overbrighten(&light);
                         let specular = H2DefaultLight { color: light.specular, ..light };
-                        for (layer, light) in
-                            [(H2Layer::LightDiffuse, &light), (H2Layer::LightSpecular, &specular)]
-                        {
-                            self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
+                        for _ in 0..draws {
+                            for (layer, light) in
+                                [(H2Layer::LightDiffuse, &light), (H2Layer::LightSpecular, &specular)]
+                            {
+                                self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
+                            }
                         }
                     }
                     self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);

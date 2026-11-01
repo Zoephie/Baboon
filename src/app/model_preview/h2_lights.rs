@@ -427,9 +427,7 @@ impl H2PointLight {
         self.light.color_animation.is_some() || self.light.brightness_animation.is_some()
     }
 
-    /// What `sub_947870` hands the passes this frame, if the light is on. It
-    /// splits a bright color across `overbrighten_scale`'s shader variants;
-    /// a constant can simply hold it.
+    /// What `sub_947870` hands the passes this frame, if the light is on.
     pub(crate) fn lit(
         &self,
         values: Option<&H2FunctionValues>,
@@ -460,6 +458,25 @@ impl H2PointLight {
             radius,
         })
     }
+}
+
+/// `sub_946960`: a color past 1 goes to the pass halved or quartered, for a
+/// variant that scales its output back up, as passes saturate on the way. The
+/// preview keeps the first variant: the same pass drawn again is the same sum.
+pub(crate) fn overbrighten(light: &H2DefaultLight) -> (H2DefaultLight, usize) {
+    let brightest = light.color.iter().chain(&light.specular).copied().fold(0.0, f32::max);
+    let (scale, draws) = match brightest {
+        value if value <= 1.0 => (1.0, 1),
+        value if value <= 2.0 => (0.5, 2),
+        _ => (0.25, 4),
+    };
+    let scaled = |color: [f32; 3]| color.map(|channel| (channel * scale).clamp(0.0, 1.0));
+    let dimmed = H2DefaultLight {
+        color: scaled(light.color),
+        specular: scaled(light.specular),
+        ..*light
+    };
+    (dimmed, draws)
 }
 
 impl H2FlareAt {
@@ -827,6 +844,19 @@ mod tests {
         assert!(out.lit(None, None, 0.0).is_none());
         out.scale_by.clear();
         assert!(out.lit(None, None, 0.0).is_some());
+    }
+
+    #[test]
+    fn a_bright_light_is_scaled_down_and_drawn_again() {
+        let light = |color| H2DefaultLight { position: [0.0; 3], color, specular: [0.0; 3], radius: 1.0 };
+        let (dim, draws) = overbrighten(&light([0.5, 1.0, 0.25]));
+        assert_eq!((dim.color, draws), ([0.5, 1.0, 0.25], 1));
+        let (dim, draws) = overbrighten(&light([2.0, 1.0, 0.5]));
+        assert_eq!((dim.color, draws), ([1.0, 0.5, 0.25], 2));
+        let (dim, draws) = overbrighten(&light([4.0, 2.0, 1.0]));
+        assert_eq!((dim.color, draws), ([1.0, 0.5, 0.25], 4));
+        let brighter_specular = H2DefaultLight { specular: [3.0; 3], ..light([1.0; 3]) };
+        assert_eq!(overbrighten(&brighter_specular).1, 4, "the brighter of the two decides");
     }
 
     #[test]
