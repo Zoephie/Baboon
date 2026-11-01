@@ -79,6 +79,14 @@ pub(in crate::app) enum H2VertexStage {
     LightDiffuseTarget,
     /// `LightDiffuse` with a detail map at `tc4`.
     LightDiffuseDetail,
+    /// A frustum light's diffuse pass: the light in tangent space in `tc1`, the
+    /// gel's projection in `tc3`, its falloff in one color and near plane in
+    /// the other.
+    LightGel,
+    /// `LightGel` reading its albedo from the texaccum target.
+    LightGelTarget,
+    /// `LightGel` with a detail map at `tc4`.
+    LightGelDetail,
     /// A sphere light's specular pass: light and eye in tangent space.
     LightSpecular,
     /// Halo CE's `model.vsh` for a lone object: the two distant lights and
@@ -163,6 +171,9 @@ impl H2VertexStage {
             "lightaccum_sphere_diffuse_tex" => Some(Self::LightDiffuse),
             "lightaccum_sphere_diffuse" => Some(Self::LightDiffuseTarget),
             "lightaccum_sphere_diffuse_tex_detail" => Some(Self::LightDiffuseDetail),
+            "lightaccum_frustum_no_specular_gel_tex" => Some(Self::LightGel),
+            "lightaccum_frustum_no_specular_gel" => Some(Self::LightGelTarget),
+            "lightaccum_frustum_no_specular_gel_tex_detail" => Some(Self::LightGelDetail),
             "stencil_light_specular_tangentspace_sphere" => Some(Self::LightSpecular),
             _ => None,
         }
@@ -280,6 +291,19 @@ impl H2VertexStage {
     v_tc2.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
     v_tc3.xyz = to_light * -u_light_falloff + 0.5;"
             }
+            Self::LightGel | Self::LightGelTarget | Self::LightGelDetail => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    vec3 to_light = u_light_position - position;
+    v_tc0.xy = base;
+    v_tc1.xyz = tangent_space(to_light, tangent, binormal, normal);
+    v_tc2.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc3 = vec4(dot(to_light, u_gel_rows[0].xyz) + u_gel_rows[0].w,
+        dot(to_light, u_gel_rows[1].xyz) + u_gel_rows[1].w,
+        0.0, dot(to_light, u_gel_rows[2].xyz));
+    v_tc3.z = v_tc3.w;
+    v_color0 = vec4(vec3(clamp(dot(to_light, u_gel_rows[2].xyz) + u_gel_rows[2].w, 0.0, 1.0)), 1.0);
+    v_color1 = vec4(vec3(clamp(dot(to_light, u_gel_rows[3].xyz) + u_gel_rows[3].w, 0.0, 1.0)), 1.0);"
+            }
             Self::LightSpecular => {
                 "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
     v_tc1.xyz = tangent_space(u_light_position - position, tangent, binormal, normal);
@@ -391,6 +415,9 @@ impl H2VertexStage {
                     | Self::LightDiffuse
                     | Self::LightDiffuseTarget
                     | Self::LightDiffuseDetail
+                    | Self::LightGel
+                    | Self::LightGelTarget
+                    | Self::LightGelDetail
                     | Self::LightSpecular
                     | Self::ActiveCamo
                     | Self::TextureCamera
@@ -470,7 +497,7 @@ impl H2VertexStage {
         let prelude = model_vertex_prelude(version_declaration);
         let (outputs, drawn) = (self.outputs(), self.drawn_position());
         let variant = match self {
-            Self::LightDiffuseTarget => {
+            Self::LightDiffuseTarget | Self::LightGelTarget => {
                 "v_tc0 = vec4((gl_Position.xy + gl_Position.w) * 0.5, gl_Position.ww);"
             }
             Self::CeTransparentReflection | Self::CeTransparentObject | Self::CeTransparentViewer => {
@@ -480,7 +507,7 @@ impl H2VertexStage {
                 "v_tc0 = vec4(row(0, vec3(gl_Position.xy, 0.0)) + u_texture_rows[0].w * (gl_Position.w - 1.0), \
                  row(1, vec3(gl_Position.xy, 0.0)) + u_texture_rows[1].w * (gl_Position.w - 1.0), 0.0, gl_Position.w);"
             }
-            Self::LightDiffuseDetail => {
+            Self::LightDiffuseDetail | Self::LightGelDetail => {
                 "v_tc4.xy = base * u_texture_rows[1].xy + u_texture_rows[1].zw;"
             }
             Self::Hologram | Self::Prt => {
@@ -533,6 +560,7 @@ uniform vec3 u_light_direct;
 uniform vec3 u_light_indirect;
 uniform vec3 u_light_position;
 uniform float u_light_falloff;
+uniform vec4 u_gel_rows[4];
 uniform vec4 u_ce_point[{CE_POINT_LIGHT_ROWS}];
 vec3 tangent_space(vec3 value, vec3 tangent, vec3 binormal, vec3 normal) {{
     return vec3(dot(value, tangent), dot(value, binormal), dot(value, normal));
@@ -592,7 +620,7 @@ mod tests {
     use super::*;
     use crate::core::h2_pixel_shader::{PixelShaderOptions, translate};
 
-    const STAGES: [H2VertexStage; 41] = [
+    const STAGES: [H2VertexStage; 44] = [
         H2VertexStage::CeActiveCamo,
         H2VertexStage::CePlasma,
         H2VertexStage::CeGlassLit,
@@ -608,6 +636,9 @@ mod tests {
         H2VertexStage::LightDiffuseTarget,
         H2VertexStage::LightDiffuseDetail,
         H2VertexStage::LightDiffuse,
+        H2VertexStage::LightGel,
+        H2VertexStage::LightGelTarget,
+        H2VertexStage::LightGelDetail,
         H2VertexStage::LightSpecular,
         H2VertexStage::Emissive,
         H2VertexStage::Environment,

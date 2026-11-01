@@ -107,6 +107,7 @@ pub(crate) struct RenderModelPreview {
     pub h2_flares: Vec<h2_lights::H2FlareAt>,
     /// Halo 2 sphere lights on the object and what it holds.
     pub h2_point_lights: Vec<h2_lights::H2PointLight>,
+    pub h2_gel_lights: Vec<h2_lights::H2GelLight>,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,
     /// Halo CE: the antennas among the object's widgets.

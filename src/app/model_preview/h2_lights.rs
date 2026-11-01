@@ -40,6 +40,21 @@ const LIGHT_ONLY_FIRST_PERSON: i128 = 0x20;
 const IGNORES_PARENTS: i128 = 0x2800;
 /// `type`: the only one that takes the sphere path.
 const SPHERE: i128 = 0;
+/// `type`: orthogonal lights assert in `sub_946960`, so these are the frustums.
+const PROJECTIVE: i128 = 2;
+const PYRAMID: i128 = 3;
+/// `flags`: without both, `render_light_get_diffuse_implementation_index`
+/// takes a shadow buffer or frame alpha pass the preview has no use for.
+const NO_SHADOW: i128 = 8;
+/// `falloff geometry`: `directional`, which tool's postprocess makes of default
+/// on a frustum.
+const DIRECTIONAL_FALLOFF: i128 = 1;
+/// `sub_946960`'s divisor for the near plane's edge, `dword_EB9D38`.
+const NEAR_EDGE_DIVISOR: f32 = 40.0;
+/// What `sub_946960` leaves between the apex and the near plane's edge.
+const NEAR_EDGE_BIAS: f32 = 0.0078125;
+/// The bounds tool's postprocess holds `field of view` to, in degrees.
+const FIELD_OF_VIEW: [f32; 2] = [1.0, 120.0];
 /// What the brightness of `sub_8ED2A0` comes to, at most.
 const BRIGHTEST: f32 = 4.0;
 /// `default lightmap setting`: the game makes no such light.
@@ -261,6 +276,41 @@ pub(crate) struct H2PointLight {
     light: H2Light,
 }
 
+/// A frustum's shape.
+#[derive(Debug, Clone)]
+struct H2Frustum {
+    near_width: f32,
+    /// `height stretch` by the gel's aspect.
+    stretch: f32,
+    half_view: f32,
+    falloff: f32,
+    cutoff: f32,
+    gel: Option<Arc<H2Image>>,
+}
+
+/// A frustum light at its marker, which only a gel pass draws.
+#[derive(Debug, Clone)]
+pub(crate) struct H2GelLight {
+    /// Which object's functions drive it; 0 is the opened.
+    pub(crate) object: u8,
+    node: usize,
+    position: [f32; 3],
+    forward: [f32; 3],
+    up: [f32; 3],
+    /// `primary scale`, a name the object's functions answer to.
+    scale_by: String,
+    light: H2Light,
+    frustum: H2Frustum,
+}
+
+/// The vectors `lightaccum_frustum_no_specular_gel` reads as c33 to c36, in a
+/// light's frame of `sub_946960`. All but `apex` take the vector to the light.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct H2GelRows {
+    pub(crate) apex: [f32; 3],
+    pub(crate) rows: [[f32; 4]; 4],
+}
+
 /// A flare at one of the markers an object attaches it to.
 #[derive(Debug, Clone)]
 pub(crate) struct H2FlareAt {
@@ -351,7 +401,10 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
 /// `sub_8EB720`, and what tool's postprocess gives a tag for the game: the
 /// light, whether it lights the model on the sphere path, and its flare. `None`
 /// for a light the game makes nothing of in a third person view.
-fn read_h2_light(source: &TagSource, path: &str) -> Option<(H2Light, bool, Option<Arc<H2Flare>>)> {
+fn read_h2_light(
+    source: &TagSource,
+    path: &str,
+) -> Option<(H2Light, bool, Option<H2Frustum>, Option<Arc<H2Flare>>)> {
     let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
     let root = tag.root();
     let flags = root.read_int_any("flags").unwrap_or(0);
@@ -406,11 +459,42 @@ fn read_h2_light(source: &TagSource, path: &str) -> Option<(H2Light, bool, Optio
         radius,
         specular_radius: specular_radius.unwrap_or(radius),
     };
-    let gel = root.read_tag_ref_path("gel map").is_some_and(|gel| !gel.is_empty());
-    let lights_model = root.read_int_any("type") == Some(SPHERE)
-        && !gel
-        && flags & IGNORES_PARENTS != IGNORES_PARENTS;
-    Some((light, lights_model, flare))
+    let lit = flags & IGNORES_PARENTS != IGNORES_PARENTS;
+    // Implementation 1 has no gel to read, so a sphere's own never shows.
+    let lights_model = root.read_int_any("type") == Some(SPHERE) && lit;
+    let frustum = lit.then(|| read_h2_frustum(source, root, flags)).flatten();
+    Some((light, lights_model, frustum, flare))
+}
+
+/// The shape `sub_8EB100` and `sub_8E84F0` read from a frustum `light`, with
+/// tool's postprocess applied. None for a light drawing through a pass other
+/// than the gel's.
+fn read_h2_frustum(source: &TagSource, root: TagStruct<'_>, flags: i128) -> Option<H2Frustum> {
+    let kind = root.read_int_any("type")?;
+    let plain = flags & (NO_SPECULAR | NO_SHADOW) == NO_SPECULAR | NO_SHADOW;
+    let falloff = matches!(root.read_int_any("falloff geometry"), Some(0 | DIRECTIONAL_FALLOFF));
+    if !matches!(kind, PROJECTIVE | PYRAMID) || !plain || !falloff {
+        return None;
+    }
+    let gel = root.read_tag_ref_path("gel map").filter(|gel| !gel.is_empty());
+    let gel = gel
+        .and_then(|gel| decode_h2_image(source, &gel, SamplerKind::Texture2D, 0))
+        .map(Arc::new);
+    let aspect = gel.as_deref().map_or(1.0, |image| match image {
+        H2Image::Flat(image) => image.height as f32 / image.width as f32,
+        _ => 1.0,
+    });
+    let stretch = root.read_real("height stretch").filter(|stretch| *stretch != 0.0).unwrap_or(1.0);
+    let [narrowest, widest] = FIELD_OF_VIEW;
+    let view = root.read_real("field of view").unwrap_or(0.0).clamp(narrowest, widest);
+    Some(H2Frustum {
+        near_width: if kind == PYRAMID { 0.0 } else { root.read_real("near width").unwrap_or(0.0) },
+        stretch: stretch * aspect,
+        half_view: view.to_radians() * 0.5,
+        falloff: root.read_real("falloff distance").unwrap_or(0.0),
+        cutoff: root.read_real("cutoff distance").unwrap_or(0.0),
+        gel,
+    })
 }
 
 /// `render_submit_object_attachments`' `lens_flare`s, at every marker of their
@@ -421,11 +505,12 @@ pub(super) fn read_h2_flares(
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-) -> (Vec<H2FlareAt>, Vec<H2PointLight>) {
+) -> (Vec<H2FlareAt>, Vec<H2PointLight>, Vec<H2GelLight>) {
     let mut flares = Vec::new();
     let mut point_lights = Vec::new();
+    let mut gel_lights = Vec::new();
     let Some(block) = object_block(object, "attachments") else {
-        return (flares, point_lights);
+        return (flares, point_lights, gel_lights);
     };
     let lens_group = u32::from_be_bytes(*b"lens");
     let light_group = u32::from_be_bytes(*b"ligh");
@@ -442,9 +527,26 @@ pub(super) fn read_h2_flares(
             };
             (None, flare)
         } else if group == light_group {
-            let Some((light, lights_model, flare)) = read_h2_light(source, &path) else {
+            let Some((light, lights_model, frustum, flare)) = read_h2_light(source, &path) else {
                 continue;
             };
+            if let Some(frustum) = frustum {
+                let name = attachment.read_string_id("marker").unwrap_or_default();
+                let named = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name));
+                if let Some(marker) = named {
+                    let (place, node) = frame(marker);
+                    gel_lights.push(H2GelLight {
+                        object: owner,
+                        node,
+                        position: place.position,
+                        forward: place.axes[0],
+                        up: place.axes[2],
+                        scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
+                        light: light.clone(),
+                        frustum,
+                    });
+                }
+            }
             if lights_model {
                 let name = attachment.read_string_id("marker").unwrap_or_default();
                 let named = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name));
@@ -489,7 +591,7 @@ pub(super) fn read_h2_flares(
             });
         }
     }
-    (flares, point_lights)
+    (flares, point_lights, gel_lights)
 }
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -566,6 +668,16 @@ impl H2Light {
         let lit = diffuse.iter().chain(&specular).any(|channel| *channel != 0.0);
         (size > 0.0 && lit).then_some(diffuse)
     }
+
+    /// `sub_8ED2A0`'s brightness for `value`.
+    fn shining(&self, value: f32, time: f32) -> f32 {
+        let [dim, bright] = self.brightness;
+        let mut brightness = (1.0 - value) * dim + value * bright;
+        if let Some(function) = &self.brightness_animation {
+            brightness *= function.evaluate(time, 0.0);
+        }
+        (brightness * 2.0).clamp(0.0, BRIGHTEST)
+    }
 }
 
 impl H2PointLight {
@@ -596,12 +708,7 @@ impl H2PointLight {
         let diffuse = light.diffuse_at(value, time)?;
         let specular =
             ce_color_interpolate(light.interpolation, light.specular[0], light.specular[1], value);
-        let [dim, bright] = light.brightness;
-        let mut brightness = (1.0 - value) * dim + value * bright;
-        if let Some(function) = &light.brightness_animation {
-            brightness *= function.evaluate(time, 0.0);
-        }
-        let brightness = (brightness * 2.0).clamp(0.0, BRIGHTEST);
+        let brightness = light.shining(value, time);
         let size = (1.0 - value) * light.size[0] + value * light.size[1];
         let radius = (light.radius * size).max(light.specular_radius * size);
         if radius <= UNSET {
@@ -614,6 +721,71 @@ impl H2PointLight {
             specular: specular.map(|channel| (channel * brightness).min(BRIGHTEST)),
             radius,
         })
+    }
+}
+
+impl H2Frustum {
+    /// `sub_8E84F0` and `sub_946960` at `size`, for a marker's `position`.
+    /// `falloff geometry` directional; gel animation rests at no offset.
+    fn rows(&self, position: [f32; 3], forward: [f32; 3], up: [f32; 3], size: f32) -> H2GelRows {
+        let tan_x = self.half_view.tan();
+        let tan_y = tan_x * self.stretch;
+        let (falloff, cutoff) = (self.falloff * size, self.cutoff * size);
+        let behind = self.near_width / tan_x * 0.5;
+        let apex = std::array::from_fn(|axis| position[axis] - forward[axis] * behind);
+        let left = cross(forward, up);
+        let scale = -1.0 / (cutoff - falloff);
+        let across = |axis: usize| (forward[axis] - left[axis] / tan_x) * scale * 0.5;
+        let along = |axis: usize| (forward[axis] + up[axis] / tan_y) * scale * 0.5;
+        let reach = forward.map(|axis| axis * scale);
+        let edge = (cutoff - falloff) * 0.5 / NEAR_EDGE_DIVISOR;
+        H2GelRows {
+            apex,
+            rows: [
+                [across(0), across(1), across(2), 0.0],
+                [along(0), along(1), along(2), 0.0],
+                [reach[0], reach[1], reach[2], (behind + falloff) * scale],
+                [
+                    reach[0] * edge,
+                    reach[1] * edge,
+                    reach[2] * edge,
+                    edge * scale * (behind + NEAR_EDGE_BIAS) + 0.5,
+                ],
+            ],
+        }
+    }
+}
+
+impl H2GelLight {
+    pub(crate) fn scale_name(&self) -> &str {
+        &self.scale_by
+    }
+
+    pub(crate) fn animates(&self) -> bool {
+        self.light.brightness_animation.is_some() || self.light.color_animation.is_some()
+    }
+
+    pub(crate) fn gel(&self) -> Option<&Arc<H2Image>> {
+        self.frustum.gel.as_ref()
+    }
+
+    /// The light for a gel pass, and its frustum there. None while it's out.
+    pub(crate) fn lit(
+        &self,
+        values: Option<&H2FunctionValues>,
+        bones: Option<&[[f32; 4]]>,
+        time: f32,
+    ) -> Option<(H2DefaultLight, H2GelRows)> {
+        let value = attachment_value(&self.scale_by, values);
+        let light = &self.light;
+        let diffuse = light.diffuse_at(value, time)?;
+        let size = (1.0 - value) * light.size[0] + value * light.size[1];
+        let brightness = light.shining(value, time);
+        let (position, forward) = posed_on(self.node, self.position, self.forward, bones);
+        let (_, up) = posed_on(self.node, self.position, self.up, bones);
+        let rows = self.frustum.rows(position, forward, up, size);
+        let color = diffuse.map(|channel| (channel * brightness).min(BRIGHTEST));
+        Some((H2DefaultLight { position: rows.apex, color, specular: [0.0; 3], radius: 1.0 }, rows))
     }
 }
 
@@ -1045,5 +1217,60 @@ mod tests {
         let (outer, inner) = tested.occlusion_patches(None, &view()).unwrap();
         assert_eq!((outer.extent[0], inner.unwrap().extent[0]), (0.2, 0.1));
         assert!(flare(NO_OCCLUSION_TEST, Vec::new()).occlusion_patches(None, &view()).is_none());
+    }
+
+    fn gel_frustum() -> H2Frustum {
+        H2Frustum {
+            near_width: 0.6,
+            stretch: 0.8,
+            half_view: 65f32.to_radians() * 0.5,
+            falloff: 3.0,
+            cutoff: 6.0,
+            gel: None,
+        }
+    }
+
+    /// What `lightaccum_frustum_no_specular_gel` gives a point: gel u, v,
+    /// falloff and near plane colors, before they clamp.
+    fn gel_at(rows: &H2GelRows, point: [f32; 3]) -> [f32; 4] {
+        let to_light: [f32; 3] = std::array::from_fn(|axis| rows.apex[axis] - point[axis]);
+        let row = |index: usize| dot(to_light, std::array::from_fn(|axis| rows.rows[index][axis]));
+        let w = row(2);
+        [
+            (row(0) + rows.rows[0][3]) / w,
+            (row(1) + rows.rows[1][3]) / w,
+            row(2) + rows.rows[2][3],
+            row(3) + rows.rows[3][3],
+        ]
+    }
+
+    #[test]
+    fn a_frustum_projects_its_gel_from_a_point_behind_the_near_plane() {
+        let frustum = gel_frustum();
+        let (forward, up) = ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let rows = frustum.rows([2.0, 0.0, 0.0], forward, up, 1.0);
+        let behind = 0.3 / frustum.half_view.tan();
+        assert!((rows.apex[0] - (2.0 - behind)).abs() < 1e-5);
+        let ahead = |distance: f32| [2.0 - behind + distance, 0.0, 0.0];
+        // The axis lands in the middle of the gel, at every distance.
+        for distance in [1.0, 4.0] {
+            let [u, v, ..] = gel_at(&rows, ahead(distance));
+            assert!((u - 0.5).abs() < 1e-5 && (v - 0.5).abs() < 1e-5);
+        }
+        // The frustum's edges land on the gel's. `sub_8E84F0` crosses forward
+        // into up, so u climbs toward +Y on a +X, +Z light.
+        let tan_x = frustum.half_view.tan();
+        let left = [2.0 - behind + 4.0, 4.0 * tan_x, 0.0];
+        let right = [2.0 - behind + 4.0, -4.0 * tan_x, 0.0];
+        assert!((gel_at(&rows, left)[0] - 1.0).abs() < 1e-4);
+        assert!(gel_at(&rows, right)[0].abs() < 1e-4);
+        let top = [2.0 - behind + 4.0, 0.0, 4.0 * tan_x * frustum.stretch];
+        assert!((gel_at(&rows, top)[1] - 1.0).abs() < 1e-4);
+        // Dark from the far end, full up to the falloff distance.
+        assert!(gel_at(&rows, ahead(behind + 3.0))[2].abs() < 1e-4);
+        assert!((gel_at(&rows, ahead(behind + 6.0))[2] - 1.0).abs() < 1e-4);
+        // The near edge takes a surface past it and leaves one behind it.
+        assert!(gel_at(&rows, ahead(behind + 0.1))[3] > 0.5);
+        assert!(gel_at(&rows, ahead(behind - 0.1))[3] < 0.5);
     }
 }

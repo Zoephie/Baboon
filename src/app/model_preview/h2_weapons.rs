@@ -523,12 +523,13 @@ pub(super) fn attach_h2_weapon(
             preview.weapon_ik.extend(points);
         }
     }
-    let (flares, lights) =
+    let (flares, lights, gels) =
         super::h2_lights::read_h2_flares(source, &weapon, owner, &attached.markers, |marker| {
             (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
         });
     preview.h2_flares.extend(flares);
     preview.h2_point_lights.extend(lights);
+    preview.h2_gel_lights.extend(gels);
     // No weapon in the kit has PRT of its own.
     if let Some(prt) = preview.h2_prt.as_mut() {
         prt.pad(attached.vertices.len());

@@ -535,6 +535,7 @@ fn texture(slot: u32, kind: SamplerKind, image: Option<Arc<H2Image>>) -> H2DrawT
         texaccum: false,
         frame_copy: false,
         falloff: false,
+        gel: false,
     }
 }
 

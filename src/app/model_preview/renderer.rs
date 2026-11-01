@@ -133,7 +133,8 @@ pub(super) fn draw_model_viewport(
         object_moves: object_functions(data).any(|functions| functions.move_at_rest())
             || h2_functions_move(data, &state.h2_function_inputs, time)
             || data.preview.h2_flares.iter().any(|at| at.animates())
-            || data.preview.h2_point_lights.iter().any(|light| light.animates()),
+            || data.preview.h2_point_lights.iter().any(|light| light.animates())
+            || data.preview.h2_gel_lights.iter().any(|light| light.animates()),
         h2_values: h2_function_values_for(data, &state.h2_function_inputs, time),
         h2_attached_values: h2_attached_values(data, time),
         ce_points: Vec::new(),
@@ -803,7 +804,11 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
     let passes = textures.flat_map(|texture| texture.h2_layers.iter().flatten());
     let flares = data.preview.h2_flares.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
     let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == 0);
-    let flares = flares.chain(lights.map(|light| light.scale_name())).filter(|name| !name.is_empty());
+    let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == 0);
+    let flares = flares
+        .chain(lights.map(|light| light.scale_name()))
+        .chain(gels.map(|light| light.scale_name()))
+        .filter(|name| !name.is_empty());
     // `sub_6C18F0` gates the shield overlay on this itself.
     let shield = data.preview.materials.iter().any(|m| m.shield == Some(H2Layer::ShieldDamaged));
     let gate = shield.then_some("current_shield_damage");
@@ -847,7 +852,8 @@ fn h2_function_values_for(
     time: f32,
 ) -> Option<h2_functions::H2FunctionValues> {
     let flares = data.preview.h2_flares.iter().any(|at| !at.scale_name().is_empty())
-        || data.preview.h2_point_lights.iter().any(|light| !light.scale_name().is_empty());
+        || data.preview.h2_point_lights.iter().any(|light| !light.scale_name().is_empty())
+        || data.preview.h2_gel_lights.iter().any(|light| !light.scale_name().is_empty());
     (data.h2_object_functions.is_some() || flares).then(|| h2_function_values(data, set, time))
 }
 
@@ -1603,6 +1609,9 @@ struct ModelGpuSlot {
     uploaded_textures: Option<u64>,
     /// Halo CE's lens flares: per light, then per image, of `flare_geometry`.
     flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
+    /// Each of `h2_gel_lights`' gels, of `gel_geometry`.
+    gel_textures: Vec<Option<glow::NativeTexture>>,
+    gel_geometry: Option<u64>,
     flare_geometry: Option<u64>,
     antenna_textures: Vec<Option<glow::NativeTexture>>,
 }
@@ -1645,6 +1654,8 @@ impl ModelGpuSlot {
                 materials: Vec::new(),
                 uploaded_textures: None,
                 flare_textures: Vec::new(),
+                gel_textures: Vec::new(),
+                gel_geometry: None,
                 flare_geometry: None,
                 antenna_textures: Vec::new(),
             })
@@ -2148,6 +2159,8 @@ struct ModelGlRenderer {
     h2_target: Option<H2Target>,
     h2_scene: Option<H2Target>,
     h2_frame_copy: Option<H2Target>,
+    /// The gel and `H2GelRows` of the frustum light drawing now.
+    h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
     h2_bloom: Option<H2Bloom>,
     h2_shadow_map: Option<(glow::NativeFramebuffer, glow::NativeTexture)>,
     program: glow::NativeProgram,
@@ -2243,6 +2256,7 @@ impl ModelGlRenderer {
                 h2_target: None,
                 h2_scene: None,
                 h2_frame_copy: None,
+                h2_gel: None,
                 h2_bloom: None,
                 h2_shadow_map: None,
                 program,
@@ -2454,6 +2468,28 @@ impl ModelGlRenderer {
                                 self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
                             }
                         }
+                    }
+                    let uploaded = &mut self.slots[slot];
+                    if uploaded.gel_geometry != Some(frame.geometry_id) {
+                        for texture in uploaded.gel_textures.drain(..).flatten() {
+                            gl.delete_texture(texture);
+                        }
+                        let gels = frame.preview.h2_gel_lights.iter().map(|light| light.gel());
+                        uploaded.gel_textures =
+                            gels.map(|gel| gel.and_then(|gel| upload_h2_image(gl, gel))).collect();
+                        uploaded.gel_geometry = Some(frame.geometry_id);
+                    }
+                    for (index, gel) in frame.preview.h2_gel_lights.iter().enumerate() {
+                        let values = frame.h2_values_of_object(gel.object);
+                        let Some((light, rows)) = gel.lit(values, bones, frame.time) else {
+                            continue;
+                        };
+                        let (light, draws) = h2_lights::overbrighten(&light);
+                        self.h2_gel = Some((self.slots[slot].gel_textures[index], rows.rows));
+                        for _ in 0..draws {
+                            self.draw_h2_passes(gl, frame, slot, &order, H2Layer::LightGel, Some(&light));
+                        }
+                        self.h2_gel = None;
                     }
                     self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
                 }
@@ -2996,7 +3032,10 @@ impl ModelGlRenderer {
                         match texture.kind {
                             SamplerKind::Texture2D => {
                                 let target = self.h2_target.as_ref().map(|target| target.color);
-                                let bound = if texture.texaccum {
+                                let gel = self.h2_gel.and_then(|(texture, _)| texture);
+                                let bound = if texture.gel {
+                                    gel.or(self.placeholder)
+                                } else if texture.texaccum {
                                     target.or(self.placeholder)
                                 } else if texture.frame_copy {
                                     let copy = self.h2_frame_copy.as_ref();
@@ -3254,6 +3293,10 @@ impl ModelGlRenderer {
                 gl.uniform_3_f32_slice(location.as_ref(), &light.position);
                 let location = program.location(gl, "u_light_falloff");
                 gl.uniform_1_f32(location.as_ref(), 0.5 / light.radius);
+            }
+            if let Some((_, rows)) = &self.h2_gel {
+                let location = program.location(gl, "u_gel_rows");
+                gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
             let location = program.location(gl, "zwriteout");
             gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 1.0, 1.0);

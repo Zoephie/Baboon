@@ -48,6 +48,8 @@ pub(crate) enum H2Layer {
     LightDiffuseLow,
     /// `very low`.
     LightDiffuseVeryLow,
+    /// A frustum light's gel pass, drawn once per light.
+    LightGel,
     LightSpecular,
     Hologram,
     /// Takes over from every other opaque layer while camo is on.
@@ -64,7 +66,7 @@ pub(crate) enum H2Layer {
     ShadowMask,
 }
 
-pub(crate) const H2_LAYER_COUNT: usize = 21;
+pub(crate) const H2_LAYER_COUNT: usize = 22;
 
 /// The sphere lights `render_lights` falls back on with nothing else lighting
 /// the scene: a warm key and a cool fill.
@@ -105,6 +107,7 @@ impl H2Layer {
         Self::LightDiffuseHigh,
         Self::LightDiffuseLow,
         Self::LightDiffuseVeryLow,
+        Self::LightGel,
         Self::LightSpecular,
         Self::Hologram,
         Self::ActiveCamo,
@@ -129,7 +132,8 @@ impl H2Layer {
             Self::LightDiffuse
             | Self::LightDiffuseHigh
             | Self::LightDiffuseLow
-            | Self::LightDiffuseVeryLow => "diffuse",
+            | Self::LightDiffuseVeryLow
+            | Self::LightGel => "diffuse",
             Self::LightSpecular => "specular",
             Self::Hologram => "hologram",
             Self::ActiveCamo => "active camo",
@@ -170,6 +174,7 @@ impl H2Layer {
             | Self::LightDiffuseHigh
             | Self::LightDiffuseLow
             | Self::LightDiffuseVeryLow => H2_SPHERE_LIGHT_DIFFUSE_IMPLEMENTATION,
+            Self::LightGel => H2_GEL_LIGHT_DIFFUSE_IMPLEMENTATION,
             Self::ActiveCamo => H2_FULL_ACTIVE_CAMO_IMPLEMENTATION,
             _ => 0,
         }
@@ -304,7 +309,10 @@ const H2_OBJECT_LIGHTMAP_IMPLEMENTATION: usize = 2;
 const H2_FULL_ACTIVE_CAMO_IMPLEMENTATION: usize = 1;
 /// `render_light_get_diffuse_implementation_index` for a light of type sphere.
 const H2_SPHERE_LIGHT_DIFFUSE_IMPLEMENTATION: usize = 1;
+/// The same for a frustum with neither specular nor a shadow.
+const H2_GEL_LIGHT_DIFFUSE_IMPLEMENTATION: usize = 3;
 const LIGHT_FALLOFF: &str = "LIGHT falloff";
+const LIGHT_GEL: &str = "LIGHT gel";
 const ACTIVE_CAMO_AMOUNT: &str = "OBJECT active camo amount";
 /// The one frame texture a preview can supply itself.
 const VECTOR_NORMALIZATION: &str = "GLOBAL vector-normalization";
@@ -1006,6 +1014,8 @@ pub(crate) struct H2DrawTexture {
     /// Bound to a white volume. A default light's radius puts a model at the
     /// middle of its falloff, which reads 1.
     pub(crate) falloff: bool,
+    /// Bound for each light from its own `gel map`.
+    pub(crate) gel: bool,
 }
 
 /// A pass ready for the renderer: resolved, translated and decoded on the
@@ -1319,6 +1329,7 @@ pub(in crate::app) fn h2_pass_needs_frame_texture(pass: &H2Pass, has_texaccum: b
             H2ParameterValue::Extern(name)
                 if name != VECTOR_NORMALIZATION
                     && name != LIGHT_FALLOFF
+                    && name != LIGHT_GEL
                     && name != FRAME_COPY
                     && name != ACTIVE_CAMO_BUMP
                     && !CAMERA_FEEDS.contains(&name.as_str())
@@ -1573,12 +1584,14 @@ pub(in crate::app) fn prepare_draw_pass(
                 value,
                 Some(H2ParameterValue::Extern(name)) if name == LIGHT_FALLOFF
             );
+            let gel = matches!(value, Some(H2ParameterValue::Extern(name)) if name == LIGHT_GEL);
             H2DrawTexture {
                 slot: sampler.slot,
                 kind: sampler.kind,
                 image,
                 normalization,
                 texaccum,
+                gel,
                 frame_copy: matches!(
                     value,
                     Some(H2ParameterValue::Extern(name))
