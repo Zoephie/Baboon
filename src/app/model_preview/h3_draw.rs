@@ -2,6 +2,7 @@
 //! albedo and normal into targets, a lit pass reading them back into an HDR
 //! accumulation target, and the final composite's tone curve onto the scene.
 
+use super::h3_bloom::H3Bloom;
 use super::h3_prt::{H3PrtKind, second_order_rotation};
 use std::borrow::Cow;
 
@@ -62,13 +63,12 @@ void main() {
 const COMPOSITE_FRAGMENT: &str = "#version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
-uniform float bloom_intensity;
 uniform vec4 tone_curve_constants;
 out vec4 color;
 void main() {
     vec4 accumulated = texelFetch(accumulation, ivec2(gl_FragCoord.xy), 0);
     vec2 place = gl_FragCoord.xy / vec2(textureSize(accumulation, 0));
-    vec3 blend = accumulated.rgb + texture(bloom, place).rgb * bloom_intensity;
+    vec3 blend = accumulated.rgb + texture(bloom, place).rgb;
     vec3 clamped = min(blend, tone_curve_constants.xxx);
     vec3 toned = ((clamped * tone_curve_constants.w + tone_curve_constants.z) * clamped
         + tone_curve_constants.y) * clamped;
@@ -79,11 +79,6 @@ void main() {
     color.a = accumulated.a;
 }
 ";
-
-/// `globals\default.camera_fx_settings`' bloom point and inherent bloom.
-const BLOOM_CURVE: [f32; 2] = [1.2, 0.2];
-/// Its bloom intensity.
-const BLOOM_INTENSITY: f32 = 0.2;
 
 /// The targets a frame draws through.
 pub(super) struct H3Targets {
@@ -97,7 +92,7 @@ pub(super) struct H3Targets {
     behind: glow::NativeTexture,
 }
 
-unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Option<glow::NativeProgram> {
+pub(super) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Option<glow::NativeProgram> {
     unsafe {
         let program = gl.create_program().ok()?;
         for (kind, source) in [(glow::VERTEX_SHADER, COMPOSITE_VERTEX), (glow::FRAGMENT_SHADER, fragment)] {
@@ -891,7 +886,7 @@ impl ModelGlRenderer {
                 gl.color_mask(true, true, true, true);
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            let bloom = if frame.bloom { self.h3_blurred_bloom(gl, framebuffer, accumulation, size) } else { None };
+            let bloom = if frame.bloom { self.h3_built_bloom(gl, framebuffer, accumulation, size) } else { None };
             self.h3_composite(gl, accumulation, bloom);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
@@ -899,7 +894,7 @@ impl ModelGlRenderer {
         }
     }
 
-    unsafe fn h3_blurred_bloom(
+    unsafe fn h3_built_bloom(
         &mut self,
         gl: &glow::Context,
         framebuffer: glow::NativeFramebuffer,
@@ -908,9 +903,10 @@ impl ModelGlRenderer {
     ) -> Option<glow::NativeTexture> {
         unsafe {
             if self.h3_bloom.is_none() {
-                self.h3_bloom = H2Bloom::new(gl, H2_GLSL_VERSION, true);
+                self.h3_bloom = H3Bloom::new(gl);
             }
-            self.h3_bloom.as_mut()?.blur_hdr(gl, framebuffer, accumulation, size, BLOOM_CURVE)
+            let vertices = self.h3_empty_array(gl);
+            self.h3_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size)
         }
     }
 
@@ -936,8 +932,6 @@ impl ModelGlRenderer {
             gl.bind_texture(glow::TEXTURE_2D, bloom);
             let location = gl.get_uniform_location(program, "bloom");
             gl.uniform_1_i32(location.as_ref(), 1);
-            let location = gl.get_uniform_location(program, "bloom_intensity");
-            gl.uniform_1_f32(location.as_ref(), if bloom.is_some() { BLOOM_INTENSITY } else { 0.0 });
             gl.active_texture(glow::TEXTURE0);
             let location = gl.get_uniform_location(program, "tone_curve_constants");
             gl.uniform_4_f32_slice(location.as_ref(), &TONE_CURVE);

@@ -1116,6 +1116,8 @@ fn paint_model_gl(
 #[cfg(all(test, target_os = "macos"))]
 #[path = "h2_shot.rs"]
 mod h2_shot;
+#[path = "h3_bloom.rs"]
+mod h3_bloom;
 #[path = "h3_draw.rs"]
 mod h3_draw;
 
@@ -2229,7 +2231,7 @@ struct ModelGlRenderer {
     /// Linked passes by their address; none for one that failed.
     h3_programs: HashMap<usize, Option<h3_draw::H3Program>>,
     h3_composite_program: Option<glow::NativeProgram>,
-    h3_bloom: Option<H2Bloom>,
+    h3_bloom: Option<h3_bloom::H3Bloom>,
     h3_empty_vertices: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -3031,7 +3033,7 @@ impl ModelGlRenderer {
             gl.color_mask(true, true, true, true);
             self.draw_h2_passes(gl, frame, slot, order, H2Layer::Bloom, None);
             if self.h2_bloom.is_none() {
-                self.h2_bloom = H2Bloom::new(gl, H2_GLSL_VERSION, false);
+                self.h2_bloom = H2Bloom::new(gl, H2_GLSL_VERSION);
             }
             if let Some(bloom) = &mut self.h2_bloom {
                 bloom.apply(gl, framebuffer, color, size);
