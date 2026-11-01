@@ -247,7 +247,8 @@ void main() {{
             H2Layer::ShadowApply,
             H2DrawPass {
                 depth_bias: H3_SHADOW_APPLY_BIAS,
-                channels: [true; 4],
+                // The accumulation's alpha is what covers the background.
+                channels: [true, true, true, false],
                 blend: Some(H2Blend {
                     equation: H2BlendEquation::Add,
                     source: H2BlendFactor::Zero,
