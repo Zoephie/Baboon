@@ -255,9 +255,13 @@ impl H2UnitWeapons {
 
     /// Clips of what is not held. A name leaves `any` out, as `combat:rifle:idle`
     /// beside `combat:rifle:pr:idle`, so its words are read against the graph.
-    /// A mode with no clips for this class keeps all of its own: the Chief's
-    /// `combat:unarmed` has none.
+    /// A mode with no clips for this class keeps all of its own, and what is
+    /// under `any` is for anything, as the game's search falls through to it.
+    /// With nothing held every clip stays.
     pub(crate) fn hidden(&self, clips: &[&str], class: &str, kinds: &[String]) -> BTreeSet<usize> {
+        if class == UNARMED {
+            return BTreeSet::new();
+        }
         let in_graph = |mode: &str, class: &str| {
             self.graph.iter().any(|entry| entry.mode == mode && entry.class == class)
         };
@@ -283,8 +287,8 @@ impl H2UnitWeapons {
                 [kind, _, ..] if is_kind(mode, clip_class, kind) => Some(*kind),
                 _ => None,
             };
-            let held = of_kind.is_none_or(|kind| kinds.iter().any(|held| held == kind));
-            if *clip_class != class || !held {
+            let held = of_kind.is_none_or(|kind| kind == ANY || kinds.iter().any(|held| held == kind));
+            if (*clip_class != class && *clip_class != ANY) || !held {
                 hidden.insert(index);
             }
         }
@@ -720,6 +724,49 @@ mod tests {
         ];
         let hidden = unit.hidden(&clips, "pistol", &["hp".to_owned()]);
         assert_eq!(hidden, BTreeSet::from([2, 3]));
-        assert!(unit.hidden(&clips, "unarmed", &[]).is_empty(), "no unarmed clips, nothing to swap");
+        assert!(unit.hidden(&clips, "unarmed", &[]).is_empty(), "nothing held, nothing hidden");
+    }
+
+    fn graph_of(entries: &[(&str, &str, &str, bool)]) -> H2UnitWeapons {
+        let graph = entries.iter().map(|(mode, class, kind, has_idle)| GraphEntry {
+            mode: (*mode).to_owned(),
+            class: (*class).to_owned(),
+            kind: (*kind).to_owned(),
+            has_idle: *has_idle,
+        });
+        H2UnitWeapons { graph: graph.collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn what_is_under_any_stays_for_every_weapon() {
+        let unit = graph_of(&[
+            ("combat", "rifle", "any", true),
+            ("combat", "rifle", "br", false),
+            ("combat", "rifle", "ar", false),
+            ("mongoose_p", "any", "any", true),
+            ("mongoose_p", "rifle", "any", true),
+            ("mongoose_p", "flag", "any", true),
+        ]);
+        let clips = [
+            "combat:rifle:any:melee",
+            "combat:rifle:br:melee_strike_1",
+            "combat:rifle:ar:grip",
+            "mongoose_p:any:idle",
+            "mongoose_p:flag:melee",
+            "mongoose_p:rifle:idle",
+        ];
+        let hidden = unit.hidden(&clips, "rifle", &["ar".to_owned()]);
+        assert_eq!(hidden, BTreeSet::from([1, 4]));
+    }
+
+    #[test]
+    fn with_nothing_held_every_clip_stays() {
+        let unit = graph_of(&[
+            ("combat", "unarmed", "any", true),
+            ("combat", "rifle", "any", true),
+        ]);
+        let clips = ["combat:unarmed:airborne_arc", "combat:unarmed:idle", "combat:rifle:melee_airborne"];
+        assert!(unit.hidden(&clips, UNARMED, &[]).is_empty());
+        assert_eq!(unit.hidden(&clips, "rifle", &[]), BTreeSet::from([0, 1]));
     }
 }
