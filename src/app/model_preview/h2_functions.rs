@@ -207,11 +207,6 @@ pub(crate) fn read_h2_object_functions(object: &TagFile) -> Option<H2ObjectFunct
     Some(H2ObjectFunctions { functions })
 }
 
-/// Whether a function is one the preview made to start an event's effect.
-fn is_event_function(name: &str) -> bool {
-    name.contains(": ") && name.split(": ").next().is_some_and(|field| field.contains("effect") || field.contains("detonation"))
-}
-
 /// A button for each effect an event would play. An effect starts when its
 /// function comes on, so a press turns it off for a frame and then on.
 fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut H2FunctionInputs) {
@@ -252,7 +247,8 @@ pub(super) fn draw_h2_function_controls(
             names.push(name);
         }
     }
-    let (events, names): (Vec<&str>, Vec<&str>) = names.into_iter().partition(|name| is_event_function(name));
+    let (events, names): (Vec<&str>, Vec<&str>) =
+        names.into_iter().partition(|name| super::h3_effects::is_event_function(name));
     draw_event_effects(ui, &events, key, set);
     if names.is_empty() {
         return;
@@ -302,6 +298,7 @@ mod tests {
 
     #[test]
     fn an_events_function_goes_by_its_field_and_a_region_name_does_not() {
+        use super::super::h3_effects::is_event_function;
         assert!(is_event_function("firing effect: firing"));
         assert!(is_event_function("transition effect (generic): human_explosion_large"));
         assert!(!is_event_function("headlights"));

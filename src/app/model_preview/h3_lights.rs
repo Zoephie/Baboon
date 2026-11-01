@@ -7,6 +7,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
+use super::h3_effects::adopt_event_function;
 use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeFlareView, CeSprite, posed_on};
 use super::h3_effects::{
@@ -145,6 +146,7 @@ impl H3Light {
 
     /// Follow the regions `merge_attached` renames for what `name` brings.
     pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
         if let Some((region, _)) = &mut self.only_under {
             *region = format!("{name}: {region}");
         }
@@ -629,6 +631,7 @@ impl H3FlareAt {
 
     /// Follow the regions `merge_attached` renames for what `name` brings.
     pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
         if let Some((region, _)) = &mut self.only_under {
             *region = format!("{name}: {region}");
         }

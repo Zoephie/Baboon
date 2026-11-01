@@ -372,6 +372,20 @@ pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3O
 
 const WORLD_ORIENTATION: &str = "use parent position but world orientation";
 
+/// Whether a function is one the preview made to start an event's effect.
+pub(super) fn is_event_function(name: &str) -> bool {
+    name.rsplit_once(": ").is_some_and(|(field, _)| field.contains("effect") || field.contains("detonation"))
+}
+
+/// Hand an attached object's event effect to the object it is on, under its
+/// name, so that one panel plays them all.
+pub(super) fn adopt_event_function(name: &str, function: &mut String, object: &mut u8) {
+    if is_event_function(function) {
+        *function = format!("{name}: {function}");
+        *object = 0;
+    }
+}
+
 /// How deep an effect's parts may name further effects: the tags go one down.
 const MOST_NESTING: usize = 3;
 
@@ -535,6 +549,17 @@ mod tests {
         assert!(once.age(0, 1.0).is_some());
         assert_eq!(once.age(0, 3.0), None);
         assert!(once.moves());
+    }
+
+    #[test]
+    fn an_attached_objects_event_effect_moves_to_its_owner_and_a_function_of_its_own_does_not() {
+        let (mut function, mut object) = ("firing effect: firing".to_owned(), 3);
+        adopt_event_function("gun", &mut function, &mut object);
+        assert_eq!((function.as_str(), object), ("gun: firing effect: firing", 0));
+        assert!(is_event_function("gun: firing effect: firing"));
+        let (mut function, mut object) = ("power".to_owned(), 3);
+        adopt_event_function("gun", &mut function, &mut object);
+        assert_eq!((function.as_str(), object), ("power", 3));
     }
 
     #[test]

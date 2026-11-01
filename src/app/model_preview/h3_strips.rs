@@ -7,6 +7,7 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
+use super::h3_effects::adopt_event_function;
 use super::ce_attachments::elements;
 use super::ce_lights::{CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
@@ -721,6 +722,7 @@ impl H3StripAt {
     }
 
     pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
         if let Some((region, _)) = &mut self.only_under {
             *region = format!("{name}: {region}");
         }
