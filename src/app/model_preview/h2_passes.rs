@@ -1045,8 +1045,8 @@ pub(crate) struct H2DrawPass {
     /// Components of `constants` the shader animates: register, component.
     animated_constants: Vec<(u32, usize, Vec<H2Animation>)>,
     animated_rows: Vec<H2AnimatedRow>,
-    animated_tint_facing: Vec<H2Animation>,
-    animated_tint_glancing: Vec<H2Animation>,
+    animated_tint_facing: Vec<H2AnimatedTint>,
+    animated_tint_glancing: Vec<H2AnimatedTint>,
     /// Halo CE reworks its rows and a constant by its own functions.
     pub(crate) ce_animation: Option<std::sync::Arc<CeModelAnimation>>,
 }
@@ -1086,8 +1086,7 @@ impl H2DrawPass {
     pub(crate) fn moves(&self) -> bool {
         self.animated_constants.iter().flat_map(|(_, _, animations)| animations)
             .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
-            .chain(&self.animated_tint_facing)
-            .chain(&self.animated_tint_glancing)
+            .chain(self.animated_tints())
             .any(H2Animation::moves)
             || self.ce_animation.as_ref().is_some_and(|animation| animation.moves())
     }
@@ -1102,8 +1101,7 @@ impl H2DrawPass {
         let constants = self.animated_constants.iter().flat_map(|(_, _, animations)| animations);
         constants
             .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
-            .chain(&self.animated_tint_facing)
-            .chain(&self.animated_tint_glancing)
+            .chain(self.animated_tints())
             .filter_map(|animation| animation.held_input.as_ref().map(|(name, _)| name.as_str()))
     }
 
@@ -1122,10 +1120,23 @@ impl H2DrawPass {
         rows
     }
 
+    fn animated_tints(&self) -> impl Iterator<Item = &H2Animation> {
+        self.animated_tint_facing.iter().chain(&self.animated_tint_glancing)
+            .flat_map(|(_, animations)| animations)
+    }
+
     pub(crate) fn tints_at(&self, clock: H2Clock<'_>) -> ([f32; 4], [f32; 4]) {
+        let at = |mut tint: [f32; 4], animated: &[H2AnimatedTint]| {
+            for (mask, animations) in animated {
+                if let Some(vector) = animated_vector(animations, clock) {
+                    fill_components(&mut tint, vector, *mask);
+                }
+            }
+            tint
+        };
         (
-            animated_vector(&self.animated_tint_facing, clock).unwrap_or(self.tint_facing),
-            animated_vector(&self.animated_tint_glancing, clock).unwrap_or(self.tint_glancing),
+            at(self.tint_facing, &self.animated_tint_facing),
+            at(self.tint_glancing, &self.animated_tint_glancing),
         )
     }
 
@@ -1149,6 +1160,9 @@ pub(crate) struct H2ChangePermutation {
     pub(crate) upper: [f32; 3],
     pub(crate) variant: String,
 }
+
+/// Animations of a tint, with the components they write.
+type H2AnimatedTint = ([bool; 4], Vec<H2Animation>);
 
 /// An object's four change color channels.
 pub(crate) type H2ChangeColors = [Vec<H2ChangePermutation>; 4];
@@ -1405,6 +1419,27 @@ fn parameter_vector(value: &H2ParameterValue, specular_brightness: f32) -> [f32;
     }
 }
 
+/// The components a vertex constant's `component mask` writes. Color and
+/// brightness are separate parameters sharing a register, as rgb and alpha.
+fn component_mask(components: &str) -> [bool; 4] {
+    match components {
+        "x (value)" => [true, false, false, false],
+        "y (value)" => [false, true, false, false],
+        "z (value)" => [false, false, true, false],
+        "w (value)" => [false, false, false, true],
+        "xyz/rgb (color)" => [true, true, true, false],
+        _ => [true; 4],
+    }
+}
+
+fn fill_components(target: &mut [f32; 4], value: [f32; 4], mask: [bool; 4]) {
+    for (index, write) in mask.into_iter().enumerate() {
+        if write {
+            target[index] = value[index];
+        }
+    }
+}
+
 fn channel_mask(channels: &str) -> [bool; 4] {
     match channels {
         "color only" => [true, true, true, false],
@@ -1594,17 +1629,14 @@ pub(in crate::app) fn prepare_draw_pass(
         if constant.bank.starts_with("Vn") {
             let value = lookup(&constant.parameter)
                 .map_or([1.0; 4], |value| parameter_vector(value, specular_brightness));
-            match constant.register {
-                10 => {
-                    tint_facing = value;
-                    animated_tint_facing = animations_of(&constant.parameter);
-                }
-                11 => {
-                    tint_glancing = value;
-                    animated_tint_glancing = animations_of(&constant.parameter);
-                }
-                _ => {}
-            }
+            let mask = component_mask(&constant.components);
+            let (tint, animated) = match constant.register {
+                10 => (&mut tint_facing, &mut animated_tint_facing),
+                11 => (&mut tint_glancing, &mut animated_tint_glancing),
+                _ => continue,
+            };
+            fill_components(tint, value, mask);
+            animated.push((mask, animations_of(&constant.parameter)));
             continue;
         }
         let Some(row) = texture_rows.get_mut(constant.register.max(0) as usize) else {
@@ -1934,6 +1966,32 @@ mod tests {
         assert_eq!(drawn.tint_facing, [0.25, 0.5, 0.75, 1.0]);
         assert_eq!(drawn.tint_glancing, [1.0; 4]);
         assert_eq!(drawn.change_colors, [(2, 0, 0), (2, 1, 0), (2, 2, 0)]);
+    }
+
+    #[test]
+    fn tint_color_and_brightness_share_a_register() {
+        let pass = H2Pass {
+            path: String::new(),
+            implementation: 0,
+            vertex_shader: "rasterizer\\vertex_shaders_dx9\\transparent_generic_default".to_owned(),
+            blend: None,
+            depth: H2Depth { compare: None, write: false },
+            channels: "color only".to_owned(),
+            custom_channels: None,
+            alpha_test: None,
+            textures: Vec::new(),
+            parameters: vec![
+                ("color".to_owned(), H2ParameterValue::Color([0.5, 0.0, 0.25])),
+                ("bright".to_owned(), H2ParameterValue::Value(0.8)),
+            ],
+            vertex_constants: vec![
+                H2VertexConstant { parameter: "color".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "xyz/rgb (color)".to_owned() },
+                H2VertexConstant { parameter: "bright".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "w (value)".to_owned() },
+            ],
+            animations: HashMap::new(),
+        };
+        let drawn = prepare_draw_pass(&pass, "float4 main(\n)\n{\n    return 0;\n}\n", HashMap::new(), 1.0, |_, _| None, |_| [1.0, 1.0]).unwrap();
+        assert_eq!(drawn.tint_facing, [0.5, 0.0, 0.25, 0.8]);
     }
 
     #[test]
