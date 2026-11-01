@@ -1519,6 +1519,11 @@ fn draw_model_view_settings_menu(
                  fixed lighting plus two sphere lights. Off, they are lit as an \
                  object in a level with lightmaps.",
             );
+            ui.add_enabled(state.h2_game_shaders, egui::Checkbox::new(&mut state.h2_prt, "PRT"))
+                .on_hover_text(
+                    "Use the occlusion Halo 2 and Halo 3 models bake into their vertices. \
+                     Off, they light as though nothing shades them.",
+                );
             ui.add_enabled(
                 state.h2_game_shaders && !state.h2_default_lights,
                 egui::Checkbox::new(&mut state.h2_light_follows_camera, "Light Follows Camera"),

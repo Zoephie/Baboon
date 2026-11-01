@@ -1064,7 +1064,8 @@ unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: H3Sampler) 
 /// What `render_mesh_part_default` lights a part with.
 fn h3_lit_pass<'a>(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch, material: &'a H3Material) -> &'a Arc<H3Pass> {
     let vertex = frame.preview.indices.get(batch.index_start as usize).copied().unwrap_or(0);
-    let kind = frame.preview.h3_prt.as_ref().map_or(H3PrtKind::None, |prt| prt.kind_at(vertex));
+    let prt = frame.preview.h3_prt.as_ref().filter(|_| frame.prt);
+    let kind = prt.map_or(H3PrtKind::None, |prt| prt.kind_at(vertex));
     let slot = match kind {
         H3PrtKind::Ambient => Some(0),
         H3PrtKind::Linear => Some(1),

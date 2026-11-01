@@ -254,6 +254,7 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) h2_active_camo: bool,
     pub(in crate::app) h2_bloom: bool,
     pub(in crate::app) h2_self_shadow: bool,
+    pub(in crate::app) h2_prt: bool,
     /// What the panel set an opened Halo CE object's function inputs to.
     pub(in crate::app) ce_function_inputs: super::ce_functions::CeFunctionInputs,
     /// What the panel has set of a Halo 2 object's functions.
@@ -323,6 +324,7 @@ impl Default for ModelPreviewState {
             h2_active_camo: false,
             h2_bloom: true,
             h2_self_shadow: false,
+            h2_prt: true,
             ce_function_inputs: Default::default(),
             h2_function_inputs: Default::default(),
             textures_pending: false,

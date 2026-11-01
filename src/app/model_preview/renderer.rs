@@ -127,6 +127,7 @@ pub(super) fn draw_model_viewport(
         active_camo: state.h2_active_camo,
         bloom: state.h2_bloom,
         self_shadow: state.h2_self_shadow,
+        prt: state.h2_prt,
         light_follows_camera: state.h2_light_follows_camera,
         time,
         h2_prt_clusters: None,
@@ -793,6 +794,7 @@ struct ModelGpuFrame {
     active_camo: bool,
     bloom: bool,
     self_shadow: bool,
+    prt: bool,
     light_follows_camera: bool,
     /// Seconds, for what Halo 2 shaders animate.
     time: f32,
@@ -986,7 +988,7 @@ impl ModelGpuFrame {
     }
 
     fn h2_object_prt_clusters(&self) -> Option<[Vec<[f32; 4]>; 2]> {
-        let prt = self.preview.h2_prt.as_ref().filter(|_| self.game_shaders && !self.default_lights)?;
+        let prt = self.preview.h2_prt.as_ref().filter(|_| self.prt && self.game_shaders && !self.default_lights)?;
         let (lights, ambient) = h2_prt_object_lights(self.h2_object_light());
         Some([prt.clusters_lit_by(&lights, ambient), prt.clusters_lit_by(&lights[..1], ambient)])
     }
@@ -2829,7 +2831,7 @@ impl ModelGlRenderer {
         let passes = Self::h2_passes(frame, material, layer);
         self.h2_supported
             && !passes.is_empty()
-            && (layer != H2Layer::Prt || frame.preview.h2_prt.is_some())
+            && (layer != H2Layer::Prt || (frame.prt && frame.preview.h2_prt.is_some()))
             && passes.iter().all(|pass| {
                 self.h2_programs
                     .get(&(pass.stage, pass.fragment.clone()))
