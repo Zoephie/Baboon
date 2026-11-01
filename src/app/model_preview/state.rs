@@ -213,10 +213,13 @@ pub(in crate::app) struct ModelPreviewState {
     /// The `high_detail` value the cached `data` was built with, so toggling it
     /// invalidates the cache and reloads.
     pub(in crate::app) loaded_high_detail: bool,
-    /// Halo CE bipeds: the weapon held, by path. They start with none.
-    pub(in crate::app) ce_weapon: Option<String>,
-    /// The `ce_weapon` the cached `data` was built with.
-    pub(in crate::app) loaded_ce_weapon: Option<String>,
+    /// Bipeds: the weapon held, by path. They start with none.
+    pub(in crate::app) weapon: Option<String>,
+    /// The `weapon` the cached `data` was built with.
+    pub(in crate::app) loaded_weapon: Option<String>,
+    /// Halo 2 bipeds: what the left hand holds.
+    pub(in crate::app) secondary_weapon: Option<String>,
+    pub(in crate::app) loaded_secondary_weapon: Option<String>,
     /// What outlives the reload a weapon change makes: the old geometry's id,
     /// for its function inputs, and the region selections.
     pub(in crate::app) ce_weapon_carry: Option<(u64, HashMap<String, ModelRegionSelection>)>,
@@ -300,8 +303,10 @@ impl Default for ModelPreviewState {
             marker_filter: String::new(),
             high_detail: true,
             loaded_high_detail: false,
-            ce_weapon: None,
-            loaded_ce_weapon: None,
+            weapon: None,
+            loaded_weapon: None,
+            secondary_weapon: None,
+            loaded_secondary_weapon: None,
             ce_weapon_carry: None,
             ce_clip_after_load: None,
             show_collision: false,
@@ -351,7 +356,8 @@ impl ModelPreviewState {
         self.loaded_key.as_deref() != Some(entry_key)
             || self.data.is_none()
             || self.loaded_high_detail != self.high_detail
-            || self.loaded_ce_weapon != self.ce_weapon
+            || self.loaded_weapon != self.weapon
+            || self.loaded_secondary_weapon != self.secondary_weapon
             || self.loaded_scenario_selection != self.scenario_bsp_selection
     }
 }
@@ -500,6 +506,10 @@ pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) ce_weapons: Option<super::ce_attachments::CeBipedWeapons>,
     /// Halo 2: the functions of an opened object.
     pub(in crate::app) h2_object_functions: Option<super::h2_functions::H2ObjectFunctions>,
+    /// Halo 2 units: what they can hold.
+    pub(in crate::app) h2_weapons: Option<super::h2_weapons::H2UnitWeapons>,
+    /// Halo 2 units: what they hold.
+    pub(in crate::app) h2_attached: Vec<super::h2_weapons::H2AttachedObject>,
     /// Scenario tags only: the `structure bsps` block's references (one per
     /// element, `None` where the reference is empty), driving the per-BSP
     /// checkbox list. Empty for every other tag group.

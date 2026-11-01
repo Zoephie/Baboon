@@ -153,8 +153,9 @@ pub(super) fn resting_aim(graph: &TagFile, clip: &str) -> Vec<(usize, usize)> {
 /// A hand held to a marker of the weapon: an IK point of the animations.
 #[derive(Debug, Clone)]
 pub(crate) struct CeWeaponIk {
-    /// The weapon class whose clips hold it, the second word of their names.
-    class: String,
+    /// Which clips hold it: a Halo CE weapon class, the second word of their
+    /// names, or a Halo 2 mode, the first.
+    pub(super) scope: String,
     hand: usize,
     elbow: usize,
     shoulder: usize,
@@ -164,12 +165,18 @@ pub(crate) struct CeWeaponIk {
     weapon_node: usize,
     /// The marker on the weapon, in bind space.
     grip: Matrix4,
+    /// The nodes below the hand, which move with it.
+    pub(super) carried: Vec<usize>,
 }
 
 impl CeWeaponIk {
+    pub(super) fn hand(&self) -> usize {
+        self.hand
+    }
+
     /// Whether a clip is one of the held weapon's, played with IK on.
     pub(super) fn runs_through(&self, clip: &str) -> bool {
-        clip.split(' ').any(|word| word.eq_ignore_ascii_case(&self.class)) && clip_runs_weapon_ik(clip)
+        clip.split(' ').any(|word| word.eq_ignore_ascii_case(&self.scope)) && clip_runs_weapon_ik(clip)
     }
 
     /// Pose the arm. `worlds` holds each node's posed transform, and
@@ -185,8 +192,14 @@ impl CeWeaponIk {
         let [Some(shoulder), Some(elbow), Some(hand)] = &mut arm else {
             return;
         };
+        let was = *hand;
         reach_with_arm(desired, shoulder, elbow, hand);
         (worlds[self.shoulder], worlds[self.elbow], worlds[self.hand]) = (*shoulder, *elbow, *hand);
+        // `render_model_adjust_hand`: what it did to the hand, from there down.
+        let moved = *hand * rigid_inverse(&was);
+        for node in &self.carried {
+            worlds[*node] = moved * worlds[*node];
+        }
     }
 }
 
@@ -214,7 +227,7 @@ pub(crate) struct CeEquippable {
     pub(crate) name: String,
     /// The `weapons` entry of the animations that holds it.
     pub(crate) class: String,
-    pub(super) label: String,
+    label: String,
 }
 
 /// What a biped can hold, and which clips the held weapon leaves out.
@@ -317,7 +330,7 @@ fn hidden_clips(graph: &TagFile, weapon_label: &str) -> std::collections::BTreeS
 }
 
 /// `.weapon` tags of a loose folder, by path without the extension.
-fn loose_weapon_paths(root: &std::path::Path) -> Vec<String> {
+pub(super) fn loose_weapon_paths(root: &std::path::Path) -> Vec<String> {
     let mut found = Vec::new();
     let mut folders = vec![root.to_path_buf()];
     while let Some(folder) = folders.pop() {
@@ -421,10 +434,10 @@ pub(super) fn attached_marker_frame(
 }
 
 /// An IK point of a weapon held on `parent`, if both markers and the arm exist.
-fn weapon_ik(
+pub(super) fn weapon_ik(
     preview: &RenderModelPreview,
     weapon: &RenderModelPreview,
-    class: &str,
+    scope: &str,
     parent: MarkerFrame,
     child: MarkerFrame,
     marker: &str,
@@ -444,13 +457,14 @@ fn weapon_ik(
     let moved = on_weapon.axes.map(|axis| attach_vector(&parent, &child, axis));
     let position = attach_point(&parent, &child, on_weapon.position);
     Some(CeWeaponIk {
-        class: class.to_owned(),
+        scope: scope.to_owned(),
         hand,
         elbow,
         shoulder,
         hand_from_marker: rigid_inverse(&(inverse_bind * matrix_of(on_hand.axes, on_hand.position))),
         weapon_node: parent.node.max(0) as usize,
         grip: matrix_of(moved, position),
+        carried: Vec::new(),
     })
 }
 
@@ -583,13 +597,14 @@ mod tests {
     #[test]
     fn ik_belongs_to_the_held_weapons_clips() {
         let ik = CeWeaponIk {
-            class: "rifle".to_owned(),
+            scope: "rifle".to_owned(),
             hand: 2,
             elbow: 1,
             shoulder: 0,
             hand_from_marker: IDENTITY,
             weapon_node: 3,
             grip: IDENTITY,
+            carried: Vec::new(),
         };
         assert!(ik.runs_through("stand rifle idle"));
         assert!(!ik.runs_through("stand unarmed idle"));
@@ -635,6 +650,7 @@ mod tests {
             name: "Gun".to_owned(),
             node_index: 2,
             position: [1.0, 2.0, 3.0],
+            scale: 1.0,
             axes: MarkerFrame::ORIGIN.axes,
         });
         assert_eq!(MarkerFrame::find(&preview, ""), MarkerFrame::ORIGIN);

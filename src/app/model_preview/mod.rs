@@ -30,9 +30,11 @@ mod ce_lights;
 mod ce_passes;
 mod h2_bloom;
 pub(in crate::app) mod h2_functions;
+mod h2_lights;
 pub(in crate::app) mod h2_passes;
 pub(in crate::app) mod h2_prt;
 pub(in crate::app) mod h2_stage;
+mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod renderer;
@@ -101,6 +103,10 @@ pub(crate) struct RenderModelPreview {
     pub weapon_ik: Vec<ce_attachments::CeWeaponIk>,
     /// Halo CE: the lens flares of the object and what it holds.
     pub ce_lights: Vec<ce_lights::CeLight>,
+    /// Halo 2 lens flares, on the markers of the object and what it holds.
+    pub h2_flares: Vec<h2_lights::H2FlareAt>,
+    /// Halo 2 sphere lights on the object and what it holds.
+    pub h2_point_lights: Vec<h2_lights::H2PointLight>,
     /// Halo CE: the antennas among the object's widgets.
     pub ce_antennas: Vec<ce_lights::CeAntenna>,
 }
@@ -220,6 +226,7 @@ pub(crate) struct RenderModelPreviewMarker {
     pub node_index: i16,
     pub position: [f32; 3],
     pub axes: [[f32; 3]; 3],
+    pub scale: f32,
 }
 
 /// One skeleton node, carried so animation playback can run forward
@@ -310,6 +317,8 @@ fn model_preview_data(
         ce_attached: Vec::new(),
         ce_weapons: None,
         h2_object_functions: None,
+        h2_weapons: None,
+        h2_attached: Vec::new(),
         scenario_bsps: Vec::new(),
         animations: None,
     }
@@ -506,7 +515,12 @@ pub(super) fn draw_model_preview_panel(
                             ui.spacing_mut().item_spacing.x = 4.0;
                             ui.add_enabled_ui(!animations.is_empty(), |ui| {
                                 let no_clips = std::collections::BTreeSet::new();
-                                let hidden = data.ce_weapons.as_ref().map_or(&no_clips, |weapons| &weapons.hidden_clips);
+                                let hidden = data
+                                    .ce_weapons
+                                    .as_ref()
+                                    .map(|weapons| &weapons.hidden_clips)
+                                    .or_else(|| data.h2_weapons.as_ref().map(|weapons| &weapons.hidden_clips))
+                                    .unwrap_or(&no_clips);
                                 draw_animation_combo(
                                     ui,
                                     &entry.key,
@@ -923,35 +937,35 @@ const WEAPON_PICKER_HEIGHT: f32 = 300.0;
 
 /// Whether the weapon list overflows its popup: `None`, a heading per class,
 /// and a row per weapon.
-fn weapon_picker_scrolls(weapons: &[ce_attachments::CeEquippable], row_height: f32) -> bool {
+fn weapon_picker_scrolls(weapons: &[attachment::WeaponOption], row_height: f32) -> bool {
     let classes = weapons.chunk_by(|a, b| a.class == b.class).count();
     (1 + classes + weapons.len()) as f32 * row_height > WEAPON_PICKER_HEIGHT
 }
 
 /// A weapon's row survives a search by its own name or its class's.
-fn weapon_matches(weapon: &ce_attachments::CeEquippable, query: &str) -> bool {
+fn weapon_matches(weapon: &attachment::WeaponOption, query: &str) -> bool {
     weapon.name.to_lowercase().contains(query) || weapon.class.to_lowercase().contains(query)
 }
 
-/// Which weapon a Halo CE biped holds. Changing it reloads the preview, so
-/// what should outlive that goes along with the state.
-fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
-    let Some(weapons) = data.ce_weapons.as_ref().filter(|weapons| !weapons.equippable.is_empty())
-    else {
-        return;
-    };
-    let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.ce_weapon.as_ref());
+/// A dropdown of weapons, returning what was picked, `None` being empty hands.
+fn weapon_dropdown(
+    ui: &mut Ui,
+    label: &str,
+    salt: (&str, &str),
+    weapons: &[attachment::WeaponOption],
+    held: Option<&attachment::WeaponOption>,
+) -> Option<Option<String>> {
     let mut chosen = None;
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        ui.label("Weapon");
-        let popup_id = ui.make_persistent_id(("ce_weapon_picker", &data.render_model_path));
+        ui.label(label);
+        let popup_id = ui.make_persistent_id(salt);
         let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
         let response = picker_button(
             ui,
             popup_id,
             held.map_or("None", |weapon| weapon.name.as_str()),
-            weapons.equippable.len(),
+            weapons.len(),
             220.0,
             text_dark(),
             true,
@@ -971,7 +985,7 @@ fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
                 let row_height = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
                 let mut query = String::new();
                 let mut changed = false;
-                if weapon_picker_scrolls(&weapons.equippable, row_height) {
+                if weapon_picker_scrolls(weapons, row_height) {
                     let filter_id = popup_id.with("entry_search");
                     let mut filter = ui
                         .data(|data| data.get_temp::<String>(filter_id))
@@ -991,7 +1005,7 @@ fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
                         }
                     }
                     let mut class = None;
-                    for weapon in &weapons.equippable {
+                    for weapon in weapons {
                         if !weapon_matches(weapon, &query) {
                             continue;
                         }
@@ -1012,18 +1026,79 @@ fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
                 });
             });
     });
-    let Some(choice) = chosen.filter(|choice| *choice != state.ce_weapon) else {
-        return;
-    };
+    chosen
+}
+
+/// Note what should outlive the reload a weapon change makes.
+fn carry_through_weapon_change(data: &ModelPreviewData, state: &mut ModelPreviewState) {
     let animations = data.animations.as_deref().map_or(&[][..], Vec::as_slice);
     state.ce_clip_after_load =
         state.animation.selected.and_then(|index| Some(animations.get(index)?.name.clone()));
     state.ce_weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
-    state.ce_weapon = choice;
+}
+
+/// Which weapon a Halo CE biped holds. Changing it reloads the preview, so
+/// what should outlive that goes along with the state.
+fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+    let Some(weapons) = data.ce_weapons.as_ref().filter(|weapons| !weapons.equippable.is_empty())
+    else {
+        return;
+    };
+    let options: Vec<_> = weapons
+        .equippable
+        .iter()
+        .map(|weapon| attachment::WeaponOption {
+            path: weapon.path.clone(),
+            name: weapon.name.clone(),
+            class: weapon.class.clone(),
+        })
+        .collect();
+    let held = options.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
+    let salt = ("ce_weapon_picker", data.render_model_path.as_str());
+    let chosen = weapon_dropdown(ui, "Weapon", salt, &options, held);
+    if let Some(choice) = chosen.filter(|choice| *choice != state.weapon) {
+        carry_through_weapon_change(data, state);
+        state.weapon = choice;
+    }
+}
+
+/// A Halo 2 unit's two hands. The left only opens for what can pair, and
+/// a primary that cannot pair empties it.
+fn draw_h2_weapon_pickers(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+    let Some(weapons) = data.h2_weapons.as_ref().filter(|weapons| !weapons.equippable.is_empty())
+    else {
+        return;
+    };
+    let primaries = weapons.primaries();
+    let held = primaries.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
+    let salt = ("h2_primary_picker", data.render_model_path.as_str());
+    if let Some(choice) = weapon_dropdown(ui, "Primary", salt, &primaries, held)
+        .filter(|choice| *choice != state.weapon)
+    {
+        carry_through_weapon_change(data, state);
+        let pairs = weapons.secondaries(choice.as_deref());
+        if !pairs.iter().any(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref()) {
+            state.secondary_weapon = None;
+        }
+        state.weapon = choice;
+    }
+    let secondaries = weapons.secondaries(state.weapon.as_deref());
+    if secondaries.is_empty() {
+        return;
+    }
+    let held = secondaries.iter().find(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref());
+    let salt = ("h2_secondary_picker", data.render_model_path.as_str());
+    if let Some(choice) = weapon_dropdown(ui, "Secondary", salt, &secondaries, held)
+        .filter(|choice| *choice != state.secondary_weapon)
+    {
+        carry_through_weapon_change(data, state);
+        state.secondary_weapon = choice;
+    }
 }
 
 fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
     draw_ce_weapon_picker(ui, data, state);
+    draw_h2_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.h2_object_functions {
         let time = ui.input(|input| input.time) as f32;
         let values = renderer::h2_function_values(data, &state.h2_function_inputs, time);

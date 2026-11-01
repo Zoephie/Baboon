@@ -62,12 +62,23 @@ pub(crate) const H2_LAYER_COUNT: usize = 16;
 pub(crate) struct H2DefaultLight {
     pub(crate) position: [f32; 3],
     pub(crate) color: [f32; 3],
+    pub(crate) specular: [f32; 3],
     pub(crate) radius: f32,
 }
 
 pub(crate) const H2_DEFAULT_LIGHTS: [H2DefaultLight; 2] = [
-    H2DefaultLight { position: [2000.0, 2000.0, 2000.0], color: [0.9, 0.9, 0.8], radius: 40000.0 },
-    H2DefaultLight { position: [-2000.0, -2000.0, 500.0], color: [0.2, 0.2, 0.3], radius: 40000.0 },
+    H2DefaultLight {
+        position: [2000.0, 2000.0, 2000.0],
+        color: [0.9, 0.9, 0.8],
+        specular: [0.9, 0.9, 0.8],
+        radius: 40000.0,
+    },
+    H2DefaultLight {
+        position: [-2000.0, -2000.0, 500.0],
+        color: [0.2, 0.2, 0.3],
+        specular: [0.2, 0.2, 0.3],
+        radius: 40000.0,
+    },
 ];
 
 impl H2Layer {
@@ -187,7 +198,7 @@ void main() {{
 /// Stands in for the direct light on the object path, where a shadow leaves
 /// the pass only its ambient, indirect and reflected light.
 pub(crate) const H2_SHADOWED_LIGHT: H2DefaultLight =
-    H2DefaultLight { position: [0.0; 3], color: [0.0; 3], radius: 1.0 };
+    H2DefaultLight { position: [0.0; 3], color: [0.0; 3], specular: [0.0; 3], radius: 1.0 };
 
 /// Which way the object path's direct light lies from a surface. A pass
 /// lights by the negated vector.

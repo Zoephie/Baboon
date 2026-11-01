@@ -5,6 +5,15 @@ use blam_tags::math::Matrix4;
 
 use super::*;
 
+/// One row of a weapon dropdown.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WeaponOption {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    /// The class its row sits under.
+    pub(crate) class: String,
+}
+
 /// `inverse_kinematics_adjust_matrices` keeps the arm this much short of straight.
 pub(super) const LONGEST_REACH: f32 = 0.98;
 

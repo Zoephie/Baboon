@@ -42,7 +42,7 @@ pub(crate) struct CeAntennaQuad {
 }
 
 /// A point and direction on `node`, where the pose puts them.
-fn posed_on(node: usize, position: [f32; 3], direction: [f32; 3], bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
+pub(super) fn posed_on(node: usize, position: [f32; 3], direction: [f32; 3], bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
     let Some(rows) = bones.and_then(|bones| bones.get(node * 3..node * 3 + 3)) else {
         return (position, direction);
     };
@@ -247,6 +247,10 @@ pub(crate) struct CeSprite {
     pub(crate) color: [f32; 3],
     pub(crate) alpha: f32,
     pub(crate) image: usize,
+    /// Halo 2: how strongly the map's brightest parts run to white.
+    pub(crate) highlight: Option<f32>,
+    /// Halo 2: whether the world's depth hides it.
+    pub(crate) depth_tested: bool,
 }
 
 /// Where the preview's camera sits, as the flare math wants it.
@@ -344,6 +348,8 @@ impl CeLight {
             color: [0.0; 3],
             alpha: 0.0,
             image: 0,
+            highlight: None,
+            depth_tested: false,
         })
     }
 
@@ -454,6 +460,8 @@ impl CeLight {
                 color: reflection.tinted(color, time),
                 alpha,
                 image: reflection.image,
+                highlight: None,
+                depth_tested: false,
             });
         }
         sprites

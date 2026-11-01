@@ -280,6 +280,21 @@ pub(super) fn animation_skinning_rows(
     Some(rows)
 }
 
+/// What a Halo 2 unit's weapons lay over the clip at `index` of `clips`.
+fn h2_held_layers(
+    clips: &[PreviewAnimationEntry],
+    index: usize,
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+) -> Vec<super::h2_weapons::H2PoseLayer> {
+    let (Some(weapons), Some(clip)) = (data.h2_weapons.as_ref(), clips.get(index)) else {
+        return Vec::new();
+    };
+    let names: Vec<_> = clips.iter().map(|clip| clip.name.as_str()).collect();
+    let (primary, secondary) = (state.weapon.as_deref(), state.secondary_weapon.as_deref());
+    weapons.pose_layers(&names, &clip.name, primary, secondary)
+}
+
 /// Hold a preview at `H2_SHOT_FRAME` of the clip named `clip`, for `h2_shot`.
 #[cfg(test)]
 pub(super) fn pose_for_shot(
@@ -291,7 +306,8 @@ pub(super) fn pose_for_shot(
 ) {
     let list = list_model_animations(source, entry).unwrap();
     let index = list.iter().position(|animation| animation.name == clip).unwrap();
-    let decoded = decode_model_animation(source, entry, index).unwrap();
+    let layers = h2_held_layers(&list, index, data, state);
+    let decoded = decode_held_animation(source, entry, index, &layers).unwrap();
     let at = std::env::var("H2_SHOT_FRAME").map_or(0, |frame| frame.parse().unwrap());
     let frame = data
         .preview
@@ -336,7 +352,7 @@ fn inverse_bind_matrix(node: &RenderModelPreviewNode) -> Matrix4 {
     }
 }
 
-/// Hold a Halo CE unit's hands to its weapon, for the clips the game does.
+/// Hold a unit's hands to its weapon, for the clips the game does.
 fn apply_weapon_ik(
     data: &ModelPreviewData,
     state: &ModelPreviewState,
@@ -352,7 +368,11 @@ fn apply_weapon_ik(
         return;
     };
     for point in &data.preview.weapon_ik {
-        if point.runs_through(clip) {
+        let runs = match &data.h2_weapons {
+            Some(weapons) => weapons.ik_runs_through(clip, &point.scope),
+            None => point.runs_through(clip),
+        };
+        if runs {
             point.apply(matrices, inverse_binds);
         }
     }
@@ -1429,8 +1449,14 @@ impl Baboon {
             kit: kit.id,
             generation: kit.generation,
         };
+        let mut layers = Vec::new();
         if let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(key) {
             state.animation.decoding = Some(selected);
+            if let Some(Ok(data)) = &state.data
+                && let Some(clips) = data.animations.as_deref()
+            {
+                layers = h2_held_layers(clips, selected, data, state);
+            }
             state.animation.error = None;
         }
 
@@ -1442,7 +1468,7 @@ impl Baboon {
                 stamp,
                 key,
                 animation_index: selected,
-                result: decode_model_animation(&source, &entry, selected),
+                result: decode_held_animation(&source, &entry, selected, &layers),
             },
             move |_| WorkerMessage::ModelAnimationDecoded {
                 stamp,
@@ -1477,7 +1503,7 @@ impl Baboon {
             Ok(entries) => {
                 if let Some(Ok(data)) = state.data.as_mut() {
                     if let (Some(clip), Some(weapons)) = (state.ce_clip_after_load.take(), &data.ce_weapons) {
-                        let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.ce_weapon.as_ref());
+                        let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
                         let class = held.map_or("unarmed", |weapon| weapon.class.as_str());
                         state.animation.selected = super::ce_attachments::clip_after_weapon_change(
                             &entries,
@@ -1485,6 +1511,24 @@ impl Baboon {
                             &clip,
                             class,
                         );
+                    }
+                    if let Some(weapons) = data.h2_weapons.as_mut() {
+                        let (class, kinds) = weapons
+                            .held(state.weapon.as_deref(), state.secondary_weapon.as_deref());
+                        let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();
+                        weapons.hidden_clips = weapons.hidden(&names, &class, &kinds);
+                        if let Some(clip) = state.ce_clip_after_load.take() {
+                            let hidden = &weapons.hidden_clips;
+                            let shown = |name: &str| {
+                                (0..entries.len()).find(|index| {
+                                    entries[*index].name.split('%').next() == Some(name)
+                                        && !hidden.contains(index)
+                                })
+                            };
+                            let mode = clip.split(':').next().unwrap_or_default();
+                            state.animation.selected = shown(clip.split('%').next().unwrap_or_default())
+                                .or_else(|| shown(&format!("{mode}:{class}:idle")));
+                        }
                     }
                     data.animations = Some(std::sync::Arc::new(entries));
                 }
@@ -1721,10 +1765,62 @@ fn ce_rest_pose(skeleton: &Skeleton, gbxmodel: Option<&TagFile>) -> Vec<NodeTran
 
 /// Worker half of the decode request: the extractor's exact composition
 /// recipe (`write_group_jma`), minus the file write.
+#[cfg(test)]
 fn decode_model_animation(
     source: &TagSource,
     entry: &TagEntry,
     animation_index: usize,
+) -> Result<DecodedAnimationPose, String> {
+    decode_held_animation(source, entry, animation_index, &[])
+}
+
+/// Lay `layer` over every frame of `pose`, leaving the arm it does not reach.
+fn lay_over(
+    pose: &mut blam_tags::Pose,
+    animation: &Animation<'_>,
+    skeleton: &Skeleton,
+    left_arm: &[bool],
+    layer: &super::h2_weapons::H2PoseLayer,
+) {
+    use super::h2_weapons::H2Arm;
+    let Some(group) = animation.find(&layer.clip) else {
+        return;
+    };
+    let Ok(clip) = group.decode() else {
+        return;
+    };
+    let kind = blam_tags::extract::animation::jma_kind_for(group);
+    for row in &mut pose.frames {
+        let composed = match kind {
+            JmaKind::Jmo => clip.runtime_overlay_pose(skeleton, row),
+            JmaKind::Jmr => {
+                clip.retargeted_replacement_pose(skeleton, row, &group.object_space_parents)
+            }
+            _ => clip.replacement_pose(skeleton, row),
+        };
+        let Some(composed) = composed.frames.into_iter().next() else {
+            continue;
+        };
+        for (node, (old, new)) in row.iter_mut().zip(composed).enumerate() {
+            let on_left = left_arm.get(node).copied().unwrap_or(false);
+            let reached = match layer.arm {
+                None => true,
+                Some(H2Arm::Left) => on_left,
+                Some(H2Arm::NotLeft) => !on_left,
+            };
+            if reached {
+                *old = new;
+            }
+        }
+    }
+}
+
+/// [`decode_model_animation`] with what a held weapon lays over the clip.
+fn decode_held_animation(
+    source: &TagSource,
+    entry: &TagEntry,
+    animation_index: usize,
+    layers: &[super::h2_weapons::H2PoseLayer],
 ) -> Result<DecodedAnimationPose, String> {
     let model = crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
     if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1 {
@@ -1787,7 +1883,7 @@ fn decode_model_animation(
         .root()
         .field_path("definitions/NEW blend screens")
         .is_none();
-    let pose = match kind {
+    let mut pose = match kind {
         JmaKind::Jmo if solver_rules => clip.runtime_overlay_pose(&skeleton, &base),
         JmaKind::Jmr if solver_rules => {
             clip.retargeted_replacement_pose(&skeleton, &base, &group.object_space_parents)
@@ -1815,6 +1911,12 @@ fn decode_model_animation(
         }
         _ => clip.pose(&skeleton, Some(&defaults)),
     };
+    if !layers.is_empty() {
+        let left_arm = super::h2_weapons::left_arm_nodes(jmad);
+        for layer in layers {
+            lay_over(&mut pose, animation, &skeleton, &left_arm, layer);
+        }
+    }
 
     let loop_frame = usize::try_from(group.loop_frame_index).unwrap_or(0);
     Ok(DecodedAnimationPose::new(&skeleton, &pose, loop_frame))

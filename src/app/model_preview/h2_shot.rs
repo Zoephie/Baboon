@@ -6,7 +6,7 @@
 //! With `H2_SHOT_CE` set, that kit is Halo CE's and the models gbxmodels, or
 //! bipeds with `H2_SHOT_BIPED`, or vehicles with `H2_SHOT_OBJECT=vehicle`, whose
 //! function inputs `H2_SHOT_INPUTS` can set, posed at `H2_SHOT_CLIP`,
-//! holding `H2_SHOT_WEAPON`, with named Halo 2
+//! holding `H2_SHOT_WEAPON` and `H2_SHOT_SECONDARY`, with named Halo 2
 //! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`.
 
 use super::*;
@@ -85,7 +85,9 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         location: TagEntryLocation::LooseFile(file.with_extension(extension)),
     };
     let settings = PreviewLoadSettings {
-        ce_weapon: std::env::var("H2_SHOT_WEAPON").ok(),
+        weapon: std::env::var("H2_SHOT_WEAPON").ok(),
+        secondary_weapon: std::env::var("H2_SHOT_SECONDARY").ok(),
+        h2_equippable: None,
         ..Default::default()
     };
     let mut data = load_model_preview(&tag, &entry, &names, Some(source), &settings).unwrap();
@@ -100,6 +102,8 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     state.yaw = shot.yaw;
     state.pitch = shot.pitch;
     state.perspective = true;
+    state.weapon = settings.weapon.clone();
+    state.secondary_weapon = settings.secondary_weapon.clone();
     if let Ok(clip) = std::env::var("H2_SHOT_CLIP") {
         animation::pose_for_shot(source, &entry, &mut data, &mut state, &clip);
     }
@@ -139,6 +143,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
             object_states(&data, &set, time)
         },
         object_moves: object_functions(&data).any(|functions| functions.move_at_rest()),
+        h2_attached_values: super::h2_attached_values(&data, time),
         h2_values: {
             let mut set = state.h2_function_inputs.clone();
             if let Ok(pairs) = std::env::var("H2_SHOT_FUNCTIONS") {

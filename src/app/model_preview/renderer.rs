@@ -131,8 +131,11 @@ pub(super) fn draw_model_viewport(
         h2_prt_clusters: None,
         object_states: object_states(data, &state.ce_function_inputs, time),
         object_moves: object_functions(data).any(|functions| functions.move_at_rest())
-            || h2_functions_move(data, &state.h2_function_inputs, time),
+            || h2_functions_move(data, &state.h2_function_inputs, time)
+            || data.preview.h2_flares.iter().any(|at| at.animates())
+            || data.preview.h2_point_lights.iter().any(|light| light.animates()),
         h2_values: h2_function_values_for(data, &state.h2_function_inputs, time),
+        h2_attached_values: h2_attached_values(data, time),
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
@@ -766,6 +769,8 @@ struct ModelGpuFrame {
     object_moves: bool,
     /// Halo 2: what its shaders can read of the object's functions.
     h2_values: Option<h2_functions::H2FunctionValues>,
+    /// What a held weapon's own functions read, by owner.
+    h2_attached_values: Vec<(u8, h2_functions::H2FunctionValues)>,
     /// Each object's point lights this frame, in step with `object_states`.
     ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
     /// Draw opaque Halo 2 materials through their passes.
@@ -796,7 +801,10 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let textures = data.textures.iter().flat_map(|textures| textures.iter());
     let passes = textures.flat_map(|texture| texture.h2_layers.iter().flatten());
-    for name in passes.flat_map(|pass| pass.function_inputs()) {
+    let flares = data.preview.h2_flares.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
+    let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == 0);
+    let flares = flares.chain(lights.map(|light| light.scale_name())).filter(|name| !name.is_empty());
+    for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares) {
         if !names.iter().any(|known| known == name) {
             names.push(name.to_owned());
         }
@@ -816,12 +824,28 @@ pub(super) fn h2_function_values(
     })
 }
 
+/// Weapons in hand run on their own functions, at rest: the sliders are the
+/// opened object's.
+fn h2_attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, h2_functions::H2FunctionValues)> {
+    if data.h2_attached.is_empty() {
+        return Vec::new();
+    }
+    let inputs = h2_shader_inputs(data);
+    let rest = h2_functions::H2FunctionInputs::default();
+    let values = data.h2_attached.iter().map(|attached| {
+        (attached.owner, attached.functions.values(&rest, data.geometry_id, &inputs, time))
+    });
+    values.collect()
+}
+
 fn h2_function_values_for(
     data: &ModelPreviewData,
     set: &h2_functions::H2FunctionInputs,
     time: f32,
 ) -> Option<h2_functions::H2FunctionValues> {
-    data.h2_object_functions.as_ref().map(|_| h2_function_values(data, set, time))
+    let flares = data.preview.h2_flares.iter().any(|at| !at.scale_name().is_empty())
+        || data.preview.h2_point_lights.iter().any(|light| !light.scale_name().is_empty());
+    (data.h2_object_functions.is_some() || flares).then(|| h2_function_values(data, set, time))
 }
 
 fn h2_functions_move(
@@ -829,9 +853,15 @@ fn h2_functions_move(
     set: &h2_functions::H2FunctionInputs,
     time: f32,
 ) -> bool {
-    data.h2_object_functions
-        .as_ref()
-        .is_some_and(|functions| functions.move_at_rest(&h2_function_values(data, set, time)))
+    let held = h2_attached_values(data, time);
+    let held_move = data.h2_attached.iter().zip(&held).any(|(attached, (_, values))| {
+        attached.functions.move_at_rest(values)
+    });
+    held_move
+        || data
+            .h2_object_functions
+            .as_ref()
+            .is_some_and(|functions| functions.move_at_rest(&h2_function_values(data, set, time)))
 }
 
 /// The opened object's functions, then those of what is attached to it.
@@ -866,6 +896,19 @@ impl ModelGpuFrame {
     fn outputs_of(&self, material: usize) -> [f32; 4] {
         let object = self.preview.materials.get(material).map_or(0, |material| material.object);
         self.object_states.get(object as usize).map_or([0.0; 4], |state| state.outputs)
+    }
+
+    /// The function values of the Halo 2 object that owns `material`.
+    fn h2_values_of(&self, material: usize) -> Option<&h2_functions::H2FunctionValues> {
+        let object = self.preview.materials.get(material).map_or(0, |material| material.object);
+        self.h2_values_of_object(object)
+    }
+
+    fn h2_values_of_object(&self, object: u8) -> Option<&h2_functions::H2FunctionValues> {
+        if object == 0 {
+            return self.h2_values.as_ref();
+        }
+        self.h2_attached_values.iter().find(|(owner, _)| *owner == object).map(|(_, values)| values)
     }
 
     /// The change colors of the object that owns `material`.
@@ -2061,10 +2104,18 @@ const CE_FLARE_FRAGMENT: &str = "#version 330
 in vec2 v_uv;
 uniform sampler2D u_map;
 uniform vec4 u_color;
+uniform float u_highlight;
 out vec4 out_color;
 void main() {
     vec4 map = texture(u_map, v_uv);
-    out_color = vec4(u_color.rgb * map.rgb, u_color.a * map.a);
+    if (u_highlight < 0.0) {
+        out_color = vec4(u_color.rgb * map.rgb, u_color.a * map.a);
+    } else {
+        // The pixel shader of `sub_92E4A0`, read from its bytecode.
+        vec3 square = map.rgb * map.rgb;
+        vec3 sixth = square * square * square;
+        out_color = vec4((1.0 - u_color.rgb) * u_highlight * sixth + map.rgb * u_color.rgb, u_color.a);
+    }
 }
 ";
 
@@ -2074,6 +2125,7 @@ struct CeFlareGl {
     vertex_array: glow::NativeVertexArray,
     buffer: glow::NativeBuffer,
     color: Option<glow::NativeUniformLocation>,
+    highlight: Option<glow::NativeUniformLocation>,
     map: Option<glow::NativeUniformLocation>,
     /// A patch's samples past the depth buffer, and in all.
     queries: [glow::NativeQuery; 2],
@@ -2383,6 +2435,20 @@ impl ModelGlRenderer {
                             gl.disable(glow::STENCIL_TEST);
                         }
                     }
+                    // `render_lights`: real lights draw whichever rig stands behind them.
+                    let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+                    for point in &frame.preview.h2_point_lights {
+                        let values = frame.h2_values_of_object(point.object);
+                        let Some(light) = point.lit(values, bones, frame.time) else {
+                            continue;
+                        };
+                        let specular = H2DefaultLight { color: light.specular, ..light };
+                        for (layer, light) in
+                            [(H2Layer::LightDiffuse, &light), (H2Layer::LightSpecular, &specular)]
+                        {
+                            self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
+                        }
+                    }
                     self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
                 }
                 let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
@@ -2403,7 +2469,9 @@ impl ModelGlRenderer {
             let preview = &frame.preview;
             if frame.game_shaders
                 && self.h2_supported
-                && !(preview.ce_lights.is_empty() && preview.ce_antennas.is_empty())
+                && !(preview.ce_lights.is_empty()
+                    && preview.ce_antennas.is_empty()
+                    && preview.h2_flares.is_empty())
             {
                 self.draw_ce_flares(gl, frame, slot);
             }
@@ -2446,6 +2514,9 @@ impl ModelGlRenderer {
                         let images = light.flare.iter().flat_map(|flare| &flare.images);
                         images.map(|image| upload_h2_image(gl, image)).collect()
                     })
+                    .chain(frame.preview.h2_flares.iter().map(|at| {
+                        at.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect()
+                    }))
                     .collect();
                 for texture in uploaded.antenna_textures.drain(..).flatten() {
                     gl.delete_texture(texture);
@@ -2495,45 +2566,32 @@ impl ModelGlRenderer {
                 let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, &view) else {
                     continue;
                 };
-                let vertices = ce_flare_quad(camera, &view, &patch);
-                gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
-                gl.enable(glow::DEPTH_TEST);
-                gl.color_mask(false, false, false, false);
-                let mut samples = [0.0; 2];
-                for (sample, (query, compare)) in samples.iter_mut().zip([
-                    (flares.queries[0], glow::LEQUAL),
-                    (flares.queries[1], glow::ALWAYS),
-                ]) {
-                    gl.depth_func(compare);
-                    gl.begin_query(glow::SAMPLES_PASSED, query);
-                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
-                    gl.end_query(glow::SAMPLES_PASSED);
-                    // glow's plain reads take the EXT entry point below GL 4.5,
-                    // which panics on a Mac. This one checks the core entry
-                    // point, and with no query buffer bound its offset is
-                    // where the result goes.
-                    let mut passed = 0_u64;
-                    let result = &raw mut passed as usize;
-                    gl.get_query_parameter_u64_with_offset(query, glow::QUERY_RESULT, result);
-                    *sample = passed as f32;
-                }
-                gl.disable(glow::DEPTH_TEST);
-                gl.color_mask(true, true, true, false);
-                if samples[1] <= 0.0 {
+                let Some(occlusion) = ce_flare_occlusion(gl, flares, camera, &view, &patch) else {
                     continue;
-                }
-                let occlusion = samples[0] / samples[1];
-                for sprite in light.sprites(&outputs, &colors, bones, &view, frame.time, occlusion) {
-                    let Some(texture) = uploaded.flare_textures[index].get(sprite.image).copied().flatten() else {
-                        continue;
-                    };
-                    let vertices = ce_flare_quad(camera, &view, &sprite);
-                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
-                    gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                    let [red, green, blue] = sprite.color;
-                    gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, sprite.alpha);
-                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
-                }
+                };
+                let sprites = light.sprites(&outputs, &colors, bones, &view, frame.time, occlusion);
+                let textures = &uploaded.flare_textures[index];
+                draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
+            }
+            let first_h2 = frame.preview.ce_lights.len();
+            for (index, at) in frame.preview.h2_flares.iter().enumerate() {
+                let occlusion = match at.occlusion_patches(bones, &view) {
+                    None => [1.0; 2],
+                    Some((outer, inner)) => {
+                        let Some(outer) = ce_flare_occlusion(gl, flares, camera, &view, &outer) else {
+                            continue;
+                        };
+                        let inner = inner.map_or(Some(1.0), |inner| {
+                            ce_flare_occlusion(gl, flares, camera, &view, &inner)
+                        });
+                        [outer * inner.unwrap_or(0.0), outer]
+                    }
+                };
+                let values = frame.h2_values_of_object(at.object);
+                let colors = if at.object == 0 { frame.change_colors } else { [[1.0; 3]; 4] };
+                let sprites = at.sprites(values, &colors, bones, &view, frame.time, occlusion);
+                let textures = &uploaded.flare_textures[first_h2 + index];
+                draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
             }
             gl.color_mask(true, true, true, true);
             gl.depth_mask(true);
@@ -3119,7 +3177,7 @@ impl ModelGlRenderer {
             }
             let location = program.location(gl, "u_texture_rows");
             let (outputs, change_colors) = (frame.outputs_of(material), frame.change_colors_of(material));
-            let clock = H2Clock { time: frame.time, values: frame.h2_values.as_ref() };
+            let clock = H2Clock { time: frame.time, values: frame.h2_values_of(material) };
             let rows = pass.texture_rows_at(clock, &outputs);
             gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             let (tint_facing, tint_glancing) = pass.tints_at(clock);
@@ -3408,6 +3466,7 @@ mod tests {
             name: "weapon".to_owned(),
             node_index: 1,
             position: [1.0, 2.0, 3.0],
+            scale: 1.0,
             axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         };
         let rows = vec![
@@ -4334,6 +4393,7 @@ pub(super) fn render_model_to_preview(
                 name: group.name.clone(),
                 node_index: marker.node_index as i16,
                 position: transform_preview_marker_position(marker, &node_world),
+                scale: marker.scale,
                 axes: transform_preview_marker_axes(marker, &node_world),
             });
         }
@@ -4620,6 +4680,72 @@ fn ce_flare_quad(
     )
 }
 
+/// How much of `patch` the model leaves showing, if any of it is on screen.
+unsafe fn ce_flare_occlusion(
+    gl: &glow::Context,
+    flares: &CeFlareGl,
+    camera: &ModelGpuCamera,
+    view: &ce_lights::CeFlareView,
+    patch: &ce_lights::CeSprite,
+) -> Option<f32> {
+    unsafe {
+        let vertices = ce_flare_quad(camera, view, patch);
+        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+        gl.enable(glow::DEPTH_TEST);
+        gl.color_mask(false, false, false, false);
+        let mut samples = [0.0; 2];
+        for (sample, (query, compare)) in samples.iter_mut().zip([
+            (flares.queries[0], glow::LEQUAL),
+            (flares.queries[1], glow::ALWAYS),
+        ]) {
+            gl.depth_func(compare);
+            gl.begin_query(glow::SAMPLES_PASSED, query);
+            gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+            gl.end_query(glow::SAMPLES_PASSED);
+            // glow's plain reads take the EXT entry point below GL 4.5,
+            // which panics on a Mac. This one checks the core entry
+            // point, and with no query buffer bound its offset is
+            // where the result goes.
+            let mut passed = 0_u64;
+            let result = &raw mut passed as usize;
+            gl.get_query_parameter_u64_with_offset(query, glow::QUERY_RESULT, result);
+            *sample = passed as f32;
+        }
+        gl.disable(glow::DEPTH_TEST);
+        gl.color_mask(true, true, true, false);
+        (samples[1] > 0.0).then(|| samples[0] / samples[1])
+    }
+}
+
+unsafe fn draw_flare_sprites(
+    gl: &glow::Context,
+    flares: &CeFlareGl,
+    camera: &ModelGpuCamera,
+    view: &ce_lights::CeFlareView,
+    sprites: &[ce_lights::CeSprite],
+    textures: &[Option<glow::NativeTexture>],
+) {
+    unsafe {
+        for sprite in sprites {
+            let Some(texture) = textures.get(sprite.image).copied().flatten() else {
+                continue;
+            };
+            let vertices = ce_flare_quad(camera, view, sprite);
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            let [red, green, blue] = sprite.color;
+            gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, sprite.alpha);
+            gl.uniform_1_f32(flares.highlight.as_ref(), sprite.highlight.unwrap_or(-1.0));
+            if sprite.depth_tested {
+                gl.enable(glow::DEPTH_TEST);
+                gl.depth_func(glow::LEQUAL);
+            }
+            gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+            gl.disable(glow::DEPTH_TEST);
+        }
+    }
+}
+
 unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<CeFlareGl> {
     unsafe {
         let program = link_h2_program(gl, main, CE_FLARE_VERTEX, CE_FLARE_FRAGMENT)
@@ -4638,6 +4764,7 @@ unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<C
             vertex_array,
             buffer,
             color: gl.get_uniform_location(program, "u_color"),
+            highlight: gl.get_uniform_location(program, "u_highlight"),
             map: gl.get_uniform_location(program, "u_map"),
             queries: [gl.create_query().ok()?, gl.create_query().ok()?],
         })

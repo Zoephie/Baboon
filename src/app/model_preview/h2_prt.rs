@@ -37,6 +37,11 @@ pub(crate) struct H2Prt {
 }
 
 impl H2Prt {
+    /// Stay parallel to vertices that have none of this.
+    pub(crate) fn pad(&mut self, count: usize) {
+        self.vertices.resize(self.vertices.len() + count, [0.0; VERTEX_FLOATS]);
+    }
+
     /// The constants of every cluster under `lights` and an ambient color.
     pub(crate) fn clusters_lit_by(&self, lights: &[H2PrtLight], ambient: [f32; 3]) -> Vec<[f32; 4]> {
         let mut coefficients = sh_project(lights);

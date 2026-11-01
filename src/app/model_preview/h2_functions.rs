@@ -118,12 +118,17 @@ impl H2ObjectFunctions {
         }
     }
 
-    /// The names the panel can set.
+    /// The names the panel can set: what a function reads, and what scales or
+    /// turns it off, unless another function here makes that.
     fn imports(&self) -> Vec<&str> {
         let mut names: Vec<&str> = Vec::new();
+        let made_here = |name: &str| self.functions.iter().any(|function| function.export == name);
         for function in &self.functions {
-            if !function.import.is_empty() && !names.contains(&function.import.as_str()) {
-                names.push(&function.import);
+            let read = [&function.import, &function.scale_by, &function.turn_off_with];
+            for name in read.map(String::as_str) {
+                if !name.is_empty() && !made_here(name) && !names.contains(&name) {
+                    names.push(name);
+                }
             }
         }
         names

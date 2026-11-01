@@ -30,9 +30,13 @@ pub(super) struct PreviewLoadSettings {
     pub(super) high_detail: bool,
     pub(super) scenario_selection: std::collections::BTreeSet<usize>,
     /// Halo CE: the weapon a biped holds, by path.
-    pub(super) ce_weapon: Option<String>,
+    pub(super) weapon: Option<String>,
     /// Halo CE: the biped's weapons, when an earlier load found them.
     pub(super) ce_equippable: Option<Vec<super::ce_attachments::CeEquippable>>,
+    /// Halo 2 units: what the left hand holds, by path.
+    pub(super) secondary_weapon: Option<String>,
+    /// Halo 2 units: their weapons, when an earlier load found them.
+    pub(super) h2_equippable: Option<Vec<super::h2_weapons::H2Equippable>>,
 }
 
 impl PreviewLoadSettings {
@@ -40,7 +44,12 @@ impl PreviewLoadSettings {
         Self {
             high_detail: state.high_detail,
             scenario_selection: state.scenario_bsp_selection.clone(),
-            ce_weapon: state.ce_weapon.clone(),
+            weapon: state.weapon.clone(),
+            secondary_weapon: state.secondary_weapon.clone(),
+            h2_equippable: match &state.data {
+                Some(Ok(data)) => data.h2_weapons.as_ref().map(|weapons| weapons.equippable.clone()),
+                _ => None,
+            },
             ce_equippable: match &state.data {
                 Some(Ok(data)) => data.ce_weapons.as_ref().map(|weapons| weapons.equippable.clone()),
                 _ => None,
@@ -74,7 +83,8 @@ impl Baboon {
         let desired_matches = state.loaded_key.as_deref() == Some(key)
             && state.loaded_high_detail == state.high_detail
             && state.loaded_scenario_selection == state.scenario_bsp_selection
-            && state.loaded_ce_weapon == state.ce_weapon;
+            && state.loaded_weapon == state.weapon
+            && state.loaded_secondary_weapon == state.secondary_weapon;
         if desired_matches && (state.data.is_some() || state.preview_load_id.is_some()) {
             return false;
         }
@@ -126,7 +136,8 @@ impl Baboon {
         state.loaded_key = Some(key.to_owned());
         state.loaded_high_detail = settings.high_detail;
         state.loaded_scenario_selection = settings.scenario_selection.clone();
-        state.loaded_ce_weapon = settings.ce_weapon.clone();
+        state.loaded_weapon = settings.weapon.clone();
+        state.loaded_secondary_weapon = settings.secondary_weapon.clone();
         state.preview_load_id = Some(request_id);
         state.data = None;
         state.render_model_path = None;
@@ -300,7 +311,7 @@ pub(super) fn load_model_preview(
         }
         // A vehicle's guns are part of it. A biped holds what it is handed.
         let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
-        let chosen = settings.ce_weapon.as_deref();
+        let chosen = settings.weapon.as_deref();
         let weapons = is_biped.then(|| {
             let known = settings.ce_equippable.as_deref();
             super::ce_attachments::biped_weapons(source, model_tag, chosen, known)
@@ -345,6 +356,34 @@ pub(super) fn load_model_preview(
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = read_h2_change_colors(model_tag);
             data.h2_object_functions = super::h2_functions::read_h2_object_functions(model_tag);
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            let markers = std::mem::take(&mut preview.markers);
+            let found = super::h2_lights::read_h2_flares(source, model_tag, 0, &markers, |marker| {
+                let place = super::attachment::MarkerFrame {
+                    axes: marker.axes,
+                    position: marker.position,
+                    node: marker.node_index,
+                };
+                (place, marker.node_index.max(0) as usize)
+            });
+            (preview.h2_flares, preview.h2_point_lights) = found;
+            preview.markers = markers;
+            if model_tag.header.group_tag == u32::from_be_bytes(*b"bipd") {
+                let known = settings.h2_equippable.as_deref();
+                let weapons = super::h2_weapons::unit_weapons(source, model_tag, known);
+                let preview = std::sync::Arc::make_mut(&mut data.preview);
+                let primary = settings.weapon.as_deref();
+                let secondary = settings.secondary_weapon.as_deref();
+                for (path, left, owner) in [(primary, false, 1), (secondary, true, 2)] {
+                    let attached = path.and_then(|path| {
+                        // `unit_apply_ik` leaves two weapons in their own hands.
+                        let ik = (secondary.is_none()).then_some(&weapons);
+                        super::h2_weapons::attach_h2_weapon(source, model_tag, path, left, owner, ik, preview)
+                    });
+                    data.h2_attached.extend(attached);
+                }
+                data.h2_weapons = Some(weapons);
+            }
         }
         return Ok(data);
     }
