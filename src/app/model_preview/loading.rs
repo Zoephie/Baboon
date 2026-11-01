@@ -378,6 +378,8 @@ pub(super) fn load_model_preview(
             preview.h3_particles = systems.into_iter().map(Arc::new).collect();
             let strips = super::h3_strips::read_h3_strips(source, model_tag, 0, &preview.markers, frame);
             preview.h3_strips = strips.into_iter().map(Arc::new).collect();
+            let carried = super::h3_particles::carried_strips(&preview.h3_particles);
+            preview.h3_strips.extend(carried);
             preview.h3_screen_effects =
                 super::h3_screen_effects::read_h3_screen_effects(source, model_tag, 0, &preview.markers, frame);
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);

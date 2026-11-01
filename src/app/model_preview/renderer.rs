@@ -3161,7 +3161,11 @@ impl ModelGlRenderer {
             }
             if !cursor_advanced && !frame.preview.h3_strips.is_empty() {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
-                uploaded.h3_strips.advance(&frame.preview.h3_strips, values, &mut uploaded.h3_onsets, bones, frame.time);
+                let (systems, particles) = (&frame.preview.h3_particles, &uploaded.h3_particles);
+                let tracks = |strip: &Arc<h3_strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
+                    particles.tracks_of(systems, strip).into_iter().map(|track| (track.id, track.place)).collect()
+                };
+                uploaded.h3_strips.advance(&frame.preview.h3_strips, values, &mut uploaded.h3_onsets, tracks, bones, frame.time);
             }
             // `c_transparency_renderer` sorts far to near, each from its location.
             enum Sprites {

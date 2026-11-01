@@ -15,6 +15,7 @@ use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;
 use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_markers, part_runs_by};
+use super::h3_strips::{H3StripAt, read_carried_strips};
 use super::h3_shaders::{H3Blend, read_h3_definition};
 use super::materials::{H3Bitmap, read_h3_bitmap};
 use super::renderer::H3_EXPOSURE;
@@ -933,6 +934,10 @@ pub(crate) struct H3ParticleSystem {
     attached: Vec<(H3ParticleTrigger, usize)>,
     /// Started by a particle, at the particle: nothing of its own runs it.
     child: bool,
+    /// `use parent position but world orientation`: its axes do not turn.
+    world_oriented: bool,
+    /// Contrails its particles start, each following the particle.
+    carried: Vec<Arc<H3StripAt>>,
     hidden: bool,
     die_with_effect: bool,
     lod: Option<[f32; 4]>,
@@ -1012,6 +1017,18 @@ fn read_attached_parts(
     parts
 }
 
+/// The contrails these systems' particles start, each once: a system at many
+/// markers shares its own.
+pub(super) fn carried_strips(systems: &[Arc<H3ParticleSystem>]) -> Vec<Arc<H3StripAt>> {
+    let mut strips: Vec<Arc<H3StripAt>> = Vec::new();
+    for strip in systems.iter().flat_map(|system| &system.carried) {
+        if !strips.iter().any(|known| Arc::ptr_eq(known, strip)) {
+            strips.push(Arc::clone(strip));
+        }
+    }
+    strips
+}
+
 impl H3ParticleSystem {
     pub(crate) fn only_under(&self) -> Option<&(String, String)> {
         self.only_under.as_ref()
@@ -1049,6 +1066,7 @@ pub(super) fn read_h3_particles(
         };
         let locations = elements(effect.root(), "locations");
         let times = Arc::new(object_effect.times_of(effect.root()));
+        let world_oriented = H3ObjectEffect::world_oriented(effect.root());
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for system in elements(event, "particle systems") {
                 let location = usize::try_from(system.read_block_index("location")).ok();
@@ -1060,9 +1078,16 @@ pub(super) fn read_h3_particles(
                     continue;
                 };
                 let children = read_attached_parts(source, &parts.look);
+                let carried: Vec<_> = parts
+                    .look
+                    .attachments
+                    .iter()
+                    .filter(|(trigger, _)| *trigger == H3ParticleTrigger::Birth)
+                    .flat_map(|(_, path)| read_carried_strips(source, path))
+                    .map(Arc::new)
+                    .collect();
                 for marker in part_markers(markers, &name, object_effect.once) {
                     let (place, node) = frame(marker);
-                    let place = H3ObjectEffect::oriented(place, effect.root());
                     let attached = children.iter().enumerate().map(|(at, child)| (child.0, at + 1)).collect();
                     let parts = parts.clone();
                     systems.push(H3ParticleSystem {
@@ -1084,6 +1109,8 @@ pub(super) fn read_h3_particles(
                         emitters: parts.emitters,
                         attached,
                         child: false,
+                        world_oriented,
+                        carried: carried.clone(),
                         hidden: parts.hidden,
                         die_with_effect: parts.die_with_effect,
                         lod: parts.lod,
@@ -1109,6 +1136,8 @@ pub(super) fn read_h3_particles(
                             emitters: parts.emitters,
                             attached: Vec::new(),
                             child: true,
+                            world_oriented: false,
+                            carried: Vec::new(),
                             hidden: parts.hidden,
                             die_with_effect: parts.die_with_effect,
                             lod: parts.lod,
@@ -1191,6 +1220,8 @@ fn emit(shape: H3EmissionShape, radius: f32, angle_degrees: f32, random: &mut Ra
 
 #[derive(Debug, Clone)]
 struct Particle {
+    /// Unique among its emitter's, for what follows it.
+    id: u64,
     axis: [f32; 3],
     age: f32,
     inverse_lifespan: f32,
@@ -1209,6 +1240,7 @@ struct Particle {
 #[derive(Debug, Clone)]
 struct RunningEmitter {
     particles: Vec<Particle>,
+    made: u64,
     accumulator: f32,
     started: bool,
     random: Random,
@@ -1222,25 +1254,39 @@ pub(crate) struct H3ParticleField {
     running: Vec<Vec<RunningEmitter>>,
     /// Per system, what particles have started of it.
     instances: Vec<Vec<H3ChildInstance>>,
+    /// Per system, where the particles something follows are.
+    tracks: Vec<Vec<H3ParticleTrack>>,
 }
 
-/// `effect_new_attached_from_particle`: one run of a system, where a particle was.
+/// Where a live particle is, for what is attached to it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct H3ParticleTrack {
+    pub(crate) id: u64,
+    pub(crate) place: [f32; 3],
+    velocity: [f32; 3],
+}
+
+/// `effect_new_attached_from_particle`: one run of a system, attached to a
+/// particle while that lasts. A death's has no particle left to follow.
 #[derive(Debug, Clone)]
 struct H3ChildInstance {
+    follows: Option<u64>,
+    parent: usize,
     origin: [f32; 3],
     axes: [[f32; 3]; 3],
     start: f32,
     running: Vec<RunningEmitter>,
 }
 
-/// What starts at once: flak throws dozens.
-const MOST_INSTANCES: usize = 32;
+/// `particle_block.h`'s limit on systems.
+const MOST_INSTANCES: usize = 320;
 
 fn fresh_emitters(system: &H3ParticleSystem, seed: u32) -> Vec<RunningEmitter> {
     let emitters = system.emitters.iter().enumerate();
     emitters
         .map(|(index, _)| RunningEmitter {
             particles: Vec::new(),
+            made: 0,
             accumulator: 0.0,
             started: false,
             random: Random(seed.wrapping_mul(977) ^ (index as u32).wrapping_mul(131)),
@@ -1265,10 +1311,12 @@ fn step_location(
     origin: [f32; 3],
     axes: [[f32; 3]; 3],
     now: f32,
-    births: &mut Vec<([f32; 3], [f32; 3])>,
-    deaths: &mut Vec<([f32; 3], [f32; 3])>,
+    births: &mut Vec<(u64, [f32; 3], [f32; 3])>,
+    deaths: &mut Vec<(u64, [f32; 3], [f32; 3])>,
+    tracks: &mut Vec<H3ParticleTrack>,
 ) {
-    for (emitter, running) in system.emitters.iter().zip(emitters) {
+    tracks.clear();
+    for (at, (emitter, running)) in system.emitters.iter().zip(emitters).enumerate() {
         if let Some(mut state) = state {
             let random = &mut running.random;
             state.system_seeds = std::array::from_fn(|at| {
@@ -1276,9 +1324,24 @@ fn step_location(
                 seeded.next()
             });
             let frame = emitter_frame(emitter, origin, axes, &state);
-            emitter.pulse(&system.look, state, running, STEP, frame, system.world, births);
+            emitter.pulse(&system.look, state, running, STEP, frame, system.world, births, at);
             let home = if system.world { origin } else { [0.0; 3] };
             emitter.step(state, &mut running.particles, STEP, home, deaths);
+            if !(system.attached.is_empty() && system.carried.is_empty()) {
+                let (offset, turned) = frame;
+                let to_world = |vector: [f32; 3]| -> [f32; 3] {
+                    std::array::from_fn(|axis| (0..3).map(|row| turned[row][axis] * vector[row]).sum())
+                };
+                tracks.extend(running.particles.iter().map(|particle| {
+                    let (place, velocity) = if system.world {
+                        (particle.position, particle.velocity)
+                    } else {
+                        let moved = to_world(particle.position);
+                        (std::array::from_fn(|axis| offset[axis] + moved[axis]), to_world(particle.velocity))
+                    };
+                    H3ParticleTrack { id: particle.id, place, velocity }
+                }));
+            }
         } else {
             // The next run of its event is a new location's, with its burst.
             running.started = false;
@@ -1288,6 +1351,12 @@ fn step_location(
                 ..Default::default()
             };
             emitter.step(rest, &mut running.particles, STEP, [0.0; 3], deaths);
+            // A location's frame is gone with its state: what follows stays put.
+            tracks.extend(running.particles.iter().map(|particle| H3ParticleTrack {
+                id: particle.id,
+                place: if system.world { particle.position } else { origin },
+                velocity: particle.velocity,
+            }));
         }
     }
 }
@@ -1352,7 +1421,8 @@ impl H3Emitter {
         dt: f32,
         frame: ([f32; 3], [[f32; 3]; 3]),
         world: bool,
-        started: &mut Vec<([f32; 3], [f32; 3])>,
+        started: &mut Vec<(u64, [f32; 3], [f32; 3])>,
+        at: usize,
     ) {
         running.accumulator = running.accumulator.fract();
         if !running.started {
@@ -1390,10 +1460,13 @@ impl H3Emitter {
                 let moved = to_world(position);
                 std::array::from_fn(|axis| offset[axis] + moved[axis])
             };
-            started.push((placed, to_world(velocity)));
+            running.made += 1;
+            let id = running.made << 8 | at as u64;
+            started.push((id, placed, to_world(velocity)));
             let (position, velocity) = if world { (placed, to_world(velocity)) } else { (position, velocity) };
             let axis = self.axis.pick(self.reference_axis, self.axis_angle.scalar(&particle_state), random);
             running.particles.push(Particle {
+                id,
                 axis,
                 age: 0.0,
                 inverse_lifespan: 1.0 / self.lifespan.scalar(&particle_state).max(0.01),
@@ -1418,7 +1491,7 @@ impl H3Emitter {
         particles: &mut Vec<Particle>,
         dt: f32,
         home: [f32; 3],
-        ended: &mut Vec<([f32; 3], [f32; 3])>,
+        ended: &mut Vec<(u64, [f32; 3], [f32; 3])>,
     ) {
         if let Some(flock) = &self.flock {
             flock.update(particles, state, home, dt);
@@ -1426,7 +1499,7 @@ impl H3Emitter {
         particles.retain_mut(|particle| {
             particle.age += particle.inverse_lifespan * dt;
             if particle.age >= 1.0 {
-                ended.push((particle.position, particle.velocity));
+                ended.push((particle.id, particle.position, particle.velocity));
                 return false;
             }
             let state = H3ParticleState {
@@ -1601,6 +1674,7 @@ impl H3ParticleField {
         if self.running.len() != systems.len() || self.time.is_none_or(|last| time < last) {
             self.running = systems.iter().enumerate().map(|(at, system)| fresh_emitters(system, at as u32)).collect();
             self.instances = vec![Vec::new(); systems.len()];
+            self.tracks = vec![Vec::new(); systems.len()];
             self.time = Some(time - PRE_ROLL);
         }
         let Some(mut now) = self.time else {
@@ -1613,11 +1687,26 @@ impl H3ParticleField {
                 let (mut births, mut deaths) = (Vec::new(), Vec::new());
                 if system.child {
                     let mut runs = std::mem::take(&mut self.instances[index]);
+                    let mut no_tracks = Vec::new();
+                    let tracks = &self.tracks;
                     runs.retain_mut(|run| {
                         let age = now - run.start;
+                        if let Some(followed) = run.follows {
+                            let found = tracks[run.parent].iter().find(|track| track.id == followed);
+                            match found {
+                                Some(track) => {
+                                    run.origin = track.place;
+                                    run.axes = axes_along(track.velocity);
+                                }
+                                None => run.follows = None,
+                            }
+                        }
+                        if system.die_with_effect && age >= system.times.once() {
+                            run.running.iter_mut().for_each(|running| running.particles.clear());
+                        }
                         let state = (age < system.times.once()).then(|| system_state_stepped(system, None, now, run.start)).flatten();
                         let state = with_lod(system, state, run.origin, eye);
-                        step_location(system, &mut run.running, state, run.origin, run.axes, now, &mut births, &mut deaths);
+                        step_location(system, &mut run.running, state, run.origin, run.axes, now, &mut births, &mut deaths, &mut no_tracks);
                         age < system.times.once() || run.running.iter().any(|running| !running.particles.is_empty())
                     });
                     self.instances[index] = runs;
@@ -1628,7 +1717,7 @@ impl H3ParticleField {
                 let state = system_state_stepped(system, scope.as_ref(), now, onset);
                 let (origin, axes) = location(system, bones);
                 let state = with_lod(system, state, origin, eye);
-                step_location(system, &mut self.running[index], state, origin, axes, now, &mut births, &mut deaths);
+                step_location(system, &mut self.running[index], state, origin, axes, now, &mut births, &mut deaths, &mut self.tracks[index]);
                 let off = !system.scale_by.is_empty()
                     && !scope.as_ref().and_then(|values| values.get(&system.scale_by)).is_some_and(|value| *value > 0.0);
                 if system.die_with_effect && (off || system.times.is_over(now - onset)) {
@@ -1636,10 +1725,13 @@ impl H3ParticleField {
                 }
                 for (trigger, offset) in &system.attached {
                     let events = if *trigger == H3ParticleTrigger::Birth { &births } else { &deaths };
-                    spawned.extend(events.iter().map(|event| (index + offset, *event, system.world, origin, axes)));
+                    let follow = *trigger == H3ParticleTrigger::Birth;
+                    spawned.extend(events.iter().map(|&(id, place, velocity)| {
+                        ((index + offset, index), follow.then_some(id), (place, velocity), system.world, origin, axes)
+                    }));
                 }
             }
-            for (index, (place, velocity), world, origin, axes) in spawned {
+            for ((index, parent), follows, (place, velocity), world, origin, axes) in spawned {
                 let Some(system) = systems.get(index) else {
                     continue;
                 };
@@ -1658,6 +1750,8 @@ impl H3ParticleField {
                 };
                 let seed = (runs.len() as u32 + 1).wrapping_mul(index as u32 + 1).wrapping_add((now * 30.0) as u32);
                 runs.push(H3ChildInstance {
+                    follows,
+                    parent,
                     origin: place,
                     axes: axes_along(velocity),
                     start: now,
@@ -1697,6 +1791,13 @@ impl H3ParticleField {
         let (origin, axes) = location(system, bones);
         system.vertices_at(running, (origin, axes, onset), values, view, lighting, time, &mut vertices);
         vertices
+    }
+
+    /// Where the particles of `system` are, for a contrail that follows them.
+    pub(crate) fn tracks_of<'a>(&'a self, systems: &[Arc<H3ParticleSystem>], strip: &Arc<H3StripAt>) -> Vec<&'a H3ParticleTrack> {
+        let carriers = systems.iter().zip(&self.tracks);
+        let carrying = carriers.filter(|(system, _)| system.carried.iter().any(|known| Arc::ptr_eq(known, strip)));
+        carrying.flat_map(|(_, tracks)| tracks).collect()
     }
 
     /// Where a system's sort goes, for one whose place a particle chose.
@@ -1916,7 +2017,8 @@ fn location(system: &H3ParticleSystem, bones: Option<&[[f32; 4]]>) -> ([f32; 3],
     let turn = |[i, j, k]: [f32; 3]| -> [f32; 3] {
         std::array::from_fn(|row| rows[row][0] * i + rows[row][1] * j + rows[row][2] * k)
     };
-    ([place(&rows[0]), place(&rows[1]), place(&rows[2])], system.axes.map(turn))
+    let axes = if system.world_oriented { system.axes } else { system.axes.map(turn) };
+    ([place(&rows[0]), place(&rows[1]), place(&rows[2])], axes)
 }
 
 /// `c_particle_emitter::calc_matrix`: its direction turns the location, and its

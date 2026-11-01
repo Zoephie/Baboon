@@ -2,6 +2,7 @@
 //! is worked out whole each frame; a contrail leaves profiles behind as its
 //! location moves, so one on a still object draws nothing, as in the game.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use blam_tags::{TagFunction, TagStruct};
@@ -357,6 +358,10 @@ pub(crate) struct H3StripAt {
     node: usize,
     position: [f32; 3],
     forward: [f32; 3],
+    /// `use parent position but world orientation`: its forward does not turn.
+    world_oriented: bool,
+    /// Started by a particle: it follows them, not a marker.
+    carried: bool,
     /// `secondary location (beams)`: where a beam runs to, instead of its length.
     end: Option<(usize, [f32; 3])>,
     only_under: Option<(String, String)>,
@@ -421,6 +426,8 @@ pub(super) fn read_h3_strips(
                     node,
                     position: place.position,
                     forward: place.axes[0],
+                    world_oriented: part.world_oriented,
+                    carried: false,
                     end,
                     only_under: marker.only_under.clone(),
                     scale_by: part.effect.scale_by.clone(),
@@ -434,6 +441,52 @@ pub(super) fn read_h3_strips(
             }
         }
     });
+    strips
+}
+
+/// The contrails an effect holds, as a particle starts them.
+pub(super) fn read_carried_strips(source: &TagSource, path: &str) -> Vec<H3StripAt> {
+    let mut strips = Vec::new();
+    let Ok(effect) = load_referenced_tag_from_source(source, path, "effect", b"effe") else {
+        return strips;
+    };
+    let times = Arc::new(H3EffectTimes::read(effect.root()));
+    let contrail_group = u32::from_be_bytes(*b"cntl");
+    for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
+        for part in elements(event, "parts") {
+            let Some((group, path)) = part.read_tag_ref_with_group("type") else {
+                continue;
+            };
+            if group != contrail_group || path.is_empty() {
+                continue;
+            }
+            let Ok(tag) = load_referenced_tag_from_source(source, &path, "contrail_system", b"cntl") else {
+                continue;
+            };
+            for element in elements(tag.root(), "contrails") {
+                let (Some(look), Some(contrail)) = (read_strip_look(source, element), read_contrail(element)) else {
+                    continue;
+                };
+                strips.push(H3StripAt {
+                    object: 0,
+                    node: 0,
+                    position: [0.0; 3],
+                    forward: [1.0, 0.0, 0.0],
+                    world_oriented: false,
+                    carried: true,
+                    end: None,
+                    only_under: None,
+                    scale_by: String::new(),
+                    secondary_by: String::new(),
+                    seeds: seeds_of(strips.len()),
+                    times: Arc::clone(&times),
+                    event: at,
+                    look: Arc::new(look),
+                    kind: Arc::new(StripKind::Contrail(contrail)),
+                });
+            }
+        }
+    }
     strips
 }
 
@@ -711,6 +764,8 @@ impl RunningContrail {
 pub(crate) struct H3StripField {
     time: Option<f32>,
     running: Vec<RunningContrail>,
+    /// Per strip, one for each particle it follows, with when that began.
+    carried: Vec<HashMap<u64, (f32, RunningContrail)>>,
 }
 
 impl H3StripAt {
@@ -777,7 +832,8 @@ impl H3StripAt {
         let Some(mut state) = self.state(values, time, onset) else {
             return Vec::new();
         };
-        let (origin, forward) = posed_on(self.node, self.position, self.forward, bones);
+        let (origin, turned) = posed_on(self.node, self.position, self.forward, bones);
+        let forward = if self.world_oriented { self.forward } else { turned };
         let uncapped = beam.length.scalar(&state);
         let reach = self.end.map(|(node, end)| minus(posed_on(node, end, [1.0, 0.0, 0.0], bones).0, origin));
         let (direction, cap) = match reach {
@@ -902,6 +958,7 @@ impl H3StripField {
         strips: &[Arc<H3StripAt>],
         values: impl Fn(u8) -> Option<H2FunctionValues>,
         onsets: &mut H3EffectOnsets,
+        tracks: impl Fn(&Arc<H3StripAt>) -> Vec<(u64, [f32; 3])>,
         bones: Option<&[[f32; 4]]>,
         time: f32,
     ) {
@@ -909,6 +966,7 @@ impl H3StripField {
             self.running = (0..strips.len())
                 .map(|at| RunningContrail { random: at as u32 * 977 + 1, ..Default::default() })
                 .collect();
+            self.carried = vec![HashMap::new(); strips.len()];
             self.time = Some(time);
         }
         let dt = time - self.time.unwrap_or(time);
@@ -916,10 +974,32 @@ impl H3StripField {
         if dt <= 0.0 {
             return;
         }
-        for (strip, running) in strips.iter().zip(&mut self.running) {
+        for (index, (strip, running)) in strips.iter().zip(&mut self.running).enumerate() {
             let StripKind::Contrail(contrail) = &*strip.kind else {
                 continue;
             };
+            if strip.carried {
+                let live = tracks(strip);
+                let carried = &mut self.carried[index];
+                for &(id, place) in &live {
+                    let (born, follower) = carried.entry(id).or_insert_with(|| {
+                        (time, RunningContrail { random: (id as u32).wrapping_mul(977) | 1, previous: place, location: Some(place), ..Default::default() })
+                    });
+                    if let Some(state) = strip.state(None, time, *born) {
+                        follower.location = Some(place);
+                        follower.pulse(contrail, &strip.look, &state, place, dt);
+                    }
+                }
+                for (id, (born, follower)) in carried.iter_mut() {
+                    let state = strip.state(None, time, *born).unwrap_or_default();
+                    follower.update(contrail, &state, dt);
+                    if !live.iter().any(|(known, _)| known == id) {
+                        follower.location = None;
+                    }
+                }
+                carried.retain(|_, (_, follower)| follower.location.is_some() || !follower.profiles.is_empty());
+                continue;
+            }
             let at = strip.origin(bones);
             let last = running.location.replace(at);
             if last.is_none() {
@@ -956,6 +1036,12 @@ impl H3StripField {
         onset: f32,
     ) -> Vec<H3ParticleVertex> {
         match &*strip.kind {
+            StripKind::Contrail(contrail) if strip.carried => {
+                let followers = self.carried.get(index).into_iter().flatten();
+                followers
+                    .flat_map(|(_, (born, follower))| strip.contrail_vertices(contrail, follower, None, view, lighting, time, *born))
+                    .collect()
+            }
             StripKind::Beam(beam) => strip.beam_vertices(beam, values, bones, view, time, onset),
             StripKind::Contrail(contrail) => self
                 .running
@@ -1079,6 +1165,56 @@ mod tests {
         running.pulse(&contrail, &look, &StripState::default(), [1.0, 0.0, 0.0], 0.1);
         let lengths: Vec<f32> = running.profiles.iter().map(|profile| profile.length).collect();
         assert_eq!(lengths, [0.25, 0.75, 1.0]);
+    }
+
+    fn carried_strip() -> Arc<H3StripAt> {
+        Arc::new(H3StripAt {
+            object: 0,
+            node: 0,
+            position: [0.0; 3],
+            forward: [1.0, 0.0, 0.0],
+            world_oriented: false,
+            carried: true,
+            end: None,
+            only_under: None,
+            scale_by: String::new(),
+            secondary_by: String::new(),
+            seeds: [0.0; OWN_SEEDS],
+            times: Arc::new(H3EffectTimes::read_nothing()),
+            event: 0,
+            look: Arc::new(look(None)),
+            kind: Arc::new(StripKind::Contrail(contrail(60.0, 0.5))),
+        })
+    }
+
+    #[test]
+    fn a_carried_contrail_trails_its_particle_and_fades_after_it_dies() {
+        let strip = carried_strip();
+        let strips = [Arc::clone(&strip)];
+        let mut field = H3StripField::default();
+        let mut onsets = H3EffectOnsets::default();
+        let view = CeFlareView { eye: [0.0, -5.0, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] };
+        let lighting = [[0.0; 4]; 10];
+        let mut advance = |field: &mut H3StripField, place: Option<[f32; 3]>, time: f32| {
+            let tracks = |_: &Arc<H3StripAt>| place.map(|place| (7, place)).into_iter().collect();
+            field.advance(&strips, |_| None, &mut onsets, tracks, None, time);
+        };
+        advance(&mut field, Some([0.0; 3]), 0.0);
+        for step in 1..=10 {
+            let time = step as f32 / 30.0;
+            advance(&mut field, Some([time, 0.0, 0.0]), time);
+        }
+        let drawn = field.vertices(0, &strip, None, None, &view, &lighting, 0.33, 0.0);
+        assert!(!drawn.is_empty(), "a moving particle leaves a trail");
+        let reach = drawn.iter().map(|vertex| vertex.place[0]).fold(0.0, f32::max);
+        assert!(reach > 0.2, "along where it went: {reach}");
+        advance(&mut field, None, 0.4);
+        assert!(!field.vertices(0, &strip, None, None, &view, &lighting, 0.4, 0.0).is_empty(), "it outlives the particle");
+        for step in 0..30 {
+            advance(&mut field, None, 0.45 + step as f32 * 0.1);
+        }
+        assert!(field.vertices(0, &strip, None, None, &view, &lighting, 3.5, 0.0).is_empty());
+        assert!(field.carried[0].is_empty(), "nothing is left to run");
     }
 
     #[test]

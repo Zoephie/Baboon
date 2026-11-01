@@ -64,6 +64,8 @@ impl H3Channel {
 /// A `light` at the marker an object attaches it to.
 #[derive(Debug, Clone)]
 pub(crate) struct H3Light {
+    /// `use parent position but world orientation`: its axes do not turn.
+    world_oriented: bool,
     /// When its effect's event runs, for a light an attached effect makes.
     event: Option<(Arc<H3EffectTimes>, usize)>,
     /// `destroy light after`, seconds from then.
@@ -199,8 +201,11 @@ impl H3Light {
         if color.iter().all(|channel| *channel <= 0.0) {
             return None;
         }
-        let (position, forward) = posed_on(self.node, self.position, self.forward, bones);
-        let (_, up) = posed_on(self.node, self.position, self.up, bones);
+        let (position, mut forward) = posed_on(self.node, self.position, self.forward, bones);
+        let (_, mut up) = posed_on(self.node, self.position, self.up, bones);
+        if self.world_oriented {
+            (forward, up) = (self.forward, self.up);
+        }
         let (cone, near) = if self.frustum { (self.field_of_view, self.near_width) } else { (0.0, 0.0) };
         // A sphere has no cone: `cone_angle_radians` reads as the fallback.
         let cone_angle = if self.frustum { cone } else { std::f32::consts::TAU };
@@ -303,8 +308,10 @@ pub(super) fn read_h3_lights(
                            scale_by: String,
                            change_color: i128,
                            by_effect: Option<H3EffectScale>,
-                           event: Option<(Arc<H3EffectTimes>, usize)>| H3Light {
+                           event: Option<(Arc<H3EffectTimes>, usize)>,
+                           world_oriented: bool| H3Light {
         event,
+        world_oriented,
         destroy_after: tag.destroy_after,
         object: owner,
         node,
@@ -345,7 +352,7 @@ pub(super) fn read_h3_lights(
         let (place, node) = frame(marker);
         let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
         let change_color = attachment.read_int_any("change color").unwrap_or(0);
-        lights.push(place_light(tag, place, node, None, scale_by, change_color, None, None));
+        lights.push(place_light(tag, place, node, None, scale_by, change_color, None, None, false));
     }
     for_each_attached_part(source, object, |part| {
         if part.group != light_group {
@@ -363,7 +370,7 @@ pub(super) fn read_h3_lights(
             let only_under = marker.only_under.clone();
             let event = Some((Arc::clone(&part.times), part.event));
             let (scale_by, change_color) = (part.effect.scale_by.clone(), part.effect.change_color);
-            lights.push(place_light(tag, place, node, only_under, scale_by, change_color, by_effect, event));
+            lights.push(place_light(tag, place, node, only_under, scale_by, change_color, by_effect, event, part.world_oriented));
         }
     });
     lights
@@ -563,12 +570,14 @@ pub(super) fn read_h3_flares(
                            once: bool,
                            scale_by: String,
                            by_effect: Option<H3EffectScale>,
-                           event: Option<(Arc<H3EffectTimes>, usize)>| {
+                           event: Option<(Arc<H3EffectTimes>, usize)>,
+                           placed: &dyn Fn(MarkerFrame, usize) -> (MarkerFrame, usize)| {
         let Some(flare) = read_h3_flare(source, path).map(Arc::new) else {
             return;
         };
         for marker in part_markers(markers, name, once) {
             let (place, node) = frame(marker);
+            let (place, node) = placed(place, node);
             flares.push(H3FlareAt {
                 object: owner,
                 node,
@@ -589,14 +598,15 @@ pub(super) fn read_h3_flares(
         if group == flare_group && !path.is_empty() {
             let name = marker_name(attachment, "marker");
             let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
-            place_flare(&path, &name, false, scale_by, None, None);
+            place_flare(&path, &name, false, scale_by, None, None, &|place, node| (place, node));
         }
     }
     for_each_attached_part(source, object, |part| {
         if part.group == flare_group {
             let by_effect = Some(H3EffectScale { scaled: part.scaled });
             let event = Some((Arc::clone(&part.times), part.event));
-            place_flare(&part.path, &part.marker, part.effect.once, part.effect.scale_by.clone(), by_effect, event);
+            let placed = |place, node| part.placed(place, node);
+            place_flare(&part.path, &part.marker, part.effect.once, part.effect.scale_by.clone(), by_effect, event, &placed);
         }
     });
     flares

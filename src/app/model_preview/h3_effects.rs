@@ -137,6 +137,16 @@ impl H3EffectTimes {
         (age >= 0.0).then_some(age)
     }
 
+    #[cfg(test)]
+    pub(super) fn read_nothing() -> Self {
+        Self {
+            events: vec![H3EventTime::of([0.0, 0.0], [100.0, 100.0])],
+            loop_start: 0,
+            parallel: false,
+            once: false,
+        }
+    }
+
     /// Whether a run that does not loop has finished.
     pub(super) fn is_over(&self, time: f32) -> bool {
         self.once && time >= self.once()
@@ -262,8 +272,7 @@ pub(super) fn for_each_attached_part(
         };
         let locations = elements(effect.root(), "locations");
         let times = Arc::new(object_effect.times_of(effect.root()));
-        let flags = effect.root().read_flag_names("flags").unwrap_or_default();
-        let world_oriented = flags.iter().any(|(_, name)| name.starts_with(WORLD_ORIENTATION));
+        let world_oriented = H3ObjectEffect::world_oriented(effect.root());
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for part in elements(event, "parts") {
                 let Some((group, path)) = part.read_tag_ref_with_group("type") else {
@@ -329,13 +338,9 @@ impl H3ObjectEffect {
     }
 
     /// `use parent position but world orientation`.
-    pub(super) fn oriented(place: MarkerFrame, effect: TagStruct<'_>) -> MarkerFrame {
+    pub(super) fn world_oriented(effect: TagStruct<'_>) -> bool {
         let flags = effect.read_flag_names("flags").unwrap_or_default();
-        if flags.iter().any(|(_, name)| name.starts_with(WORLD_ORIENTATION)) {
-            MarkerFrame { axes: WORLD_AXES, ..place }
-        } else {
-            place
-        }
+        flags.iter().any(|(_, name)| name.starts_with(WORLD_ORIENTATION))
     }
 
     pub(super) fn times_of(&self, effect: TagStruct<'_>) -> H3EffectTimes {

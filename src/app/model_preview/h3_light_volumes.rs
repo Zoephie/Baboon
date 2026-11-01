@@ -210,6 +210,8 @@ pub(crate) struct H3LightVolumeAt {
     node: usize,
     position: [f32; 3],
     forward: [f32; 3],
+    /// `use parent position but world orientation`: its forward does not turn.
+    world_oriented: bool,
     only_under: Option<(String, String)>,
     scale_by: String,
     /// `secondary scale`, the effect's `b`.
@@ -295,6 +297,7 @@ pub(super) fn read_h3_light_volumes(
                     node,
                     position: place.position,
                     forward: place.axes[0],
+                    world_oriented: part.world_oriented,
                     only_under: marker.only_under.clone(),
                     scale_by: part.effect.scale_by.clone(),
                     secondary_by: part.effect.secondary_by.clone(),
@@ -432,7 +435,8 @@ impl H3LightVolumeAt {
         let length = volume.length.scalar(&state);
         let density = volume.density.scalar(&state);
         let (count, profiles, distance) = profile_layout(length, density);
-        let (origin, direction) = posed_on(self.node, self.position, self.forward, bones);
+        let (origin, turned) = posed_on(self.node, self.position, self.forward, bones);
+        let direction = if self.world_oriented { self.forward } else { turned };
         let direction = unit(direction);
         let offset = volume.offset.scalar(&state);
         let side_length = volume.profile_length.scalar(&state);

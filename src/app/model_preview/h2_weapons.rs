@@ -552,7 +552,10 @@ fn fold_attached(
         let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
         preview.h3_light_volumes.extend(volumes.into_iter().map(|volume| volume.on_attached(name)));
         let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
-        preview.h3_particles.extend(particles.into_iter().map(|system| Arc::new(system.on_attached(name))));
+        let particles: Vec<_> = particles.into_iter().map(|system| Arc::new(system.on_attached(name))).collect();
+        let carried = super::h3_particles::carried_strips(&particles);
+        preview.h3_particles.extend(particles);
+        preview.h3_strips.extend(carried);
         let strips = super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
         preview.h3_strips.extend(strips.into_iter().map(|strip| Arc::new(strip.on_attached(name))));
         let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
