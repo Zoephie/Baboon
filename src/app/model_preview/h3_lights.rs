@@ -327,10 +327,22 @@ pub(crate) struct H3FlareAt {
     forward: [f32; 3],
     marker_scale: f32,
     scale_by: String,
+    /// Set for a flare an attached effect draws.
+    by_effect: Option<H3EffectScale>,
     flare: Arc<H3Flare>,
 }
 
+/// `effect_generate_lens_flares`' use of the attachment's scale.
+#[derive(Debug, Clone, Copy)]
+struct H3EffectScale {
+    /// The part's `A scales values` takes in its type's scale, as otherwise the
+    /// flare burns at full while the effect runs.
+    scaled: bool,
+}
+
 const NO_OCCLUSION_TEST: i128 = 2;
+/// `_effect_part_type_scale_bit`, by its option's name.
+const PART_SCALE: &str = "type-specific scale";
 const ONLY_FIRST_PERSON_FLARE: i128 = 4;
 /// `occlusion offset direction` toward the eye.
 const OFFSET_TOWARD_EYE: i128 = 1;
@@ -403,34 +415,77 @@ pub(super) fn read_h3_flares(
         return flares;
     };
     let flare_group = u32::from_be_bytes(*b"lens");
-    for attachment in elements(block, "attachments") {
-        let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
-            continue;
+    let effect_group = u32::from_be_bytes(*b"effe");
+    let mut place_flare = |path: &str,
+                           name: &str,
+                           attachment: TagStruct<'_>,
+                           by_effect: Option<H3EffectScale>| {
+        let Some(flare) = read_h3_flare(source, path).map(Arc::new) else {
+            return;
         };
-        if group != flare_group || path.is_empty() {
-            continue;
-        }
-        let Some(flare) = read_h3_flare(source, &path).map(Arc::new) else {
-            continue;
-        };
-        let name = attachment
-            .read_string_id("marker")
-            .or_else(|| attachment.read_string("marker"))
-            .unwrap_or_default();
-        for marker in markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name)) {
+        for marker in markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(name)) {
             let (place, node) = frame(marker);
             flares.push(H3FlareAt {
                 object: owner,
                 node,
                 position: place.position,
                 forward: place.axes[0],
-                marker_scale: marker.scale,
+                // An effect hands `lens_flares_create` a scale of its own.
+                marker_scale: if by_effect.is_some() { 1.0 } else { marker.scale },
                 scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
+                by_effect,
                 flare: Arc::clone(&flare),
             });
         }
+    };
+    for attachment in elements(block, "attachments") {
+        let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
+            continue;
+        };
+        if path.is_empty() {
+            continue;
+        }
+        if group == flare_group {
+            let name = marker_of(attachment, "marker");
+            place_flare(&path, &name, attachment, None);
+        } else if group == effect_group {
+            let Ok(effect) = load_referenced_tag_from_source(source, &path, "effect", b"effe") else {
+                continue;
+            };
+            let locations = elements(effect.root(), "locations");
+            for event in elements(effect.root(), "events") {
+                for part in elements(event, "parts") {
+                    let Some((group, part_path)) = part.read_tag_ref_with_group("type") else {
+                        continue;
+                    };
+                    let location = usize::try_from(part.read_block_index("location")).ok();
+                    let location = location.and_then(|location| locations.get(location));
+                    if let (true, false, Some(location)) = (group == flare_group, part_path.is_empty(), location) {
+                        let name = marker_of(*location, "marker name");
+                        let scales = part.read_flag_names("A scales values").unwrap_or_default();
+                        let scaled = scales.iter().any(|(_, name)| name == PART_SCALE);
+                        place_flare(&part_path, &name, attachment, Some(H3EffectScale { scaled }));
+                    }
+                }
+            }
+        }
     }
     flares
+}
+
+fn marker_of(holder: TagStruct<'_>, field: &str) -> String {
+    holder.read_string_id(field).or_else(|| holder.read_string(field)).unwrap_or_default()
+}
+
+impl H3EffectScale {
+    /// `attachments_update` runs the effect only while the function is on.
+    fn of(self, value: f32) -> f32 {
+        match (value > 0.0, self.scaled) {
+            (false, _) => 0.0,
+            (true, true) => value,
+            (true, false) => 1.0,
+        }
+    }
 }
 
 impl H3FlareAt {
@@ -454,7 +509,8 @@ impl H3FlareAt {
         if self.scale_by.is_empty() {
             return 1.0;
         }
-        values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0)
+        let value = values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0);
+        self.by_effect.map_or(value, |scale| scale.of(value))
     }
 
     fn radius(&self, scale: f32) -> f32 {
@@ -561,6 +617,16 @@ impl H3FlareAt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_effects_flare_burns_whole_while_its_function_is_on() {
+        let whole = H3EffectScale { scaled: false };
+        assert_eq!(whole.of(0.0), 0.0);
+        assert_eq!(whole.of(0.25), 1.0);
+        let scaled = H3EffectScale { scaled: true };
+        assert_eq!(scaled.of(0.0), 0.0);
+        assert_eq!(scaled.of(0.25), 0.25);
+    }
 
     #[test]
     fn a_light_reaches_zero_at_its_maximum_distance() {
