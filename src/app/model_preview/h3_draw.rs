@@ -279,7 +279,7 @@ fn frame_key(uniform: &str, frame: usize) -> String {
 
 /// `calculate_dominant_light_from_lightprobe`: the probe's first order, by
 /// luminance, and how much of the probe lies along it.
-fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4]) {
+fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4], f32) {
     let [r, g, b] = probe;
     let weighted = |at: usize| 0.212_656 * r[at] + 0.715_158 * g[at] + 0.072_185_6 * b[at];
     let toward = [-weighted(3), -weighted(1), weighted(2)];
@@ -304,7 +304,24 @@ fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4]) {
         let sum: f32 = eval.iter().zip(&channel).map(|(a, b)| a * b).sum();
         sum.max(0.0) / denominator
     });
-    ([x, y, z, 1.0], [intensity[0], intensity[1], intensity[2], 1.0])
+    // How much of the green the one light leaves unexplained.
+    let (error, most) = eval.iter().zip(&probe[1]).fold((0.0, 0.0), |(error, most), (a, b)| {
+        let difference = intensity[1] * a - b;
+        (error + difference * difference, most + b * b * 2.0)
+    });
+    let contrast = if most > 0.0001 { (1.0 - error / most).powi(4) * 10.0 } else { 10.0 };
+    ([x, y, z, 1.0], [intensity[0], intensity[1], intensity[2], 1.0], contrast)
+}
+
+/// Which way an object's shadow falls from and how dark it is: the dominant
+/// light, whose shadow fades out as the probe grows even.
+pub(super) fn h3_shadow_light(frame: &ModelGpuFrame) -> ([f32; 3], f32) {
+    let ([x, y, z, _], _, contrast) = dominant_light(&frame_probe(frame));
+    ([x, y, z], h3_shadow_alpha(contrast))
+}
+
+fn h3_shadow_alpha(contrast: f32) -> f32 {
+    (contrast.clamp(2.0, 8.0) - 2.0) / 6.0
 }
 
 /// The default probe turned about the vertical by `angle`, the sky staying up.
@@ -1146,6 +1163,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_shadow_fades_as_the_probe_grows_even() {
+        assert_eq!(h3_shadow_alpha(2.0), 0.0);
+        assert_eq!(h3_shadow_alpha(1.0), 0.0);
+        assert_eq!(h3_shadow_alpha(5.0), 0.5);
+        assert_eq!(h3_shadow_alpha(10.0), 1.0);
+        let mut even = DEFAULT_PROBE;
+        even.iter_mut().for_each(|channel| channel[1..].fill(0.0));
+        let contrast = |probe: &[[f32; 9]; 3]| dominant_light(probe).2;
+        assert!(contrast(&DEFAULT_PROBE) > contrast(&even), "{}", contrast(&even));
+    }
+
+    #[test]
     fn a_shield_shows_once_either_reading_rises() {
         let values = |name: &str, value: f32| {
             h2_functions::H2FunctionValues::from([(name.to_owned(), value)])
@@ -1167,10 +1196,10 @@ mod tests {
 
     #[test]
     fn the_dominant_light_points_at_the_bright_side_and_turns_with_it() {
-        let (fixed, intensity) = dominant_light(&DEFAULT_PROBE);
+        let (fixed, intensity, _) = dominant_light(&DEFAULT_PROBE);
         assert!(fixed[1] > 0.9 && fixed[0] < 0.0, "{fixed:?}");
         assert!(intensity[..3].iter().all(|value| *value > 0.0), "{intensity:?}");
-        let (turned, again) = dominant_light(&turned_probe(std::f32::consts::FRAC_PI_2));
+        let (turned, again, _) = dominant_light(&turned_probe(std::f32::consts::FRAC_PI_2));
         assert!((turned[0] + fixed[1]).abs() < 1e-4 && (turned[1] - fixed[0]).abs() < 1e-4, "{turned:?}");
         assert!((again[0] - intensity[0]).abs() < 1e-3);
     }

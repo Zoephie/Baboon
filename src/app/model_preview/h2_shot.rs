@@ -174,6 +174,10 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         ),
     };
     let mut frame = frame;
+    frame.object_moves =
+        super::object_moves(&data, &state.h2_function_inputs, time, frame.h2_values.as_ref());
+    eprintln!("NOTE moves {}", frame.h2_moves());
+    let mut frame = frame;
     frame.h2_prt_clusters = frame.h2_object_prt_clusters();
     frame.ce_points = frame.ce_point_lights();
     unsafe {

@@ -131,19 +131,7 @@ pub(super) fn draw_model_viewport(
         time,
         h2_prt_clusters: None,
         object_states: object_states(data, &state.ce_function_inputs, time),
-        object_moves: object_functions(data).any(|functions| functions.move_at_rest())
-            || h2_functions_move(data, &state.h2_function_inputs, time)
-            || data.preview.h2_flares.iter().any(|at| at.animates())
-            || data.preview.h2_point_lights.iter().any(|light| light.animates())
-            || data.preview.h2_gel_lights.iter().any(|light| light.animates())
-            || data.preview.h3_lights.iter().any(|light| light.animates())
-            || data.preview.h3_flares.iter().any(|at| at.animates())
-            || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
-                texture.h3.as_ref().is_some_and(|material| {
-                    material.animations.iter().any(|animation| animation.moves())
-                        || (material.shield.is_some() && h3_draw::h3_shield_showing(h2_values.as_ref()))
-                })
-            }),
+        object_moves: object_moves(data, &state.h2_function_inputs, time, h2_values.as_ref()),
         h2_values,
         h2_attached_values: h2_attached_values(data, time),
         ce_points: Vec::new(),
@@ -878,6 +866,28 @@ fn h2_function_values_for(
     (data.h2_object_functions.is_some() || flares || h3).then(|| h2_function_values(data, set, time))
 }
 
+/// Whether anything on the object changes with time alone.
+pub(super) fn object_moves(
+    data: &ModelPreviewData,
+    set: &h2_functions::H2FunctionInputs,
+    time: f32,
+    h2_values: Option<&h2_functions::H2FunctionValues>,
+) -> bool {
+    object_functions(data).any(|functions| functions.move_at_rest())
+        || h2_functions_move(data, set, time)
+        || data.preview.h2_flares.iter().any(|at| at.animates())
+        || data.preview.h2_point_lights.iter().any(|light| light.animates())
+        || data.preview.h2_gel_lights.iter().any(|light| light.animates())
+        || data.preview.h3_lights.iter().any(|light| light.animates())
+        || data.preview.h3_flares.iter().any(|at| at.animates())
+        || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
+            texture.h3.as_ref().is_some_and(|material| {
+                material.animations.iter().any(|animation| animation.moves())
+                    || (material.shield.is_some() && h3_draw::h3_shield_showing(h2_values))
+            })
+        })
+}
+
 fn h2_functions_move(
     data: &ModelPreviewData,
     set: &h2_functions::H2FunctionInputs,
@@ -994,6 +1004,10 @@ impl ModelGpuFrame {
         let Some(textures) = self.textures.as_ref() else {
             return false;
         };
+        // Halo 3 has no layers to ask: what moves it is all in `object_moves`.
+        if self.object_moves && textures.iter().any(|texture| texture.h3.is_some()) {
+            return true;
+        }
         self.visible_batches.iter().any(|&index| {
             let Some(batch) = self.preview.batches.get(index) else {
                 return false;
@@ -3260,10 +3274,12 @@ impl ModelGlRenderer {
             }
             if matches!(pass.stage, H2VertexStage::ShadowCaster | H2VertexStage::ShadowMask) {
                 let location = program.location(gl, "u_shadow_matrix");
-                let toward = if frame.default_lights {
-                    h2_prt_lights()[0].direction
+                let (toward, shadow_alpha) = if self.h3_draws(frame) {
+                    h3_draw::h3_shadow_light(frame)
+                } else if frame.default_lights {
+                    (h2_prt_lights()[0].direction, 1.0)
                 } else {
-                    frame.h2_object_light()
+                    (frame.h2_object_light(), 1.0)
                 };
                 let matrix = h2_shadow_matrix(&frame.preview, toward);
                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
@@ -3282,6 +3298,8 @@ impl ModelGlRenderer {
                     gl.uniform_3_f32_slice(location.as_ref(), &toward);
                     let location = program.location(gl, "u_shadow_size");
                     gl.uniform_1_f32(location.as_ref(), H3_SHADOW_MAP_SIZE as f32);
+                    let location = program.location(gl, "u_shadow_alpha");
+                    gl.uniform_1_f32(location.as_ref(), shadow_alpha);
                 }
             }
             for (name, axis) in [
