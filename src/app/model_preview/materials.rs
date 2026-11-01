@@ -473,15 +473,6 @@ fn h3_parameter_value(values: &Values<'_>, name: &str) -> Option<H3Value> {
     })
 }
 
-/// Where a Halo 3 cube stores each face, counted `+X -X +Y -Y +Z -Z`.
-const H3_CUBE_FACE_SLOTS: [usize; 6] = [0, 2, 1, 3, 4, 5];
-
-/// A face's top level, of a cube whose top levels take `level` bytes each.
-fn h3_cube_face(pixels: &[u8], level: usize, face: usize) -> Option<&[u8]> {
-    let slot = *H3_CUBE_FACE_SLOTS.get(face)?;
-    pixels.get(slot * level..(slot + 1) * level)
-}
-
 /// The bitmap the engine binds for an extern texture, with no level around
 /// the object: `rasterizer_globals`' material textures, and its default cube.
 fn h3_extern_bitmap(name: &str) -> Option<&'static str> {
@@ -1194,16 +1185,7 @@ pub(super) fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind,
         if !image.is_cube() {
             return None;
         }
-        // `bitmap_cube_map_address`: each level holds all six faces, and past
-        // Halo 2 too they ring the Z-up world, `+X +Y -X -Y +Z -Z`.
-        let classic = tag.classic_engine().is_some();
-        let level = format.level_bytes(width, height) as usize;
-        let face = |index: usize| {
-            if classic {
-                return decode(image.cube_face_bytes(index as u32).ok()?);
-            }
-            decode(h3_cube_face(image.pixel_bytes().ok()?, level, index)?)
-        };
+        let face = |index: usize| decode(image.cube_face_bytes(index as u32).ok()?);
         let faces = [face(0)?, face(1)?, face(2)?, face(3)?, face(4)?, face(5)?];
         return Some(H2Image::Cube { size: width as usize, faces });
     }
@@ -2155,20 +2137,5 @@ mod tests {
         assert_eq!(rgba.len(), width * height * depth * 4);
         let slice = width * height * 4;
         assert_ne!(rgba[..slice], rgba[slice * (depth - 1)..], "slices differ");
-    }
-}
-
-#[cfg(test)]
-mod h3_cube_tests {
-    use super::*;
-
-    #[test]
-    fn a_cube_face_comes_from_its_slot_and_ignores_the_smaller_levels() {
-        let mut pixels: Vec<u8> = (0..6).flat_map(|slot| [slot; 4]).collect();
-        pixels.extend([9; 6]);
-        let faces: Vec<u8> = (0..6).map(|face| h3_cube_face(&pixels, 4, face).unwrap()[0]).collect();
-        assert_eq!(faces, [0, 2, 1, 3, 4, 5]);
-        assert_eq!(h3_cube_face(&pixels, 4, 6), None);
-        assert_eq!(h3_cube_face(&pixels[..23], 4, 5), None);
     }
 }
