@@ -280,7 +280,7 @@ pub(super) fn load_model_preview(
     // and legacy physics tags. Start with the render reference here; collision
     // is added by the background overlay path.
     if blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1
-        && is_object_family_group(model_tag.header.group_tag)
+        && is_object_family_group(model_tag.header.group_tag, source.and_then(TagSource::game))
     {
         let Some(source) = source else {
             return Err("Halo CE object preview requires a loaded source.".to_owned());
@@ -345,7 +345,7 @@ pub(super) fn load_model_preview(
 
     // Every later object names a `.model`, which previews as itself. The
     // object has the change colors, so nothing needs to go looking for it.
-    if is_object_family_group(model_tag.header.group_tag) {
+    if is_object_family_group(model_tag.header.group_tag, source.and_then(TagSource::game)) {
         let Some(source) = source else {
             return Err("Object preview requires a loaded source.".to_owned());
         };
@@ -602,7 +602,7 @@ pub(super) fn load_model_preview(
 /// The `.model` an object stands for. `None` for any other tag, which is its
 /// own model, and for a Halo CE object, which has no `.model` to name.
 pub(super) fn preview_model_tag(source: &TagSource, tag: &TagFile) -> Result<Option<TagFile>, String> {
-    if !is_object_family_group(tag.header.group_tag)
+    if !is_object_family_group(tag.header.group_tag, source.game())
         || blam_tags::game::Game::of(tag) == blam_tags::game::Game::Halo1
     {
         return Ok(None);

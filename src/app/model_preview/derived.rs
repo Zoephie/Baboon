@@ -1572,7 +1572,7 @@ impl Baboon {
             return false;
         };
         if entry.group_tag != u32::from_be_bytes(*b"hlmt")
-            && !is_object_family_group(entry.group_tag)
+            && !is_object_family_group(entry.group_tag, kit.source.as_ref().and_then(|source| source.game))
         {
             return false;
         }
@@ -1594,7 +1594,7 @@ impl Baboon {
         let build = move || -> Option<_> {
                 let model = crate::core::source::read_entry(&source, &entry).ok()?;
                 if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
-                    && is_object_family_group(model.header.group_tag)
+                    && is_object_family_group(model.header.group_tag, source.game())
                 {
                     return Some((halo1_object_collision_overlay(&model, &source), None));
                 }

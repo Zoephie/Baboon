@@ -1373,7 +1373,7 @@ impl Baboon {
         // names its `model_animations` itself, the way it names its gbxmodel.
         // Any other object reaches a graph through its `.model`.
         let names_a_graph = entry.group_tag == u32::from_be_bytes(*b"hlmt")
-            || is_object_family_group(entry.group_tag);
+            || is_object_family_group(entry.group_tag, source.game());
         if !names_a_graph {
             return false;
         }

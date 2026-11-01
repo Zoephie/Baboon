@@ -71,7 +71,7 @@ pub(super) fn draw_tag(
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let is_object_family = is_object_family_group(entry.group_tag);
+    let is_object_family = is_object_family_group(entry.group_tag, source_game);
     let is_shaderish = !supports_field_search(entry, &bundled_group_hierarchy(source_game));
     let is_model = is_previewable_geometry_group_for_game(entry.group_tag, names, source_game);
 
@@ -79,7 +79,7 @@ pub(super) fn draw_tag(
         draw_tag_metadata(ui, tag, entry, names);
     }
     if is_object_family {
-        draw_object_model_summary(ui, tag, entry, names, edit);
+        draw_object_model_summary(ui, tag, entry, names, source_game, edit);
     }
     if is_sound_classes_group(entry.group_tag) {
         draw_sound_classes_summary(ui, tag);

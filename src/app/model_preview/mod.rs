@@ -1431,7 +1431,7 @@ fn draw_model_view_settings_menu(
 
             if !is_campaign_evolved
                 && (tag.header.group_tag.to_be_bytes() == *b"hlmt"
-                    || is_object_family_group(tag.header.group_tag))
+                    || is_object_family_group(tag.header.group_tag, source_game))
             {
                 model_view_icon_checkbox(
                     ui,
