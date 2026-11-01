@@ -380,7 +380,9 @@ pub(super) fn biped_weapons(
     };
     let equippable = known.map_or_else(|| equippable_of(source, &graph), <[_]>::to_vec);
     let held = chosen.and_then(|path| equippable.iter().find(|weapon| weapon.path == path));
-    let hidden_clips = hidden_clips(&graph, held.map_or(UNARMED, |weapon| weapon.label.as_str()));
+    // With nothing held every clip stays.
+    let hidden_clips =
+        held.map_or_else(Default::default, |weapon| hidden_clips(&graph, weapon.label.as_str()));
     CeBipedWeapons { equippable, hidden_clips }
 }
 
@@ -755,6 +757,8 @@ mod tests {
         let pistol = held("hp", "pistol");
         assert!(!pistol("stand pistol idle"));
         assert!(pistol("stand rifle idle"));
+        let unarmed = biped_weapons(&source, &cyborg, None, Some(&[])).hidden_clips;
+        assert!(unarmed.is_empty(), "nothing held, nothing hidden: {} clips", unarmed.len());
         // `alert` has no rocket launcher, so it falls back on its last weapon.
         let tag = graph("characters\\cyborg\\cyborg");
         let alert_rifle = elements(tag.root(), "animations")
