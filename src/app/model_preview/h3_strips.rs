@@ -409,6 +409,7 @@ pub(super) fn read_h3_strips(
             let (look, kind) = (Arc::new(look), Arc::new(kind));
             for marker in part_markers(markers, &part.marker, part.effect.once) {
                 let (place, node) = frame(marker);
+                let (place, node) = part.placed(place, node);
                 let place = part_frame(&place, offset, yaw, pitch);
                 let end = part.secondary_marker.as_ref().and_then(|name| {
                     let far = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(name))?;

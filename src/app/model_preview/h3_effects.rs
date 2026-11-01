@@ -222,6 +222,10 @@ pub(super) struct H3EffectPart<'a> {
     pub(super) marker: String,
     /// `secondary location (beams)`, by name.
     pub(super) secondary_marker: Option<String>,
+    /// `use parent position but world orientation`, of its effect.
+    pub(super) world_oriented: bool,
+    /// `never attached to object`: it stays where it began.
+    pub(super) unattached: bool,
     /// `A scales values` takes in the attachment's scale.
     pub(super) scaled: bool,
     pub(super) times: Arc<H3EffectTimes>,
@@ -258,6 +262,8 @@ pub(super) fn for_each_attached_part(
         };
         let locations = elements(effect.root(), "locations");
         let times = Arc::new(object_effect.times_of(effect.root()));
+        let flags = effect.root().read_flag_names("flags").unwrap_or_default();
+        let world_oriented = flags.iter().any(|(_, name)| name.starts_with(WORLD_ORIENTATION));
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for part in elements(event, "parts") {
                 let Some((group, path)) = part.read_tag_ref_with_group("type") else {
@@ -271,12 +277,34 @@ pub(super) fn for_each_attached_part(
                 let marker = object_effect.marker_of(*location);
                 let secondary = usize::try_from(part.read_block_index("secondary location (beams)")).ok();
                 let secondary_marker = secondary.and_then(|at| locations.get(at)).map(|at| marker_name(*at, "marker name"));
+                let flags = part.read_flag_names("flags").unwrap_or_default();
+                let unattached = flags.iter().any(|(_, name)| name.starts_with("never attached to object"));
                 let scales = part.read_flag_names("A scales values").unwrap_or_default();
                 let scaled = scales.iter().any(|(_, name)| name == PART_SCALE);
                 let times = Arc::clone(&times);
-                visit(H3EffectPart { effect: &object_effect, part, group, path, marker, secondary_marker, scaled, times, event: at });
+                visit(H3EffectPart {
+                    effect: &object_effect,
+                    part,
+                    group,
+                    path,
+                    marker,
+                    secondary_marker,
+                    world_oriented,
+                    unattached,
+                    scaled,
+                    times,
+                    event: at,
+                });
             }
         }
+    }
+}
+
+impl H3EffectPart<'_> {
+    /// Where a marker puts this part: its frame and the node it follows.
+    pub(super) fn placed(&self, place: MarkerFrame, node: usize) -> (MarkerFrame, usize) {
+        let place = if self.world_oriented { MarkerFrame { axes: WORLD_AXES, ..place } } else { place };
+        (place, if self.unattached { NO_NODE } else { node })
     }
 }
 
@@ -304,7 +332,7 @@ impl H3ObjectEffect {
     pub(super) fn oriented(place: MarkerFrame, effect: TagStruct<'_>) -> MarkerFrame {
         let flags = effect.read_flag_names("flags").unwrap_or_default();
         if flags.iter().any(|(_, name)| name.starts_with(WORLD_ORIENTATION)) {
-            MarkerFrame { axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], ..place }
+            MarkerFrame { axes: WORLD_AXES, ..place }
         } else {
             place
         }
@@ -370,6 +398,9 @@ pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3O
     with_nested_effects(source, effects)
 }
 
+const WORLD_AXES: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+/// Past any pose, so what holds it stays at rest.
+const NO_NODE: usize = usize::MAX / 8;
 const WORLD_ORIENTATION: &str = "use parent position but world orientation";
 
 /// Whether a function is one the preview made to start an event's effect.

@@ -288,6 +288,7 @@ pub(super) fn read_h3_light_volumes(
             };
             for marker in part_markers(markers, &part.marker, part.effect.once) {
                 let (place, node) = frame(marker);
+                let (place, node) = part.placed(place, node);
                 let place = part_frame(&place, offset, yaw, pitch);
                 volumes.push(H3LightVolumeAt {
                     object: owner,

@@ -357,6 +357,7 @@ pub(super) fn read_h3_lights(
                 return;
             };
             let (place, node) = frame(marker);
+            let (place, node) = part.placed(place, node);
             let place = part_frame(&place, offset, yaw, pitch);
             let by_effect = Some(H3EffectScale { scaled: part.scaled });
             let only_under = marker.only_under.clone();
