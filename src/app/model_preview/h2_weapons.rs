@@ -102,6 +102,9 @@ struct GraphEntry {
     class: String,
     kind: String,
     has_idle: bool,
+    /// The clips its actions and overlays name, whatever those are called:
+    /// the assault rifle's `fire_1` is `combat:rifle:br:fire_1`.
+    slots: Vec<String>,
 }
 
 /// Which nodes an overlay channel reaches: the graph's `left arm member`
@@ -275,8 +278,18 @@ impl H2UnitWeapons {
             let prefix = format!("{mode}:{class}:");
             clips.iter().any(|clip| clip.starts_with(&prefix))
         };
+        // What the held weapon's own slots point at is its, by any name.
+        let slotted: BTreeSet<&str> = self
+            .graph
+            .iter()
+            .filter(|entry| entry.class == class && kinds.iter().any(|held| *held == entry.kind))
+            .flat_map(|entry| entry.slots.iter().map(String::as_str))
+            .collect();
         let mut hidden = BTreeSet::new();
         for (index, clip) in clips.iter().enumerate() {
+            if slotted.contains(clip) {
+                continue;
+            }
             let words: Vec<_> = clip.split(':').collect();
             let [mode, clip_class, rest @ ..] = words.as_slice() else {
                 continue;
@@ -311,11 +324,27 @@ fn graph_entries(graph: &TagFile) -> Vec<GraphEntry> {
         return entries;
     };
     let label = |entry: TagStruct<'_>| entry.read_string_id("label").unwrap_or_default();
+    let names: Vec<String> = holder_of(graph.root(), "animations")
+        .map(|holder| elements(holder, "animations"))
+        .unwrap_or_default()
+        .iter()
+        .map(|animation| animation.read_string_id("name").unwrap_or_default())
+        .collect();
+    let clip_of = |slot: &TagStruct<'_>| {
+        let reference = slot.descend("animation")?;
+        // Only a graph's own: what `graph index` names lies in another.
+        if reference.read_int_any("graph index").is_some_and(|graph| graph >= 0) {
+            return None;
+        }
+        names.get(usize::try_from(reference.read_block_index("animation")).ok()?).cloned()
+    };
     for mode in elements(holder, "modes") {
         for class in elements(mode, "weapon class") {
             for kind in elements(class, "weapon type") {
                 let actions = elements(kind, "actions");
+                let overlays = elements(kind, "overlays");
                 entries.push(GraphEntry {
+                    slots: actions.iter().chain(&overlays).filter_map(clip_of).collect(),
                     mode: label(mode),
                     class: label(class),
                     kind: label(kind),
@@ -701,7 +730,7 @@ mod tests {
     use super::*;
 
     fn entry(mode: &str, class: &str, kind: &str, has_idle: bool) -> GraphEntry {
-        GraphEntry { mode: mode.to_owned(), class: class.to_owned(), kind: kind.to_owned(), has_idle }
+        GraphEntry { mode: mode.to_owned(), class: class.to_owned(), kind: kind.to_owned(), has_idle, slots: Vec::new() }
     }
 
     fn weapon(name: &str, class: &str, kind: &str, dual: bool, only_dual: bool) -> H2Equippable {
@@ -867,8 +896,24 @@ mod tests {
             class: (*class).to_owned(),
             kind: (*kind).to_owned(),
             has_idle: *has_idle,
+            slots: Vec::new(),
         });
         H2UnitWeapons { graph: graph.collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_clip_the_held_types_slot_names_stays_whatever_it_is_called() {
+        let mut weapons = graph_of(&[
+            ("combat", "rifle", "ar", true),
+            ("combat", "rifle", "br", true),
+            ("combat", "rifle", "sr", true),
+        ]);
+        weapons.graph[0].slots = vec!["combat:rifle:br:fire_1".to_owned()];
+        let clips = ["combat:rifle:ar:grip", "combat:rifle:br:fire_1", "combat:rifle:br:grip", "combat:rifle:sr:fire_1"];
+        let hidden = weapons.hidden(&clips, "rifle", &["ar".to_owned()]);
+        assert_eq!(hidden.iter().copied().collect::<Vec<_>>(), [2, 3], "only the BR's own stay hidden");
+        let hidden = weapons.hidden(&clips, "rifle", &["sr".to_owned()]);
+        assert!(hidden.contains(&1), "the AR's slot means nothing to a held sniper rifle");
     }
 
     #[test]

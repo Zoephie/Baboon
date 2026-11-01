@@ -2344,6 +2344,7 @@ in vec3 v_extra;
 in vec4 v_lean;
 in vec3 v_normal;
 uniform bool u_lit;
+uniform bool u_premultiplied;
 uniform vec4 u_lighting[10];
 uniform float u_distortion;
 uniform bool u_unsigned;
@@ -2415,6 +2416,10 @@ void main() {
     } else {
         color.rgb += u_add;
     }
+    // `convert_to_render_target_premultiplied_alpha`.
+    if (u_premultiplied) {
+        color.rgb *= color.a;
+    }
     out_color = color;
 }
 ";
@@ -2463,6 +2468,7 @@ struct H3ParticleGl {
     multiply: Option<glow::NativeUniformLocation>,
     add: Option<glow::NativeUniformLocation>,
     lit: Option<glow::NativeUniformLocation>,
+    premultiplied: Option<glow::NativeUniformLocation>,
     lighting: Option<glow::NativeUniformLocation>,
     distortion: Option<glow::NativeUniformLocation>,
     unsigned: Option<glow::NativeUniformLocation>,
@@ -2510,6 +2516,8 @@ impl H3ParticleGl {
             gl.uniform_3_f32_slice(self.add.as_ref(), &look.add);
             gl.uniform_1_f32(self.distortion.as_ref(), look.distortion.unwrap_or(0.0));
             gl.uniform_1_i32(self.lit.as_ref(), i32::from(look.lit_pixels));
+            let premultiplied = look.blend == H3Blend::PreMultiplied;
+            gl.uniform_1_i32(self.premultiplied.as_ref(), i32::from(premultiplied));
             gl.uniform_4_f32_slice(self.lighting.as_ref(), lighting.as_flattened());
             let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| *texels != h3_shaders::H3Texels::Signed);
             gl.uniform_1_i32(self.unsigned.as_ref(), i32::from(unsigned));
@@ -2556,6 +2564,7 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             multiply: gl.get_uniform_location(program, "u_multiply"),
             add: gl.get_uniform_location(program, "u_add"),
             lit: gl.get_uniform_location(program, "u_lit"),
+            premultiplied: gl.get_uniform_location(program, "u_premultiplied"),
             lighting: gl.get_uniform_location(program, "u_lighting"),
             distortion: gl.get_uniform_location(program, "u_distortion"),
             unsigned: gl.get_uniform_location(program, "u_unsigned"),
