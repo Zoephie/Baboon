@@ -352,6 +352,44 @@ pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3O
             });
         }
     }
+    with_nested_effects(source, effects)
+}
+
+/// How deep an effect's parts may name further effects: the tags go one down.
+const MOST_NESTING: usize = 3;
+
+/// Each effect, then those its parts name, at those parts' locations. A part's
+/// effect is played by its event, once, under the same function.
+fn with_nested_effects(source: &TagSource, mut effects: Vec<H3ObjectEffect>) -> Vec<H3ObjectEffect> {
+    let effect_group = u32::from_be_bytes(*b"effe");
+    let mut level = 0..effects.len();
+    for _ in 0..MOST_NESTING {
+        let mut nested = Vec::new();
+        for outer in &effects[level.clone()] {
+            let Ok(tag) = load_referenced_tag_from_source(source, &outer.path, "effect", b"effe") else {
+                continue;
+            };
+            let locations = elements(tag.root(), "locations");
+            let parts = elements(tag.root(), "events").into_iter().flat_map(|event| elements(event, "parts"));
+            for part in parts {
+                let Some((group, path)) = part.read_tag_ref_with_group("type") else {
+                    continue;
+                };
+                let location = usize::try_from(part.read_block_index("location")).ok();
+                let location = location.and_then(|location| locations.get(location));
+                if let (true, false, Some(location)) = (group == effect_group, path.is_empty(), location) {
+                    let marker = outer.marker_of(*location);
+                    nested.push(H3ObjectEffect { path, marker, once: true, ..outer.clone() });
+                }
+            }
+        }
+        let start = effects.len();
+        effects.extend(nested);
+        level = start..effects.len();
+        if level.is_empty() {
+            break;
+        }
+    }
     effects
 }
 
