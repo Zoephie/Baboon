@@ -2229,7 +2229,7 @@ struct ModelGlRenderer {
     /// Linked passes by their address; none for one that failed.
     h3_programs: HashMap<usize, Option<h3_draw::H3Program>>,
     h3_composite_program: Option<glow::NativeProgram>,
-    h3_bloom_program: Option<glow::NativeProgram>,
+    h3_bloom: Option<H2Bloom>,
     h3_empty_vertices: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -2333,7 +2333,7 @@ impl ModelGlRenderer {
                 h3_light: None,
                 h3_programs: HashMap::new(),
                 h3_composite_program: None,
-                h3_bloom_program: None,
+                h3_bloom: None,
                 h3_empty_vertices: None,
                 h2_gel: None,
                 h2_bloom: None,
@@ -2590,7 +2590,7 @@ impl ModelGlRenderer {
                         self.draw_h2_passes(gl, frame, slot, &order, layer, None);
                     }
                 }
-                if frame.game_shaders && frame.bloom {
+                if frame.game_shaders && frame.bloom && !self.h3_draws(frame) {
                     self.draw_h2_bloom(gl, frame, slot, &order);
                     gl.use_program(Some(self.program));
                     gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -3030,12 +3030,8 @@ impl ModelGlRenderer {
             gl.clear(glow::COLOR_BUFFER_BIT);
             gl.color_mask(true, true, true, true);
             self.draw_h2_passes(gl, frame, slot, order, H2Layer::Bloom, None);
-            if self.h3_draws(frame) {
-                self.h3_bloom_mask(gl);
-                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-            }
             if self.h2_bloom.is_none() {
-                self.h2_bloom = H2Bloom::new(gl, H2_GLSL_VERSION);
+                self.h2_bloom = H2Bloom::new(gl, H2_GLSL_VERSION, false);
             }
             if let Some(bloom) = &mut self.h2_bloom {
                 bloom.apply(gl, framebuffer, color, size);
