@@ -312,13 +312,22 @@ pub(crate) struct H3Pass {
     pub(crate) textures: Vec<(String, TextureKind)>,
 }
 
+/// The game's `Nodes[70]` holds one mesh's node map, uploaded a mesh at a time.
+/// The preview's vertices name the skeleton's own nodes, all at once, with the
+/// last kept spare.
+const H3_NODES: usize = MAX_PREVIEW_BONES + 1;
+
 /// A skinned vertex without weights rides the spare node, which holds still.
 fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
-    let spare = vertex.uniforms.iter().find_map(|(name, ty)| match ty {
-        Type::Array(_, Some(nodes)) if name == "Nodes" => Some(nodes - 1),
+    let mut uniforms = vertex.uniforms;
+    let nodes = uniforms.iter_mut().find_map(|(name, ty)| match ty {
+        Type::Array(_, Some(nodes)) if name == "Nodes" => Some(nodes),
         _ => None,
     });
-    let mut uniforms = vertex.uniforms;
+    let spare = nodes.map(|nodes| {
+        *nodes = H3_NODES;
+        H3_NODES - 1
+    });
     for uniform in pixel.uniforms {
         if !uniforms.iter().any(|known| known.0 == uniform.0) {
             uniforms.push(uniform);
@@ -330,7 +339,9 @@ fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
             textures.push(texture);
         }
     }
-    let source = vertex.source.replace(
+    // Flat in the source, three rows to a node.
+    let source = vertex.source.replace("Nodes[210]", &format!("Nodes[{}]", H3_NODES * 3));
+    let source = source.replace(
         "hlsl_p0.node_weights = a_BLENDWEIGHT;",
         "hlsl_p0.node_weights = a_BLENDWEIGHT;
     if (dot(a_BLENDWEIGHT, vec4(1.0)) <= 0.0) {
