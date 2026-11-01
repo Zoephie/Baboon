@@ -177,6 +177,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         h3_flares_shown: super::h3_flares_shown(&data.preview, &state),
         h3_lights_shown: super::h3_lights_shown(&data.preview, &state),
         h3_volumes_shown: super::h3_volumes_shown(&data.preview, &state),
+        h3_systems_shown: super::h3_systems_shown(&data.preview, &state),
         h2_flares_shown: super::h2_flares_shown(&data.preview, &state),
         h2_values: {
             let mut set = state.h2_function_inputs.clone();

@@ -4,6 +4,7 @@
 //! `dual`, once a second weapon is in the left hand.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
@@ -550,6 +551,8 @@ fn fold_attached(
         let flares = super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
         let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
         preview.h3_light_volumes.extend(volumes.into_iter().map(|volume| volume.on_attached(name)));
+        let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+        preview.h3_particles.extend(particles.into_iter().map(|system| Arc::new(system.on_attached(name))));
         preview.h3_lights.extend(lights.into_iter().map(|light| light.on_attached(name)));
         preview.h3_flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
     } else {

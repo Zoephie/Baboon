@@ -78,7 +78,7 @@ pub(super) struct H3EffectTimes {
 }
 
 impl H3EffectTimes {
-    fn read(effect: TagStruct<'_>) -> Self {
+    pub(super) fn read(effect: TagStruct<'_>) -> Self {
         let flags = effect.read_flag_names("flags").unwrap_or_default();
         Self {
             events: elements(effect, "events").iter().map(|event| H3EventTime::read(*event)).collect(),
@@ -139,13 +139,18 @@ pub(super) struct H3EffectPart<'a> {
 /// Whether `event_generate_parts` makes a part on an object in third person:
 /// out of the water, and not asked to be nonviolent.
 fn part_runs(part: TagStruct<'_>) -> bool {
+    part_runs_by(part, "create in", "violence mode")
+}
+
+/// `part_runs`, for parts and particle systems, which name these two apart.
+pub(super) fn part_runs_by(part: TagStruct<'_>, environment: &str, violence: &str) -> bool {
     let named = |field: &str| part.read_enum_name(field).unwrap_or_default();
-    let environment = named("create in");
+    let environment = named(environment);
     let disabled = part.read_flag_names("flags").unwrap_or_default();
     matches!(environment.as_str(), "" | ANYWHERE | AIR)
-        && named("violence mode") != ONLY_NONVIOLENT
+        && named(violence) != ONLY_NONVIOLENT
         && named("camera mode") != ONLY_FIRST_PERSON
-        && !disabled.iter().any(|(_, name)| name == DISABLED)
+        && !disabled.iter().any(|(_, name)| name.starts_with(DISABLED))
 }
 
 /// Every part of every effect `object` attaches, with its effect held open.

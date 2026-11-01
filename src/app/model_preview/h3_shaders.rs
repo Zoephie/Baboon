@@ -103,7 +103,7 @@ impl H3Definition {
     }
 
     /// The name of the option chosen in a category.
-    fn chosen(&self, category: &str, options: &[usize]) -> Option<&str> {
+    pub(crate) fn chosen(&self, category: &str, options: &[usize]) -> Option<&str> {
         let at = self.categories.iter().position(|known| known.name == category)?;
         let option = options.get(at).copied().unwrap_or(0);
         Some(self.categories[at].options.get(option)?.name.as_str())

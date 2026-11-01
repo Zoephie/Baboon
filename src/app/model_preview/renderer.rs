@@ -10,7 +10,7 @@ use super::h2_passes::{
 use super::h2_bloom::H2Bloom;
 use super::h2_passes::{H2Clock, h2_prt_lights};
 use super::h2_stage::H2VertexStage;
-use super::h3_shaders::H3Sampler;
+use super::h3_shaders::{H3Blend, H3Sampler};
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
@@ -140,6 +140,7 @@ pub(super) fn draw_model_viewport(
         h3_flares_shown: h3_flares_shown(&data.preview, state),
         h3_lights_shown: h3_lights_shown(&data.preview, state),
         h3_volumes_shown: h3_volumes_shown(&data.preview, state),
+        h3_systems_shown: h3_systems_shown(&data.preview, state),
         h2_flares_shown: h2_flares_shown(&data.preview, state),
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
@@ -352,6 +353,12 @@ fn h3_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> V
 fn h3_volumes_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
     preview.h3_light_volumes.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+}
+
+/// The same of Halo 3's particle systems.
+fn h3_systems_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+    let shown = |only| marker_active(only, &state.region_selections);
+    preview.h3_particles.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Halo 2's.
@@ -824,6 +831,7 @@ struct ModelGpuFrame {
     h3_flares_shown: Vec<bool>,
     h3_lights_shown: Vec<bool>,
     h3_volumes_shown: Vec<bool>,
+    h3_systems_shown: Vec<bool>,
     h2_flares_shown: Vec<bool>,
     /// Each object's point lights this frame, in step with `object_states`.
     ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
@@ -861,6 +869,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
     let h3_lights = data.preview.h3_lights.iter().filter(|light| light.object == 0);
     let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == 0);
     let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == 0);
+    let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == 0);
     let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == 0);
     let h3 = data.textures.iter().flat_map(|textures| textures.iter());
     let h3 = h3.filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
@@ -870,6 +879,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
         .chain(h3_lights.flat_map(|light| light.inputs()))
         .chain(h3_flares.map(|at| at.scale_name()))
         .chain(h3_volumes.flat_map(|at| at.scale_names()))
+        .chain(h3_systems.flat_map(|at| at.scale_names()))
         .chain(lights.map(|light| light.scale_name()))
         .chain(gels.map(|light| light.scale_name()))
         .filter(|name| !name.is_empty());
@@ -940,6 +950,7 @@ pub(super) fn object_moves(
         || data.preview.h3_lights.iter().any(|light| light.animates())
         || data.preview.h3_flares.iter().any(|at| at.animates())
         || data.preview.h3_light_volumes.iter().any(|at| at.animates())
+        || !data.preview.h3_particles.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
@@ -1722,6 +1733,8 @@ struct ModelGpuSlot {
     flare_geometry: Option<u64>,
     antenna_textures: Vec<Option<glow::NativeTexture>>,
     volume_textures: Vec<Option<glow::NativeTexture>>,
+    h3_particles: h3_particles::H3ParticleField,
+    particle_textures: Vec<[Option<glow::NativeTexture>; 3]>,
 }
 
 impl ModelGpuSlot {
@@ -1768,6 +1781,8 @@ impl ModelGpuSlot {
                 flare_geometry: None,
                 antenna_textures: Vec::new(),
                 volume_textures: Vec::new(),
+                h3_particles: Default::default(),
+                particle_textures: Vec::new(),
             })
         }
     }
@@ -2272,8 +2287,157 @@ struct CeFlareGl {
     queries: [glow::NativeQuery; 2],
 }
 
+const PARTICLE_VERTEX: &str = "#version 410 core
+layout(location = 0) in vec4 a_clip;
+layout(location = 1) in vec2 a_sprite;
+layout(location = 2) in vec2 a_next_sprite;
+layout(location = 3) in vec2 a_billboard;
+layout(location = 4) in vec4 a_color;
+layout(location = 5) in vec3 a_extra;
+out vec2 v_sprite;
+out vec2 v_next_sprite;
+out vec2 v_billboard;
+out vec4 v_color;
+out vec3 v_extra;
+void main() {
+    gl_Position = a_clip;
+    v_sprite = a_sprite;
+    v_next_sprite = a_next_sprite;
+    v_billboard = a_billboard;
+    v_color = a_color;
+    v_extra = a_extra;
+}
+";
+
+const PARTICLE_FRAGMENT: &str = "#version 410 core
+in vec2 v_sprite;
+in vec2 v_next_sprite;
+in vec2 v_billboard;
+in vec4 v_color;
+in vec3 v_extra;
+uniform sampler2D u_base;
+uniform sampler2D u_alpha;
+uniform sampler2D u_palette;
+uniform int u_albedo;
+uniform bool u_black_point;
+uniform bool u_multiply;
+uniform vec3 u_add;
+out vec4 out_color;
+vec4 albedo(vec2 sprite) {
+    vec4 base = texture(u_base, sprite);
+    vec4 tone = base;
+    float row = v_extra.y;
+    if (u_albedo >= 3) {
+        tone = texture(u_palette, vec2(base.r, row));
+    }
+    if (u_albedo == 1 || u_albedo == 4) {
+        tone.a = texture(u_alpha, v_billboard).a;
+    } else if (u_albedo == 2 || u_albedo == 5) {
+        tone.a = texture(u_alpha, sprite).a;
+    }
+    return tone;
+}
+void main() {
+    vec4 color = mix(albedo(v_sprite), albedo(v_next_sprite), v_extra.x);
+    if (u_black_point) {
+        float black = v_extra.z;
+        float middle = (black + 1.0) * 0.5;
+        color.a = middle * clamp((color.a - black) / (middle - black), 0.0, 1.0)
+            + clamp(color.a - middle, 0.0, 1.0);
+    }
+    color *= v_color;
+    if (u_multiply) {
+        color.rgb = mix(vec3(1.0), color.rgb, color.a);
+    } else {
+        color.rgb += u_add;
+    }
+    out_color = color;
+}
+";
+
+const PARTICLE_FLOATS: usize = 17;
+
+/// What Halo 3's particles draw with, made on first use.
+struct H3ParticleGl {
+    program: glow::NativeProgram,
+    vertex_array: glow::NativeVertexArray,
+    buffer: glow::NativeBuffer,
+    albedo: Option<glow::NativeUniformLocation>,
+    black_point: Option<glow::NativeUniformLocation>,
+    multiply: Option<glow::NativeUniformLocation>,
+    add: Option<glow::NativeUniformLocation>,
+}
+
+impl H3ParticleGl {
+    unsafe fn draw(
+        &self,
+        gl: &glow::Context,
+        system: &h3_particles::H3ParticleSystem,
+        vertices: &[[f32; PARTICLE_FLOATS]],
+        textures: [Option<glow::NativeTexture>; 3],
+        no_map: Option<glow::NativeTexture>,
+    ) {
+        let look = &system.look;
+        unsafe {
+            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(self.vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.buffer));
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(vertices), glow::STREAM_DRAW);
+            for (unit, texture) in textures.into_iter().enumerate() {
+                gl.active_texture(glow::TEXTURE0 + unit as u32);
+                gl.bind_texture(glow::TEXTURE_2D, texture.or(no_map));
+            }
+            gl.active_texture(glow::TEXTURE0);
+            gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
+            gl.uniform_1_i32(self.black_point.as_ref(), i32::from(look.black_point));
+            let multiply = look.blend == H3Blend::Multiply;
+            gl.uniform_1_i32(self.multiply.as_ref(), i32::from(multiply));
+            gl.uniform_3_f32_slice(self.add.as_ref(), &look.add);
+            h3_draw::h3_set_blend(gl, look.blend);
+            // What covers the background has to say so, as an antenna does.
+            let covers = matches!(look.blend, H3Blend::AlphaBlend | H3Blend::PreMultiplied);
+            gl.color_mask(true, true, true, covers);
+            gl.draw_arrays(glow::TRIANGLES, 0, vertices.len() as i32);
+            gl.color_mask(true, true, true, false);
+        }
+    }
+}
+
+unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<H3ParticleGl> {
+    unsafe {
+        let program = link_h2_program(gl, main, PARTICLE_VERTEX, PARTICLE_FRAGMENT)
+            .map_err(|error| eprintln!("model preview: {error}"))
+            .ok()?;
+        let vertex_array = gl.create_vertex_array().ok()?;
+        let buffer = gl.create_buffer().ok()?;
+        gl.bind_vertex_array(Some(vertex_array));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+        let stride = (PARTICLE_FLOATS * size_of::<f32>()) as i32;
+        let mut offset = 0;
+        for (attribute, size) in [4, 2, 2, 2, 4, 3].into_iter().enumerate() {
+            gl.enable_vertex_attrib_array(attribute as u32);
+            gl.vertex_attrib_pointer_f32(attribute as u32, size, glow::FLOAT, false, stride, offset);
+            offset += size * size_of::<f32>() as i32;
+        }
+        gl.use_program(Some(program));
+        for (unit, name) in ["u_base", "u_alpha", "u_palette"].into_iter().enumerate() {
+            gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
+        }
+        Some(H3ParticleGl {
+            program,
+            vertex_array,
+            buffer,
+            albedo: gl.get_uniform_location(program, "u_albedo"),
+            black_point: gl.get_uniform_location(program, "u_black_point"),
+            multiply: gl.get_uniform_location(program, "u_multiply"),
+            add: gl.get_uniform_location(program, "u_add"),
+        })
+    }
+}
+
 struct ModelGlRenderer {
     ce_flares: Option<CeFlareGl>,
+    h3_particle_gl: Option<H3ParticleGl>,
     /// Whether this context can draw Halo 2 passes; see `H2_GLSL_VERSION`.
     h2_supported: bool,
     /// Whether this context can draw Halo 3's: the translated shaders want GLSL 4.10.
@@ -2391,6 +2555,7 @@ impl ModelGlRenderer {
                 h2_programs: HashMap::new(),
                 h2_black_cube: upload_black_cube(gl),
                 h3_no_bloom: upload_black_flat(gl),
+                h3_particle_gl: None,
                 h2_black_volume: upload_solid_volume(gl, [0, 0, 0, 255]),
                 h2_white_volume: upload_solid_volume(gl, [255; 4]),
                 h2_normalization_cube: upload_normalization_cube(gl),
@@ -2702,7 +2867,8 @@ impl ModelGlRenderer {
                 && preview.h2_antennas.is_empty()
                 && preview.h2_flares.is_empty()
                 && preview.h3_flares.is_empty()
-                && preview.h3_light_volumes.is_empty())
+                && preview.h3_light_volumes.is_empty()
+                && preview.h3_particles.is_empty())
     }
 
     pub(super) unsafe fn draw_ce_flares(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
@@ -2714,8 +2880,30 @@ impl ModelGlRenderer {
             let Some(flares) = self.ce_flares.as_mut() else {
                 return;
             };
+            if self.h3_particle_gl.is_none() && !frame.preview.h3_particles.is_empty() {
+                self.h3_particle_gl = h3_particle_gl(gl, self.program);
+            }
+            let particle_gl = &self.h3_particle_gl;
+            let no_map = self.h3_no_bloom;
             let uploaded = &mut self.slots[slot];
             if uploaded.flare_geometry != Some(frame.geometry_id) {
+                uploaded.h3_particles = h3_particles::H3ParticleField::default();
+                for texture in uploaded.particle_textures.drain(..).flatten().flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.particle_textures = frame
+                    .preview
+                    .h3_particles
+                    .iter()
+                    .map(|system| {
+                        let look = &system.look;
+                        [&look.base_map, &look.alpha_map, &look.palette_map].map(|map| {
+                            map.as_ref().and_then(|(image, texels, mips)| {
+                                h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)
+                            })
+                        })
+                    })
+                    .collect();
                 for texture in uploaded.flare_textures.drain(..).flatten().flatten() {
                     gl.delete_texture(texture);
                 }
@@ -2814,33 +3002,85 @@ impl ModelGlRenderer {
             }
             gl.color_mask(true, true, true, false);
             // `render_effects`, among the transparents: every profile is its own quad.
+            if !frame.preview.h3_particles.is_empty() {
+                let systems = &frame.preview.h3_particles;
+                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                uploaded.h3_particles.advance(systems, values, frame.time);
+            }
             // `c_transparency_renderer` sorts far to near, each from its location.
-            let mut volumes: Vec<_> = frame.preview.h3_light_volumes.iter().enumerate().collect();
-            let distance = |at: &h3_light_volumes::H3LightVolumeAt| {
-                let origin = at.origin(bones);
-                (0..3).map(|axis| (origin[axis] - view.eye[axis]).powi(2)).sum::<f32>()
+            enum Sprites {
+                Volume(usize),
+                System(usize),
+            }
+            let eye_distance = |origin: [f32; 3]| {
+                (0..3).map(|axis| (origin[axis] - view.eye[axis]) * view.forward[axis]).sum::<f32>()
             };
-            volumes.sort_by(|(_, a), (_, b)| distance(b).total_cmp(&distance(a)));
-            for (index, at) in volumes {
-                if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
-                    continue;
-                }
-                let Some(texture) = uploaded.volume_textures.get(index).copied().flatten() else {
-                    continue;
-                };
-                h3_draw::h3_set_blend(gl, at.blend());
-                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                for quad in at.quads(frame.h2_values_of_object(at.object), bones, &view, frame.time) {
-                    let vertices = quad.corners.map(|[x, y, z, u, v]| {
-                        let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
-                        [a, b, c, d, u, v]
-                    });
-                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
-                    let [red, green, blue, alpha] = quad.color;
-                    gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
-                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+            let volumes = frame.preview.h3_light_volumes.iter().enumerate();
+            let volumes = volumes.map(|(at, volume)| (eye_distance(volume.origin(bones)), Sprites::Volume(at)));
+            let systems = frame.preview.h3_particles.iter().enumerate();
+            let systems = systems.map(|(at, system)| (system.distance(bones, &view), Sprites::System(at)));
+            let mut sorted: Vec<_> = volumes.chain(systems).collect();
+            sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
+            for (_, sprites) in sorted {
+                match sprites {
+                    Sprites::Volume(index) => {
+                        let at = &frame.preview.h3_light_volumes[index];
+                        if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        let Some(texture) = uploaded.volume_textures.get(index).copied().flatten() else {
+                            continue;
+                        };
+                        gl.use_program(Some(flares.program));
+                        gl.bind_vertex_array(Some(flares.vertex_array));
+                        gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                        gl.active_texture(glow::TEXTURE0);
+                        h3_draw::h3_set_blend(gl, at.blend());
+                        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                        for quad in at.quads(frame.h2_values_of_object(at.object), bones, &view, frame.time) {
+                            let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                                let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                                [a, b, c, d, u, v]
+                            });
+                            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                            let [red, green, blue, alpha] = quad.color;
+                            gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
+                            gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                        }
+                    }
+                    Sprites::System(index) => {
+                        let system = &frame.preview.h3_particles[index];
+                        if !frame.h3_systems_shown.get(index).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        let Some(particles) = particle_gl.as_ref() else {
+                            continue;
+                        };
+                        let values = frame.h2_values_of_object(system.object);
+                        let drawn = uploaded.h3_particles.vertices(index, system, values, bones, &view, frame.time);
+                        if drawn.is_empty() {
+                            continue;
+                        }
+                        let vertices: Vec<[f32; PARTICLE_FLOATS]> = drawn
+                            .iter()
+                            .map(|vertex| {
+                                let [a, b, c, d] = ce_flare_clip(camera, vertex.place);
+                                let ([e, f], [g, h], [i, j]) = (vertex.sprite, vertex.next_sprite, vertex.billboard);
+                                let [k, l, m, n] = vertex.color;
+                                let [o, p, q] = vertex.extra;
+                                [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q]
+                            })
+                            .collect();
+                        let textures = uploaded.particle_textures.get(index).copied().unwrap_or_default();
+                        particles.draw(gl, system, &vertices, textures, no_map);
+                    }
                 }
             }
+            gl.use_program(Some(flares.program));
+            gl.bind_vertex_array(Some(flares.vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+            gl.active_texture(glow::TEXTURE0);
+            gl.color_mask(true, true, true, false);
             gl.blend_equation(glow::FUNC_ADD);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE);
             for (index, light) in frame.preview.ce_lights.iter().enumerate() {

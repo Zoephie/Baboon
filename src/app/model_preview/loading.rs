@@ -374,6 +374,8 @@ pub(super) fn load_model_preview(
             preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, frame);
             preview.h3_light_volumes =
                 super::h3_light_volumes::read_h3_light_volumes(source, model_tag, 0, &preview.markers, frame);
+            let systems = super::h3_particles::read_h3_particles(source, model_tag, 0, &preview.markers, frame);
+            preview.h3_particles = systems.into_iter().map(Arc::new).collect();
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
