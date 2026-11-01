@@ -152,6 +152,8 @@ pub(crate) struct MaterialTextures {
     /// Halo 2 passes by `H2Layer`, drawn in place of the slots above; empty
     /// for other games and outside a loose kit, whose `.psh` sources they need.
     pub h2_layers: [Vec<H2DrawPass>; H2_LAYER_COUNT],
+    /// Why it draws bare unless its passes do.
+    pub bare_without_passes: Option<String>,
 }
 
 impl MaterialTextures {
@@ -681,17 +683,19 @@ fn resolve_h2_shader(
         textures.h2_layers[H2Layer::ActiveCamo as usize] =
             prepare_h2_camo_passes(source, bump, caches);
     }
-    // 633 of halo2_mcc's 3,147 model materials land here, nearly all on
-    // `transparent\*` templates (skies, plasma, alpha-blended env) and the
-    // self-illumination-only `illum*` ones.
+    // Passes draw it with Game Shaders on: an emblem's overlay does, and is only
+    // off for want of a player. Without them, and with no slots, it is bare.
     if textures.slots.iter().all(Option::is_none)
         && textures.h2_layers[H2Layer::Transparent as usize].is_empty()
     {
         let template = root.read_tag_ref_path("template").unwrap_or_default();
         let leaf = tag_path::name(&template);
-        textures.error = Some(format!(
-            "its template ({leaf}) uses none of the maps this preview draws"
-        ));
+        let reason = format!("its template ({leaf}) uses none of the maps this preview draws");
+        if textures.h2_layers.iter().all(Vec::is_empty) {
+            textures.error = Some(reason);
+        } else {
+            textures.bare_without_passes = Some(format!("{reason} without Game Shaders"));
+        }
     }
     textures
 }
@@ -1613,6 +1617,23 @@ mod tests {
         assert!(shotgun.get(TextureSlot::AlphaTest).is_some(), "shotgun_primary alpha tests");
     }
 
+    /// Passes draw a material with no slots only while Game Shaders are on.
+    #[test]
+    fn a_material_of_passes_alone_is_bare_only_without_game_shaders() {
+        let materials = [RenderModelPreviewMaterial {
+            shader_path: "shaders/emblem".to_owned(),
+            ..Default::default()
+        }];
+        let textures = [MaterialTextures {
+            bare_without_passes: Some("no maps".to_owned()),
+            ..Default::default()
+        }];
+        assert_eq!(texture_resolve_note(&textures, &materials, true), None);
+        let (summary, detail) = texture_resolve_note(&textures, &materials, false).unwrap();
+        assert!(summary.starts_with("1 of 1 materials untextured"), "{summary}");
+        assert!(detail.contains("shaders/emblem: no maps"), "{detail}");
+    }
+
     /// A material that drew untextured says why, instead of just looking flat.
     #[test]
     fn untextured_materials_say_why() {
@@ -1636,7 +1657,7 @@ mod tests {
             },
             MaterialTextures::default(),
         ];
-        let (summary, detail) = texture_resolve_note(&textures, &materials).unwrap();
+        let (summary, detail) = texture_resolve_note(&textures, &materials, true).unwrap();
         assert_eq!(
             summary,
             "1 of 3 materials untextured; 1 read without their definition or template defaults \
@@ -1645,7 +1666,7 @@ mod tests {
         assert!(detail.contains("shaders/a: shader tag not found"));
         assert!(detail.contains("shaders/b"));
         assert!(!detail.contains("shaders/c"));
-        assert_eq!(texture_resolve_note(&textures[2..], &materials[2..]), None);
+        assert_eq!(texture_resolve_note(&textures[2..], &materials[2..], true), None);
     }
 
     /// With `BLAM_TEST_H2EK`: `+X`'s top row is `+Y`'s right column reversed,

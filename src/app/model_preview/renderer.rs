@@ -804,7 +804,10 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
     let flares = data.preview.h2_flares.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
     let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == 0);
     let flares = flares.chain(lights.map(|light| light.scale_name())).filter(|name| !name.is_empty());
-    for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares) {
+    // `sub_6C18F0` gates the shield overlay on this itself.
+    let shield = data.preview.materials.iter().any(|m| m.shield == Some(H2Layer::ShieldDamaged));
+    let gate = shield.then_some("current_shield_damage");
+    for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares).chain(gate) {
         if !names.iter().any(|known| known == name) {
             names.push(name.to_owned());
         }

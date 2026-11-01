@@ -1794,7 +1794,11 @@ fn draw_model_viewport_with_stats(
     // showed: the model just looked flat.
     if state.render_mode.uses_textures()
         && let Some(textures) = data.textures.as_deref()
-        && let Some((summary, detail)) = texture_resolve_note(textures, &data.preview.materials)
+        && let Some((summary, detail)) = texture_resolve_note(
+            textures,
+            &data.preview.materials,
+            state.h2_game_shaders,
+        )
     {
         ui.label(RichText::new(summary).small().color(subtle_dark()))
             .on_hover_text(detail);
@@ -1806,6 +1810,7 @@ fn draw_model_viewport_with_stats(
 fn texture_resolve_note(
     textures: &[MaterialTextures],
     materials: &[RenderModelPreviewMaterial],
+    game_shaders: bool,
 ) -> Option<(String, String)> {
     let name = |index: usize| {
         materials
@@ -1819,10 +1824,9 @@ fn texture_resolve_note(
         .iter()
         .enumerate()
         .filter_map(|(index, texture)| {
-            texture
-                .error
-                .as_ref()
-                .map(|error| format!("{}: {error}", name(index)))
+            let bare = texture.bare_without_passes.as_ref().filter(|_| !game_shaders);
+            let error = texture.error.as_ref().or(bare);
+            error.map(|error| format!("{}: {error}", name(index)))
         })
         .collect();
     let partial: Vec<String> = textures

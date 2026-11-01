@@ -134,6 +134,23 @@ impl H2ObjectFunctions {
         names
     }
 
+    /// Everything `read` depends on, down through the functions making it.
+    fn reaching(&self, read: &[String]) -> Vec<String> {
+        let mut reached = read.to_vec();
+        let mut next = 0;
+        while let Some(name) = reached.get(next).cloned() {
+            next += 1;
+            for function in self.functions.iter().filter(|function| function.export == name) {
+                for source in [&function.import, &function.scale_by, &function.turn_off_with] {
+                    if !source.is_empty() && !reached.contains(source) {
+                        reached.push(source.clone());
+                    }
+                }
+            }
+        }
+        reached
+    }
+
     /// Whether anything here moves with no one touching it.
     pub(crate) fn move_at_rest(&self, inputs: &H2FunctionValues) -> bool {
         self.functions.iter().any(|function| {
@@ -217,10 +234,15 @@ pub(super) fn draw_h2_function_controls(
             set.retain(|(geometry, _), _| *geometry != key);
         }
     });
+    const UNREAD: &str = "Nothing this preview draws reads this. It may drive something \
+                          the preview does not have, such as an effect's particles.";
+    let reached = functions.reaching(shader_inputs);
+    let drawn = |name: &str| reached.iter().any(|known| known == name);
     for name in names {
         let at_rest = object_input(name);
         let mut value = set.get(&(key, name.to_owned())).copied().unwrap_or(at_rest);
-        if ui.add(egui::Slider::new(&mut value, 0.0..=1.0).text(name)).changed() {
+        let slider = egui::Slider::new(&mut value, 0.0..=1.0).text(name);
+        if ui.add_enabled(drawn(name), slider).on_disabled_hover_text(UNREAD).changed() {
             set.insert((key, name.to_owned()), value);
         }
     }
@@ -231,7 +253,8 @@ pub(super) fn draw_h2_function_controls(
             continue;
         }
         seen.push(export);
-        ui.label(format!("{export}: {:.2}", values.get(export).copied().unwrap_or(0.0)));
+        let text = format!("{export}: {:.2}", values.get(export).copied().unwrap_or(0.0));
+        ui.add_enabled(drawn(export), egui::Label::new(text)).on_disabled_hover_text(UNREAD);
     }
 }
 
@@ -244,6 +267,23 @@ mod tests {
         function.set_clamp_range(0.0, 1.0).unwrap();
         let encoding = blam_tags::tag_function::FunctionEncoding::H2;
         Arc::new(TagFunction::parse_encoded(encoding, &function.to_bytes()).unwrap())
+    }
+
+    #[test]
+    fn only_what_reaches_something_drawn_counts() {
+        let mut shield = function("current_shield_damage", "shield_hit");
+        shield.scale_by = "scale".to_owned();
+        let mut down = function("shield_depleted", "shield_down");
+        down.turn_off_with = "body_vitality".to_owned();
+        let chained = function("shield_hit", "glow");
+        let functions = H2ObjectFunctions { functions: vec![shield, down, chained] };
+        let reached = functions.reaching(&["glow".to_owned()]);
+        for name in ["glow", "shield_hit", "current_shield_damage", "scale"] {
+            assert!(reached.iter().any(|known| known == name), "{name}");
+        }
+        for name in ["shield_down", "shield_depleted", "body_vitality"] {
+            assert!(!reached.iter().any(|known| known == name), "{name}");
+        }
     }
 
     fn function(import: &str, export: &str) -> H2ObjectFunction {
