@@ -207,6 +207,35 @@ pub(crate) fn read_h2_object_functions(object: &TagFile) -> Option<H2ObjectFunct
     Some(H2ObjectFunctions { functions })
 }
 
+/// Whether a function is one the preview made to start an event's effect.
+fn is_event_function(name: &str) -> bool {
+    name.contains(": ") && name.split(": ").next().is_some_and(|field| field.contains("effect") || field.contains("detonation"))
+}
+
+/// A button for each effect an event would play. An effect starts when its
+/// function comes on, so a press turns it off for a frame and then on.
+fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut H2FunctionInputs) {
+    const STARTING: f32 = -1.0;
+    for name in events {
+        if let Some(value) = set.get_mut(&(key, (*name).to_owned()))
+            && *value == STARTING
+        {
+            *value = 1.0;
+        }
+    }
+    if events.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    egui::CollapsingHeader::new("Effects").id_salt("object_event_effects").show(ui, |ui| {
+        for name in events {
+            if ui.small_button(format!("Play {name}")).clicked() {
+                set.insert((key, (*name).to_owned()), STARTING);
+            }
+        }
+    });
+}
+
 /// Sliders for what an object imports, and what its functions come to.
 pub(super) fn draw_h2_function_controls(
     ui: &mut Ui,
@@ -223,6 +252,8 @@ pub(super) fn draw_h2_function_controls(
             names.push(name);
         }
     }
+    let (events, names): (Vec<&str>, Vec<&str>) = names.into_iter().partition(|name| is_event_function(name));
+    draw_event_effects(ui, &events, key, set);
     if names.is_empty() {
         return;
     }
@@ -267,6 +298,14 @@ mod tests {
         function.set_clamp_range(0.0, 1.0).unwrap();
         let encoding = blam_tags::tag_function::FunctionEncoding::H2;
         Arc::new(TagFunction::parse_encoded(encoding, &function.to_bytes()).unwrap())
+    }
+
+    #[test]
+    fn an_events_function_goes_by_its_field_and_a_region_name_does_not() {
+        assert!(is_event_function("firing effect: firing"));
+        assert!(is_event_function("transition effect (generic): human_explosion_large"));
+        assert!(!is_event_function("headlights"));
+        assert!(!is_event_function("turret: power"));
     }
 
     #[test]

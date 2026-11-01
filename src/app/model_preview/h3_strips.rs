@@ -11,8 +11,8 @@ use super::ce_attachments::elements;
 use super::ce_lights::{CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
-use super::h3_effects::{H3EffectOnsets, H3EffectTimes, MOST_MARKERS, for_each_attached_part, part_frame, read_part_placement};
-use super::h3_particles::{H3ParticleVertex, H3SpriteShader, read_ends, read_sprite_shader};
+use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, part_markers, read_part_placement};
+use super::h3_particles::{H3ParticleVertex, H3SpriteShader, lightmap_tint, read_ends, read_sprite_shader};
 use super::h3_shaders::H3Blend;
 use super::renderer::H3_EXPOSURE;
 use super::*;
@@ -305,6 +305,7 @@ struct ContrailDefinition {
     black_point: StripProperty,
     palette: StripProperty,
     intensity: StripProperty,
+    tint_from_lightmap: bool,
     opacity_from_a: bool,
     random_u: bool,
     random_v: bool,
@@ -327,6 +328,7 @@ fn read_contrail(element: TagStruct<'_>) -> Option<ContrailDefinition> {
         black_point: read("profile black point")?,
         palette: read("profile palette")?,
         intensity: read("profile intensity")?,
+        tint_from_lightmap: flagged("tint from lightmap"),
         opacity_from_a: flagged("profile opacity from scale a"),
         random_u: flagged("random u offset"),
         random_v: flagged("random v offset"),
@@ -404,8 +406,7 @@ pub(super) fn read_h3_strips(
                 continue;
             };
             let (look, kind) = (Arc::new(look), Arc::new(kind));
-            let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&part.marker));
-            for marker in named.take(MOST_MARKERS) {
+            for marker in part_markers(markers, &part.marker, part.effect.once) {
                 let (place, node) = frame(marker);
                 let place = part_frame(&place, offset, yaw, pitch);
                 let end = part.secondary_marker.as_ref().and_then(|name| {
@@ -420,8 +421,8 @@ pub(super) fn read_h3_strips(
                     forward: place.axes[0],
                     end,
                     only_under: marker.only_under.clone(),
-                    scale_by: part.attachment.read_string_id("primary scale").unwrap_or_default(),
-                    secondary_by: part.attachment.read_string_id("secondary scale").unwrap_or_default(),
+                    scale_by: part.effect.scale_by.clone(),
+                    secondary_by: part.effect.secondary_by.clone(),
                     seeds: seeds_of(strips.len()),
                     times: Arc::clone(&part.times),
                     event: part.event,
@@ -832,6 +833,7 @@ impl H3StripAt {
         running: &RunningContrail,
         values: Option<&H2FunctionValues>,
         view: &CeFlareView,
+        lighting: &[[f32; 4]; 10],
         time: f32,
         onset: f32,
     ) -> Vec<H3ParticleVertex> {
@@ -843,6 +845,7 @@ impl H3StripAt {
             ..self.state(values, time, onset).unwrap_or(StripState { game_time: time.rem_euclid(1.0), age: 1.0, seeds: self.seeds, ..Default::default() })
         };
         let blend = self.look.shader.blend;
+        let initial = if contrail.tint_from_lightmap { lightmap_tint(lighting) } else { [1.0; 3] };
         let live = &running.profiles;
         let profiles: Vec<Profile> = live
             .iter()
@@ -857,6 +860,8 @@ impl H3StripAt {
                     * contrail.secondary_alpha.scalar(&state).clamp(0.0, 1.0)
                     * profile.alpha;
                 let [x, y, _] = contrail.offset.vector(&state);
+                let mut color = exposed(blend, contrail.color.color(&state), alpha, contrail.intensity.scalar(&state));
+                (0..3).for_each(|channel| color[channel] *= initial[channel]);
                 Profile {
                     place: profile.place,
                     direction,
@@ -864,7 +869,7 @@ impl H3StripAt {
                     size: contrail.size.scalar(&state),
                     rotation: contrail.rotation.scalar(&state).rem_euclid(1.0),
                     length: profile.length,
-                    color: exposed(blend, contrail.color.color(&state), alpha, contrail.intensity.scalar(&state)),
+                    color,
                     palette: contrail.palette.scalar(&state).rem_euclid(1.0),
                     black_point: contrail.black_point.scalar(&state).rem_euclid(1.0),
                 }
@@ -943,6 +948,7 @@ impl H3StripField {
         values: Option<&H2FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
+        lighting: &[[f32; 4]; 10],
         time: f32,
         onset: f32,
     ) -> Vec<H3ParticleVertex> {
@@ -951,7 +957,7 @@ impl H3StripField {
             StripKind::Contrail(contrail) => self
                 .running
                 .get(index)
-                .map_or_else(Vec::new, |running| strip.contrail_vertices(contrail, running, values, view, time, onset)),
+                .map_or_else(Vec::new, |running| strip.contrail_vertices(contrail, running, values, view, lighting, time, onset)),
         }
     }
 }
@@ -1013,6 +1019,7 @@ mod tests {
             black_point: constant(0.0),
             palette: constant(0.0),
             intensity: constant(1.0),
+            tint_from_lightmap: false,
             opacity_from_a: false,
             random_u: false,
             random_v: false,

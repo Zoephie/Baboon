@@ -3259,13 +3259,13 @@ impl ModelGlRenderer {
                         };
                         let values = frame.h2_values_of_object(strip.object);
                         let onset = uploaded.h3_onsets.of(strip.object, strip.scale_name(), values, frame.time);
-                        let drawn = uploaded.h3_strips.vertices(index, strip, values, bones, &view, frame.time, onset);
+                        let lighting = h3_draw::h3_lighting_constants(frame);
+                        let drawn = uploaded.h3_strips.vertices(index, strip, values, bones, &view, &lighting, frame.time, onset);
                         if drawn.is_empty() {
                             continue;
                         }
                         let vertices = particle_floats(camera, &drawn);
                         let textures = uploaded.strip_textures.get(index).copied().unwrap_or_default();
-                        let lighting = h3_draw::h3_lighting_constants(frame);
                         particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting);
                     }
                 }

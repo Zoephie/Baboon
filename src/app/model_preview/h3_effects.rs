@@ -77,6 +77,8 @@ pub(super) struct H3EffectTimes {
     events: Vec<H3EventTime>,
     loop_start: usize,
     parallel: bool,
+    /// Over after one run, as an event's effect is.
+    once: bool,
 }
 
 impl H3EffectTimes {
@@ -86,6 +88,7 @@ impl H3EffectTimes {
             events: elements(effect, "events").iter().map(|event| H3EventTime::read(*event)).collect(),
             loop_start: usize::try_from(effect.read_block_index("loop start event")).unwrap_or(0),
             parallel: flags.iter().any(|(_, name)| name == PARALLEL),
+            once: false,
         }
     }
 
@@ -94,6 +97,9 @@ impl H3EffectTimes {
     /// Otherwise one follows another, returning to the loop start.
     pub(super) fn age(&self, index: usize, time: f32) -> Option<f32> {
         let event = *self.events.get(index)?;
+        if self.once && !(0.0..self.once()).contains(&time) {
+            return None;
+        }
         if self.parallel {
             let cycle = self.events.iter().map(|event| event.length()).fold(0.0, f32::max);
             let time = time.rem_euclid(cycle.max(ONE_TICK));
@@ -123,6 +129,19 @@ impl H3EffectTimes {
         if self.parallel { lengths.fold(0.0, f32::max) } else { lengths.sum() }
     }
 
+    /// When `index` first begins, if that lies after `from` and by `to`: a
+    /// step can be longer than a whole event, and must not pass over it.
+    pub(super) fn begins_within(&self, index: usize, from: f32, to: f32) -> Option<f32> {
+        let event = *self.events.get(index)?;
+        let before: f32 = if self.parallel {
+            0.0
+        } else {
+            self.events.iter().take(index).map(|event| event.length()).sum()
+        };
+        let begin = before + event.delay;
+        (from < begin && begin <= to).then_some(begin)
+    }
+
     /// Seconds since `index` began, for what outlasts its normalized age. An
     /// effect that only ticks over has been running all along.
     pub(super) fn elapsed(&self, index: usize, time: f32) -> Option<f32> {
@@ -146,7 +165,7 @@ impl H3EffectTimes {
 
     /// Whether the event's age or its being on changes as time passes.
     pub(super) fn moves(&self) -> bool {
-        self.events.len() > 1 || self.events.iter().any(|event| event.delay > 0.0 || event.duration > ONE_TICK)
+        self.once || self.events.len() > 1 || self.events.iter().any(|event| event.delay > 0.0 || event.duration > ONE_TICK)
     }
 }
 
@@ -176,7 +195,7 @@ impl H3EffectOnsets {
 
 /// An event's part on an attachment's effect.
 pub(super) struct H3EffectPart<'a> {
-    pub(super) attachment: TagStruct<'a>,
+    pub(super) effect: &'a H3ObjectEffect,
     pub(super) part: TagStruct<'a>,
     pub(super) group: u32,
     pub(super) path: String,
@@ -214,22 +233,12 @@ pub(super) fn for_each_attached_part(
     object: &TagFile,
     mut visit: impl for<'a> FnMut(H3EffectPart<'a>),
 ) {
-    let Some(block) = object_block(object, "attachments") else {
-        return;
-    };
-    let effect_group = u32::from_be_bytes(*b"effe");
-    for attachment in elements(block, "attachments") {
-        let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
-            continue;
-        };
-        if group != effect_group || path.is_empty() {
-            continue;
-        }
-        let Ok(effect) = load_referenced_tag_from_source(source, &path, "effect", b"effe") else {
+    for object_effect in h3_object_effects(source, object) {
+        let Ok(effect) = load_referenced_tag_from_source(source, &object_effect.path, "effect", b"effe") else {
             continue;
         };
         let locations = elements(effect.root(), "locations");
-        let times = Arc::new(H3EffectTimes::read(effect.root()));
+        let times = Arc::new(object_effect.times_of(effect.root()));
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for part in elements(event, "parts") {
                 let Some((group, path)) = part.read_tag_ref_with_group("type") else {
@@ -240,17 +249,126 @@ pub(super) fn for_each_attached_part(
                 let (false, Some(location), true) = (path.is_empty(), location, part_runs(part)) else {
                     continue;
                 };
-                let mut marker = marker_name(*location, "marker name");
-                if marker == REPLACE {
-                    marker = marker_name(attachment, "marker");
-                }
+                let marker = object_effect.marker_of(*location);
                 let secondary = usize::try_from(part.read_block_index("secondary location (beams)")).ok();
                 let secondary_marker = secondary.and_then(|at| locations.get(at)).map(|at| marker_name(*at, "marker name"));
                 let scales = part.read_flag_names("A scales values").unwrap_or_default();
                 let scaled = scales.iter().any(|(_, name)| name == PART_SCALE);
                 let times = Arc::clone(&times);
-                visit(H3EffectPart { attachment, part, group, path, marker, secondary_marker, scaled, times, event: at });
+                visit(H3EffectPart { effect: &object_effect, part, group, path, marker, secondary_marker, scaled, times, event: at });
             }
+        }
+    }
+}
+
+/// An effect an object runs: an attachment, on while its function is, or one
+/// an event plays, which the preview gives a function of its own to start it.
+#[derive(Debug, Clone)]
+pub(super) struct H3ObjectEffect {
+    pub(super) path: String,
+    marker: String,
+    pub(super) scale_by: String,
+    pub(super) secondary_by: String,
+    pub(super) change_color: i128,
+    /// Plays through once, as an event's does; attachments and `looping effect`s loop.
+    pub(super) once: bool,
+}
+
+impl H3ObjectEffect {
+    /// `effect_build_locations`' marker for a location.
+    pub(super) fn marker_of(&self, location: TagStruct<'_>) -> String {
+        let marker = marker_name(location, "marker name");
+        if marker == REPLACE { self.marker.clone() } else { marker }
+    }
+
+    pub(super) fn times_of(&self, effect: TagStruct<'_>) -> H3EffectTimes {
+        H3EffectTimes { once: self.once, ..H3EffectTimes::read(effect) }
+    }
+}
+
+/// What a location of this name lands on. An event's effect with no such
+/// marker plays on the object, where the first marker stands in for it.
+pub(super) fn part_markers<'a>(
+    markers: &'a [RenderModelPreviewMarker],
+    name: &str,
+    once: bool,
+) -> Vec<&'a RenderModelPreviewMarker> {
+    let named: Vec<_> = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(name)).collect();
+    if named.is_empty() && once { markers.first().into_iter().collect() } else { named.into_iter().take(MOST_MARKERS).collect() }
+}
+
+/// Every effect `object` and its `.model` name, attachments first.
+pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3ObjectEffect> {
+    let mut effects = Vec::new();
+    let effect_group = u32::from_be_bytes(*b"effe");
+    if let Some(block) = object_block(object, "attachments") {
+        for attachment in elements(block, "attachments") {
+            let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
+                continue;
+            };
+            if group == effect_group && !path.is_empty() {
+                effects.push(H3ObjectEffect {
+                    path,
+                    marker: marker_name(attachment, "marker"),
+                    scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
+                    secondary_by: attachment.read_string_id("secondary scale").unwrap_or_default(),
+                    change_color: attachment.read_int_any("change color").unwrap_or(0),
+                    once: false,
+                });
+            }
+        }
+    }
+    let mut named = Vec::new();
+    collect_event_effects(object.root(), &mut named);
+    let model = object_reference(object, "model")
+        .and_then(|path| load_referenced_tag_from_source(source, &path, "model", b"hlmt").ok());
+    if let Some(model) = &model {
+        collect_event_effects(model.root(), &mut named);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for (field, path) in named {
+        if seen.insert(path.clone()) {
+            effects.push(H3ObjectEffect {
+                scale_by: event_function_name(&field, &path),
+                once: !field.contains("looping"),
+                path,
+                marker: String::new(),
+                secondary_by: String::new(),
+                change_color: 0,
+            });
+        }
+    }
+    effects
+}
+
+/// The name an event's effect goes by among the object's functions.
+fn event_function_name(field: &str, path: &str) -> String {
+    let stem = path.rsplit('\\').next().unwrap_or(path);
+    format!("{field}: {stem}")
+}
+
+/// Every effect reference under `holder`, by the field that names it, leaving
+/// out `attachments`, which run on their own.
+fn collect_event_effects(holder: TagStruct<'_>, found: &mut Vec<(String, String)>) {
+    let effect_group = u32::from_be_bytes(*b"effe");
+    for field in holder.fields() {
+        let name = field.name();
+        if name == "attachments" {
+            continue;
+        }
+        if field.field_type() == blam_tags::TagFieldType::TagReference {
+            if let Some((group, path)) = holder.read_tag_ref_with_group(name)
+                && group == effect_group
+                && !path.is_empty()
+            {
+                found.push((name.to_owned(), path));
+            }
+        } else if let Some(child) = field.as_struct() {
+            collect_event_effects(child, found);
+        } else if let Some(block) = field.as_block() {
+            block.iter().for_each(|element| collect_event_effects(element, found));
+        } else if let Some(array) = field.as_array() {
+            array.iter().for_each(|element| collect_event_effects(element, found));
         }
     }
 }
@@ -305,7 +423,7 @@ mod tests {
 
     fn times(events: &[([f32; 2], [f32; 2])], loop_start: usize, parallel: bool) -> H3EffectTimes {
         let events = events.iter().map(|(delay, duration)| H3EventTime::of(*delay, *duration)).collect();
-        H3EffectTimes { events, loop_start, parallel }
+        H3EffectTimes { events, loop_start, parallel, once: false }
     }
 
     #[test]
@@ -329,6 +447,30 @@ mod tests {
         assert_eq!(two.elapsed(1, 4.0), Some(1.0));
         let tick = times(&[([0.0, 0.0], [0.0, 0.0])], 0, false);
         assert_eq!(tick.elapsed(0, 7.0), Some(7.0));
+    }
+
+    #[test]
+    fn a_step_longer_than_an_event_still_sees_it_begin() {
+        let two = times(&[([0.0, 0.0], [0.0, 0.0]), ([0.0, 0.0], [0.0, 0.0])], 0, false);
+        assert_eq!(two.begins_within(1, 0.0, 0.05), Some(ONE_TICK));
+        assert_eq!(two.begins_within(1, 0.05, 0.1), None);
+        assert_eq!(two.begins_within(0, -0.01, 0.05), Some(0.0));
+        assert_eq!(two.begins_within(0, 0.0, 0.05), None, "already begun");
+    }
+
+    #[test]
+    fn an_events_effect_runs_once_and_an_attachment_loops() {
+        let looped = times(&[([0.0, 0.0], [2.0, 2.0])], 0, false);
+        assert!(looped.age(0, 3.0).is_some());
+        let once = H3EffectTimes { once: true, ..times(&[([0.0, 0.0], [2.0, 2.0])], 0, false) };
+        assert!(once.age(0, 1.0).is_some());
+        assert_eq!(once.age(0, 3.0), None);
+        assert!(once.moves());
+    }
+
+    #[test]
+    fn an_events_effect_is_named_by_its_field_and_tag() {
+        assert_eq!(event_function_name("firing effect", "objects\\weapons\\fx\\firing"), "firing effect: firing");
     }
 
     #[test]

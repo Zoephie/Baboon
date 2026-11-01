@@ -8,12 +8,12 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::ce_attachments::{elements, object_block};
+use super::ce_attachments::elements;
 use super::ce_lights::CeFlareView;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;
-use super::h3_effects::{H3EffectTimes, MOST_MARKERS, marker_name, part_runs_by};
+use super::h3_effects::{H3EffectTimes, h3_object_effects, part_markers, part_runs_by};
 use super::h3_shaders::{H3Blend, read_h3_definition};
 use super::materials::{H3Bitmap, read_h3_bitmap};
 use super::renderer::H3_EXPOSURE;
@@ -59,21 +59,21 @@ impl H3ParticleInput {
     fn named(name: &str) -> Self {
         match name.split('{').next().unwrap_or_default() {
             "particle age" => Self::Age,
-            "system age" => Self::SystemAge,
+            "system age" | "emitter age" => Self::SystemAge,
             "particle random" => Self::Random,
-            "system random" => Self::SystemRandom,
-            "particle correlation 1" => Self::Seed(0),
-            "particle correlation 2" => Self::Seed(1),
-            "particle correlation 3" => Self::Seed(2),
-            "particle correlation 4" => Self::Seed(3),
-            "system correlation 1" => Self::SystemSeed(0),
-            "system correlation 2" => Self::SystemSeed(1),
-            "particle emission time" => Self::EmissionTime,
-            "location lod" => Self::Lod,
+            "system random" | "emitter random" => Self::SystemRandom,
+            "particle correlation 1" | "particle random 1" => Self::Seed(0),
+            "particle correlation 2" | "particle random 2" => Self::Seed(1),
+            "particle correlation 3" | "particle random 3" => Self::Seed(2),
+            "particle correlation 4" | "particle random 4" => Self::Seed(3),
+            "system correlation 1" | "emitter correlation 1" | "emitter random 1" => Self::SystemSeed(0),
+            "system correlation 2" | "emitter correlation 2" | "emitter random 2" => Self::SystemSeed(1),
+            "particle emission time" | "emitter time" | "particle emit time" => Self::EmissionTime,
+            "location lod" | "system lod" => Self::Lod,
             "game time" => Self::GameTime,
             "effect a scale" => Self::EffectA,
             "effect b scale" => Self::EffectB,
-            "particle rotation" => Self::Rotation,
+            "particle rotation" | "physics rotation" => Self::Rotation,
             "location random" => Self::LocationSeed,
             _ => Self::Other,
         }
@@ -290,6 +290,11 @@ pub(crate) struct H3ParticleLook {
     attachments: Vec<(H3ParticleTrigger, String)>,
     /// `s_mesh_variant_list`: what `Model` draws in place of a quad.
     model: Option<Vec<Vec<blam_tags::ParticleVertex>>>,
+    /// `bitmap authored vertically`: a quarter turn, for what is not a mesh.
+    vertical: bool,
+    /// `tint from lightmap`.
+    tint_from_lightmap: bool,
+    double_sided: bool,
     /// `fade when viewed edge-on`: `1 / range` and the cutoff, in radians.
     edge_fade: Option<[f32; 2]>,
     /// `motion blur`'s stretch.
@@ -567,6 +572,9 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         random_rotation: flagged("random starting rotation"),
         intensity_fades: flagged("intensity affects alpha"),
         model,
+        vertical: flagged("bitmap authored vertically"),
+        tint_from_lightmap: flagged("tint from lightmap"),
+        double_sided: flagged("double-sided"),
         attachments: elements(root, "attachments")
             .iter()
             .filter_map(|attachment| {
@@ -907,11 +915,14 @@ pub(crate) struct H3ParticleSystem {
     attached: Vec<(H3ParticleTrigger, usize)>,
     /// Started by a particle, at the particle: nothing of its own runs it.
     child: bool,
+    hidden: bool,
 }
 
 /// What a tag's `particle system` holds, wherever it ends up.
 #[derive(Clone)]
 struct H3SystemParts {
+    /// `don't render system`: it still runs, for what its particles start.
+    hidden: bool,
     sort_bias: f32,
     world: bool,
     near_range: f32,
@@ -923,7 +934,7 @@ struct H3SystemParts {
 fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3SystemParts> {
     let flags = system.read_flag_names("flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
-    if flagged("don't render system") || !part_runs_by(system, "environment", "disposition") {
+    if !part_runs_by(system, "environment", "disposition") {
         return None;
     }
     let look = system.read_tag_ref_path("particle").filter(|path| !path.is_empty())?;
@@ -938,6 +949,7 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
     let real = |field: &str| system.read_real(field).unwrap_or(0.0);
     let cutoff = if flagged("override near fade") { real("near fade override") } else { real("near fade cutoff") };
     Some(H3SystemParts {
+        hidden: flagged("don't render system"),
         sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
         world: system.read_enum_name("coordinate system").as_deref() == Some("world"),
         // As `1 / range` comes out on the card.
@@ -1000,41 +1012,26 @@ pub(super) fn read_h3_particles(
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
 ) -> Vec<H3ParticleSystem> {
     let mut systems = Vec::new();
-    let Some(block) = object_block(object, "attachments") else {
-        return systems;
-    };
-    let effect_group = u32::from_be_bytes(*b"effe");
-    for attachment in elements(block, "attachments") {
-        let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
-            continue;
-        };
-        if group != effect_group || path.is_empty() {
-            continue;
-        }
-        let Ok(effect) = load_referenced_tag_from_source(source, &path, "effect", b"effe") else {
+    for object_effect in h3_object_effects(source, object) {
+        let Ok(effect) = load_referenced_tag_from_source(source, &object_effect.path, "effect", b"effe") else {
             continue;
         };
         let locations = elements(effect.root(), "locations");
-        let times = Arc::new(H3EffectTimes::read(effect.root()));
+        let times = Arc::new(object_effect.times_of(effect.root()));
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for system in elements(event, "particle systems") {
                 let location = usize::try_from(system.read_block_index("location")).ok();
                 let Some(location) = location.and_then(|location| locations.get(location)) else {
                     continue;
                 };
-                let mut name = marker_name(*location, "marker name");
-                if name == "replace" {
-                    name = marker_name(attachment, "marker");
-                }
+                let name = object_effect.marker_of(*location);
                 let Some(parts) = read_system_parts(source, system) else {
                     continue;
                 };
                 let children = read_attached_parts(source, &parts.look);
-                let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
-                for marker in named.take(MOST_MARKERS) {
+                for marker in part_markers(markers, &name, object_effect.once) {
                     let (place, node) = frame(marker);
                     let attached = children.iter().enumerate().map(|(at, child)| (child.0, at + 1)).collect();
-                    let scale = |name: &str| attachment.read_string_id(name).unwrap_or_default();
                     let parts = parts.clone();
                     systems.push(H3ParticleSystem {
                         node,
@@ -1042,8 +1039,8 @@ pub(super) fn read_h3_particles(
                         axes: place.axes,
                         only_under: marker.only_under.clone(),
                         object: owner,
-                        scale_by: scale("primary scale"),
-                        secondary_by: scale("secondary scale"),
+                        scale_by: object_effect.scale_by.clone(),
+                        secondary_by: object_effect.secondary_by.clone(),
                         sort_bias: parts.sort_bias,
                         world: parts.world,
                         location_seed: (systems.len() as f32 * 0.618_034).fract(),
@@ -1055,6 +1052,7 @@ pub(super) fn read_h3_particles(
                         emitters: parts.emitters,
                         attached,
                         child: false,
+                        hidden: parts.hidden,
                     });
                     for (_, parts, times, event) in &children {
                         let parts = parts.clone();
@@ -1077,6 +1075,7 @@ pub(super) fn read_h3_particles(
                             emitters: parts.emitters,
                             attached: Vec::new(),
                             child: true,
+                            hidden: parts.hidden,
                         });
                     }
                 }
@@ -1278,6 +1277,20 @@ fn system_state(
         effect_b: read(&system.secondary_by),
         location_seed: system.location_seed,
         ..Default::default()
+    })
+}
+
+/// `system_state` for a step ending at `time`, and for an event that came and
+/// went within it: the game's tick is half a step, and its one-tick events are many.
+fn system_state_stepped(
+    system: &H3ParticleSystem,
+    values: Option<&H2FunctionValues>,
+    time: f32,
+    onset: f32,
+) -> Option<H3ParticleState> {
+    system_state(system, values, time, onset).or_else(|| {
+        let begin = system.times.begins_within(system.event, time - onset - STEP, time - onset)?;
+        system_state(system, values, begin + onset, onset)
     })
 }
 
@@ -1484,6 +1497,16 @@ fn frame_variant(input: f32, count: usize, one_shot: bool, backwards: bool) -> f
     if backwards { count - variant } else { variant }
 }
 
+/// `effect_lightprobe_get_lightmap_tint`, as `initial_color.rgb * exp2(a)`
+/// comes out: the probe's constant term, with a brightness of at most 2.
+pub(super) fn lightmap_tint(lighting: &[[f32; 4]; 10]) -> [f32; 3] {
+    let scale = (4.0 * std::f32::consts::PI).sqrt().recip();
+    let tint: [f32; 3] = std::array::from_fn(|channel| lighting[0][channel] * scale);
+    let brightest = tint[0].max(tint[1]).max(tint[2]).max(f32::EPSILON);
+    let exponent = brightest.log2().clamp(0.0, 1.0);
+    tint.map(|channel| (channel * 2f32.powf(-exponent)).clamp(0.0, 1.0) * 2f32.powf(exponent))
+}
+
 /// `surface_basis`, for a distortion: its corners lean away as a dome's would.
 fn curved_lean(lean: [[f32; 3]; 2], plane: [[f32; 3]; 2], offset: [f32; 2], curvature: f32) -> [[f32; 3]; 2] {
     let norm = (offset[0] * offset[0] + offset[1] * offset[1]).sqrt() + 0.0001;
@@ -1543,7 +1566,7 @@ impl H3ParticleField {
                     let mut runs = std::mem::take(&mut self.instances[index]);
                     runs.retain_mut(|run| {
                         let age = now - run.start;
-                        let state = (age < system.times.once()).then(|| system_state(system, None, now, run.start)).flatten();
+                        let state = (age < system.times.once()).then(|| system_state_stepped(system, None, now, run.start)).flatten();
                         step_location(system, &mut run.running, state, run.origin, run.axes, now, &mut births, &mut deaths);
                         age < system.times.once() || run.running.iter().any(|running| !running.particles.is_empty())
                     });
@@ -1552,7 +1575,7 @@ impl H3ParticleField {
                 }
                 let scope = values(system.object);
                 let onset = onsets.of(system.object, &system.scale_by, scope.as_ref(), now);
-                let state = system_state(system, scope.as_ref(), now, onset);
+                let state = system_state_stepped(system, scope.as_ref(), now, onset);
                 let (origin, axes) = location(system, bones);
                 step_location(system, &mut self.running[index], state, origin, axes, now, &mut births, &mut deaths);
                 for (trigger, offset) in &system.attached {
@@ -1602,6 +1625,9 @@ impl H3ParticleField {
         onset: f32,
     ) -> Vec<H3ParticleVertex> {
         let mut vertices = Vec::new();
+        if system.hidden {
+            return vertices;
+        }
         if system.child {
             for run in self.instances.get(index).into_iter().flatten() {
                 let at = (run.origin, run.axes, run.start);
@@ -1685,20 +1711,29 @@ impl H3ParticleSystem {
                 }
                 let basis = billboard(look.billboard, place, velocity, turned, view);
                 let manual = emitter.rotation.scalar(&state).rem_euclid(1.0);
-                let (sin, cos) = (std::f32::consts::TAU * (particle.rotation + manual)).sin_cos();
+                let turned_up = if look.vertical { 0.25 } else { 0.0 };
+                let (sin, cos) = (std::f32::consts::TAU * (particle.rotation + manual + turned_up)).sin_cos();
                 let tint = emitter.tint.color(&state);
                 let color = look.color.color(&state);
                 let intensity = look.intensity.scalar(&state);
                 let mut alpha = (emitter.alpha.scalar(&state) * look.alpha.scalar(&state)).clamp(0.0, 1.0);
+                // `default_vs`: wholly transparent is dead, whatever the blend.
+                if alpha == 0.0 {
+                    continue;
+                }
                 if look.intensity_fades {
                     alpha *= intensity;
                 }
                 let eye: [f32; 3] = std::array::from_fn(|axis| place[axis] - view.eye[axis]);
                 let near = system.near_range * (dot(view.forward, eye) - system.near_cutoff);
                 alpha *= if near.is_nan() { 0.0 } else { near.clamp(0.0, 1.0) };
+                if alpha == 0.0 && look.model.is_none() {
+                    continue;
+                }
                 let light = if look.shader.blend == H3Blend::Multiply { 1.0 } else { H3_EXPOSURE };
+                let initial = if look.tint_from_lightmap { lightmap_tint(lighting) } else { [1.0; 3] };
                 let rgb: [f32; 3] = std::array::from_fn(|axis| {
-                    (tint[axis] * color[axis]).clamp(0.0, 1.0) * intensity * light
+                    (tint[axis] * color[axis]).clamp(0.0, 1.0) * initial[axis] * intensity * light
                 });
                 let shading = look.shader.lighting;
                 let normal_at = |planar: [f32; 2], spun: [[f32; 3]; 2]| -> [f32; 3] {
@@ -1769,7 +1804,16 @@ impl H3ParticleSystem {
                     let along = |vector: [f32; 3]| -> [f32; 3] {
                         std::array::from_fn(|axis| (0..3).map(|at| vector[at] * plane[at][axis]).sum())
                     };
-                    for vertex in mesh {
+                    for triangle in mesh.chunks_exact(3) {
+                        // Backfaces cull among the transparents.
+                        let turned_away = triangle.iter().all(|vertex| {
+                            let normal = along([vertex.normal.i, vertex.normal.j, vertex.normal.k]);
+                            dot(normal, minus(view.eye, place)) < 0.0
+                        });
+                        if turned_away && !look.double_sided {
+                            continue;
+                        }
+                        for vertex in triangle {
                         let at = [vertex.position.x * aspect, vertex.position.y, vertex.position.z];
                         let moved = along(at);
                         let spot = std::array::from_fn(|axis| place[axis] + moved[axis] * size);
@@ -1777,6 +1821,7 @@ impl H3ParticleSystem {
                         let lit = lit_by(normal);
                         let lean = [plane[0], plane[1]].map(|side| side.map(|axis| axis * size * width));
                         vertices.push(at_spot(spot, [vertex.texcoord.x, vertex.texcoord.y], normal, lit, lean));
+                        }
                     }
                     continue;
                 }
@@ -1891,6 +1936,27 @@ mod tests {
         assert_eq!(axes[0], [0.0, 1.0, 0.0]);
         assert!(dot(axes[1], axes[0]).abs() < 1e-6 && dot(axes[2], axes[0]).abs() < 1e-6);
         assert_eq!(axes_along([0.0; 3])[0], [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn an_older_tags_names_read_as_the_same_inputs() {
+        assert_eq!(H3ParticleInput::named("emitter age"), H3ParticleInput::SystemAge);
+        assert_eq!(H3ParticleInput::named("emitter random"), H3ParticleInput::SystemRandom);
+        assert_eq!(H3ParticleInput::named("emitter correlation 2"), H3ParticleInput::SystemSeed(1));
+        assert_eq!(H3ParticleInput::named("system lod"), H3ParticleInput::Lod);
+        assert_eq!(H3ParticleInput::named("no such input"), H3ParticleInput::Other);
+    }
+
+    #[test]
+    fn a_lightmap_tint_is_the_probes_constant_and_keeps_only_two_stops() {
+        let scale = (4.0 * std::f32::consts::PI).sqrt();
+        let mut lighting = [[0.0; 4]; 10];
+        lighting[0] = [0.5 * scale, 0.25 * scale, 0.0, 0.0];
+        let tint = lightmap_tint(&lighting);
+        assert!((tint[0] - 0.5).abs() < 1e-5 && (tint[1] - 0.25).abs() < 1e-5);
+        lighting[0] = [16.0 * scale, 8.0 * scale, 0.0, 0.0];
+        let tint = lightmap_tint(&lighting);
+        assert!((tint[0] - 2.0).abs() < 1e-5, "{tint:?}");
     }
 
     #[test]

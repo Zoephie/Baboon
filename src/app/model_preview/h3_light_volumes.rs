@@ -12,7 +12,7 @@ use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::{
-    H3EffectTimes, MOST_MARKERS, for_each_attached_part, part_frame, read_part_placement,
+    H3EffectTimes, for_each_attached_part, part_frame, part_markers, read_part_placement,
 };
 use super::h3_shaders::{H3Blend, read_h3_definition};
 use super::materials::{H3Bitmap, read_h3_bitmap};
@@ -285,8 +285,7 @@ pub(super) fn read_h3_light_volumes(
             let Some(definition) = read_definition(source, element).map(Arc::new) else {
                 continue;
             };
-            let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&part.marker));
-            for marker in named.take(MOST_MARKERS) {
+            for marker in part_markers(markers, &part.marker, part.effect.once) {
                 let (place, node) = frame(marker);
                 let place = part_frame(&place, offset, yaw, pitch);
                 volumes.push(H3LightVolumeAt {
@@ -295,8 +294,8 @@ pub(super) fn read_h3_light_volumes(
                     position: place.position,
                     forward: place.axes[0],
                     only_under: marker.only_under.clone(),
-                    scale_by: part.attachment.read_string_id("primary scale").unwrap_or_default(),
-                    secondary_by: part.attachment.read_string_id("secondary scale").unwrap_or_default(),
+                    scale_by: part.effect.scale_by.clone(),
+                    secondary_by: part.effect.secondary_by.clone(),
                     seeds: volume_seeds(volumes.len()),
                     times: Arc::clone(&part.times),
                     event: part.event,
