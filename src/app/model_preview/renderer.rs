@@ -2456,6 +2456,18 @@ impl ModelGlRenderer {
                 }
                 let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
                 self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Transparent, None);
+                // `sub_6C18F0`: `object_overshield_amount` is the vitality past 1.
+                let value = |name: &str| {
+                    frame.h2_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+                };
+                for (layer, name) in [
+                    (H2Layer::ShieldDamaged, "current_shield_damage"),
+                    (H2Layer::Overshield, "object_overshield_amount"),
+                ] {
+                    if value(name) > 0.0 {
+                        self.draw_h2_passes(gl, frame, slot, &order, layer, None);
+                    }
+                }
                 if frame.game_shaders && frame.bloom {
                     self.draw_h2_bloom(gl, frame, slot, &order);
                     gl.use_program(Some(self.program));
@@ -2944,6 +2956,11 @@ impl ModelGlRenderer {
             {
                 continue;
             }
+            // A held weapon is an object of its own, with no such shader.
+            let held = frame.preview.materials.get(material).is_some_and(|m| m.object != 0);
+            if held && matches!(layer, H2Layer::ShieldDamaged | H2Layer::Overshield) {
+                continue;
+            }
             let Some((byte_offset, index_count)) = model_draw_range(
                 batch.index_start,
                 batch.index_count,
@@ -3211,6 +3228,11 @@ impl ModelGlRenderer {
                 for (changed, component, channel) in &pass.change_colors {
                     if changed == register {
                         value[*component] = change_colors[*channel][*component];
+                    }
+                }
+                for (changed, component) in &pass.camo_amounts {
+                    if changed == register {
+                        value[*component] = if frame.active_camo { 1.0 } else { 0.0 };
                     }
                 }
                 if let Some(light) = light {
@@ -4364,7 +4386,7 @@ pub(super) fn render_model_to_preview(
             .map(|material| RenderModelPreviewMaterial {
                 shader_path: material.render_method.clone(),
                 shader_group: material.render_method_group,
-                overlay: false,
+                overlay: false, shield: None,
                 permutation: 0,
                 object: 0,
             })

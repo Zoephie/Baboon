@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::core::source::MountedContainer;
-use super::h2_passes::h2_prt_lights;
+use super::h2_passes::{H2Layer, h2_prt_lights};
 use super::h2_prt::read_h2_prt;
 use blam_tags::iostore::IoStoreArchive;
 use blam_tags::iostore::container_header::EIoContainerHeaderVersion;
@@ -299,7 +299,7 @@ pub(super) fn load_model_preview(
             preview.materials.push(RenderModelPreviewMaterial {
                 shader_path,
                 shader_group,
-                overlay: true,
+                overlay: true, shield: None,
                 permutation: 0,
                 object: 0,
             });
@@ -522,7 +522,29 @@ pub(super) fn load_model_preview(
         && group == shader_group
         && !shader_path.is_empty()
     {
-        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, overlay: false, permutation: 0, object: 0 });
+        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, overlay: false, shield: None, permutation: 0, object: 0 });
+    }
+    // `sub_6C18F0` lays its shield shaders over it the same way.
+    let damage = model_tag.root().field("new damage info").and_then(|field| field.as_block());
+    if let Some(damage) = damage.and_then(|block| block.element(0)) {
+        let shaders = [
+            ("shield damaged shader", H2Layer::ShieldDamaged),
+            ("overshield shader", H2Layer::Overshield),
+        ];
+        for (name, layer) in shaders {
+            let Some(shader_path) = damage.read_tag_ref_path(name).filter(|path| !path.is_empty())
+            else {
+                continue;
+            };
+            preview.materials.push(RenderModelPreviewMaterial {
+                shader_path,
+                shader_group,
+                overlay: false,
+                shield: Some(layer),
+                permutation: 0,
+                object: 0,
+            });
+        }
     }
     // The collision/physics overlays are NOT built here: this parse runs on
     // the UI thread, and walking the collision BSP plus tessellating the

@@ -159,6 +159,9 @@ pub(crate) struct RenderModelPreviewMaterial {
     /// Drawn over the whole model, from no batch of its own: a Halo CE
     /// object's `modifier shader`.
     pub overlay: bool,
+    /// Halo 2: which of a model's damage shaders this is, drawn from no batch
+    /// of its own while the object's shield says so.
+    pub shield: Option<h2_passes::H2Layer>,
     /// Halo CE: which image of each bitmap it draws, wrapping at their count.
     pub permutation: usize,
     /// Which object owns it, for its function outputs and change colors: 0

@@ -251,6 +251,14 @@ pub(crate) fn resolve_model_textures(
             texture.h2_layers[hologram].clone_from(&passes);
         }
     }
+    // So are its damage shaders, which take their turn over the object.
+    for layer in [H2Layer::ShieldDamaged, H2Layer::Overshield] {
+        let owner = materials.iter().position(|material| material.shield == Some(layer));
+        let passes = owner.map(|owner| std::mem::take(&mut textures[owner].h2_layers[transparent]));
+        for texture in textures.iter_mut().filter(|_| passes.is_some()) {
+            texture.h2_layers[layer as usize].clone_from(passes.as_ref().unwrap());
+        }
+    }
     for texture in &mut textures {
         // A pass with no object implementation still has the fallback's.
         if texture.h2_layers[H2Layer::ObjectLightmap as usize].is_empty() {
@@ -1174,7 +1182,7 @@ mod tests {
                 .map(|material| RenderModelPreviewMaterial {
                     shader_path: material.render_method.clone(),
                     shader_group: material.render_method_group,
-                    overlay: false,
+                    overlay: false, shield: None,
                     permutation: 0,
                     object: 0,
                 })
@@ -1343,7 +1351,7 @@ mod tests {
             &[RenderModelPreviewMaterial {
                 shader_path: String::new(),
                 shader_group: 0,
-                overlay: false,
+                overlay: false, shield: None,
                 permutation: 0,
                 object: 0,
             }],
@@ -1410,7 +1418,7 @@ mod tests {
             &[RenderModelPreviewMaterial {
                 shader_path: r"objects\characters\dervish\shaders\dervish_armor".to_owned(),
                 shader_group: u32::from_be_bytes(*b"rmsh"),
-                overlay: false,
+                overlay: false, shield: None,
                 permutation: 0,
                 object: 0,
             }],
@@ -1444,7 +1452,7 @@ mod tests {
             &[RenderModelPreviewMaterial {
                 shader_path: path.to_owned(),
                 shader_group: u32::from_be_bytes(*group),
-                overlay: false,
+                overlay: false, shield: None,
                 permutation: 0,
                 object: 0,
             }],
@@ -1536,7 +1544,7 @@ mod tests {
             let material = RenderModelPreviewMaterial {
                 shader_path: path.to_owned(),
                 shader_group: u32::from_be_bytes(*b"soso"),
-                overlay: false,
+                overlay: false, shield: None,
                 permutation,
                 object: 0,
             };
@@ -1694,7 +1702,7 @@ mod tests {
         let material = |path: &str| RenderModelPreviewMaterial {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*b"shad"),
-            overlay: false,
+            overlay: false, shield: None,
             permutation: 0,
             object: 0,
         };

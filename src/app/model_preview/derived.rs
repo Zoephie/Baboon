@@ -1142,7 +1142,7 @@ fn sbsp_preview_materials(root: &TagStruct<'_>) -> Vec<RenderModelPreviewMateria
                 .map(|(shader_group, path)| RenderModelPreviewMaterial {
                     shader_path: path,
                     shader_group,
-                    overlay: false,
+                    overlay: false, shield: None,
                     permutation: 0,
                     object: 0,
                 })

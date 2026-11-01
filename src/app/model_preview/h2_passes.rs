@@ -53,6 +53,10 @@ pub(crate) enum H2Layer {
     /// Takes over from every other opaque layer while camo is on.
     ActiveCamo,
     Transparent,
+    /// A model's `shield damaged shader`, over all of it.
+    ShieldDamaged,
+    /// A model's `overshield shader`, over all of it.
+    Overshield,
     /// A mask written to the frame's alpha, for the glow drawn from it.
     Bloom,
     /// Not the game's: see `h2_shadow_passes`.
@@ -60,7 +64,7 @@ pub(crate) enum H2Layer {
     ShadowMask,
 }
 
-pub(crate) const H2_LAYER_COUNT: usize = 19;
+pub(crate) const H2_LAYER_COUNT: usize = 21;
 
 /// The sphere lights `render_lights` falls back on with nothing else lighting
 /// the scene: a warm key and a cool fill.
@@ -105,6 +109,8 @@ impl H2Layer {
         Self::Hologram,
         Self::ActiveCamo,
         Self::Transparent,
+        Self::ShieldDamaged,
+        Self::Overshield,
         Self::Bloom,
         Self::ShadowCaster,
         Self::ShadowMask,
@@ -128,7 +134,7 @@ impl H2Layer {
             Self::Hologram => "hologram",
             Self::ActiveCamo => "active camo",
             Self::Bloom => "bloom",
-            Self::ShadowCaster | Self::ShadowMask => "",
+            Self::ShadowCaster | Self::ShadowMask | Self::ShieldDamaged | Self::Overshield => "",
             Self::Transparent => TRANSPARENT_LAYER,
         }
     }
@@ -191,6 +197,7 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 2] {
         tint_glancing: [1.0; 4],
         change_colors: Vec::new(),
         light_colors: Vec::new(),
+        camo_amounts: Vec::new(),
         light_direct: [0.0; 3],
         light_indirect: [0.0; 3],
         animated_constants: Vec::new(),
@@ -298,6 +305,7 @@ const H2_FULL_ACTIVE_CAMO_IMPLEMENTATION: usize = 1;
 /// `render_light_get_diffuse_implementation_index` for a light of type sphere.
 const H2_SPHERE_LIGHT_DIFFUSE_IMPLEMENTATION: usize = 1;
 const LIGHT_FALLOFF: &str = "LIGHT falloff";
+const ACTIVE_CAMO_AMOUNT: &str = "OBJECT active camo amount";
 /// The one frame texture a preview can supply itself.
 const VECTOR_NORMALIZATION: &str = "GLOBAL vector-normalization";
 const NO_EXTERN: &str = "none";
@@ -386,8 +394,10 @@ pub(crate) enum H2AnimationKind {
     ScaleUniform,
     ScaleX,
     ScaleY,
+    ScaleZ,
     TranslationX,
     TranslationY,
+    TranslationZ,
     Rotation,
     Value,
     Color,
@@ -526,8 +536,10 @@ fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
                 "bitmap scale uniform" => H2AnimationKind::ScaleUniform,
                 "bitmap scale x" => H2AnimationKind::ScaleX,
                 "bitmap scale y" => H2AnimationKind::ScaleY,
+                "bitmap scale z" => H2AnimationKind::ScaleZ,
                 "bitmap translation x" => H2AnimationKind::TranslationX,
                 "bitmap translation y" => H2AnimationKind::TranslationY,
+                "bitmap translation z" => H2AnimationKind::TranslationZ,
                 "bitmap rotation angle" => H2AnimationKind::Rotation,
                 "value" => H2AnimationKind::Value,
                 "color" => H2AnimationKind::Color,
@@ -548,6 +560,8 @@ fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
 pub(crate) enum H2RowForm {
     Row1,
     Row2,
+    /// The last of a 3D map's three: `xyzw row3 (3D affine xform)`.
+    Row3,
     SimpleXform,
     ScaleXy,
     ScaleZw,
@@ -558,37 +572,41 @@ pub(crate) enum H2RowForm {
 pub(crate) struct H2AnimatedRow {
     register: usize,
     form: H2RowForm,
-    scale: [f32; 2],
+    scale: [f32; 3],
     animations: Vec<H2Animation>,
 }
 
 impl H2AnimatedRow {
-    /// `shader_setup_evaluate_overlay_bitmap_xform_animation`, which turns
-    /// about the middle of the map.
+    /// `sub_6D8B60`, which turns about the middle of the map. Scale reaches
+    /// the turn and not the translation, which `sub_9185D0` writes straight
+    /// into its register each frame.
     fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], clock: H2Clock<'_>) {
-        let [mut scale_x, mut scale_y] = self.scale;
-        let (mut move_x, mut move_y, mut angle) = (0.0, 0.0, 0.0);
+        let [mut scale_x, mut scale_y, mut scale_z] = self.scale;
+        let (mut move_x, mut move_y, mut move_z, mut angle) = (0.0, 0.0, 0.0, 0.0);
         for animation in &self.animations {
             let value = animation.scalar(clock);
             match animation.kind {
-                H2AnimationKind::ScaleUniform => (scale_x, scale_y) = (value, value),
+                H2AnimationKind::ScaleUniform => (scale_x, scale_y, scale_z) = (value, value, value),
                 H2AnimationKind::ScaleX => scale_x = value,
                 H2AnimationKind::ScaleY => scale_y = value,
+                H2AnimationKind::ScaleZ => scale_z = value,
                 H2AnimationKind::TranslationX => move_x = value,
                 H2AnimationKind::TranslationY => move_y = value,
+                H2AnimationKind::TranslationZ => move_z = value,
                 H2AnimationKind::Rotation => angle = value,
                 H2AnimationKind::Value | H2AnimationKind::Color => {}
             }
         }
         let (sin, cos): (f32, f32) = f32::sin_cos(angle);
-        let offset_x = ((sin + 1.0 - cos) * 0.5 + move_x) * scale_x;
-        let offset_y = ((1.0 - cos - sin) * 0.5 + move_y) * scale_y;
+        let offset_x = (sin + 1.0 - cos) * 0.5 * scale_x + move_x;
+        let offset_y = (1.0 - cos - sin) * 0.5 * scale_y + move_y;
         let Some(row) = rows.get_mut(self.register) else {
             return;
         };
         match self.form {
             H2RowForm::Row1 => *row = [cos * scale_x, -sin * scale_x, 0.0, offset_x],
             H2RowForm::Row2 => *row = [sin * scale_y, cos * scale_y, 0.0, offset_y],
+            H2RowForm::Row3 => *row = [0.0, 0.0, scale_z, move_z],
             H2RowForm::SimpleXform => *row = [cos * scale_x, cos * scale_y, offset_x, offset_y],
             H2RowForm::ScaleXy => (row[0], row[1]) = (cos * scale_x, cos * scale_y),
             H2RowForm::ScaleZw => (row[2], row[3]) = (cos * scale_x, cos * scale_y),
@@ -1017,6 +1035,9 @@ pub(crate) struct H2DrawPass {
     pub(crate) change_colors: Vec<(u32, usize, usize)>,
     /// Constant components filled from the current light: register, component.
     pub(crate) light_colors: Vec<(u32, usize)>,
+    /// Registers and components of `OBJECT active camo amount`, which holds
+    /// for the object as it is drawn: plenty of passes read it with no camo on.
+    pub(crate) camo_amounts: Vec<(u32, usize)>,
     /// The vectors a lightmap pass lights by. Most passes keep them in the
     /// tag, each as its pixel shader expects: some negate them.
     pub(crate) light_direct: [f32; 3],
@@ -1050,6 +1071,7 @@ impl H2DrawPass {
             tint_glancing: [1.0; 4],
             change_colors: Vec::new(),
             light_colors: Vec::new(),
+            camo_amounts: Vec::new(),
             light_direct: [0.0; 3],
             light_indirect: [0.0; 3],
             animated_constants: Vec::new(),
@@ -1368,8 +1390,8 @@ fn extern_value(name: &str, specular_brightness: f32) -> [f32; 4] {
         "LIGHTMAP object indirect vector" => DEFAULT_INDIRECT_VECTOR,
         // White is the game's own answer when an object allows no colors.
         _ if name.starts_with("OBJECT change color") => [1.0; 4],
-        // Only drawn at all with camo fully on.
-        "OBJECT active camo amount" => [1.0; 4],
+        // A pass's own value for it comes from the frame; see `camo_amounts`.
+        ACTIVE_CAMO_AMOUNT => [1.0; 4],
         _ => [0.0, 0.0, 0.0, 1.0],
     }
 }
@@ -1431,6 +1453,7 @@ pub(in crate::app) fn prepare_draw_pass(
     let mut animated_constants = Vec::new();
     let mut change_colors = Vec::new();
     let mut light_colors = Vec::new();
+    let mut camo_amounts = Vec::new();
     for binding in &translated.constants {
         let value = lookup(&binding.source)
             .map_or([0.0, 0.0, 0.0, 1.0], |value| parameter_vector(value, specular_brightness));
@@ -1469,6 +1492,11 @@ pub(in crate::app) fn prepare_draw_pass(
                 && index < 3
             {
                 light_colors.push((binding.register, index));
+            }
+            if matches!(lookup(&binding.source), Some(H2ParameterValue::Extern(name)) if name == ACTIVE_CAMO_AMOUNT)
+                && index < 4
+            {
+                camo_amounts.push((binding.register, index));
             }
         }
     }
@@ -1600,6 +1628,9 @@ pub(in crate::app) fn prepare_draw_pass(
         } else if constant.components.contains("row2") {
             *row = [0.0, y, 0.0, 0.0];
             H2RowForm::Row2
+        } else if constant.components.contains("row3") {
+            *row = [0.0, 0.0, x, 0.0];
+            H2RowForm::Row3
         } else if constant.components.contains("simple xform") {
             *row = [x, y, 0.0, 0.0];
             H2RowForm::SimpleXform
@@ -1622,7 +1653,7 @@ pub(in crate::app) fn prepare_draw_pass(
             animated_rows.push(H2AnimatedRow {
                 register: constant.register.max(0) as usize,
                 form,
-                scale: [x, y],
+                scale: [x, y, x],
                 animations,
             });
         }
@@ -1645,6 +1676,7 @@ pub(in crate::app) fn prepare_draw_pass(
         tint_glancing,
         change_colors,
         light_colors,
+        camo_amounts,
         light_direct,
         light_indirect,
         animated_constants,
@@ -1723,16 +1755,23 @@ mod tests {
     fn a_texture_transform_moves_scales_and_turns_as_the_game_builds_it() {
         let row = |form, animations| {
             let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
-            H2AnimatedRow { register: 1, form, scale: [2.0, 4.0], animations }.apply(&mut rows, 0.0.into());
+            H2AnimatedRow { register: 1, form, scale: [2.0, 4.0, 8.0], animations }
+                .apply(&mut rows, 0.0.into());
             rows[1]
         };
         let moved = vec![
             animation(H2AnimationKind::TranslationX, 0.0, 0.25),
             animation(H2AnimationKind::TranslationY, 0.0, 0.5),
         ];
-        assert_eq!(row(H2RowForm::SimpleXform, moved.clone()), [2.0, 4.0, 0.5, 2.0]);
-        assert_eq!(row(H2RowForm::Row1, moved.clone()), [2.0, 0.0, 0.0, 0.5]);
-        assert_eq!(row(H2RowForm::Row2, moved), [0.0, 4.0, 0.0, 2.0]);
+        // `sub_6D8B60` leaves a translation unscaled.
+        assert_eq!(row(H2RowForm::SimpleXform, moved.clone()), [2.0, 4.0, 0.25, 0.5]);
+        assert_eq!(row(H2RowForm::Row1, moved.clone()), [2.0, 0.0, 0.0, 0.25]);
+        assert_eq!(row(H2RowForm::Row2, moved), [0.0, 4.0, 0.0, 0.5]);
+
+        let deep = vec![animation(H2AnimationKind::TranslationZ, 0.0, 0.5)];
+        assert_eq!(row(H2RowForm::Row3, deep), [0.0, 0.0, 8.0, 0.5]);
+        let even = vec![animation(H2AnimationKind::ScaleUniform, 0.0, 3.0)];
+        assert_eq!(row(H2RowForm::Row3, even), [0.0, 0.0, 3.0, 0.0], "uniform scale reaches z");
 
         let turned = row(
             H2RowForm::Row1,
