@@ -94,6 +94,9 @@ pub(super) struct H3Targets {
     accumulation: glow::NativeTexture,
     /// A copy of the scene behind the object, for active camo.
     behind: glow::NativeTexture,
+    /// A copy of the depth, for what fades against it.
+    depth_copy: glow::NativeTexture,
+    depth_copy_framebuffer: glow::NativeFramebuffer,
 }
 
 pub(super) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Option<glow::NativeProgram> {
@@ -170,7 +173,45 @@ impl H3Targets {
                 glow::RENDERBUFFER,
                 Some(depth),
             );
-            Some(Self { size, albedo_framebuffer, accumulation_framebuffer, albedo, normal, accumulation, behind })
+            let depth_copy = gl.create_texture().ok()?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(depth_copy));
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::DEPTH24_STENCIL8 as i32,
+                size[0],
+                size[1],
+                0,
+                glow::DEPTH_STENCIL,
+                glow::UNSIGNED_INT_24_8,
+                glow::PixelUnpackData::Slice(None),
+            );
+            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
+                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
+            }
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            let depth_copy_framebuffer = gl.create_framebuffer().ok()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(depth_copy_framebuffer));
+            gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+                glow::TEXTURE_2D,
+                Some(depth_copy),
+                0,
+            );
+            gl.draw_buffers(&[glow::NONE]);
+            gl.read_buffer(glow::NONE);
+            Some(Self {
+                size,
+                albedo_framebuffer,
+                accumulation_framebuffer,
+                albedo,
+                normal,
+                accumulation,
+                behind,
+                depth_copy,
+                depth_copy_framebuffer,
+            })
         }
     }
 
@@ -178,7 +219,8 @@ impl H3Targets {
         unsafe {
             gl.delete_framebuffer(self.albedo_framebuffer);
             gl.delete_framebuffer(self.accumulation_framebuffer);
-            for texture in [self.albedo, self.normal, self.accumulation, self.behind] {
+            gl.delete_framebuffer(self.depth_copy_framebuffer);
+            for texture in [self.albedo, self.normal, self.accumulation, self.behind, self.depth_copy] {
                 gl.delete_texture(texture);
             }
         }
@@ -846,15 +888,6 @@ impl ModelGlRenderer {
             }
             gl.enable(glow::BLEND);
             gl.depth_mask(false);
-            for (batch, material) in blended {
-                h3_set_blend(gl, material.blend);
-                if material.decal {
-                    gl.enable(glow::POLYGON_OFFSET_FILL);
-                    gl.polygon_offset(DECAL_SLOPE_BIAS, DECAL_DEPTH_BIAS * DEPTH_UNITS);
-                }
-                self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
-                gl.disable(glow::POLYGON_OFFSET_FILL);
-            }
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, true);
             // `submit_visibility_and_render`: additive, each light on its own.
@@ -877,6 +910,50 @@ impl ModelGlRenderer {
                 }
                 self.h3_light = None;
             }
+            // `c_transparency_renderer`: what blends, far to near, sprites among
+            // the materials.
+            let sprites = self.draws_object_sprites(frame);
+            if sprites {
+                if let Some(targets) = self.h3_targets.as_ref() {
+                    let [width, height] = targets.size;
+                    gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
+                    gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
+                    let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
+                    gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+                    gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
+                    self.h3_depth_copy = Some(targets.depth_copy);
+                }
+            }
+            let mut blended: Vec<_> = blended
+                .into_iter()
+                .map(|(batch, material)| (batch_distance(frame, batch), batch, material))
+                .collect();
+            blended.sort_by(|(a, ..), (b, ..)| b.total_cmp(a));
+            for (distance, batch, material) in blended {
+                if sprites {
+                    self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(distance));
+                }
+                gl.enable(glow::BLEND);
+                gl.depth_mask(false);
+                gl.depth_func(glow::LEQUAL);
+                h3_set_cull(gl, frame);
+                gl.color_mask(true, true, true, true);
+                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                h3_set_blend(gl, material.blend);
+                if material.decal {
+                    gl.enable(glow::POLYGON_OFFSET_FILL);
+                    gl.polygon_offset(DECAL_SLOPE_BIAS, DECAL_DEPTH_BIAS * DEPTH_UNITS);
+                }
+                self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                gl.disable(glow::POLYGON_OFFSET_FILL);
+            }
+            if sprites {
+                self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+            }
+            gl.blend_equation(glow::FUNC_ADD);
+            gl.color_mask(true, true, true, true);
+            gl.enable(glow::BLEND);
+            gl.depth_mask(false);
             let mut bloom = None;
             if frame.active_camo {
                 // Camo shows what is behind it, which the game blooms the same
@@ -913,8 +990,8 @@ impl ModelGlRenderer {
             }
             // `c_player_view::render`: after the transparents, before the bloom
             // and the tone curve, so these are in the same light as the scene.
-            if self.draws_object_sprites(frame) {
-                self.draw_ce_flares(gl, frame, slot);
+            if sprites {
+                self.draw_ce_flares(gl, frame, slot, SpriteStage::Rest);
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             if frame.bloom && bloom.is_none() {
@@ -983,6 +1060,22 @@ impl ModelGlRenderer {
             *self.h3_empty_vertices.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
         }
     }
+}
+
+/// How far along the view a batch's middle lies, as sprites measure theirs.
+fn batch_distance(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch) -> f32 {
+    let preview = &frame.preview;
+    let start = batch.index_start as usize;
+    let indices = preview.indices.get(start..start + batch.index_count as usize).unwrap_or(&[]);
+    let places = indices.iter().filter_map(|index| preview.vertices.get(*index as usize));
+    let (mut sum, mut count) = ([0.0; 3], 0.0);
+    for vertex in places {
+        sum = std::array::from_fn(|axis| sum[axis] + vertex.position[axis]);
+        count += 1.0;
+    }
+    let view = ce_flare_view(&frame.camera);
+    let middle: [f32; 3] = sum.map(|axis| axis / f32::max(count, 1.0));
+    (0..3).map(|axis| (middle[axis] - view.eye[axis]) * view.forward[axis]).sum()
 }
 
 /// `c_object_renderer::render_albedo` and its like: `_cull_mode_cw` throughout.

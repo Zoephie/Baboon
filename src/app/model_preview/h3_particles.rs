@@ -288,6 +288,8 @@ pub(crate) struct H3ParticleLook {
     pub(crate) blend: H3Blend,
     pub(crate) black_point: bool,
     pub(crate) frame_blend: bool,
+    /// `depth_fade_range`, with the `depth_fade` option on.
+    pub(crate) depth_fade: Option<f32>,
     pub(crate) add: [f32; 3],
     pub(crate) base_map: Option<H3Bitmap>,
     pub(crate) alpha_map: Option<H3Bitmap>,
@@ -383,6 +385,13 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         blend: definition.blend(&options),
         black_point: chosen("black_point") == "on",
         frame_blend: chosen("frame_blend") == "on",
+        depth_fade: (chosen("depth_fade") == "on" && chosen("blend_mode") != "opaque").then(|| {
+            let range = parameter(shader, "depth_fade_range")
+                .and_then(|parameter| elements(parameter, "animated parameters").first().copied())
+                .and_then(|animated| tag_function_at(&animated, "function"))
+                .map_or(1.0, |function| function.evaluate(0.0, 0.0));
+            range.max(1e-4)
+        }),
         add,
         base_map: read_map(source, shader, "base_map"),
         alpha_map: read_map(source, shader, "alpha_map"),

@@ -2322,7 +2322,14 @@ uniform int u_albedo;
 uniform bool u_black_point;
 uniform bool u_multiply;
 uniform vec3 u_add;
+uniform float u_fade;
+uniform vec4 u_depth;
+uniform sampler2D u_scene_depth;
 out vec4 out_color;
+float view_depth(float window) {
+    float ndc = window * 2.0 - 1.0;
+    return (ndc - u_depth.y) / (u_depth.x - ndc * u_depth.z);
+}
 vec4 albedo(vec2 sprite) {
     vec4 base = texture(u_base, sprite);
     vec4 tone = base;
@@ -2339,6 +2346,11 @@ vec4 albedo(vec2 sprite) {
 }
 void main() {
     vec4 color = mix(albedo(v_sprite), albedo(v_next_sprite), v_extra.x);
+    if (u_fade > 0.0) {
+        float scene = texelFetch(u_scene_depth, ivec2(gl_FragCoord.xy), 0).r;
+        float behind = (view_depth(scene) - view_depth(gl_FragCoord.z)) / u_depth.w;
+        color.a *= clamp(behind / u_fade, 0.0, 1.0);
+    }
     if (u_black_point) {
         float black = v_extra.z;
         float middle = (black + 1.0) * 0.5;
@@ -2357,6 +2369,15 @@ void main() {
 
 const PARTICLE_FLOATS: usize = 17;
 
+/// Which part of the object's sprites a call draws.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum SpriteStage {
+    /// Volumes and particles not yet drawn, down to this far away.
+    FartherThan(f32),
+    /// Antennas and lens flares, and any left of those.
+    Rest,
+}
+
 /// What Halo 3's particles draw with, made on first use.
 struct H3ParticleGl {
     program: glow::NativeProgram,
@@ -2366,6 +2387,8 @@ struct H3ParticleGl {
     black_point: Option<glow::NativeUniformLocation>,
     multiply: Option<glow::NativeUniformLocation>,
     add: Option<glow::NativeUniformLocation>,
+    fade: Option<glow::NativeUniformLocation>,
+    depth: Option<glow::NativeUniformLocation>,
 }
 
 impl H3ParticleGl {
@@ -2376,6 +2399,8 @@ impl H3ParticleGl {
         vertices: &[[f32; PARTICLE_FLOATS]],
         textures: [Option<glow::NativeTexture>; 3],
         no_map: Option<glow::NativeTexture>,
+        depth: Option<glow::NativeTexture>,
+        camera: &ModelGpuCamera,
     ) {
         let look = &system.look;
         unsafe {
@@ -2387,7 +2412,18 @@ impl H3ParticleGl {
                 gl.active_texture(glow::TEXTURE0 + unit as u32);
                 gl.bind_texture(glow::TEXTURE_2D, texture.or(no_map));
             }
+            gl.active_texture(glow::TEXTURE3);
+            gl.bind_texture(glow::TEXTURE_2D, depth);
             gl.active_texture(glow::TEXTURE0);
+            let range = if depth.is_some() { look.depth_fade.unwrap_or(0.0) } else { 0.0 };
+            gl.uniform_1_f32(self.fade.as_ref(), range);
+            gl.uniform_4_f32(
+                self.depth.as_ref(),
+                camera.depth_scale * camera.depth_map[0],
+                camera.depth_map[1],
+                camera.perspective,
+                camera.scale,
+            );
             gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
             gl.uniform_1_i32(self.black_point.as_ref(), i32::from(look.black_point));
             let multiply = look.blend == H3Blend::Multiply;
@@ -2420,7 +2456,7 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             offset += size * size_of::<f32>() as i32;
         }
         gl.use_program(Some(program));
-        for (unit, name) in ["u_base", "u_alpha", "u_palette"].into_iter().enumerate() {
+        for (unit, name) in ["u_base", "u_alpha", "u_palette", "u_scene_depth"].into_iter().enumerate() {
             gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
         }
         Some(H3ParticleGl {
@@ -2431,6 +2467,8 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             black_point: gl.get_uniform_location(program, "u_black_point"),
             multiply: gl.get_uniform_location(program, "u_multiply"),
             add: gl.get_uniform_location(program, "u_add"),
+            fade: gl.get_uniform_location(program, "u_fade"),
+            depth: gl.get_uniform_location(program, "u_depth"),
         })
     }
 }
@@ -2438,6 +2476,11 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
 struct ModelGlRenderer {
     ce_flares: Option<CeFlareGl>,
     h3_particle_gl: Option<H3ParticleGl>,
+    /// How far through the frame's sorted sprites the draws have got.
+    h3_sprite_cursor: usize,
+    /// Particles step once a frame, however many calls draw them.
+    h3_sprites_advanced: bool,
+    h3_depth_copy: Option<glow::NativeTexture>,
     /// Whether this context can draw Halo 2 passes; see `H2_GLSL_VERSION`.
     h2_supported: bool,
     /// Whether this context can draw Halo 3's: the translated shaders want GLSL 4.10.
@@ -2556,6 +2599,9 @@ impl ModelGlRenderer {
                 h2_black_cube: upload_black_cube(gl),
                 h3_no_bloom: upload_black_flat(gl),
                 h3_particle_gl: None,
+                h3_sprite_cursor: 0,
+                h3_sprites_advanced: false,
+                h3_depth_copy: None,
                 h2_black_volume: upload_solid_volume(gl, [0, 0, 0, 255]),
                 h2_white_volume: upload_solid_volume(gl, [255; 4]),
                 h2_normalization_cube: upload_normalization_cube(gl),
@@ -2837,7 +2883,7 @@ impl ModelGlRenderer {
                 self.draw_batches(gl, frame, true, &self.slots[slot].materials);
             }
             if !self.h3_draws(frame) && self.draws_object_sprites(frame) {
-                self.draw_ce_flares(gl, frame, slot);
+                self.draw_ce_flares(gl, frame, slot, SpriteStage::Rest);
             }
 
             // Polygon mode is not reset by egui_glow's generic callback-state
@@ -2871,7 +2917,13 @@ impl ModelGlRenderer {
                 && preview.h3_particles.is_empty())
     }
 
-    pub(super) unsafe fn draw_ce_flares(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(super) unsafe fn draw_ce_flares(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        stage: SpriteStage,
+    ) {
         unsafe {
             let h3 = self.h3_draws(frame);
             if self.ce_flares.is_none() {
@@ -2987,7 +3039,9 @@ impl ModelGlRenderer {
             // Plain color times map, not what the last flare left set.
             gl.uniform_1_f32(flares.highlight.as_ref(), -1.0);
             gl.uniform_2_f32(flares.tint.as_ref(), 0.0, 0.0);
-            for (quads, texture) in preview_antennas(frame, &uploaded.antenna_textures, bones, &view) {
+            let antennas = matches!(stage, SpriteStage::Rest);
+            let quads = if antennas { preview_antennas(frame, &uploaded.antenna_textures, bones, &view) } else { Vec::new() };
+            for (quads, texture) in quads {
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                 for quad in quads {
                     let vertices = quad.corners.map(|[x, y, z, u, v]| {
@@ -3002,7 +3056,9 @@ impl ModelGlRenderer {
             }
             gl.color_mask(true, true, true, false);
             // `render_effects`, among the transparents: every profile is its own quad.
-            if !frame.preview.h3_particles.is_empty() {
+            let cursor = &mut self.h3_sprite_cursor;
+            if !self.h3_sprites_advanced && !frame.preview.h3_particles.is_empty() {
+                self.h3_sprites_advanced = true;
                 let systems = &frame.preview.h3_particles;
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
                 uploaded.h3_particles.advance(systems, values, frame.time);
@@ -3021,7 +3077,15 @@ impl ModelGlRenderer {
             let systems = systems.map(|(at, system)| (system.distance(bones, &view), Sprites::System(at)));
             let mut sorted: Vec<_> = volumes.chain(systems).collect();
             sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
-            for (_, sprites) in sorted {
+            let limit = match stage {
+                SpriteStage::FartherThan(limit) => limit,
+                SpriteStage::Rest => f32::INFINITY,
+            };
+            for (distance, sprites) in sorted.into_iter().skip(*cursor) {
+                if distance < limit {
+                    break;
+                }
+                *cursor += 1;
                 match sprites {
                     Sprites::Volume(index) => {
                         let at = &frame.preview.h3_light_volumes[index];
@@ -3072,9 +3136,15 @@ impl ModelGlRenderer {
                             })
                             .collect();
                         let textures = uploaded.particle_textures.get(index).copied().unwrap_or_default();
-                        particles.draw(gl, system, &vertices, textures, no_map);
+                        particles.draw(gl, system, &vertices, textures, no_map, self.h3_depth_copy, camera);
                     }
                 }
+            }
+            if matches!(stage, SpriteStage::FartherThan(_)) {
+                gl.blend_equation(glow::FUNC_ADD);
+                gl.color_mask(true, true, true, true);
+                gl.use_program(Some(self.program));
+                return;
             }
             gl.use_program(Some(flares.program));
             gl.bind_vertex_array(Some(flares.vertex_array));
@@ -3138,6 +3208,8 @@ impl ModelGlRenderer {
                 let textures = &uploaded.flare_textures[first_h2 + index];
                 draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
             }
+            self.h3_sprite_cursor = 0;
+            self.h3_sprites_advanced = false;
             gl.color_mask(true, true, true, true);
             gl.depth_mask(true);
             gl.depth_func(glow::LEQUAL);
