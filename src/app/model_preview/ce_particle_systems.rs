@@ -687,6 +687,7 @@ pub(crate) fn new_unattached(
     running.velocity = velocity;
     running.color = color;
     running.scale = scale;
+    // `light_particle` with no structure under it: `global_real_rgb_grey`.
     running.lighting = [0.5; 3];
     update_unattached(def, &mut running, ground, 0.001, random);
     running.first = false;

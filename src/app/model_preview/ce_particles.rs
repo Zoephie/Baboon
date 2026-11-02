@@ -43,6 +43,8 @@ const ANIMATE_ONCE_PER_FRAME: i128 = 0x8;
 const DIES_AT_REST: i128 = 0x10;
 const DIES_ON_STRUCTURE: i128 = 0x20;
 const DIES_IN_AIR: i128 = 0x100;
+const TINT_FROM_DIFFUSE: i128 = 0x40;
+const SELF_ILLUMINATED: i128 = 0x200;
 const RANDOM_HORIZONTAL_MIRROR: i128 = 0x400;
 const RANDOM_VERTICAL_MIRROR: i128 = 0x800;
 
@@ -1225,6 +1227,9 @@ fn new_running() -> RunningEffect {
     }
 }
 
+/// `global_real_rgb_grey`, which `light_particle` gives where no structure is.
+const PARTICLE_GREY: f32 = 0.5;
+
 /// The most effects particles may have made at once. The game's effect
 /// array is shared with every other effect; the preview keeps its own.
 const MOST_SPAWNED: usize = 128;
@@ -1630,6 +1635,16 @@ fn generate_particles(
                 } else {
                     rgb
                 };
+                // `particle_new`: `light_particle` finds no structure under a
+                // preview's particle, so both its light and the diffuse color
+                // below it are grey.
+                let mut tinted = tinted;
+                if particle_def.flags & SELF_ILLUMINATED == 0 {
+                    tinted = tinted.map(|channel| channel * PARTICLE_GREY);
+                }
+                if particle_def.flags & TINT_FROM_DIFFUSE != 0 {
+                    tinted = tinted.map(|channel| channel * PARTICLE_GREY);
+                }
                 let alpha = (1.0 - mix) * low[3] + high[3] * mix;
                 let mut lifespan = random.range(particle_def.lifespan[0], particle_def.lifespan[1]);
                 if lifespan <= 0.0 {
