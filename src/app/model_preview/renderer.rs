@@ -1011,6 +1011,7 @@ pub(super) fn object_moves(
         || !data.preview.h2_contrails.is_empty()
         || !data.preview.ce_effects.is_empty()
         || !data.preview.ce_contrails.is_empty()
+        || !data.preview.ce_lightning.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
@@ -1141,6 +1142,7 @@ impl ModelGpuFrame {
             || !preview.h2_contrails.is_empty()
             || !preview.ce_effects.is_empty()
             || !preview.ce_contrails.is_empty()
+            || !preview.ce_lightning.is_empty()
             || !preview.h2_liquids.is_empty()
             || !preview.h2_light_volumes.is_empty()
             || !preview.h2_flares.is_empty()
@@ -1823,6 +1825,7 @@ struct ModelGpuSlot {
     ce_contrails: ce_contrails::CeContrailField,
     ce_contrail_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     ce_light_volume_textures: Vec<Option<glow::NativeTexture>>,
+    ce_lightning_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
@@ -1888,6 +1891,7 @@ impl ModelGpuSlot {
                 ce_contrails: Default::default(),
                 ce_contrail_textures: Vec::new(),
                 ce_light_volume_textures: Vec::new(),
+                ce_lightning_textures: Vec::new(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
                 h3_vision_clock: None,
@@ -2447,6 +2451,20 @@ unsafe fn draw_ce_particles(
         // What each sprite draws with: texture, blend, nonlinear tint, color, corners.
         type Sprite = (glow::NativeTexture, i32, bool, [f32; 4], [[f32; 5]; 4]);
         let mut sprites: Vec<Sprite> = Vec::new();
+        // Made afresh every frame, as the game draws it.
+        let seed = (frame.time * 1000.0) as u32;
+        let first = states.first();
+        let outputs0 = first.map_or([0.0; 4], |state| state.outputs);
+        let colors0 = first.map_or([[1.0; 3]; 4], |state| state.change_colors);
+        for (index, lightning) in frame.preview.ce_lightning.iter().enumerate() {
+            let Some(texture) = uploaded.ce_lightning_textures.get(index).copied().flatten() else {
+                continue;
+            };
+            let seed = seed.wrapping_add(index as u32 * 7919);
+            for quad in lightning.quads(&outputs0, &colors0, bones, view, seed) {
+                sprites.push((texture, lightning.blend, lightning.nonlinear_tint, quad.color, quad.corners));
+            }
+        }
         for quad in uploaded.ce_contrails.quads(contrails, change_colors, view) {
             let Some(contrail) = contrails.get(quad.contrail) else {
                 continue;
@@ -3456,6 +3474,7 @@ impl ModelGlRenderer {
                 && preview.ce_effects.is_empty()
                 && preview.ce_contrails.is_empty()
                 && preview.ce_light_volumes.is_empty()
+                && preview.ce_lightning.is_empty()
                 && preview.h2_antennas.is_empty()
                 && preview.h2_flares.is_empty()
                 && preview.h3_flares.is_empty()
@@ -3575,6 +3594,11 @@ impl ModelGlRenderer {
                 }
                 uploaded.ce_light_volume_textures =
                     frame.preview.ce_light_volumes.iter().map(|volume| upload_h2_image(gl, &volume.image)).collect();
+                for texture in uploaded.ce_lightning_textures.drain(..).flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.ce_lightning_textures =
+                    frame.preview.ce_lightning.iter().map(|lightning| upload_h2_image(gl, &lightning.image)).collect();
                 uploaded.ce_contrail_textures = frame
                     .preview
                     .ce_contrails
@@ -3797,7 +3821,7 @@ impl ModelGlRenderer {
                 }
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             }
-            if antennas && !(frame.preview.ce_effects.is_empty() && frame.preview.ce_contrails.is_empty()) {
+            if antennas && !(frame.preview.ce_effects.is_empty() && frame.preview.ce_contrails.is_empty() && frame.preview.ce_lightning.is_empty()) {
                 draw_ce_particles(gl, &mut self.ce_effect_gl, self.program, uploaded, frame, bones, &view);
                 gl.use_program(Some(flares.program));
                 gl.bind_vertex_array(Some(flares.vertex_array));

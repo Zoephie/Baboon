@@ -338,6 +338,7 @@ pub(super) fn load_model_preview(
         preview.ce_effects = super::ce_particles::read_ce_effects(source, model_tag, 0, &preview.markers);
         preview.ce_contrails = super::ce_contrails::read_ce_contrails(source, model_tag, 0, &preview.markers);
         preview.ce_light_volumes = super::ce_widgets::read_ce_light_volumes(source, model_tag, &preview.markers);
+        preview.ce_lightning = super::ce_widgets::read_ce_lightning(source, model_tag, &preview.markers);
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = read_h2_change_colors(model_tag);
         data.ce_object_functions = super::ce_functions::read_ce_object_functions(model_tag);
