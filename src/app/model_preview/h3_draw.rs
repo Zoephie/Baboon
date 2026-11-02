@@ -1038,6 +1038,9 @@ impl ModelGlRenderer {
             gl.color_mask(true, true, true, true);
             gl.enable(glow::BLEND);
             gl.depth_mask(false);
+            // Neither the camo nor the shield can count on a transparent having
+            // put the model's own geometry back after the lights and sprites.
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             let mut bloom = None;
             if frame.active_camo {
                 // Camo shows what is behind it, which the game blooms the same
