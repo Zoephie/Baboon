@@ -21,8 +21,12 @@ const ACTIVATING_ABOVE: f32 = 0.0001;
 const TICKS_PER_SECOND: f32 = 30.0;
 const OUTPUTS: [&str; 4] = ["A out", "B out", "C out", "D out"];
 
-/// An input's value on an object at rest. Most read damage or motion, of
-/// which there is none. `random constant` is drawn per object, so a middle.
+/// An input's value on an object at rest, as the `*_export_function_values`
+/// give it: vitality and `alive` full, damage and motion nothing; a device as
+/// a scenario places one by default (`device_add_scenario_information`:
+/// powered, at position 0); a weapon `ready` with its magazines full; `compass`
+/// facing north. `random constant` is drawn once per object from the game's
+/// seed, which a preview has none of, so a middle.
 fn resting_input(name: &str, weapon: Option<TagStruct<'_>>) -> f32 {
     let magazine = |index: usize| {
         let magazines = weapon?.field("magazines")?.as_block()?;
@@ -103,7 +107,9 @@ impl CeFunction {
             scale_function_by: source("scale function by"),
             wobble_function: option_index(block, "wobble function", &super::ce_passes::PERIODIC_FUNCTIONS)
                 as usize,
-            wobble_rate: inverse(real("wobble period")),
+            // Tool's postprocess (`sub_4A09A0`) leaves it be, and the game
+            // multiplies the time by it.
+            wobble_rate: real("wobble period"),
             wobble_magnitude: real("wobble magnitude"),
             square_threshold: real("square wave threshold"),
             steps: block.read_int_any("step count").unwrap_or(0) as i32,
@@ -112,7 +118,8 @@ impl CeFunction {
             scale_result_by: source("scale result by"),
             map_to: option_index(block, "map to", &MAP_TO) as usize,
             bounds_mode: option_index(block, "bounds mode", &BOUNDS_MODES) as usize,
-            bounds: if bounds == [0.0; 2] { [0.0, 1.0] } else { bounds },
+            // Tool's postprocess: bounds that meet become nothing to one.
+            bounds: if bounds[0] == bounds[1] { [0.0, 1.0] } else { bounds },
             scale_by: real("scale by"),
             usage: block.read_string("usage").unwrap_or_default(),
         }
@@ -149,8 +156,10 @@ impl CeFunction {
         if self.steps > 1 {
             value = (self.steps as f32 * value).floor() * inverse((self.steps - 1) as f32);
         }
-        if self.sawtooth > 0 {
-            value %= inverse(self.sawtooth as f32);
+        // Tool bakes one over one less than the count, nothing for one or less;
+        // the game wraps by it where it is something.
+        if self.sawtooth > 1 {
+            value %= 1.0 / (self.sawtooth - 1) as f32;
         }
         if self.add != 0 {
             value = (value + values[self.add]).min(1.0);
@@ -458,6 +467,17 @@ mod tests {
         assert_eq!(rested, [false, true, false, false]);
         let (_, raised) = objects.outputs_active(&[0.5, 0.0, 0.0, 0.0], 0.0);
         assert_eq!(raised, [true, true, true, false]);
+    }
+
+    #[test]
+    fn a_sawtooth_wraps_at_one_over_one_less_than_its_count() {
+        let values = [0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let input = CeFunction { scale_function_by: 1, ..function(0) };
+        let three = CeFunction { sawtooth: 3, ..input.clone() };
+        assert!((three.evaluate(&values, 0.0) - 0.2).abs() < 1e-5);
+        // One tooth is no sawtooth at all.
+        let one = CeFunction { sawtooth: 1, ..input };
+        assert!((one.evaluate(&values, 0.0) - 0.7).abs() < 1e-5);
     }
 
     #[test]
