@@ -377,6 +377,9 @@ pub(crate) struct H3SpriteShader {
     /// `depth_fade_range`, with the `depth_fade` option on.
     pub(crate) depth_fade: Option<f32>,
     pub(crate) add: [f32; 3],
+    /// `alpha_test.hlsl`: under a half of alpha it is gone, and otherwise
+    /// solid, writing depth like anything opaque.
+    pub(crate) alpha_test: bool,
     /// Whether the pixel is lit, as `per_pixel_ravi_order_3` is.
     pub(crate) lit_pixels: bool,
     /// `sort layer`: `transparent_layer_and_z_sort_proc` goes by this first.
@@ -392,6 +395,27 @@ pub(crate) struct H3SpriteShader {
 }
 
 impl H3SpriteShader {
+    /// What a leaf draws with: only a map, cut out at half its alpha.
+    pub(crate) fn alpha_tested(blend: H3Blend, base_map: H3Bitmap) -> Self {
+        Self {
+            albedo: H3ParticleAlbedo::Diffuse,
+            blend,
+            black_point: false,
+            frame_blend: false,
+            depth_fade: None,
+            add: [0.0; 3],
+            alpha_test: true,
+            lit_pixels: false,
+            sort_layer: 2,
+            distortion: None,
+            lighting: H3ParticleLighting::None,
+            uv_scale: [1.0; 2],
+            base_map: Some(base_map),
+            alpha_map: None,
+            palette_map: None,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn blank() -> Self {
         Self {
@@ -401,6 +425,7 @@ impl H3SpriteShader {
             frame_blend: false,
             depth_fade: None,
             add: [0.0; 3],
+            alpha_test: false,
             lit_pixels: false,
             sort_layer: 2,
             distortion: None,
@@ -450,6 +475,7 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
             range.max(1e-4)
         }),
         add,
+        alpha_test: false,
         lit_pixels: chosen("lighting") == "per_pixel_ravi_order_3",
         sort_layer: h3_sort_layer(shader),
         distortion: chosen("specialized_rendering").starts_with("distortion").then(|| {

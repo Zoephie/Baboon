@@ -385,6 +385,9 @@ pub(super) fn load_model_preview(
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
             let markers = preview.markers.clone();
             super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview);
+            let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
+            let leaves = super::h3_leaves::read_h3_leaves(source, model_tag, &markers, middle);
+            preview.h3_leaves = leaves.into_iter().map(Arc::new).collect();
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = read_h2_change_colors(model_tag);

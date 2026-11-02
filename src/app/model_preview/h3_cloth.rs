@@ -49,7 +49,7 @@ fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
 }
 
 /// `rotate_vector_about_axis`.
-fn turned_about(vector: [f32; 3], axis: [f32; 3], angle: f32) -> [f32; 3] {
+pub(crate) fn turned_about(vector: [f32; 3], axis: [f32; 3], angle: f32) -> [f32; 3] {
     let (sin, cos) = angle.sin_cos();
     let along = dot(axis, vector) * (1.0 - cos);
     let across = cross(axis, vector);

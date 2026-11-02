@@ -966,6 +966,7 @@ pub(super) fn object_moves(
         || !data.preview.h3_strips.is_empty()
         || !data.preview.h3_screen_effects.is_empty()
         || !data.preview.h3_cloth.is_empty()
+        || !data.preview.h3_leaves.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
@@ -1752,6 +1753,8 @@ struct ModelGpuSlot {
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
     h3_cloth: h3_cloth::H3ClothField,
+    h3_leaves: h3_leaves::H3LeafField,
+    leaf_textures: Vec<[Option<glow::NativeTexture>; 3]>,
     strip_textures: Vec<[Option<glow::NativeTexture>; 3]>,
     particle_textures: Vec<[Option<glow::NativeTexture>; 3]>,
 }
@@ -1804,6 +1807,8 @@ impl ModelGpuSlot {
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
                 h3_cloth: Default::default(),
+                h3_leaves: Default::default(),
+                leaf_textures: Vec::new(),
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
             })
@@ -2347,6 +2352,7 @@ in vec3 v_extra;
 in vec4 v_lean;
 in vec3 v_normal;
 uniform bool u_lit;
+uniform bool u_alpha_test;
 uniform bool u_premultiplied;
 uniform vec4 u_lighting[10];
 uniform float u_distortion;
@@ -2401,6 +2407,12 @@ void main() {
         float middle = (black + 1.0) * 0.5;
         color.a = middle * clamp((color.a - black) / (middle - black), 0.0, 1.0)
             + clamp(color.a - middle, 0.0, 1.0);
+    }
+    if (u_alpha_test) {
+        if (color.a < 0.5) {
+            discard;
+        }
+        color.a = 1.0;
     }
     color *= v_color;
     if (u_lit) {
@@ -2472,6 +2484,7 @@ struct H3ParticleGl {
     add: Option<glow::NativeUniformLocation>,
     lit: Option<glow::NativeUniformLocation>,
     premultiplied: Option<glow::NativeUniformLocation>,
+    alpha_test: Option<glow::NativeUniformLocation>,
     lighting: Option<glow::NativeUniformLocation>,
     distortion: Option<glow::NativeUniformLocation>,
     unsigned: Option<glow::NativeUniformLocation>,
@@ -2521,6 +2534,8 @@ impl H3ParticleGl {
             gl.uniform_1_i32(self.lit.as_ref(), i32::from(look.lit_pixels));
             let premultiplied = look.blend == H3Blend::PreMultiplied;
             gl.uniform_1_i32(self.premultiplied.as_ref(), i32::from(premultiplied));
+            gl.uniform_1_i32(self.alpha_test.as_ref(), i32::from(look.alpha_test));
+            gl.depth_mask(look.alpha_test);
             gl.uniform_4_f32_slice(self.lighting.as_ref(), lighting.as_flattened());
             let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| *texels != h3_shaders::H3Texels::Signed);
             gl.uniform_1_i32(self.unsigned.as_ref(), i32::from(unsigned));
@@ -2533,6 +2548,7 @@ impl H3ParticleGl {
             let covers = matches!(look.blend, H3Blend::AlphaBlend | H3Blend::PreMultiplied);
             gl.color_mask(true, true, true, covers);
             gl.draw_arrays(glow::TRIANGLES, 0, vertices.len() as i32);
+            gl.depth_mask(false);
             gl.color_mask(true, true, true, false);
         }
     }
@@ -2568,6 +2584,7 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             add: gl.get_uniform_location(program, "u_add"),
             lit: gl.get_uniform_location(program, "u_lit"),
             premultiplied: gl.get_uniform_location(program, "u_premultiplied"),
+            alpha_test: gl.get_uniform_location(program, "u_alpha_test"),
             lighting: gl.get_uniform_location(program, "u_lighting"),
             distortion: gl.get_uniform_location(program, "u_distortion"),
             unsigned: gl.get_uniform_location(program, "u_unsigned"),
@@ -3023,7 +3040,8 @@ impl ModelGlRenderer {
                 && preview.h3_flares.is_empty()
                 && preview.h3_light_volumes.is_empty()
                 && preview.h3_particles.is_empty()
-                && preview.h3_strips.is_empty())
+                && preview.h3_strips.is_empty()
+                && preview.h3_leaves.is_empty())
     }
 
     pub(super) unsafe fn draw_ce_flares(
@@ -3041,7 +3059,11 @@ impl ModelGlRenderer {
             let Some(flares) = self.ce_flares.as_mut() else {
                 return;
             };
-            if self.h3_particle_gl.is_none() && !(frame.preview.h3_particles.is_empty() && frame.preview.h3_strips.is_empty()) {
+            if self.h3_particle_gl.is_none()
+                && !(frame.preview.h3_particles.is_empty()
+                    && frame.preview.h3_strips.is_empty()
+                    && frame.preview.h3_leaves.is_empty())
+            {
                 self.h3_particle_gl = h3_particle_gl(gl, self.program);
             }
             let particle_gl = &self.h3_particle_gl;
@@ -3050,7 +3072,12 @@ impl ModelGlRenderer {
             if uploaded.flare_geometry != Some(frame.geometry_id) {
                 uploaded.h3_particles = h3_particles::H3ParticleField::default();
                 uploaded.h3_strips = h3_strips::H3StripField::default();
-                let drained = uploaded.particle_textures.drain(..).chain(uploaded.strip_textures.drain(..));
+                uploaded.h3_leaves = h3_leaves::H3LeafField::default();
+                let drained = uploaded
+                    .particle_textures
+                    .drain(..)
+                    .chain(uploaded.strip_textures.drain(..))
+                    .chain(uploaded.leaf_textures.drain(..));
                 for texture in drained.flatten().flatten() {
                     gl.delete_texture(texture);
                 }
@@ -3064,6 +3091,7 @@ impl ModelGlRenderer {
                 uploaded.particle_textures =
                     frame.preview.h3_particles.iter().map(|system| maps(&system.look.shader)).collect();
                 uploaded.strip_textures = frame.preview.h3_strips.iter().map(|strip| maps(strip.shader())).collect();
+                uploaded.leaf_textures = frame.preview.h3_leaves.iter().map(|leaves| maps(leaves.shader())).collect();
                 for texture in uploaded.flare_textures.drain(..).flatten().flatten() {
                     gl.delete_texture(texture);
                 }
@@ -3174,6 +3202,9 @@ impl ModelGlRenderer {
                 let ground = lowest.fold(0.0, f32::min);
                 uploaded.h3_particles.advance(systems, values, &mut uploaded.h3_onsets, bones, view.eye, ground, frame.time);
             }
+            if !cursor_advanced {
+                uploaded.h3_leaves.advance(&frame.preview.h3_leaves, frame.time);
+            }
             if !cursor_advanced && !frame.preview.h3_strips.is_empty() {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
                 let (systems, particles) = (&frame.preview.h3_particles, &uploaded.h3_particles);
@@ -3187,6 +3218,7 @@ impl ModelGlRenderer {
                 Volume(usize),
                 System(usize),
                 Strip(usize),
+                Leaves(usize),
             }
             let eye_distance = |origin: [f32; 3]| {
                 (0..3).map(|axis| (origin[axis] - view.eye[axis]) * view.forward[axis]).sum::<f32>()
@@ -3205,7 +3237,11 @@ impl ModelGlRenderer {
             let strips = strips
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
                 .map(|(at, strip)| (layered(strip.shader().sort_layer, eye_distance(strip.origin(bones))), Sprites::Strip(at)));
-            let mut sorted: Vec<_> = volumes.chain(systems).chain(strips).collect();
+            let leaves = frame.preview.h3_leaves.iter().enumerate();
+            let leaves = leaves
+                .filter(|_| !matches!(stage, SpriteStage::Distortions))
+                .map(|(at, leaves)| (layered(2, eye_distance(leaves.origin())), Sprites::Leaves(at)));
+            let mut sorted: Vec<_> = volumes.chain(systems).chain(strips).chain(leaves).collect();
             sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
             let limit = match stage {
                 SpriteStage::FartherThan(limit) => limit,
@@ -3270,6 +3306,20 @@ impl ModelGlRenderer {
                         let vertices = particle_floats(camera, &drawn);
                         let textures = uploaded.particle_textures.get(index).copied().unwrap_or_default();
                         particles.draw(gl, &system.look.shader, &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting);
+                    }
+                    Sprites::Leaves(index) => {
+                        let leaves = &frame.preview.h3_leaves[index];
+                        let Some(particles) = particle_gl.as_ref() else {
+                            continue;
+                        };
+                        let lighting = h3_draw::h3_lighting_constants(frame);
+                        let drawn = uploaded.h3_leaves.vertices(index, leaves, &lighting);
+                        if drawn.is_empty() {
+                            continue;
+                        }
+                        let vertices = particle_floats(camera, &drawn);
+                        let textures = uploaded.leaf_textures.get(index).copied().unwrap_or_default();
+                        particles.draw(gl, leaves.shader(), &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting);
                     }
                     Sprites::Strip(index) => {
                         let strip = &frame.preview.h3_strips[index];
