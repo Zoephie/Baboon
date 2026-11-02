@@ -51,6 +51,10 @@ pub(crate) struct H3ScreenSettings {
     fov: [f32; 2],
     /// ODST's `vision mode`.
     vision: f32,
+    /// ODST's `motion suck`: on a definition its amount, and on what is sampled
+    /// the way the view seems to have moved.
+    suck: f32,
+    suck_toward: [f32; 3],
 }
 
 impl Default for H3ScreenSettings {
@@ -70,13 +74,15 @@ impl Default for H3ScreenSettings {
             blur: [0.0; 2],
             fov: [0.0; 2],
             vision: 0.0,
+            suck: 0.0,
+            suck_toward: [0.0; 3],
         }
     }
 }
 
 impl H3ScreenSettings {
     /// `accumulate_settings`: the strongest of each, not their sum.
-    fn accumulate(&mut self, other: &Self, falloff: f32) {
+    fn accumulate(&mut self, other: &Self, falloff: f32, toward: [f32; 3]) {
         let falloff = falloff.clamp(0.0, 1.0);
         let most = |mine: &mut f32, theirs: f32| *mine = mine.max(falloff * theirs);
         most(&mut self.exposure_boost, other.exposure_boost);
@@ -97,10 +103,21 @@ impl H3ScreenSettings {
             most(&mut self.fov[axis], other.fov[axis]);
         }
         most(&mut self.vision, other.vision);
+        // Unlike all the rest, this one adds up.
+        let length = toward.iter().map(|axis| axis * axis).sum::<f32>().sqrt();
+        let unit = if length >= 0.0001 { toward.map(|axis| axis / length) } else { toward };
+        for axis in 0..3 {
+            self.suck_toward[axis] += unit[axis] * other.suck * falloff;
+        }
     }
 
     pub(crate) fn vision(&self) -> f32 {
         self.vision
+    }
+
+    /// `distortion_apply`'s motion, if any.
+    pub(crate) fn suck(&self) -> Option<[f32; 3]> {
+        (self.suck_toward != [0.0; 3]).then_some(self.suck_toward)
     }
 
     /// `c_player_view::render_postprocess_blur`: the blurred copy's spread by
@@ -341,6 +358,8 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
             blur: [real("horizontal blur"), real("vertical blur")],
             fov: [real("fov in"), real("fov out")],
             vision: real("vision mode"),
+            suck: real("motion suck"),
+            suck_toward: [0.0; 3],
         },
         radius: real("maximum distance"),
         delay,
@@ -391,6 +410,10 @@ impl H3ScreenEffectAt {
     /// The object functions its object falloffs read.
     pub(crate) fn turns_on_vision(&self) -> bool {
         self.definitions.iter().any(|definition| definition.settings.vision > 0.0)
+    }
+
+    pub(crate) fn sucks(&self) -> bool {
+        self.definitions.iter().any(|definition| definition.settings.suck != 0.0)
     }
 
     pub(crate) fn object_inputs(&self) -> impl Iterator<Item = &str> {
@@ -481,7 +504,7 @@ pub(crate) fn h3_screen_settings<'a>(
             if definition.active(age) {
                 let falloff = definition.falloff(distance, angle, age, scope);
                 if falloff > 0.0 {
-                    settings.accumulate(&definition.settings, falloff);
+                    settings.accumulate(&definition.settings, falloff, to_effect);
                     if let Some((path, layer, order)) = &definition.shader {
                         let shader = H3ScreenShader { path: path.clone(), alpha: falloff, layer: *layer, order: *order };
                         insert_shader(&mut shaders, shader);
@@ -496,6 +519,18 @@ pub(crate) fn h3_screen_settings<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn motion_suck_adds_up_along_the_way_to_each_effect() {
+        let mut settings = H3ScreenSettings::default();
+        assert_eq!(settings.suck(), None, "nothing moved");
+        let sucks = H3ScreenSettings { suck: 0.5, ..Default::default() };
+        settings.accumulate(&sucks, 0.5, [0.0, 0.0, 4.0]);
+        settings.accumulate(&sucks, 1.0, [3.0, 0.0, 0.0]);
+        assert_eq!(settings.suck(), Some([0.5, 0.0, 0.25]));
+        settings.accumulate(&H3ScreenSettings::default(), 1.0, [3.0, 0.0, 0.0]);
+        assert_eq!(settings.suck(), Some([0.5, 0.0, 0.25]), "no suck adds none");
+    }
 
     fn apply(matrix: &Matrix, color: [f32; 3]) -> [f32; 3] {
         let color = [color[0], color[1], color[2], 1.0];
@@ -623,8 +658,8 @@ mod tests {
     fn the_strongest_wins_and_a_filter_fades_out_with_its_falloff() {
         let mut settings = H3ScreenSettings::default();
         let strong = H3ScreenSettings { desaturate: 0.8, color_filter: [0.0, 1.0, 1.0], ..Default::default() };
-        settings.accumulate(&strong, 0.5);
-        settings.accumulate(&H3ScreenSettings { desaturate: 0.2, ..Default::default() }, 1.0);
+        settings.accumulate(&strong, 0.5, [0.0; 3]);
+        settings.accumulate(&H3ScreenSettings { desaturate: 0.2, ..Default::default() }, 1.0, [0.0; 3]);
         assert_eq!(settings.desaturate, 0.4);
         assert_eq!(settings.color_filter[0], 0.5);
         assert_eq!(settings.color_filter[1], 1.0);

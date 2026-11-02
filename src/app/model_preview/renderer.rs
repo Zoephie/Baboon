@@ -2670,6 +2670,7 @@ struct ModelGlRenderer {
     h3_composite_program: Option<glow::NativeProgram>,
     h3_blur_program: Option<glow::NativeProgram>,
     h3_vision_program: Option<glow::NativeProgram>,
+    h3_suck_program: Option<glow::NativeProgram>,
     h3_vision_mask: Option<glow::NativeTexture>,
     /// How much of its effect the `shader_screen` drawing now is.
     h3_screen_alpha: Option<f32>,
@@ -2786,6 +2787,7 @@ impl ModelGlRenderer {
                 h3_composite_program: None,
                 h3_blur_program: None,
                 h3_vision_program: None,
+                h3_suck_program: None,
                 h3_vision_mask: None,
                 h3_screen_alpha: None,
                 h3_bloom: None,

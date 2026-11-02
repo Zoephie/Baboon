@@ -118,6 +118,36 @@ pub(super) fn read_h3_vision(source: &TagSource, object: &TagFile) -> Option<H3V
     })
 }
 
+/// `rasterizer_globals`' motion blur as `displacement_motion_blur` wants it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct H3MotionBlur {
+    /// `pixel_blur_constants.y`: the longest smear, in pixels.
+    pub(crate) most_pixels: f32,
+    /// `pixel_blur_constants.z`: one sample's step along it.
+    pub(crate) step: f32,
+    /// `center falloff`, as squared in `crosshair_constants`.
+    pub(crate) center_falloff: [f32; 2],
+}
+
+impl H3MotionBlur {
+    fn new(max_blur: f32, blur_scale: f32, center_falloff: [f32; 2]) -> Self {
+        let doubled = blur_scale * 2.0;
+        Self { most_pixels: max_blur * 1792.0 * 0.25 / doubled, step: doubled / 6.0, center_falloff }
+    }
+}
+
+pub(super) fn read_h3_motion_blur(source: &TagSource) -> Option<H3MotionBlur> {
+    let globals =
+        load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+    let root = globals.root();
+    let real = |name: &str| root.read_real(name);
+    Some(H3MotionBlur::new(
+        real("max blur")?,
+        real("blur scale")?,
+        [real("center falloff x")?, real("center falloff y")?],
+    ))
+}
+
 /// A column matrix's inverse, for `screen_to_world`; a singular one is none.
 pub(crate) fn inverted(matrix: &[f32; 16]) -> Option<[f32; 16]> {
     let mut left: [[f64; 4]; 4] = std::array::from_fn(|row| std::array::from_fn(|column| matrix[column * 4 + row] as f64));
@@ -160,6 +190,14 @@ mod tests {
             dimming: 0.05,
             mask: None,
         }
+    }
+
+    #[test]
+    fn motion_blur_takes_the_shipped_globals_to_fifty_pixels_in_six_steps() {
+        let blur = H3MotionBlur::new(0.08, 0.35, [7.0, 7.0]);
+        assert!((blur.most_pixels - 51.2).abs() < 1e-3, "{}", blur.most_pixels);
+        assert!((blur.step - 0.7 / 6.0).abs() < 1e-6);
+        assert_ne!(H3MotionBlur::new(0.08, 0.7, [7.0, 7.0]).most_pixels, blur.most_pixels);
     }
 
     #[test]

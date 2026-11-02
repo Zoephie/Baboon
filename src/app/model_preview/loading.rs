@@ -386,6 +386,9 @@ pub(super) fn load_model_preview(
             if preview.h3_screen_effects.iter().any(|effect| effect.turns_on_vision()) {
                 preview.h3_vision = super::h3_vision::read_h3_vision(source, model_tag).map(Arc::new);
             }
+            if preview.h3_screen_effects.iter().any(|effect| effect.sucks()) {
+                preview.h3_motion_blur = super::h3_vision::read_h3_motion_blur(source);
+            }
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
             let markers = preview.markers.clone();
             super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview);

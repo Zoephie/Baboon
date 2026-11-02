@@ -132,6 +132,8 @@ pub(crate) struct RenderModelPreview {
     pub h3_screen_effects: Vec<h3_screen_effects::H3ScreenEffectAt>,
     /// ODST's VISR, for an object with an effect that turns it on.
     pub h3_vision: Option<Arc<h3_vision::H3Vision>>,
+    /// ODST's motion blur, for an object with an effect that moves the view.
+    pub h3_motion_blur: Option<h3_vision::H3MotionBlur>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,

@@ -135,6 +135,43 @@ void main() {
 }
 ";
 
+/// `displacement_motion_blur`'s `default_ps`, with the previous frame's view
+/// being this one's with the world moved by `moved`. Every fragment here has
+/// the alpha the shader's mask looks for.
+const SUCK_FRAGMENT: &str = "#version 410 core
+uniform sampler2D picture;
+uniform sampler2D depth;
+uniform mat4 screen_to_world;
+uniform mat4 world_to_screen;
+uniform vec3 moved;
+uniform float most_pixels;
+uniform float blur_step;
+uniform vec2 center_falloff;
+out vec4 color;
+void main() {
+    vec2 size = vec2(textureSize(picture, 0));
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    vec3 center = texelFetch(picture, at, 0).rgb;
+    vec2 from_center = (gl_FragCoord.xy - size * 0.5) * sqrt(center_falloff) / size;
+    float weight = clamp(clamp(dot(from_center, from_center), 0.0, 1.0) - 0.1, 0.0, 1.0);
+    color = vec4(center, 1.0);
+    if (weight > 0.0) {
+        float raw = texelFetch(depth, at, 0).r;
+        vec4 place = screen_to_world * vec4(gl_FragCoord.xy / size * 2.0 - 1.0, raw * 2.0 - 1.0, 1.0);
+        vec4 before = world_to_screen * vec4(place.xyz / place.w + moved, 1.0);
+        vec2 delta = gl_FragCoord.xy - (before.xy / before.w * 0.5 + 0.5) * size;
+        float scale = clamp(most_pixels / length(delta), 0.0, 1.0);
+        vec2 step_by = delta * blur_step * scale * weight;
+        vec3 sum = center;
+        for (int sample_at = 1; sample_at <= 6; sample_at++) {
+            ivec2 there = clamp(ivec2(gl_FragCoord.xy + step_by * float(sample_at)), ivec2(0), ivec2(size) - 1);
+            sum += texelFetch(picture, there, 0).rgb;
+        }
+        color.rgb = sum / 7.0;
+    }
+}
+";
+
 /// `hud_camera_nightvision`'s `default_ps`, its narrow filter. The game's depth
 /// runs far to near, so the edges are of `game_depth`, not of this one.
 const VISION_FRAGMENT: &str = "#version 410 core
@@ -1331,7 +1368,8 @@ impl ModelGlRenderer {
     ) {
         let blur = screen.blur();
         let vision = frame.preview.h3_vision.clone().filter(|_| screen.vision() > 0.0);
-        if shaders.is_empty() && blur.is_none() && vision.is_none() {
+        let suck = frame.preview.h3_motion_blur.zip(screen.suck());
+        if shaders.is_empty() && blur.is_none() && vision.is_none() && suck.is_none() {
             return;
         }
         let Some(targets) = self.h3_targets.as_ref() else {
@@ -1364,6 +1402,19 @@ impl ModelGlRenderer {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
                 gl.enable(glow::FRAMEBUFFER_SRGB);
             };
+            let copy_depth = |gl: &glow::Context| {
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(accumulation_framebuffer));
+                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(depth_copy_framebuffer));
+                let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
+                gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], mask, glow::NEAREST);
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
+            };
+            // `distortion_apply` comes before everything else here.
+            if let Some((blur, moved)) = suck {
+                copy_depth(gl);
+                screen_copy(gl, true);
+                self.h3_draw_suck(gl, frame, &blur, moved, behind, depth_copy);
+            }
             for shader in shaders {
                 let found = frame.preview.materials.iter().position(|material| material.shader_path == shader.path);
                 let textures = frame.textures.as_ref();
@@ -1398,11 +1449,7 @@ impl ModelGlRenderer {
             }
             gl.disable(glow::FRAMEBUFFER_SRGB);
             if let Some(vision) = vision {
-                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(accumulation_framebuffer));
-                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(depth_copy_framebuffer));
-                let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-                gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], mask, glow::NEAREST);
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
+                copy_depth(gl);
                 self.h3_draw_vision(gl, frame, slot, &vision, screen.vision(), depth_copy);
             }
             gl.color_mask(true, true, true, true);
@@ -1411,6 +1458,48 @@ impl ModelGlRenderer {
             gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], glow::COLOR_BUFFER_BIT, glow::NEAREST);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.enable(glow::DEPTH_TEST);
+        }
+    }
+
+    /// `c_view::distortion_apply`'s motion blur, for what moved the view and not
+    /// for the preview's own camera.
+    unsafe fn h3_draw_suck(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        blur: &h3_vision::H3MotionBlur,
+        moved: [f32; 3],
+        picture: glow::NativeTexture,
+        depth: glow::NativeTexture,
+    ) {
+        let matrix = view_projection(&frame.camera);
+        let Some(to_world) = h3_vision::inverted(&matrix) else {
+            return;
+        };
+        unsafe {
+            if self.h3_suck_program.is_none() {
+                self.h3_suck_program = screen_program(gl, SUCK_FRAGMENT);
+            }
+            let Some(program) = self.h3_suck_program else {
+                return;
+            };
+            gl.use_program(Some(program));
+            let spot = |name: &str| gl.get_uniform_location(program, name);
+            gl.active_texture(glow::TEXTURE1);
+            gl.bind_texture(glow::TEXTURE_2D, Some(depth));
+            gl.uniform_1_i32(spot("depth").as_ref(), 1);
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(picture));
+            gl.uniform_1_i32(spot("picture").as_ref(), 0);
+            gl.uniform_matrix_4_f32_slice(spot("screen_to_world").as_ref(), false, &to_world);
+            gl.uniform_matrix_4_f32_slice(spot("world_to_screen").as_ref(), false, &matrix);
+            gl.uniform_3_f32_slice(spot("moved").as_ref(), &moved);
+            gl.uniform_1_f32(spot("most_pixels").as_ref(), blur.most_pixels);
+            gl.uniform_1_f32(spot("blur_step").as_ref(), blur.step);
+            gl.uniform_2_f32_slice(spot("center_falloff").as_ref(), &blur.center_falloff);
+            gl.disable(glow::BLEND);
+            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
     }
 
