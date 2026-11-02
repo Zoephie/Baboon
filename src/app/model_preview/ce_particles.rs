@@ -1228,21 +1228,7 @@ impl CeParticleField {
                 continue;
             };
             let to_particle = unit(std::array::from_fn(|axis| center[axis] - view.eye[axis]));
-            // `build_sprite_compute_basis`.
-            let (across, up) = match def.orientation {
-                1 => {
-                    let along = unit(direction);
-                    (along, unit(cross(to_particle, along)))
-                }
-                2 => {
-                    let along = unit(direction);
-                    let world_up = [0.0, 0.0, 1.0];
-                    let reference = if dot(along, world_up).powi(2) > 0.99 { view.forward } else { world_up };
-                    let side = unit(cross(along, reference));
-                    (side, rotate_about(side, along, -1.0, 0.0))
-                }
-                _ => (view.right, view.up),
-            };
+            let (across, up) = sprite_basis(def.orientation, direction, to_particle, view);
             // `build_sprite_compute_vertex_fade`, which only a turned sprite takes.
             if def.fade_mode != 0 && def.orientation != 0 {
                 let normal = unit(cross(across, up));
@@ -1500,6 +1486,29 @@ fn generate_systems(
             let made = new_unattached(def, point, velocity, [1.0, red, green, blue], scale, ground, system_random);
             systems.push((index, part.system, made));
         }
+    }
+}
+
+/// `build_sprite_compute_basis`: the sprite's across (its u) and up (its v).
+/// Screen facing takes the view's; parallel to its direction runs across
+/// along it, up square to it and the way to the eye; perpendicular lies
+/// across it, square to world up, or to world left (which the game calls
+/// `viewer_space_world_forward`) where it is near vertical, turned a quarter
+/// about it.
+fn sprite_basis(orientation: i32, direction: [f32; 3], to_particle: [f32; 3], view: &CeFlareView) -> ([f32; 3], [f32; 3]) {
+    match orientation {
+        1 => {
+            let along = unit(direction);
+            (along, unit(cross(to_particle, along)))
+        }
+        2 => {
+            let along = unit(direction);
+            let world_up = [0.0, 0.0, 1.0];
+            let reference = if dot(along, world_up).powi(2) > 0.99 { [0.0, 1.0, 0.0] } else { world_up };
+            let side = unit(cross(along, reference));
+            (side, rotate_about(side, along, -1.0, 0.0))
+        }
+        _ => (view.right, view.up),
     }
 }
 
@@ -1963,6 +1972,22 @@ fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sprite_turns_as_build_sprite_compute_basis_turns_it() {
+        let view = CeFlareView { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] };
+        // Parallel: across along the way it goes, up square to it and the eye.
+        let (across, up) = sprite_basis(1, [0.0, 2.0, 0.0], [1.0, 0.0, 0.0], &view);
+        assert_eq!(across, [0.0, 1.0, 0.0]);
+        assert_eq!(up, [0.0, 0.0, 1.0]);
+        // Perpendicular, falling: square to world left, not to the eye.
+        let (across, up) = sprite_basis(2, [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], &view);
+        assert_eq!(across, [1.0, 0.0, 0.0]);
+        assert!(dot(up, across).abs() < 1e-6 && dot(up, [0.0, 0.0, 1.0]).abs() < 1e-6);
+        // Perpendicular, level: square to world up.
+        let (across, _) = sprite_basis(2, [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], &view);
+        assert_eq!(across, [0.0, -1.0, 0.0]);
+    }
 
     #[test]
     fn a_square_vector_comes_from_the_two_largest_parts() {
