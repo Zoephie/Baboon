@@ -144,6 +144,7 @@ pub(super) fn draw_model_viewport(
         h3_systems_shown: h3_systems_shown(&data.preview, state),
         h3_strips_shown: h3_strips_shown(&data.preview, state),
         h2_flares_shown: h2_flares_shown(&data.preview, state),
+        h2_shown: H2Shown::of(&data.preview, state),
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
@@ -373,6 +374,35 @@ fn h3_systems_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> 
 fn h2_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
     preview.h2_flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+}
+
+/// Which of Halo 2's other lights and effects have a marker under what is
+/// selected: `object_get_markers_by_string_id` finds only those of the
+/// permutations the object shows, so what hangs on the others is not made.
+#[derive(Debug, Clone, Default)]
+pub(super) struct H2Shown {
+    points: Vec<bool>,
+    gels: Vec<bool>,
+    volumes: Vec<bool>,
+    contrails: Vec<bool>,
+    liquids: Vec<bool>,
+}
+
+impl H2Shown {
+    pub(super) fn of(preview: &RenderModelPreview, state: &ModelPreviewState) -> Self {
+        let shown = |only: Option<&(String, String)>| only.is_none_or(|only| marker_active(only, &state.region_selections));
+        Self {
+            points: preview.h2_point_lights.iter().map(|at| shown(at.only_under())).collect(),
+            gels: preview.h2_gel_lights.iter().map(|at| shown(at.only_under())).collect(),
+            volumes: preview.h2_light_volumes.iter().map(|at| shown(at.only_under())).collect(),
+            contrails: preview.h2_contrails.iter().map(|at| shown(at.only_under())).collect(),
+            liquids: preview.h2_liquids.iter().map(|at| shown(at.only_under())).collect(),
+        }
+    }
+}
+
+fn is_shown(shown: &[bool], index: usize) -> bool {
+    shown.get(index).copied().unwrap_or(true)
 }
 
 fn marker_active(only: &(String, String), selections: &HashMap<String, ModelRegionSelection>) -> bool {
@@ -842,6 +872,9 @@ struct ModelGpuFrame {
     h3_systems_shown: Vec<bool>,
     h3_strips_shown: Vec<bool>,
     h2_flares_shown: Vec<bool>,
+    /// The rest of Halo 2's lights and effects, by whether their marker is
+    /// under what is selected.
+    h2_shown: H2Shown,
     /// Each object's point lights this frame, in step with `object_states`.
     ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
     /// Draw opaque Halo 2 materials through their passes.
@@ -882,6 +915,9 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
     let h3_strips = data.preview.h3_strips.iter().filter(|at| at.object == 0);
     let h3_screens = data.preview.h3_screen_effects.iter().filter(|at| at.object == 0);
     let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == 0);
+    let h2_volumes = data.preview.h2_light_volumes.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
+    let h2_contrails = data.preview.h2_contrails.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
+    let h2_liquids = data.preview.h2_liquids.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
     let h3 = data.textures.iter().flat_map(|textures| textures.iter());
     let h3 = h3.filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
     let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
@@ -896,6 +932,9 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
         .chain(h3_screens.flat_map(|at| at.object_inputs()))
         .chain(lights.map(|light| light.scale_name()))
         .chain(gels.map(|light| light.scale_name()))
+        .chain(h2_volumes)
+        .chain(h2_contrails)
+        .chain(h2_liquids)
         .filter(|name| !name.is_empty());
     // `sub_6C18F0` gates the shield overlay on this itself.
     let textures = data.textures.iter().flat_map(|textures| textures.iter());
@@ -3019,7 +3058,10 @@ impl ModelGlRenderer {
                     }
                     // `render_lights`: real lights draw whichever rig stands behind them.
                     let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-                    for point in &frame.preview.h2_point_lights {
+                    for (index, point) in frame.preview.h2_point_lights.iter().enumerate() {
+                        if !is_shown(&frame.h2_shown.points, index) {
+                            continue;
+                        }
                         let values = frame.h2_values_of_object(point.object);
                         let onsets = &mut self.slots[slot].h3_onsets;
                         let onset = onsets.of(point.object, point.scale_name(), values, frame.time);
@@ -3048,6 +3090,9 @@ impl ModelGlRenderer {
                     }
                     let mut masked = false;
                     for (index, gel) in frame.preview.h2_gel_lights.iter().enumerate() {
+                        if !is_shown(&frame.h2_shown.gels, index) {
+                            continue;
+                        }
                         let values = frame.h2_values_of_object(gel.object);
                         let onsets = &mut self.slots[slot].h3_onsets;
                         let onset = onsets.of(gel.object, gel.scale_name(), values, frame.time);
@@ -3315,7 +3360,10 @@ impl ModelGlRenderer {
             let antennas = matches!(stage, SpriteStage::Rest);
             if antennas {
                 let volumes = frame.preview.h2_light_volumes.iter().zip(&uploaded.h2_volume_textures);
-                for (at, textures) in volumes {
+                for (index, (at, textures)) in volumes.enumerate() {
+                    if !is_shown(&frame.h2_shown.volumes, index) {
+                        continue;
+                    }
                     let values = frame.h2_values_of_object(at.object);
                     for (volume, texture) in at.volumes().iter().zip(textures) {
                         let Some(texture) = texture else {
@@ -3336,7 +3384,10 @@ impl ModelGlRenderer {
                     }
                 }
                 let liquids = frame.preview.h2_liquids.iter().zip(&uploaded.h2_liquid_textures);
-                for (at, textures) in liquids {
+                for (index, (at, textures)) in liquids.enumerate() {
+                    if !is_shown(&frame.h2_shown.liquids, index) {
+                        continue;
+                    }
                     let values = frame.h2_values_of_object(at.object);
                     for (arc, texture) in at.arcs().iter().zip(textures) {
                         let Some(texture) = texture else {
@@ -3360,6 +3411,9 @@ impl ModelGlRenderer {
                 uploaded.h2_contrails.advance(&frame.preview.h2_contrails, values, bones, frame.time);
                 let contrails = frame.preview.h2_contrails.iter().zip(&uploaded.h2_contrail_textures);
                 for (index, (at, texture)) in contrails.enumerate() {
+                    if !is_shown(&frame.h2_shown.contrails, index) {
+                        continue;
+                    }
                     let Some(texture) = texture else {
                         continue;
                     };

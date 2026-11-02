@@ -198,6 +198,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         h3_systems_shown: super::h3_systems_shown(&data.preview, &state),
         h3_strips_shown: super::h3_strips_shown(&data.preview, &state),
         h2_flares_shown: super::h2_flares_shown(&data.preview, &state),
+        h2_shown: super::H2Shown::of(&data.preview, &state),
         h2_values: {
             let mut set = state.h2_function_inputs.clone();
             if let Ok(pairs) = std::env::var("H2_SHOT_FUNCTIONS") {

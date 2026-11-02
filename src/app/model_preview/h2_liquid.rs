@@ -57,6 +57,8 @@ pub(crate) struct LiquidArc {
 #[derive(Debug, Clone)]
 pub(crate) struct H2LiquidAt {
     pub(crate) object: u8,
+    /// The region and permutation its marker belongs to, if only one.
+    only_under: Option<(String, String)>,
     node: usize,
     position: [f32; 3],
     forward: [f32; 3],
@@ -174,6 +176,7 @@ pub(super) fn read_h2_liquids(
         let (place, node) = frame(marker);
         found.push(H2LiquidAt {
             object: owner,
+            only_under: marker.only_under.clone(),
             node,
             position: place.position,
             forward: place.axes[0],
@@ -270,6 +273,22 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 }
 
 impl H2LiquidAt {
+    pub(crate) fn scale_name(&self) -> &str {
+        &self.scale_by
+    }
+
+    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
+        self.only_under.as_ref()
+    }
+
+    /// Follow the regions `merge_attached` renames for what `name` brings.
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
+        self
+    }
+
     pub(crate) fn arcs(&self) -> &[LiquidArc] {
         &self.arcs
     }

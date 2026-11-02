@@ -381,6 +381,8 @@ pub(crate) struct H2PointLight {
     scale_by: String,
     light: H2Light,
     effect: Option<H2EffectLight>,
+    /// The region and permutation its marker belongs to, if only one.
+    only_under: Option<(String, String)>,
 }
 
 /// A frustum's shape.
@@ -409,6 +411,8 @@ pub(crate) struct H2GelLight {
     light: H2Light,
     frustum: H2Frustum,
     effect: Option<H2EffectLight>,
+    /// The region and permutation its marker belongs to, if only one.
+    only_under: Option<(String, String)>,
 }
 
 /// The vectors `lightaccum_frustum_no_specular_gel` reads as c33 to c36, in a
@@ -667,6 +671,7 @@ fn place_h2_light(
             light: light.clone(),
             frustum,
             effect: at.effect.clone(),
+            only_under: at.only_under.clone(),
         });
     }
     if lights_model {
@@ -677,6 +682,7 @@ fn place_h2_light(
             scale_by: at.scale_by.clone(),
             light: light.clone(),
             effect: at.effect.clone(),
+            only_under: at.only_under.clone(),
         });
     }
     // A preview is a third person view.
@@ -878,10 +884,18 @@ impl H2Light {
 }
 
 impl H2PointLight {
-    /// An attached object's event light answers to its owner's panel.
+    /// An attached object's event light answers to its owner's panel, and
+    /// follows the regions `merge_attached` renames.
     pub(crate) fn on_attached(mut self, name: &str) -> Self {
         adopt_event_function(name, &mut self.scale_by, &mut self.object);
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
         self
+    }
+
+    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
+        self.only_under.as_ref()
     }
 
     /// The layer its diffuse draws on.
@@ -964,7 +978,14 @@ impl H2Frustum {
 impl H2GelLight {
     pub(crate) fn on_attached(mut self, name: &str) -> Self {
         adopt_event_function(name, &mut self.scale_by, &mut self.object);
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
         self
+    }
+
+    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
+        self.only_under.as_ref()
     }
 
     pub(crate) fn scale_name(&self) -> &str {
@@ -1400,6 +1421,7 @@ mod tests {
             scale_by: "power".to_owned(),
             light,
             effect: None,
+            only_under: None,
         }
     }
 

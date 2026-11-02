@@ -605,9 +605,12 @@ fn fold_attached(
         let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
         let particles: Vec<_> = particles.into_iter().map(|system| Arc::new(system.on_attached(name))).collect();
         preview.h3_particles.extend(particles);
-        preview.h2_light_volumes.extend(super::h2_light_volumes::read_h2_light_volumes(source, object, owner, markers, frame));
-        preview.h2_contrails.extend(super::h2_contrails::read_h2_contrails(source, object, owner, markers, frame));
-        preview.h2_liquids.extend(super::h2_liquid::read_h2_liquids(source, object, owner, markers, frame));
+        let volumes = super::h2_light_volumes::read_h2_light_volumes(source, object, owner, markers, frame);
+        preview.h2_light_volumes.extend(volumes.into_iter().map(|volume| volume.on_attached(name)));
+        let contrails = super::h2_contrails::read_h2_contrails(source, object, owner, markers, frame);
+        preview.h2_contrails.extend(contrails.into_iter().map(|contrail| contrail.on_attached(name)));
+        let liquids = super::h2_liquid::read_h2_liquids(source, object, owner, markers, frame);
+        preview.h2_liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
         super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, true);
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.

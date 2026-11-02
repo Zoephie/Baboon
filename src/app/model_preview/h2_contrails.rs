@@ -88,6 +88,8 @@ struct PointState {
 #[derive(Debug, Clone)]
 pub(crate) struct H2ContrailAt {
     pub(crate) object: u8,
+    /// The region and permutation its marker belongs to, if only one.
+    only_under: Option<(String, String)>,
     node: usize,
     position: [f32; 3],
     forward: [f32; 3],
@@ -179,6 +181,7 @@ pub(super) fn read_h2_contrails(
             let (place, node) = frame(marker);
             found.push(H2ContrailAt {
                 object: owner,
+                only_under: marker.only_under.clone(),
                 node,
                 position: place.position,
                 forward: place.axes[0],
@@ -292,6 +295,22 @@ fn point_look(point: &Point, states: &[PointState]) -> (f32, [f32; 4]) {
 }
 
 impl H2ContrailAt {
+    pub(crate) fn scale_name(&self) -> &str {
+        &self.scale_by
+    }
+
+    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
+        self.only_under.as_ref()
+    }
+
+    /// Follow the regions `merge_attached` renames for what `name` brings.
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
+        self
+    }
+
     pub(crate) fn bitmap(&self) -> Option<&Arc<H2Image>> {
         self.bitmap.as_ref()
     }
