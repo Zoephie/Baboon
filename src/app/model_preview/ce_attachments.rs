@@ -20,6 +20,10 @@ const RESTING_SEAT: &str = "stand";
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CeAttachedObject {
     pub(crate) name: String,
+    /// The weapon's tag, and its markers where the hand holds them, on the
+    /// hand's node: what its attachments and widgets hang on.
+    pub(crate) path: String,
+    pub(crate) markers: Vec<RenderModelPreviewMarker>,
     pub(crate) functions: Option<CeObjectFunctions>,
     pub(crate) change_colors: H2ChangeColors,
 }
@@ -500,9 +504,24 @@ pub(super) fn attach_ce_weapon(
     }
     let lights = super::ce_lights::read_attached_lights(source, &weapon, 1, &attached, parent, child);
     preview.ce_lights.extend(lights);
+    let markers = attached
+        .markers
+        .iter()
+        .map(|marker| {
+            let held = attached_marker_frame(marker, &parent, &child);
+            RenderModelPreviewMarker {
+                position: held.position,
+                axes: held.axes,
+                node_index: held.node as i16,
+                ..marker.clone()
+            }
+        })
+        .collect();
     merge_attached(preview, attached, parent, child, 1, &name);
     Some(CeAttachedObject {
         name,
+        path: path.to_owned(),
+        markers,
         functions: read_ce_object_functions(&weapon),
         change_colors: read_h2_change_colors(&weapon),
     })

@@ -337,10 +337,24 @@ pub(super) fn load_model_preview(
         preview.ce_antennas = super::ce_lights::read_ce_antennas(source, model_tag, &preview.markers);
         preview.ce_effects = super::ce_particles::read_ce_effects(source, model_tag, 0, &preview.markers);
         preview.ce_contrails = super::ce_contrails::read_ce_contrails(source, model_tag, 0, &preview.markers);
-        preview.ce_light_volumes = super::ce_widgets::read_ce_light_volumes(source, model_tag, &preview.markers);
-        preview.ce_lightning = super::ce_widgets::read_ce_lightning(source, model_tag, &preview.markers);
-        preview.ce_glows = super::ce_widgets::read_ce_glows(source, model_tag, &preview.markers);
-        preview.ce_particle_systems = super::ce_particle_systems::read_ce_particle_systems(source, model_tag, &preview.markers);
+        preview.ce_light_volumes = super::ce_widgets::read_ce_light_volumes(source, model_tag, 0, &preview.markers);
+        preview.ce_lightning = super::ce_widgets::read_ce_lightning(source, model_tag, 0, &preview.markers);
+        preview.ce_glows = super::ce_widgets::read_ce_glows(source, model_tag, 0, &preview.markers);
+        preview.ce_particle_systems = super::ce_particle_systems::read_ce_particle_systems(source, model_tag, 0, &preview.markers);
+        // What hangs on the held weapon, as object 1, on its markers in the hand.
+        let held_tag = attached
+            .as_ref()
+            .and_then(|held| load_referenced_tag_from_source(source, &held.path, "weapon", b"weap").ok().map(|tag| (tag, held)));
+        if let Some((weapon, held)) = held_tag {
+            let markers = &held.markers;
+            preview.ce_antennas.extend(super::ce_lights::read_ce_antennas(source, &weapon, markers));
+            preview.ce_effects.extend(super::ce_particles::read_ce_effects(source, &weapon, 1, markers));
+            preview.ce_contrails.extend(super::ce_contrails::read_ce_contrails(source, &weapon, 1, markers));
+            preview.ce_light_volumes.extend(super::ce_widgets::read_ce_light_volumes(source, &weapon, 1, markers));
+            preview.ce_lightning.extend(super::ce_widgets::read_ce_lightning(source, &weapon, 1, markers));
+            preview.ce_glows.extend(super::ce_widgets::read_ce_glows(source, &weapon, 1, markers));
+            preview.ce_particle_systems.extend(super::ce_particle_systems::read_ce_particle_systems(source, &weapon, 1, markers));
+        }
         preview.ce_flags = super::ce_flags::read_ce_flags(source, model_tag, &mut preview);
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = read_h2_change_colors(model_tag);

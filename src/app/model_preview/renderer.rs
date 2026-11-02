@@ -2496,15 +2496,15 @@ unsafe fn draw_ce_particles(
         let mut sprites: Vec<Sprite> = Vec::new();
         // Made afresh every frame, as the game draws it.
         let seed = (frame.time * 1000.0) as u32;
-        let first = states.first();
-        let outputs0 = first.map_or([0.0; 4], |state| state.outputs);
-        let colors0 = first.map_or([[1.0; 3]; 4], |state| state.change_colors);
         for (index, lightning) in frame.preview.ce_lightning.iter().enumerate() {
             let Some(texture) = uploaded.ce_lightning_textures.get(index).copied().flatten() else {
                 continue;
             };
             let seed = seed.wrapping_add(index as u32 * 7919);
-            for quad in lightning.quads(&outputs0, &colors0, bones, view, seed) {
+            let state = states.get(usize::from(lightning.object));
+            let outputs = state.map_or([0.0; 4], |state| state.outputs);
+            let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
+            for quad in lightning.quads(&outputs, &colors, bones, view, seed) {
                 sprites.push((texture, lightning.blend, lightning.nonlinear_tint, quad.color, quad.corners));
             }
         }
@@ -2526,7 +2526,11 @@ unsafe fn draw_ce_particles(
         // And those on the object's attachments.
         let systems = &frame.preview.ce_particle_systems;
         if !systems.is_empty() {
-            uploaded.ce_pctl.advance(systems, || (outputs0, colors0), bones, ground, frame.time);
+            let inputs = |object: u8| {
+                let state = states.get(usize::from(object));
+                (state.map_or([0.0; 4], |state| state.outputs), state.map_or([[1.0; 3]; 4], |state| state.change_colors))
+            };
+            uploaded.ce_pctl.advance(systems, inputs, bones, ground, frame.time);
             let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
             for quad in uploaded.ce_pctl.quads(systems, view, pixel) {
                 let texture = uploaded.ce_pctl_textures.get(quad.system).and_then(|sheets| sheets.get(quad.sheet)).and_then(|images| images.get(quad.image)).copied().flatten();
@@ -2537,7 +2541,7 @@ unsafe fn draw_ce_particles(
         }
         // `glow_render`, through `global_shader_effect_additive`.
         let glows = &frame.preview.ce_glows;
-        uploaded.ce_glows.advance(glows, &outputs0, bones, frame.time);
+        uploaded.ce_glows.advance(glows, outputs, bones, frame.time);
         let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
         for (index, quad) in uploaded.ce_glows.quads(glows, view, pixel) {
             if let Some(texture) = uploaded.ce_glow_textures.get(index).copied().flatten() {
@@ -3970,9 +3974,9 @@ impl ModelGlRenderer {
                 gl.depth_mask(false);
                 gl.blend_equation(glow::FUNC_ADD);
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE);
-                let outputs = frame.object_states.first().map_or([0.0; 4], |state| state.outputs);
                 let volumes = frame.preview.ce_light_volumes.iter().zip(&uploaded.ce_light_volume_textures);
                 for (volume, texture) in volumes {
+                    let outputs = frame.object_states.get(usize::from(volume.object)).map_or([0.0; 4], |state| state.outputs);
                     let Some(texture) = texture else {
                         continue;
                     };

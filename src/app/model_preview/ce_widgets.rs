@@ -33,6 +33,8 @@ struct LightVolumeFrame {
 /// A `light_volume` widget at the first marker of its name.
 #[derive(Debug, Clone)]
 pub(crate) struct CeLightVolume {
+    /// Which object's functions drive it; 0 is the opened.
+    pub(crate) object: u8,
     node: usize,
     position: [f32; 3],
     forward: [f32; 3],
@@ -66,7 +68,7 @@ fn read_frame(frame: TagStruct<'_>) -> LightVolumeFrame {
     }
 }
 
-fn read_light_volume(source: &TagSource, path: &str, markers: &[RenderModelPreviewMarker]) -> Option<CeLightVolume> {
+fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightVolume> {
     let tag = load_referenced_tag_from_source(source, path, "light_volume", b"mgs2").ok()?;
     let root = tag.root();
     let frame = read_frame(*elements(root, "frames").first()?);
@@ -100,6 +102,7 @@ fn read_light_volume(source: &TagSource, path: &str, markers: &[RenderModelPrevi
     }
     let source_slot = usize::try_from(root.read_int_any("brightness scale source").unwrap_or(0) - 1).ok().filter(|slot| *slot < 4);
     Some(CeLightVolume {
+        object: owner,
         node,
         position,
         forward,
@@ -117,6 +120,7 @@ fn read_light_volume(source: &TagSource, path: &str, markers: &[RenderModelPrevi
 pub(super) fn read_ce_light_volumes(
     source: &TagSource,
     object: &TagFile,
+    owner: u8,
     markers: &[RenderModelPreviewMarker],
 ) -> Vec<CeLightVolume> {
     let Some(block) = object_block(object, "widgets") else {
@@ -127,7 +131,7 @@ pub(super) fn read_ce_light_volumes(
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(kind, path)| *kind == group && !path.is_empty())
-        .filter_map(|(_, path)| read_light_volume(source, &path, markers))
+        .filter_map(|(_, path)| read_light_volume(source, &path, owner, markers))
         .collect()
 }
 
@@ -220,6 +224,7 @@ struct LightningMarker {
 /// A `lightning` widget: bolts from marker to marker, made afresh each frame.
 #[derive(Debug, Clone)]
 pub(crate) struct CeLightning {
+    pub(crate) object: u8,
     markers: Vec<LightningMarker>,
     count: usize,
     /// `A out`.. of the jitter, thickness and brightness scales, and the
@@ -245,7 +250,7 @@ fn slot(value: Option<i128>) -> Option<usize> {
     usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
 }
 
-fn read_lightning(source: &TagSource, path: &str, markers: &[RenderModelPreviewMarker]) -> Option<CeLightning> {
+fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightning> {
     let tag = load_referenced_tag_from_source(source, path, "lightning", b"elec").ok()?;
     let root = tag.root();
     let found = elements(root, "markers")
@@ -293,6 +298,7 @@ fn read_lightning(source: &TagSource, path: &str, markers: &[RenderModelPreviewM
     };
     let source_of = |name: &str| slot(root.read_int_any(name));
     Some(CeLightning {
+        object: owner,
         markers: found,
         count: root.read_int_any("count").unwrap_or(0).max(0) as usize,
         jitter_source: source_of("jitter scale source"),
@@ -309,6 +315,7 @@ fn read_lightning(source: &TagSource, path: &str, markers: &[RenderModelPreviewM
 pub(super) fn read_ce_lightning(
     source: &TagSource,
     object: &TagFile,
+    owner: u8,
     markers: &[RenderModelPreviewMarker],
 ) -> Vec<CeLightning> {
     let Some(block) = object_block(object, "widgets") else {
@@ -319,7 +326,7 @@ pub(super) fn read_ce_lightning(
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(kind, path)| *kind == group && !path.is_empty())
-        .filter_map(|(_, path)| read_lightning(source, &path, markers))
+        .filter_map(|(_, path)| read_lightning(source, &path, owner, markers))
         .collect()
 }
 
@@ -503,6 +510,7 @@ impl Driven {
 /// (`sub_525190`) only moves the `attachment`s down by one.
 #[derive(Debug, Clone)]
 pub(crate) struct CeGlow {
+    pub(crate) object: u8,
     /// `object_get_marker_by_name` with room for five.
     markers: Vec<GlowMarker>,
     particle_count: usize,
@@ -551,7 +559,7 @@ fn read_bounds(root: TagStruct<'_>, name: &str) -> [f32; 2] {
     }
 }
 
-fn read_glow(source: &TagSource, path: &str, markers: &[RenderModelPreviewMarker]) -> Option<CeGlow> {
+fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeGlow> {
     let tag = load_referenced_tag_from_source(source, path, "glow", b"glw!").ok()?;
     let root = tag.root();
     let name = root.read_string("attachment marker").unwrap_or_default();
@@ -586,6 +594,7 @@ fn read_glow(source: &TagSource, path: &str, markers: &[RenderModelPreviewMarker
     let attachment = |n: usize| slot(nth_int(root, "attachment", n));
     let [color_low, color_high] = [argb(root, "color_bound_0"), argb(root, "color_bound_1")];
     Some(CeGlow {
+        object: owner,
         markers: found,
         particle_count: root.read_int_any("number of particles").unwrap_or(0).max(0) as usize,
         boundary: root.read_int_any("boundary effect").unwrap_or(0),
@@ -627,7 +636,7 @@ fn read_glow(source: &TagSource, path: &str, markers: &[RenderModelPreviewMarker
 }
 
 /// The glows among `object`'s widgets.
-pub(super) fn read_ce_glows(source: &TagSource, object: &TagFile, markers: &[RenderModelPreviewMarker]) -> Vec<CeGlow> {
+pub(super) fn read_ce_glows(source: &TagSource, object: &TagFile, owner: u8, markers: &[RenderModelPreviewMarker]) -> Vec<CeGlow> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();
     };
@@ -636,7 +645,7 @@ pub(super) fn read_ce_glows(source: &TagSource, object: &TagFile, markers: &[Ren
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(kind, path)| *kind == group && !path.is_empty())
-        .filter_map(|(_, path)| read_glow(source, &path, markers))
+        .filter_map(|(_, path)| read_glow(source, &path, owner, markers))
         .collect()
 }
 
@@ -961,7 +970,7 @@ impl CeGlow {
 
 impl CeGlowField {
     /// `glow_update` for each glow, up to `time`.
-    pub(crate) fn advance(&mut self, glows: &[CeGlow], outputs: &[f32; 4], bones: Option<&[[f32; 4]]>, time: f32) {
+    pub(crate) fn advance(&mut self, glows: &[CeGlow], outputs_of: impl Fn(u8) -> [f32; 4], bones: Option<&[[f32; 4]]>, time: f32) {
         if self.running.len() != glows.len() || self.time.is_none_or(|last| time < last) {
             self.running = (0..glows.len())
                 .map(|at| RunningGlow { random: Lcg(at as u32 * 977 + 1), ..RunningGlow::default() })
@@ -974,6 +983,7 @@ impl CeGlowField {
         let ticks = ((time * 30.0).floor() - (last * 30.0).floor()).max(0.0) as i32;
         self.time = Some(time);
         for (glow, running) in glows.iter().zip(&mut self.running) {
+            let outputs = &outputs_of(glow.object);
             let markers = glow.posed(bones);
             let count = markers.len();
             if (2..4).contains(&count) {

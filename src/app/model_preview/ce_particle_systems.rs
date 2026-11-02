@@ -116,6 +116,8 @@ pub(crate) struct CePctlDef {
 /// A particle system on one of the object's attachments.
 #[derive(Debug, Clone)]
 pub(crate) struct CeParticleSystemAt {
+    /// Which object's functions and change colors drive it; 0 is the opened.
+    pub(crate) object: u8,
     pub(crate) def: Arc<CePctlDef>,
     /// The attachment's marker, each place it is on the model.
     markers: Vec<(usize, [f32; 3], [f32; 3])>,
@@ -243,6 +245,7 @@ fn function_slot(value: Option<i128>) -> Option<usize> {
 pub(super) fn read_ce_particle_systems(
     source: &TagSource,
     object: &TagFile,
+    owner: u8,
     markers: &[RenderModelPreviewMarker],
 ) -> Vec<CeParticleSystemAt> {
     let Some(block) = object_block(object, "attachments") else {
@@ -273,6 +276,7 @@ pub(super) fn read_ce_particle_systems(
                 .collect()
         };
         systems.push(CeParticleSystemAt {
+            object: owner,
             def: Arc::new(def),
             markers: found,
             primary: function_slot(attachment.read_int_any("primary scale")),
@@ -427,7 +431,7 @@ impl CeParticleSystemField {
     pub(crate) fn advance(
         &mut self,
         systems: &[CeParticleSystemAt],
-        inputs: impl Fn() -> ([f32; 4], [[f32; 3]; 4]),
+        inputs: impl Fn(u8) -> ([f32; 4], [[f32; 3]; 4]),
         bones: Option<&[[f32; 4]]>,
         ground: f32,
         time: f32,
@@ -442,10 +446,10 @@ impl CeParticleSystemField {
             return;
         };
         let mut random = self.random.take().unwrap_or(Random(1));
-        let (outputs, change_colors) = inputs();
         while now + STEP <= time {
             now += STEP;
             for (system, running) in systems.iter().zip(&mut self.systems) {
+                let (outputs, change_colors) = inputs(system.object);
                 let dt = if running.first { 0.001 } else { STEP };
                 update_system(system, running, &outputs, &change_colors, bones, ground, dt, &mut random);
                 running.first = false;
