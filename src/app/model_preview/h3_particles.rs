@@ -514,6 +514,9 @@ pub(crate) struct H3ParticleLook {
     corner: [f32; 4],
     /// `m_frames`: left, top, width and height.
     frames: Vec<[f32; 4]>,
+    /// Halo 2's `select random sequence`: each sequence's frames and corner,
+    /// one of which a particle takes at birth. Empty for one sequence.
+    sequences: Vec<(Vec<[f32; 4]>, [f32; 4])>,
     aspect: H3ParticleProperty,
     color: H3ParticleProperty,
     intensity: H3ParticleProperty,
@@ -956,6 +959,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         backwards: animated("can animate backwards"),
         corner,
         frames,
+        sequences: Vec::new(),
         aspect: H3ParticleProperty::named(root, "aspect ratio", &mut seeds)?,
         color: H3ParticleProperty::named(root, "color", &mut seeds)?,
         intensity: H3ParticleProperty::named(root, "intensity", &mut seeds)?,
@@ -1023,6 +1027,14 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
     let (frames, corner) = read_h2_frames(&plate, first);
+    // `sub_53CEA0`: `first + random % count`, held inside the bitmap's.
+    let sequences = if flagged("select random sequence") {
+        let count = root.read_int_any("sequence count").unwrap_or(1).max(1) as usize;
+        let last = elements(plate.root(), "sequences").len().saturating_sub(1);
+        (0..count).map(|at| read_h2_frames(&plate, (first + at).min(last))).collect()
+    } else {
+        Vec::new()
+    };
     let modulation = parameter("modulation_factor").and_then(|entry| entry.read_real("const value")).unwrap_or(0.0);
     let shader = H3SpriteShader {
         albedo,
@@ -1059,6 +1071,7 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
         backwards: flagged("can animate backwards"),
         corner,
         frames,
+        sequences,
         aspect: H3ParticleProperty::fixed(1.0)?,
         color,
         intensity: H3ParticleProperty::fixed(1.0)?,
@@ -1959,6 +1972,8 @@ struct Particle {
     seeds: [f32; SEEDS],
     emission_time: f32,
     flip: [bool; 3],
+    /// Which of the look's `sequences` it draws.
+    sequence: usize,
     system_seeds: [f32; SYSTEM_SEEDS],
 }
 
@@ -2208,6 +2223,15 @@ impl H3Emitter {
                 (std::array::from_fn(|axis| position[axis] + velocity[axis] * ahead), velocity)
             };
             let inverse_lifespan = 1.0 / self.lifespan.scalar(&particle_state).max(0.01);
+            let mut flip = [random.next() >= 0.5, random.next() >= 0.5, random.next() >= 0.5];
+            // One random word gives both: `& 1` mirrors v, `% count` the sequence.
+            let sequence = if look.sequences.is_empty() {
+                0
+            } else {
+                let word = (random.next() * 65536.0) as usize;
+                flip[1] = word & 1 != 0;
+                word % look.sequences.len()
+            };
             let axis = self.axis.pick(self.reference_axis, self.axis_angle.scalar(&particle_state), random);
             running.particles.push(Particle {
                 id,
@@ -2225,7 +2249,8 @@ impl H3Emitter {
                 frame_rate: look.rate.scalar(&particle_state),
                 seeds,
                 emission_time: state.system_age,
-                flip: [random.next() >= 0.5, random.next() >= 0.5, random.next() >= 0.5],
+                flip,
+                sequence,
                 system_seeds: state.system_seeds,
             });
         }
@@ -2701,11 +2726,15 @@ impl H3ParticleSystem {
                 let lit_by = |normal: [f32; 3]| {
                     if shading == H3ParticleLighting::Ambient { ravi(shading, normal, lighting) } else { [1.0; 3] }
                 };
-                let count = look.frames.len();
+                let (frames, corner) = match look.sequences.get(particle.sequence) {
+                    Some((frames, corner)) => (frames, *corner),
+                    None => (&look.frames, look.corner),
+                };
+                let count = frames.len();
                 let frame_at = particle.frame + look.frame.scalar(&state).rem_euclid(1.0);
                 let frame = frame_variant(frame_at, count, look.one_shot, look.backwards && particle.flip[2]);
-                let first = look.frames[frame.floor().rem_euclid(count as f32) as usize % count];
-                let second = look.frames[(frame + 1.0).floor().rem_euclid(count as f32) as usize % count];
+                let first = frames[frame.floor().rem_euclid(count as f32) as usize % count];
+                let second = frames[(frame + 1.0).floor().rem_euclid(count as f32) as usize % count];
                 let blend = if look.shader.frame_blend { frame.fract() } else { 0.0 };
                 let scroll = emitter.scroll.map(|rate| rate * time);
                 let [from, to] = look.shader.uv_scale;
@@ -2714,7 +2743,7 @@ impl H3ParticleSystem {
                     if look.shader.frame_blend { (uv_scale(1.0 + blend), uv_scale(blend)) } else { (1.0, 1.0) };
                 let black = emitter.black_point.scalar(&state).clamp(0.0, 0.9999);
                 let palette = look.palette.scalar(&state).clamp(0.0, 0.9999);
-                let [x, y, width, height] = look.corner;
+                let [x, y, width, height] = corner;
                 let at_spot = |spot: [f32; 3], mut uv: [f32; 2], normal: [f32; 3], lit: [f32; 3], lean: [[f32; 3]; 2]| {
                     let mut faded = alpha;
                     if let Some([range, cutoff]) = look.edge_fade {
