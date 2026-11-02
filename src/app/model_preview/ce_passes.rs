@@ -803,7 +803,7 @@ fn chicago_alpha_table(function: i32) -> [f32; 10] {
 }
 
 /// `srcblend_table`, `destblend_table` and `blendop_table`.
-fn framebuffer_blend(function: i32) -> H2Blend {
+pub(super) fn framebuffer_blend(function: i32) -> H2Blend {
     use H2BlendFactor::{DstColor, One, OneMinusSrcAlpha, SrcAlpha, SrcColor, Zero};
     let (equation, source, destination) = match function {
         1 => (H2BlendEquation::Add, DstColor, Zero),

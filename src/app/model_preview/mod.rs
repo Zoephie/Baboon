@@ -27,6 +27,7 @@ mod attachment;
 mod ce_attachments;
 mod ce_functions;
 mod ce_lights;
+mod ce_particles;
 mod ce_passes;
 mod h2_bloom;
 pub(in crate::app) mod h2_functions;
@@ -148,6 +149,8 @@ pub(crate) struct RenderModelPreview {
     pub h2_antennas: Vec<h2_lights::H2Antenna>,
     /// Halo CE: the antennas among the object's widgets.
     pub ce_antennas: Vec<ce_lights::CeAntenna>,
+    /// Halo CE effects the object's attachments hang on it.
+    pub ce_effects: Vec<ce_particles::CeEffectAt>,
 }
 
 #[derive(Debug, Clone, Default)]

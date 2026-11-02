@@ -1,0 +1,1241 @@
+//! Halo CE's effects on an object: the `effect` tags `attachments_new` hangs
+//! on a marker through `effect_new_looping`, and the `particle`s their events
+//! let go (`effect_generate_particles`), stepped by `particles_update` and drawn
+//! by `render_particles` through the `effect` shaders of the kit's `fx` folder.
+//! Everything read from the Xbox 360 build's symbols (HCEX_Release); what the
+//! tags on disk lack, tool's postprocess (`haloce_mcc_tool`) bakes as noted.
+
+use std::sync::Arc;
+
+use blam_tags::{TagFieldData, TagFile, TagStruct};
+
+use super::ce_attachments::{elements, object_block};
+use super::ce_lights::{CeFlareView, posed_on};
+use super::ce_passes::argb;
+use super::h2_passes::{H2Image, ce_color_interpolate};
+use super::materials::decode_h2_image;
+use super::*;
+use crate::core::h2_pixel_shader::SamplerKind;
+use crate::core::source::TagSource;
+
+/// A game tick, which is what `effects_update` steps by.
+const STEP: f32 = 1.0 / 30.0;
+const PRE_ROLL: f32 = 4.0;
+/// `effect_update` runs at most this many events in a tick.
+const MOST_EVENTS_A_TICK: usize = 8;
+/// The game's pool is shared by the whole level.
+const MOST_PARTICLES: usize = 1024;
+/// `physics_constants_reset`: gravity, and air in a level without water.
+const GRAVITY: f32 = 4.171_259_4;
+const AIR_MASS_OVER_RADIUS_CUBED: f32 = 0.0011 * MASS_OF_DENSITY;
+/// What `point_physics` postprocess (`sub_525660`) makes of a density.
+const MASS_OF_DENSITY: f32 = 0.001 * 4.188_790_3 * 28_316_846.0;
+
+/// `particle` flags.
+const CAN_ANIMATE_BACKWARDS: i128 = 0x1;
+const ANIMATION_STOPS_AT_REST: i128 = 0x2;
+const STARTS_ON_RANDOM_FRAME: i128 = 0x4;
+const ANIMATE_ONCE_PER_FRAME: i128 = 0x8;
+const DIES_AT_REST: i128 = 0x10;
+const RANDOM_HORIZONTAL_MIRROR: i128 = 0x400;
+const RANDOM_VERTICAL_MIRROR: i128 = 0x800;
+
+/// `particle_datum` flags.
+const BACKWARDS: u8 = 1;
+const AT_REST: u8 = 2;
+const MIRROR_U: u8 = 4;
+const MIRROR_V: u8 = 8;
+
+/// An effect particle's `flags`.
+const STAY_ATTACHED: i128 = 1;
+const RANDOM_INITIAL_ANGLE: i128 = 2;
+const TINT_FROM_OBJECT: i128 = 4;
+
+/// `A scales values` bits a particle's ranges and tint read, by first bit.
+const VELOCITY_BITS: u32 = 0;
+const CONE_BIT: u32 = 2;
+const ANGULAR_BITS: u32 = 3;
+const COUNT_BITS: u32 = 5;
+const DISTRIBUTION_BITS: u32 = 7;
+const RADIUS_BITS: u32 = 9;
+const TINT_BIT: u32 = 11;
+
+/// A `point_physics`, as its postprocess leaves it.
+#[derive(Debug, Clone, Copy)]
+struct CePointPhysics {
+    mass_over_radius_cubed: f32,
+    air_buoyancy: f32,
+    air_friction: f32,
+    surface_friction: f32,
+    elasticity: f32,
+    collides_with_structure: bool,
+}
+
+impl CePointPhysics {
+    fn read(tag: &TagFile) -> Self {
+        let root = tag.root();
+        let density = root.read_real("density").unwrap_or(0.0);
+        let flags = root.read_int_any("flags").unwrap_or(0);
+        Self {
+            mass_over_radius_cubed: density * MASS_OF_DENSITY,
+            air_buoyancy: if flags & 0x20 != 0 { 0.0 } else { 1.0 - 2.0 * density / (density + 0.0011) },
+            air_friction: root.read_real("air friction").unwrap_or(0.0) * 10_000.0,
+            surface_friction: root.read_real("surface friction").unwrap_or(0.0),
+            elasticity: root.read_real("elasticity").unwrap_or(0.0),
+            collides_with_structure: flags & 0x2 != 0,
+        }
+    }
+
+    fn mass(&self, radius: f32) -> f32 {
+        self.mass_over_radius_cubed * radius * radius * radius
+    }
+
+    /// `point_physics_update` in still air over a flat floor at `ground`: true
+    /// where it touched it, the only structure a preview has.
+    fn step(&self, place: &mut [f32; 3], velocity: &mut [f32; 3], radius: f32, ground: f32, dt: f32) -> bool {
+        let bulk = (AIR_MASS_OVER_RADIUS_CUBED + self.mass_over_radius_cubed) * radius * radius * radius;
+        let drag = self.air_friction * radius * radius;
+        velocity[2] += GRAVITY * self.air_buoyancy * dt;
+        let slowing = if bulk != 0.0 {
+            (dt / bulk * drag).clamp(0.0, 1.0)
+        } else if drag != 0.0 {
+            1.0
+        } else {
+            0.0
+        };
+        for axis in 0..3 {
+            velocity[axis] -= velocity[axis] * slowing;
+        }
+        let mut left = dt;
+        let mut touched = false;
+        for _ in 0..3 {
+            let next: [f32; 3] = std::array::from_fn(|axis| place[axis] + velocity[axis] * left);
+            if !self.collides_with_structure || next[2] >= ground || velocity[2] >= 0.0 {
+                *place = next;
+                return touched;
+            }
+            touched = true;
+            let t = ((place[2] - ground) / (place[2] - next[2])).clamp(0.0, 1.0);
+            let hit: [f32; 3] = std::array::from_fn(|axis| place[axis] + (next[axis] - place[axis]) * t);
+            // `component_vectors_from_normal3d`: along the floor, and into it.
+            let into = velocity[2];
+            velocity[0] *= 1.0 - self.surface_friction;
+            velocity[1] *= 1.0 - self.surface_friction;
+            velocity[2] = -into * self.elasticity;
+            *place = [hit[0], hit[1], hit[2] + radius.min(0.005)];
+            left -= t * left;
+            if left == 0.0 {
+                break;
+            }
+        }
+        touched
+    }
+}
+
+/// One sprite of a bitmap's sequence: its rect across the bitmap, the point
+/// it hangs from, and the image it is cut from.
+#[derive(Debug, Clone, Copy)]
+struct CeSpriteFrame {
+    rect: [f32; 4],
+    registration: [f32; 2],
+    image: usize,
+}
+
+/// A `particle` tag.
+#[derive(Debug, Clone)]
+pub(crate) struct CeParticleDef {
+    flags: i128,
+    physics: Option<CePointPhysics>,
+    lifespan: [f32; 2],
+    fade_in: f32,
+    fade_out: f32,
+    minimum_size: f32,
+    radius_animation: [f32; 2],
+    animation_rate: [f32; 2],
+    contact_deterioration: f32,
+    fade_end_size: f32,
+    first_sequence: i32,
+    sequence_counts: [i32; 3],
+    orientation: i32,
+    /// `framebuffer blend function`, `framebuffer fade mode`.
+    pub(crate) blend: i32,
+    fade_mode: i32,
+    pub(crate) nonlinear_tint: bool,
+    /// One over the widest of its sprites in pixels, which tool bakes at +168.
+    sprite_scale: f32,
+    sequences: Vec<Vec<CeSpriteFrame>>,
+    image_widths: Vec<f32>,
+    pub(crate) images: Vec<Option<Arc<H2Image>>>,
+}
+
+impl CeParticleDef {
+    fn radius_scale(&self, age: f32, lifespan: f32) -> f32 {
+        let [lower, upper] = self.radius_animation;
+        lower + (upper - lower) * age / lifespan
+    }
+
+    fn sprites_in(&self, sequence: i32) -> usize {
+        usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).map_or(0, Vec::len)
+    }
+}
+
+fn read_particle_def(source: &TagSource, path: &str) -> Option<CeParticleDef> {
+    let tag = load_referenced_tag_from_source(source, path, "particle", b"part").ok()?;
+    let root = tag.root();
+    let flags = root.read_int_any("flags").unwrap_or(0);
+    let bitmap_path = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
+    let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
+    let sizes: Vec<[f32; 2]> = elements(bitmap.root(), "bitmaps")
+        .iter()
+        .map(|image| {
+            let size = |name: &str| image.read_int_any(name).unwrap_or(1).max(1) as f32;
+            [size("width"), size("height")]
+        })
+        .collect();
+    let sequences: Vec<Vec<CeSpriteFrame>> = elements(bitmap.root(), "sequences")
+        .iter()
+        .map(|sequence| {
+            elements(*sequence, "sprites")
+                .iter()
+                .map(|sprite| {
+                    let read = |name: &str| sprite.read_real(name).unwrap_or(0.0);
+                    let registration = sprite.read_point2d("registration point");
+                    CeSpriteFrame {
+                        rect: [read("left"), read("right"), read("top"), read("bottom")],
+                        registration: [registration.x, registration.y],
+                        image: sprite.read_int_any("bitmap index").unwrap_or(0).max(0) as usize,
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let short = |name: &str| root.read_int_any(name).unwrap_or(0) as i32;
+    let first_sequence = short("first sequence index");
+    let sequence_counts = [short("initial sequence count"), short("looping sequence count"), short("final sequence count")];
+    let bounds = |name: &str| bounds_of(root, name);
+    // Tool's postprocess (`sub_524C80`) fills these in for the game.
+    let mut radius_animation = bounds("radius animation");
+    radius_animation.iter_mut().filter(|scale| **scale <= 0.0).for_each(|scale| *scale = 1.0);
+    let rate = bounds("animation rate");
+    let rate_upper_raw = rate[1];
+    let rate_lower = rate[0].clamp(0.0, 90.0);
+    let animation_rate = [rate_lower, if rate_lower <= rate[1] { rate[1].min(90.0) } else { rate_lower }];
+    let frame_step = if flags & ANIMATE_ONCE_PER_FRAME != 0 { 0.04 } else { rate_upper_raw };
+    let [_, looping, last] = sequence_counts;
+    let final_frames = (0..last)
+        .filter_map(|at| sequences.get((first_sequence + sequence_counts[0] + looping + at) as usize))
+        .map(Vec::len)
+        .max()
+        .unwrap_or(0) as f32;
+    let mut lifespan = bounds("lifespan");
+    lifespan.iter_mut().for_each(|end| *end -= final_frames * frame_step);
+    let mut widest = 0.0f32;
+    let shown = sequence_counts.iter().sum::<i32>();
+    for at in 0..shown {
+        for sprite in sequences.get((first_sequence + at) as usize).into_iter().flatten() {
+            let [width, height] = sizes.get(sprite.image).copied().unwrap_or([1.0, 1.0]);
+            let [left, right, top, bottom] = sprite.rect;
+            widest = widest.max(((right - left) * width).max((bottom - top) * height)).floor();
+        }
+    }
+    let (mut fade_start, mut fade_end) = (root.read_real("fade start size").unwrap_or(0.0), root.read_real("fade end size").unwrap_or(0.0));
+    if fade_end <= 0.0 || fade_start <= 0.0 {
+        (fade_start, fade_end) = (5.0, 4.0);
+    }
+    let _ = fade_start;
+    let physics = root
+        .read_tag_ref_path("physics")
+        .filter(|path| !path.is_empty())
+        .and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok())
+        .map(|tag| CePointPhysics::read(&tag));
+    let used: Vec<usize> = sequences.iter().flatten().map(|sprite| sprite.image).collect();
+    let images = (0..sizes.len())
+        .map(|index| {
+            used.contains(&index)
+                .then(|| decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, index))
+                .flatten()
+                .map(Arc::new)
+        })
+        .collect();
+    let shader_flags = root.read_int_any("shader flags").unwrap_or(0);
+    Some(CeParticleDef {
+        flags,
+        physics,
+        lifespan,
+        fade_in: root.read_real("fade in time").unwrap_or(0.0),
+        fade_out: root.read_real("fade out time").unwrap_or(0.0),
+        minimum_size: root.read_real("minimum size").unwrap_or(0.0),
+        radius_animation,
+        animation_rate,
+        contact_deterioration: root.read_real("contact deterioration").unwrap_or(0.0).max(0.0),
+        fade_end_size: fade_end,
+        first_sequence,
+        sequence_counts,
+        orientation: short("orientation"),
+        blend: short("framebuffer blend function"),
+        fade_mode: short("framebuffer fade mode"),
+        nonlinear_tint: shader_flags & 2 != 0,
+        sprite_scale: if widest > 0.0 { 1.0 / widest } else { 1.0 },
+        sequences,
+        image_widths: sizes.iter().map(|size| size[0]).collect(),
+        images,
+    })
+}
+
+/// One `particles` entry of an event.
+#[derive(Debug, Clone)]
+struct CeEffectParticle {
+    location: usize,
+    /// `create`: 1 only draws in first person, which a preview never is.
+    first_person_only: bool,
+    water_only: bool,
+    direction: [f32; 3],
+    offset: [f32; 3],
+    def: usize,
+    flags: i128,
+    distribution: i32,
+    count: [f32; 2],
+    distribution_radius: [f32; 2],
+    velocity: [f32; 2],
+    cone: f32,
+    angular_velocity: [f32; 2],
+    radius: [f32; 2],
+    /// Red, green, blue, alpha.
+    tint: [[f32; 4]; 2],
+    scales_a: u32,
+    scales_b: u32,
+}
+
+#[derive(Debug, Clone)]
+struct CeEvent {
+    skip: f32,
+    delay: [f32; 2],
+    duration: [f32; 2],
+    particles: Vec<CeEffectParticle>,
+}
+
+/// An `effect` tag.
+#[derive(Debug, Clone)]
+pub(crate) struct CeEffectDef {
+    loop_start: Option<usize>,
+    loop_stop: Option<usize>,
+    locations: Vec<String>,
+    events: Vec<CeEvent>,
+    pub(crate) particles: Vec<CeParticleDef>,
+}
+
+fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
+    match holder.field(name).and_then(|field| field.value()) {
+        Some(TagFieldData::RealBounds(bounds) | TagFieldData::AngleBounds(bounds) | TagFieldData::FractionBounds(bounds)) => {
+            [bounds.lower, bounds.upper]
+        }
+        Some(TagFieldData::ShortIntegerBounds(bounds)) => [f32::from(bounds.lower), f32::from(bounds.upper)],
+        _ => [0.0; 2],
+    }
+}
+
+/// What tool bakes from `relative direction` for the effect to read.
+fn direction_of(holder: TagStruct<'_>, name: &str) -> [f32; 3] {
+    let (yaw, pitch) = match holder.field(name).and_then(|field| field.value()) {
+        Some(TagFieldData::RealEulerAngles2d(angles)) => (angles.yaw, angles.pitch),
+        _ => (0.0, 0.0),
+    };
+    [yaw.cos() * pitch.cos(), yaw.sin() * pitch.cos(), pitch.sin()]
+}
+
+fn read_effect_def(source: &TagSource, path: &str) -> Option<CeEffectDef> {
+    let tag = load_referenced_tag_from_source(source, path, "effect", b"effe").ok()?;
+    let root = tag.root();
+    let index = |name: &str| usize::try_from(root.read_int_any(name).unwrap_or(-1)).ok();
+    let locations = elements(root, "locations")
+        .iter()
+        .map(|location| location.read_string("marker name").unwrap_or_default())
+        .collect();
+    let mut particles: Vec<CeParticleDef> = Vec::new();
+    let mut paths: Vec<String> = Vec::new();
+    let mut events = Vec::new();
+    for event in elements(root, "events") {
+        let mut entries = Vec::new();
+        for entry in elements(event, "particles") {
+            let Some(path) = entry.read_tag_ref_path("particle type").filter(|path| !path.is_empty()) else {
+                continue;
+            };
+            let def = match paths.iter().position(|known| *known == path) {
+                Some(at) => at,
+                None => {
+                    let Some(def) = read_particle_def(source, &path) else {
+                        continue;
+                    };
+                    particles.push(def);
+                    paths.push(path);
+                    particles.len() - 1
+                }
+            };
+            let tint = |name: &str| argb(entry, name);
+            let flags = |name: &str| entry.read_int_any(name).unwrap_or(0) as u32;
+            entries.push(CeEffectParticle {
+                location: entry.read_int_any("location").unwrap_or(0).max(0) as usize,
+                first_person_only: entry.read_int_any("create").unwrap_or(0) == 1,
+                water_only: matches!(entry.read_int_any("create in").unwrap_or(0), 2),
+                direction: direction_of(entry, "relative direction"),
+                offset: match entry.field("relative offset").and_then(|field| field.value()) {
+                    Some(TagFieldData::RealVector3d(vector)) => [vector.i, vector.j, vector.k],
+                    _ => [0.0; 3],
+                },
+                def,
+                flags: entry.read_int_any("flags").unwrap_or(0),
+                distribution: entry.read_int_any("distribution function").unwrap_or(0) as i32,
+                count: bounds_of(entry, "count"),
+                distribution_radius: bounds_of(entry, "distribution radius"),
+                velocity: bounds_of(entry, "velocity"),
+                cone: entry.read_real("velocity cone angle").unwrap_or(0.0),
+                angular_velocity: bounds_of(entry, "angular velocity"),
+                radius: bounds_of(entry, "radius"),
+                tint: [tint("tint lower bound"), tint("tint upper bound")],
+                scales_a: flags("A scales values"),
+                scales_b: flags("B scales values"),
+            });
+        }
+        events.push(CeEvent {
+            skip: event.read_real("skip fraction").unwrap_or(0.0),
+            delay: bounds_of(event, "delay bounds"),
+            duration: bounds_of(event, "duration bounds"),
+            particles: entries,
+        });
+    }
+    if events.is_empty() || particles.is_empty() {
+        return None;
+    }
+    Some(CeEffectDef { loop_start: index("loop start event"), loop_stop: index("loop stop event"), locations, events, particles })
+}
+
+/// Where a location sits on the model: one per marker of its name.
+#[derive(Debug, Clone, Copy)]
+struct CeLocation {
+    node: usize,
+    position: [f32; 3],
+    /// Forward, left and up.
+    axes: [[f32; 3]; 3],
+}
+
+/// An effect hung on the object by one of its `attachments`.
+#[derive(Debug, Clone)]
+pub(crate) struct CeEffectAt {
+    pub(crate) object: u8,
+    pub(crate) def: Arc<CeEffectDef>,
+    /// `A out`.. of `primary scale`, `secondary scale` and `change color`.
+    primary: Option<usize>,
+    secondary: Option<usize>,
+    change_color: Option<usize>,
+    locations: Vec<Vec<CeLocation>>,
+}
+
+fn function_slot(value: Option<i128>) -> Option<usize> {
+    usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
+}
+
+/// The effects among `object`'s attachments.
+pub(super) fn read_ce_effects(
+    source: &TagSource,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+) -> Vec<CeEffectAt> {
+    let Some(block) = object_block(object, "attachments") else {
+        return Vec::new();
+    };
+    let effect_group = u32::from_be_bytes(*b"effe");
+    let mut effects = Vec::new();
+    for attachment in elements(block, "attachments") {
+        let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
+            continue;
+        };
+        if group != effect_group || path.is_empty() {
+            continue;
+        }
+        let Some(def) = read_effect_def(source, &path) else {
+            continue;
+        };
+        // `object_get_marker_by_name`: no name is the origin; a missing one,
+        // nothing at all.
+        let locations = def
+            .locations
+            .iter()
+            .map(|name| {
+                if name.is_empty() {
+                    return vec![CeLocation { node: 0, position: [0.0; 3], axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }];
+                }
+                markers
+                    .iter()
+                    .filter(|marker| marker.name.eq_ignore_ascii_case(name))
+                    .map(|marker| CeLocation {
+                        node: marker.node_index.max(0) as usize,
+                        position: marker.position,
+                        axes: marker.axes,
+                    })
+                    .collect()
+            })
+            .collect();
+        effects.push(CeEffectAt {
+            object: owner,
+            def: Arc::new(def),
+            primary: function_slot(attachment.read_int_any("primary scale")),
+            secondary: function_slot(attachment.read_int_any("secondary scale")),
+            change_color: function_slot(attachment.read_int_any("change color")),
+            locations,
+        });
+    }
+    effects
+}
+
+/// `effect_evaluate_function_integral`: the share of an event's particles
+/// let go by `fraction` of it.
+fn integral(function: i32, fraction: f32) -> f32 {
+    if fraction == -1.0 {
+        return 0.0;
+    }
+    match function {
+        0 => 1.0,
+        1 => {
+            if fraction >= 1.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        2 => fraction,
+        3 => fraction * fraction,
+        4 => (2.0 - fraction) * fraction,
+        _ => (3.0 - 2.0 * fraction) * fraction * fraction,
+    }
+}
+
+struct Random(u32);
+
+impl Random {
+    fn next(&mut self) -> f32 {
+        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (self.0 >> 8) as f32 / 16_777_216.0
+    }
+
+    fn range(&mut self, low: f32, high: f32) -> f32 {
+        low + (high - low) * self.next()
+    }
+
+    fn bits(&mut self) -> u32 {
+        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.0 >> 16
+    }
+
+    fn direction(&mut self) -> [f32; 3] {
+        let z = self.range(-1.0, 1.0);
+        let (sin, cos) = self.range(0.0, std::f32::consts::TAU).sin_cos();
+        let flat = (1.0 - z * z).max(0.0).sqrt();
+        [flat * cos, flat * sin, z]
+    }
+}
+
+/// `effect_datum`, the parts the preview keeps.
+#[derive(Debug, Clone)]
+struct RunningEffect {
+    event: usize,
+    in_event: bool,
+    time: f32,
+    duration: f32,
+    last_fraction: f32,
+    counts: Vec<f32>,
+    finished: bool,
+    stopping: bool,
+    scale_a: f32,
+    scale_b: f32,
+    color: [f32; 3],
+}
+
+/// `particle_datum`, the parts the preview keeps.
+#[derive(Debug, Clone)]
+struct CeParticle {
+    effect: usize,
+    def: usize,
+    /// The node it rides, when `stay attached to marker`; place and
+    /// direction are then the node's.
+    node: Option<usize>,
+    place: [f32; 3],
+    direction: [f32; 3],
+    velocity: [f32; 3],
+    age: f32,
+    lifespan: f32,
+    frame_time: f32,
+    frame_span: f32,
+    sequence: i32,
+    frame: i32,
+    phase: u8,
+    rotation: f32,
+    angular_velocity: f32,
+    radius: f32,
+    /// Alpha, then red, green and blue.
+    color: [f32; 4],
+    flags: u8,
+}
+
+/// What a sprite draws: the effect and particle it came from, its corners
+/// with texture coordinates, and the vertex color the `effect` shader reads.
+#[derive(Debug, Clone)]
+pub(crate) struct CeParticleQuad {
+    pub(crate) effect: usize,
+    pub(crate) def: usize,
+    pub(crate) image: usize,
+    pub(crate) corners: [[f32; 5]; 4],
+    pub(crate) color: [f32; 4],
+}
+
+/// Every effect's particles, carried from frame to frame.
+#[derive(Default)]
+pub(crate) struct CeParticleField {
+    time: Option<f32>,
+    effects: Vec<RunningEffect>,
+    particles: Vec<CeParticle>,
+    random: Option<Random>,
+}
+
+/// What an attached effect reads of its object.
+pub(crate) struct CeObjectInputs {
+    pub(crate) outputs: [f32; 4],
+    pub(crate) change_colors: [[f32; 3]; 4],
+}
+
+fn scaled(value: [f32; 2], effect: &RunningEffect, first_bit: u32, a: u32, b: u32) -> [f32; 2] {
+    let mut lower = value[0];
+    let mut delta = value[1] - value[0];
+    if a & (1 << first_bit) != 0 {
+        lower *= effect.scale_a;
+    }
+    if b & (1 << first_bit) != 0 {
+        lower *= effect.scale_b;
+    }
+    if a & (1 << (first_bit + 1)) != 0 {
+        delta *= effect.scale_a;
+    }
+    if b & (1 << (first_bit + 1)) != 0 {
+        delta *= effect.scale_b;
+    }
+    [lower, delta]
+}
+
+fn rotate_about(vector: [f32; 3], axis: [f32; 3], sine: f32, cosine: f32) -> [f32; 3] {
+    let along = dot(axis, vector);
+    let across = cross(axis, vector);
+    std::array::from_fn(|at| vector[at] * cosine + across[at] * sine + axis[at] * along * (1.0 - cosine))
+}
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+fn unit(a: [f32; 3]) -> [f32; 3] {
+    let length = dot(a, a).sqrt();
+    if length > 0.0 { a.map(|axis| axis / length) } else { a }
+}
+
+/// A location's point and axes, in its node's space, turned onto `local`.
+fn from_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|at| {
+        location.position[at] + (0..3).map(|row| location.axes[row][at] * local[row]).sum::<f32>()
+    })
+}
+
+fn turn_by_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|at| (0..3).map(|row| location.axes[row][at] * local[row]).sum::<f32>())
+}
+
+impl CeParticleField {
+    /// Step every effect and particle to `time`, by ticks.
+    pub(crate) fn advance(
+        &mut self,
+        effects: &[CeEffectAt],
+        inputs: impl Fn(u8) -> CeObjectInputs,
+        bones: Option<&[[f32; 4]]>,
+        ground: f32,
+        time: f32,
+    ) {
+        if self.effects.len() != effects.len() || self.time.is_none_or(|last| time < last) {
+            self.effects = effects
+                .iter()
+                .map(|_| RunningEffect {
+                    event: 0,
+                    in_event: false,
+                    time: 0.0,
+                    duration: 0.0,
+                    last_fraction: -1.0,
+                    counts: Vec::new(),
+                    finished: false,
+                    stopping: false,
+                    scale_a: 1.0,
+                    scale_b: 1.0,
+                    color: [1.0; 3],
+                })
+                .collect();
+            self.particles.clear();
+            self.random = Some(Random(0x1234_5678));
+            let mut random = self.random.take().unwrap();
+            for (running, effect) in self.effects.iter_mut().zip(effects) {
+                set_event(running, &effect.def, 0, &mut random);
+            }
+            self.random = Some(random);
+            self.time = Some(time - PRE_ROLL);
+        }
+        let Some(mut now) = self.time else {
+            return;
+        };
+        let mut random = self.random.take().unwrap_or(Random(1));
+        while now + STEP <= time {
+            now += STEP;
+            for (index, effect) in effects.iter().enumerate() {
+                let state = inputs(effect.object);
+                let running = &mut self.effects[index];
+                update_effect(index, running, effect, &state, &mut self.particles, &mut random, bones, STEP);
+            }
+            let defs: Vec<&Arc<CeEffectDef>> = effects.iter().map(|effect| &effect.def).collect();
+            self.particles.retain_mut(|particle| {
+                let def = &defs[particle.effect].particles[particle.def];
+                update_particle(particle, def, &mut random, ground, STEP)
+            });
+        }
+        self.time = Some(now);
+        self.random = Some(random);
+    }
+
+    /// `render_particles` and `build_sprite`: each particle's quad, with
+    /// what `pixels` says a sphere of a radius at a point covers on screen.
+    pub(crate) fn quads(
+        &self,
+        effects: &[CeEffectAt],
+        bones: Option<&[[f32; 4]]>,
+        view: &CeFlareView,
+        pixels: impl Fn([f32; 3], f32) -> f32,
+    ) -> Vec<CeParticleQuad> {
+        let mut quads = Vec::new();
+        for particle in &self.particles {
+            let Some(effect) = effects.get(particle.effect) else {
+                continue;
+            };
+            let def = &effect.def.particles[particle.def];
+            let (center, direction) = match particle.node {
+                Some(node) => posed_on(node, particle.place, particle.direction, bones),
+                None => (particle.place, particle.direction),
+            };
+            let radius = def.radius_scale(particle.age, particle.lifespan) * particle.radius;
+            let diameter = pixels(center, radius);
+            if diameter <= def.fade_end_size {
+                continue;
+            }
+            let mut scale = radius * 2.0 * def.sprite_scale;
+            if diameter < def.minimum_size {
+                scale *= def.minimum_size / diameter;
+            }
+            let mut fade = 1.0;
+            if def.fade_in > 0.0 && particle.age < def.fade_in {
+                fade = particle.age / def.fade_in;
+            }
+            if def.fade_out > 0.0 && particle.lifespan - particle.age < def.fade_out {
+                fade *= (particle.lifespan - particle.age) / def.fade_out;
+            }
+            let Some(sprite) = usize::try_from(particle.sequence)
+                .ok()
+                .and_then(|at| def.sequences.get(at))
+                .and_then(|frames| usize::try_from(particle.frame).ok().and_then(|at| frames.get(at)))
+            else {
+                continue;
+            };
+            let to_particle = unit(std::array::from_fn(|axis| center[axis] - view.eye[axis]));
+            // `build_sprite_compute_basis`.
+            let (across, up) = match def.orientation {
+                1 => {
+                    let along = unit(direction);
+                    (along, unit(cross(to_particle, along)))
+                }
+                2 => {
+                    let along = unit(direction);
+                    let world_up = [0.0, 0.0, 1.0];
+                    let reference = if dot(along, world_up).powi(2) > 0.99 { view.forward } else { world_up };
+                    let side = unit(cross(along, reference));
+                    (side, rotate_about(side, along, -1.0, 0.0))
+                }
+                _ => (view.right, view.up),
+            };
+            // `build_sprite_compute_vertex_fade`, which only a turned sprite takes.
+            if def.fade_mode != 0 && def.orientation != 0 {
+                let normal = unit(cross(across, up));
+                let facing = dot(to_particle, normal).abs();
+                fade *= if def.fade_mode == 2 { 1.0 - facing } else { facing };
+            }
+            let [alpha, red, green, blue] = particle.color;
+            let shown_alpha =
+                if def.blend != 0 && !def.nonlinear_tint { fade } else { alpha * fade };
+            let size = def.image_widths.get(sprite.image).copied().unwrap_or(1.0) * scale;
+            let [left, right, top, bottom] = sprite.rect;
+            let center_uv = [left + sprite.registration[0], top + sprite.registration[1]];
+            let (sine, cosine) = particle.rotation.sin_cos();
+            let corner = |u: f32, v: f32| {
+                let x0 = u - center_uv[0];
+                let y0 = center_uv[1] - v;
+                let mut x = x0 * cosine - y0 * sine;
+                let mut y = y0 * cosine + x0 * sine;
+                if particle.flags & MIRROR_U != 0 {
+                    x = -x;
+                }
+                if particle.flags & MIRROR_V != 0 {
+                    y = -y;
+                }
+                let place: [f32; 3] = std::array::from_fn(|axis| center[axis] + (across[axis] * x + up[axis] * y) * size);
+                [place[0], place[1], place[2], u, v]
+            };
+            quads.push(CeParticleQuad {
+                effect: particle.effect,
+                def: particle.def,
+                image: sprite.image,
+                corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
+                color: [red, green, blue, shown_alpha],
+            });
+        }
+        quads
+    }
+}
+
+/// `effect_set_event`.
+fn set_event(running: &mut RunningEffect, def: &CeEffectDef, event: usize, random: &mut Random) {
+    if let Some(found) = def.events.get(event) {
+        running.event = event;
+        running.time = 0.0;
+        running.in_event = false;
+        running.duration = random.range(found.delay[0], found.delay[1]);
+    }
+}
+
+/// `effect_update` for an effect `effect_new_looping` made.
+#[allow(clippy::too_many_arguments)]
+fn update_effect(
+    index: usize,
+    running: &mut RunningEffect,
+    effect: &CeEffectAt,
+    inputs: &CeObjectInputs,
+    particles: &mut Vec<CeParticle>,
+    random: &mut Random,
+    bones: Option<&[[f32; 4]]>,
+    dt: f32,
+) {
+    let def = &effect.def;
+    // `object_get_function_value`: none is on at one.
+    let (scale_a, on) = match effect.primary {
+        Some(output) => (inputs.outputs[output], inputs.outputs[output] > 0.0),
+        None => (1.0, true),
+    };
+    running.scale_a = scale_a;
+    if on {
+        if running.finished {
+            running.finished = false;
+            running.stopping = false;
+            set_event(running, def, 0, random);
+        }
+    } else if !running.finished && !running.stopping {
+        // `effect_stop`: on to what follows the loop, or done.
+        match def.loop_stop.map(|stop| stop + 1).filter(|next| *next < def.events.len()) {
+            Some(next) => {
+                set_event(running, def, next, random);
+                running.stopping = true;
+            }
+            None => running.finished = true,
+        }
+    }
+    running.scale_b = effect.secondary.map_or(1.0, |output| inputs.outputs[output]);
+    running.color = effect.change_color.map_or([1.0; 3], |channel| inputs.change_colors[channel]);
+    let mut dt = dt;
+    for _ in 0..MOST_EVENTS_A_TICK {
+        if dt < 0.0 || running.finished {
+            break;
+        }
+        let ended;
+        if running.duration - running.time > dt {
+            running.time += dt;
+            ended = false;
+            dt = -1.0;
+        } else {
+            dt -= running.duration - running.time;
+            running.time = running.duration;
+            ended = true;
+        }
+        if running.in_event {
+            generate_particles(index, running, effect, particles, random, bones);
+            if ended {
+                let mut next = match (def.loop_start, def.loop_stop) {
+                    (Some(start), Some(stop)) if running.event == stop && !running.stopping => start,
+                    _ => running.event + 1,
+                };
+                while next < def.events.len() && random.next() < def.events[next].skip {
+                    next += 1;
+                }
+                if next >= def.events.len() {
+                    running.finished = true;
+                    return;
+                }
+                set_event(running, def, next, random);
+            }
+        } else if ended {
+            let event = &def.events[running.event];
+            running.time = 0.0;
+            running.in_event = true;
+            running.last_fraction = -1.0;
+            running.duration = random.range(event.duration[0], event.duration[1]);
+            running.counts = event
+                .particles
+                .iter()
+                .map(|entry| {
+                    let [lower, delta] = scaled(entry.count, running, COUNT_BITS, entry.scales_a, entry.scales_b);
+                    (lower + random.range(0.0, delta)).floor().clamp(0.0, 255.0)
+                })
+                .collect();
+        }
+    }
+}
+
+/// `effect_generate_particles`.
+fn generate_particles(
+    index: usize,
+    running: &mut RunningEffect,
+    effect: &CeEffectAt,
+    particles: &mut Vec<CeParticle>,
+    random: &mut Random,
+    bones: Option<&[[f32; 4]]>,
+) {
+    let def = &effect.def;
+    let fraction = if running.duration <= 0.0 { 1.0 } else { running.time / running.duration };
+    let event = &def.events[running.event];
+    for (at, entry) in event.particles.iter().enumerate() {
+        let count = running.counts.get(at).copied().unwrap_or(0.0);
+        let due = (integral(entry.distribution, fraction) * count) as i32
+            - (integral(entry.distribution, running.last_fraction) * count) as i32;
+        if due <= 0 || entry.first_person_only || entry.water_only {
+            continue;
+        }
+        let Some(instances) = effect.locations.get(entry.location) else {
+            continue;
+        };
+        let particle_def = &def.particles[entry.def];
+        for location in instances {
+            for _ in 0..due {
+                if particles.len() >= MOST_PARTICLES {
+                    return;
+                }
+                let [lower, delta] = scaled(entry.distribution_radius, running, DISTRIBUTION_BITS, entry.scales_a, entry.scales_b);
+                let distance = random.range(0.0, delta) + lower;
+                let spread = random.direction();
+                let offset = turn_by_location(location, entry.offset);
+                let local: [f32; 3] =
+                    std::array::from_fn(|axis| location.position[axis] + spread[axis] * distance + offset[axis]);
+                // `effect_random_translational_velocity`.
+                let [lower, delta] = scaled(entry.velocity, running, VELOCITY_BITS, entry.scales_a, entry.scales_b);
+                let speed = random.range(0.0, delta) + lower;
+                let mut cone = entry.cone;
+                if entry.scales_a & (1 << CONE_BIT) != 0 {
+                    cone *= running.scale_a;
+                }
+                if entry.scales_b & (1 << CONE_BIT) != 0 {
+                    cone *= running.scale_b;
+                }
+                let mut direction = entry.direction;
+                let angle = random.next() * cone;
+                if angle != 0.0 {
+                    let axis = random.direction();
+                    let (sine, cosine) = angle.sin_cos();
+                    direction = rotate_about(direction, axis, sine, cosine);
+                }
+                let direction = turn_by_location(location, direction);
+                let velocity = direction.map(|axis| axis * speed);
+                let attached = entry.flags & STAY_ATTACHED != 0;
+                let (place, direction, velocity) = if attached {
+                    (local, direction, velocity)
+                } else {
+                    let (place, direction) = posed_on(location.node, local, direction, bones);
+                    let (_, velocity) = posed_on(location.node, [0.0; 3], velocity, bones);
+                    (place, direction, velocity)
+                };
+                let [lower, delta] = scaled(entry.radius, running, RADIUS_BITS, entry.scales_a, entry.scales_b);
+                let radius = random.range(0.0, delta) + lower;
+                let [lower, delta] = scaled(entry.angular_velocity, running, ANGULAR_BITS, entry.scales_a, entry.scales_b);
+                let angular_velocity = random.range(0.0, delta) + lower;
+                let rotation =
+                    if entry.flags & RANDOM_INITIAL_ANGLE != 0 { random.range(0.0, std::f32::consts::TAU) } else { 0.0 };
+                let mix = if entry.scales_a & (1 << TINT_BIT) != 0 || entry.scales_b & (1 << TINT_BIT) != 0 {
+                    let mut mix = 1.0;
+                    if entry.scales_a & (1 << TINT_BIT) != 0 {
+                        mix = running.scale_a;
+                    }
+                    if entry.scales_b & (1 << TINT_BIT) != 0 {
+                        mix *= running.scale_b;
+                    }
+                    mix
+                } else {
+                    random.next()
+                };
+                let [low, high] = entry.tint;
+                let rgb = ce_color_interpolate(
+                    (entry.flags >> 3) & 3,
+                    [low[0], low[1], low[2]],
+                    [high[0], high[1], high[2]],
+                    mix,
+                );
+                let tinted = if entry.flags & TINT_FROM_OBJECT != 0 {
+                    std::array::from_fn(|channel| rgb[channel] * running.color[channel])
+                } else {
+                    rgb
+                };
+                let alpha = (1.0 - mix) * low[3] + high[3] * mix;
+                let mut lifespan = random.range(particle_def.lifespan[0], particle_def.lifespan[1]);
+                if lifespan <= 0.0 {
+                    lifespan = 0.0001;
+                }
+                let frame_span = if particle_def.animation_rate[1] == 0.0 {
+                    f32::MAX
+                } else {
+                    1.0 / random.range(particle_def.animation_rate[0], particle_def.animation_rate[1])
+                };
+                let mut flags = 0;
+                if particle_def.flags & CAN_ANIMATE_BACKWARDS != 0 && random.bits() & 1 != 0 {
+                    flags |= BACKWARDS;
+                }
+                if particle_def.flags & RANDOM_HORIZONTAL_MIRROR != 0 && random.bits() & 4 != 0 {
+                    flags |= MIRROR_U;
+                }
+                if particle_def.flags & RANDOM_VERTICAL_MIRROR != 0 && random.bits() & 8 != 0 {
+                    flags |= MIRROR_V;
+                }
+                let mut particle = CeParticle {
+                    effect: index,
+                    def: entry.def,
+                    node: attached.then_some(location.node),
+                    place,
+                    direction,
+                    velocity,
+                    age: 0.0,
+                    lifespan,
+                    frame_time: -1.0,
+                    frame_span,
+                    sequence: -1,
+                    frame: -1,
+                    phase: 0,
+                    rotation,
+                    angular_velocity,
+                    radius,
+                    color: [alpha, tinted[0], tinted[1], tinted[2]],
+                    flags,
+                };
+                if next_sequence(&mut particle, particle_def, random) {
+                    let count = particle_def.sprites_in(particle.sequence) as i32;
+                    particle.frame = if particle_def.flags & STARTS_ON_RANDOM_FRAME != 0 {
+                        let step = if particle.flags & BACKWARDS == 0 { -1 } else { 1 };
+                        step + (random.next() * count as f32) as i32
+                    } else if particle.flags & BACKWARDS != 0 {
+                        count
+                    } else {
+                        -1
+                    };
+                    particles.push(particle);
+                }
+            }
+        }
+    }
+    let _ = from_location;
+    running.last_fraction = fraction;
+}
+
+/// `particle_next_sequence`: false where the particle dies.
+fn next_sequence(particle: &mut CeParticle, def: &CeParticleDef, random: &mut Random) -> bool {
+    let [initial, looping, last] = def.sequence_counts;
+    let mut pick = |offset: i32, count: i32| def.first_sequence + offset + (random.next() * count as f32) as i32;
+    particle.sequence = -1;
+    if particle.phase == 0 {
+        if initial > 0 {
+            particle.sequence = pick(0, initial);
+        }
+        particle.phase += 1;
+    }
+    if particle.sequence == -1 && particle.phase == 1 {
+        particle.phase = 2;
+    }
+    if particle.phase == 2 {
+        if particle.age >= particle.lifespan || looping <= 0 {
+            particle.phase += 1;
+        } else {
+            particle.sequence = pick(initial, looping);
+        }
+    }
+    if particle.sequence == -1 && particle.phase == 3 {
+        if last > 0 {
+            particle.sequence = pick(initial + looping, last);
+        }
+        particle.phase += 1;
+    }
+    if particle.sequence == -1 || def.sequences.is_empty() {
+        return false;
+    }
+    particle.sequence = particle.sequence.clamp(0, def.sequences.len() as i32 - 1);
+    true
+}
+
+/// `particle_next_frame`: false where the particle dies.
+fn next_frame(particle: &mut CeParticle, def: &CeParticleDef, random: &mut Random) -> bool {
+    particle.frame_time = 0.0;
+    if particle.flags & BACKWARDS != 0 {
+        if particle.frame <= 0 {
+            if !next_sequence(particle, def, random) {
+                return false;
+            }
+            particle.frame = def.sprites_in(particle.sequence) as i32 - 1;
+        } else {
+            particle.frame -= 1;
+        }
+        true
+    } else {
+        let next = particle.frame + 1;
+        if next >= def.sprites_in(particle.sequence) as i32 {
+            let alive = next_sequence(particle, def, random);
+            particle.frame = 0;
+            alive
+        } else {
+            particle.frame = next;
+            true
+        }
+    }
+}
+
+/// `particles_update` for one particle: false where it dies.
+fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut Random, ground: f32, dt: f32) -> bool {
+    let first = particle.age == 0.0;
+    particle.age += dt;
+    if particle.age >= particle.lifespan && !first && def.sequence_counts[2] == 0 {
+        return false;
+    }
+    // `particle_update_frame_time`.
+    if def.flags & ANIMATION_STOPS_AT_REST == 0 || particle.flags & AT_REST == 0 {
+        if def.flags & ANIMATE_ONCE_PER_FRAME != 0 {
+            if !next_frame(particle, def, random) {
+                return false;
+            }
+        } else {
+            let mut alive = true;
+            if particle.frame_time == -1.0 {
+                alive = next_frame(particle, def, random);
+                particle.frame_time = 0.0;
+            }
+            let mut left = dt;
+            while alive {
+                let span = particle.frame_span - particle.frame_time;
+                if span > left {
+                    particle.frame_time += left;
+                    break;
+                }
+                alive = next_frame(particle, def, random);
+                left -= span;
+                if left <= 0.0 {
+                    break;
+                }
+            }
+            if !alive {
+                return false;
+            }
+        }
+    }
+    // `particle_update_physics`.
+    if particle.flags & AT_REST != 0 {
+        return true;
+    }
+    let radius = def.radius_scale(particle.age, particle.lifespan) * particle.radius;
+    let mut resting = false;
+    match (particle.node, def.physics) {
+        (Some(_), Some(physics)) => {
+            let drag = physics.air_friction * radius * radius;
+            let mass = physics.mass(radius);
+            let keep = if mass == 0.0 {
+                if drag == 0.0 { 1.0 } else { 0.0 }
+            } else {
+                (1.0 - drag / mass * dt).clamp(0.0, 1.0)
+            };
+            for axis in 0..3 {
+                particle.velocity[axis] *= keep;
+                particle.place[axis] += particle.velocity[axis] * dt;
+            }
+            resting = true;
+        }
+        (Some(_), None) => {
+            for axis in 0..3 {
+                particle.place[axis] += particle.velocity[axis] * dt;
+            }
+            resting = true;
+        }
+        (None, Some(physics)) => {
+            if physics.step(&mut particle.place, &mut particle.velocity, radius, ground, dt) {
+                resting = true;
+                particle.frame_span += def.contact_deterioration;
+            }
+        }
+        (None, None) => {
+            for axis in 0..3 {
+                particle.place[axis] += particle.velocity[axis] * dt;
+            }
+        }
+    }
+    let speed = dot(particle.velocity, particle.velocity);
+    if speed >= 0.0625 || !resting {
+        if speed >= 0.0625 {
+            particle.direction = particle.velocity;
+        }
+        particle.rotation += particle.angular_velocity * dt;
+        return true;
+    }
+    if particle.node.is_none() {
+        if def.flags & DIES_AT_REST != 0 {
+            return false;
+        }
+        particle.flags |= AT_REST;
+    }
+    particle.rotation += particle.angular_velocity * dt;
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_event_lets_go_its_particles_along_its_distribution() {
+        assert_eq!(integral(0, 0.0), 1.0);
+        assert_eq!(integral(1, 0.5), 0.0);
+        assert_eq!(integral(1, 1.0), 1.0);
+        assert_eq!(integral(2, 0.25), 0.25);
+        assert_eq!(integral(3, 0.5), 0.25);
+        assert_eq!(integral(4, 0.5), 0.75);
+        assert_eq!(integral(5, 0.5), 0.5);
+        assert_eq!(integral(2, -1.0), 0.0);
+    }
+
+    #[test]
+    fn a_point_on_the_floor_bounces_by_its_elasticity() {
+        let physics = CePointPhysics {
+            mass_over_radius_cubed: 1.0,
+            air_buoyancy: 0.0,
+            air_friction: 0.0,
+            surface_friction: 0.5,
+            elasticity: 0.5,
+            collides_with_structure: true,
+        };
+        let mut place = [0.0, 0.0, 0.1];
+        let mut velocity = [2.0, 0.0, -6.0];
+        assert!(physics.step(&mut place, &mut velocity, 0.01, 0.0, 1.0 / 30.0));
+        assert!((velocity[2] - 3.0).abs() < 1e-4, "{velocity:?}");
+        assert!((velocity[0] - 1.0).abs() < 1e-4, "{velocity:?}");
+        assert!(place[2] >= 0.0);
+    }
+}

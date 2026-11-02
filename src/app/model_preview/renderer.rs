@@ -1009,6 +1009,7 @@ pub(super) fn object_moves(
         || !data.preview.h3_cloth.is_empty()
         || !data.preview.h2_liquids.is_empty()
         || !data.preview.h2_contrails.is_empty()
+        || !data.preview.ce_effects.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
@@ -1137,6 +1138,7 @@ impl ModelGpuFrame {
             || !preview.h3_strips.is_empty()
             || !preview.h3_cloth.is_empty()
             || !preview.h2_contrails.is_empty()
+            || !preview.ce_effects.is_empty()
             || !preview.h2_liquids.is_empty()
             || !preview.h2_light_volumes.is_empty()
             || !preview.h2_flares.is_empty()
@@ -1813,6 +1815,9 @@ struct ModelGpuSlot {
     h2_liquid_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     h2_contrails: h2_contrails::H2ContrailField,
     h3_particles: h3_particles::H3ParticleField,
+    /// Halo CE effect particles, and their images by effect, particle and image.
+    ce_particles: ce_particles::CeParticleField,
+    ce_particle_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
@@ -1873,6 +1878,8 @@ impl ModelGpuSlot {
                 h2_liquid_textures: Vec::new(),
                 h2_contrails: Default::default(),
                 h3_particles: Default::default(),
+                ce_particles: Default::default(),
+                ce_particle_textures: Vec::new(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
                 h3_vision_clock: None,
@@ -2385,6 +2392,150 @@ struct CeFlareGl {
     queries: [glow::NativeQuery; 2],
 }
 
+/// `render_particles` for Halo CE's effects: each sprite through the
+/// `effect` shader its particle names, tested against the model's depth.
+unsafe fn draw_ce_particles(
+    gl: &glow::Context,
+    effect_gl: &mut Option<CeEffectGl>,
+    main: glow::NativeProgram,
+    uploaded: &mut ModelGpuSlot,
+    frame: &ModelGpuFrame,
+    bones: Option<&[[f32; 4]]>,
+    view: &ce_lights::CeFlareView,
+) {
+    unsafe {
+        if effect_gl.is_none() {
+            *effect_gl = ce_effect_gl(gl, main);
+        }
+        let Some(effect_gl) = effect_gl.as_ref() else {
+            return;
+        };
+        let camera = &frame.camera;
+        let effects = &frame.preview.ce_effects;
+        let states = &frame.object_states;
+        let inputs = |object: u8| {
+            let state = states.get(object as usize);
+            ce_particles::CeObjectInputs {
+                outputs: state.map_or([0.0; 4], |state| state.outputs),
+                change_colors: state.map_or([[1.0; 3]; 4], |state| state.change_colors),
+            }
+        };
+        let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
+        let ground = lowest.fold(0.0, f32::min);
+        uploaded.ce_particles.advance(effects, inputs, bones, ground, frame.time);
+        let mut viewport = [0; 4];
+        gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+        let half_width = viewport[2].max(1) as f32 * 0.5;
+        // `render_frustum_sphere_diameter_in_pixels`.
+        let pixels = |center: [f32; 3], radius: f32| {
+            let middle = ce_flare_clip(camera, center);
+            let side = ce_flare_clip(camera, std::array::from_fn(|axis| center[axis] + view.right[axis] * radius));
+            ((side[0] / side[3] - middle[0] / middle[3]).abs() * half_width * 2.0).max(0.0)
+        };
+        let quads = uploaded.ce_particles.quads(effects, bones, view, pixels);
+        gl.use_program(Some(effect_gl.program));
+        gl.bind_vertex_array(Some(effect_gl.vertex_array));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(effect_gl.buffer));
+        gl.active_texture(glow::TEXTURE0);
+        gl.enable(glow::DEPTH_TEST);
+        gl.depth_func(glow::LEQUAL);
+        gl.depth_mask(false);
+        gl.enable(glow::BLEND);
+        for quad in quads {
+            let Some(def) = effects.get(quad.effect).and_then(|effect| effect.def.particles.get(quad.def)) else {
+                continue;
+            };
+            let texture = uploaded
+                .ce_particle_textures
+                .get(quad.effect)
+                .and_then(|defs| defs.get(quad.def))
+                .and_then(|images| images.get(quad.image))
+                .copied()
+                .flatten();
+            let Some(texture) = texture else {
+                continue;
+            };
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            let blend = ce_passes::framebuffer_blend(def.blend);
+            gl.blend_equation(gl_blend_equation(blend.equation));
+            gl.blend_func(gl_blend_factor(blend.source), gl_blend_factor(blend.destination));
+            gl.uniform_1_i32(effect_gl.blend.as_ref(), def.blend);
+            gl.uniform_1_i32(effect_gl.nonlinear.as_ref(), i32::from(def.nonlinear_tint));
+            let [red, green, blue, alpha] = quad.color;
+            gl.uniform_4_f32(effect_gl.color.as_ref(), red, green, blue, alpha);
+            let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                [a, b, c, d, u, v]
+            });
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+            gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+        }
+    }
+}
+
+/// `fx/eff_common.h`: what Halo CE's particles, contrails and light volumes
+/// draw with. The fog it folds into the vertex alpha is 1 with no level.
+const CE_EFFECT_FRAGMENT: &str = "#version 330
+in vec2 v_uv;
+uniform sampler2D u_map;
+uniform vec4 u_color;
+uniform int u_blend;
+uniform int u_nonlinear;
+out vec4 out_color;
+void main() {
+    vec4 t0 = texture(u_map, v_uv);
+    vec4 r0 = vec4(u_nonlinear != 0 ? mix(pow(t0.rgb, vec3(4.0)), t0.rgb, u_color.rgb) : t0.rgb * u_color.rgb, t0.a);
+    float a = u_color.a;
+    if (u_blend == 0) {
+        r0.a *= a;
+    } else if (u_blend == 1) {
+        r0.rgb = mix(vec3(1.0), r0.rgb, a);
+    } else if (u_blend == 2) {
+        r0.rgb = mix(vec3(0.5), r0.rgb, a);
+    } else if (u_blend == 3) {
+        r0.rgb *= a;
+    } else if (u_blend == 7) {
+        r0 *= a;
+    }
+    out_color = r0;
+}
+";
+
+struct CeEffectGl {
+    program: glow::NativeProgram,
+    vertex_array: glow::NativeVertexArray,
+    buffer: glow::NativeBuffer,
+    color: Option<glow::NativeUniformLocation>,
+    blend: Option<glow::NativeUniformLocation>,
+    nonlinear: Option<glow::NativeUniformLocation>,
+}
+
+unsafe fn ce_effect_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<CeEffectGl> {
+    unsafe {
+        let program = link_h2_program(gl, main, CE_FLARE_VERTEX, CE_EFFECT_FRAGMENT)
+            .map_err(|error| eprintln!("model preview: {error}"))
+            .ok()?;
+        let vertex_array = gl.create_vertex_array().ok()?;
+        let buffer = gl.create_buffer().ok()?;
+        gl.bind_vertex_array(Some(vertex_array));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+        gl.enable_vertex_attrib_array(0);
+        gl.vertex_attrib_pointer_f32(0, 4, glow::FLOAT, false, CE_FLARE_STRIDE, 0);
+        gl.enable_vertex_attrib_array(1);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, CE_FLARE_STRIDE, 16);
+        gl.use_program(Some(program));
+        gl.uniform_1_i32(gl.get_uniform_location(program, "u_map").as_ref(), 0);
+        Some(CeEffectGl {
+            program,
+            vertex_array,
+            buffer,
+            color: gl.get_uniform_location(program, "u_color"),
+            blend: gl.get_uniform_location(program, "u_blend"),
+            nonlinear: gl.get_uniform_location(program, "u_nonlinear"),
+        })
+    }
+}
+
 const PARTICLE_VERTEX: &str = "#version 410 core
 layout(location = 0) in vec4 a_clip;
 layout(location = 1) in vec2 a_sprite;
@@ -2789,6 +2940,7 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
 
 struct ModelGlRenderer {
     ce_flares: Option<CeFlareGl>,
+    ce_effect_gl: Option<CeEffectGl>,
     h3_particle_gl: Option<H3ParticleGl>,
     /// How far through the frame's sorted sprites the draws have got.
     h3_sprite_cursor: usize,
@@ -2917,6 +3069,7 @@ impl ModelGlRenderer {
             let version = gl.version();
             Ok(Self {
                 ce_flares: None,
+                ce_effect_gl: None,
                 h2_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
                 h3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                 h2_programs: HashMap::new(),
@@ -3275,6 +3428,7 @@ impl ModelGlRenderer {
             && self.h2_supported
             && !(preview.ce_lights.is_empty()
                 && preview.ce_antennas.is_empty()
+                && preview.ce_effects.is_empty()
                 && preview.h2_antennas.is_empty()
                 && preview.h2_flares.is_empty()
                 && preview.h3_flares.is_empty()
@@ -3380,6 +3534,20 @@ impl ModelGlRenderer {
                         }
                         None => upload_h2_image(gl, &antenna.image),
                     }))
+                    .collect();
+                for texture in uploaded.ce_particle_textures.drain(..).flatten().flatten().flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.ce_particles = Default::default();
+                uploaded.ce_particle_textures = frame
+                    .preview
+                    .ce_effects
+                    .iter()
+                    .map(|effect| {
+                        effect.def.particles.iter().map(|particle| {
+                            particle.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
+                        }).collect()
+                    })
                     .collect();
                 for texture in uploaded.h2_liquid_textures.drain(..).flatten().flatten() {
                     gl.delete_texture(texture);
@@ -3556,6 +3724,14 @@ impl ModelGlRenderer {
                     gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
                     gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                 }
+            }
+            if antennas && !frame.preview.ce_effects.is_empty() {
+                draw_ce_particles(gl, &mut self.ce_effect_gl, self.program, uploaded, frame, bones, &view);
+                gl.use_program(Some(flares.program));
+                gl.bind_vertex_array(Some(flares.vertex_array));
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                gl.blend_equation(glow::FUNC_ADD);
+                gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             }
             gl.color_mask(true, true, true, false);
             // `render_effects`, among the transparents: every profile is its own quad.
