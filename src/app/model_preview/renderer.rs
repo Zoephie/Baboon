@@ -1012,6 +1012,7 @@ pub(super) fn object_moves(
         || !data.preview.ce_effects.is_empty()
         || !data.preview.ce_contrails.is_empty()
         || !data.preview.ce_lightning.is_empty()
+        || !data.preview.ce_glows.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
@@ -1143,6 +1144,7 @@ impl ModelGpuFrame {
             || !preview.ce_effects.is_empty()
             || !preview.ce_contrails.is_empty()
             || !preview.ce_lightning.is_empty()
+            || !preview.ce_glows.is_empty()
             || !preview.h2_liquids.is_empty()
             || !preview.h2_light_volumes.is_empty()
             || !preview.h2_flares.is_empty()
@@ -1826,6 +1828,8 @@ struct ModelGpuSlot {
     ce_contrail_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     ce_light_volume_textures: Vec<Option<glow::NativeTexture>>,
     ce_lightning_textures: Vec<Option<glow::NativeTexture>>,
+    ce_glows: ce_widgets::CeGlowField,
+    ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
@@ -1892,6 +1896,8 @@ impl ModelGpuSlot {
                 ce_contrail_textures: Vec::new(),
                 ce_light_volume_textures: Vec::new(),
                 ce_lightning_textures: Vec::new(),
+                ce_glows: Default::default(),
+                ce_glow_textures: Vec::new(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
                 h3_vision_clock: None,
@@ -2463,6 +2469,15 @@ unsafe fn draw_ce_particles(
             let seed = seed.wrapping_add(index as u32 * 7919);
             for quad in lightning.quads(&outputs0, &colors0, bones, view, seed) {
                 sprites.push((texture, lightning.blend, lightning.nonlinear_tint, quad.color, quad.corners));
+            }
+        }
+        // `glow_render`, through `global_shader_effect_additive`.
+        let glows = &frame.preview.ce_glows;
+        uploaded.ce_glows.advance(glows, &outputs0, bones, frame.time);
+        let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
+        for (index, quad) in uploaded.ce_glows.quads(glows, view, pixel) {
+            if let Some(texture) = uploaded.ce_glow_textures.get(index).copied().flatten() {
+                sprites.push((texture, 3, false, quad.color, quad.corners));
             }
         }
         for quad in uploaded.ce_contrails.quads(contrails, change_colors, view) {
@@ -3475,6 +3490,7 @@ impl ModelGlRenderer {
                 && preview.ce_contrails.is_empty()
                 && preview.ce_light_volumes.is_empty()
                 && preview.ce_lightning.is_empty()
+                && preview.ce_glows.is_empty()
                 && preview.h2_antennas.is_empty()
                 && preview.h2_flares.is_empty()
                 && preview.h3_flares.is_empty()
@@ -3599,6 +3615,11 @@ impl ModelGlRenderer {
                 }
                 uploaded.ce_lightning_textures =
                     frame.preview.ce_lightning.iter().map(|lightning| upload_h2_image(gl, &lightning.image)).collect();
+                for texture in uploaded.ce_glow_textures.drain(..).flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.ce_glow_textures = frame.preview.ce_glows.iter().map(|glow| upload_h2_image(gl, &glow.image)).collect();
+                uploaded.ce_glows = Default::default();
                 uploaded.ce_contrail_textures = frame
                     .preview
                     .ce_contrails
@@ -3821,7 +3842,7 @@ impl ModelGlRenderer {
                 }
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             }
-            if antennas && !(frame.preview.ce_effects.is_empty() && frame.preview.ce_contrails.is_empty() && frame.preview.ce_lightning.is_empty()) {
+            if antennas && !(frame.preview.ce_effects.is_empty() && frame.preview.ce_contrails.is_empty() && frame.preview.ce_lightning.is_empty() && frame.preview.ce_glows.is_empty()) {
                 draw_ce_particles(gl, &mut self.ce_effect_gl, self.program, uploaded, frame, bones, &view);
                 gl.use_program(Some(flares.program));
                 gl.bind_vertex_array(Some(flares.vertex_array));

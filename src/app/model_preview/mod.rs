@@ -156,6 +156,7 @@ pub(crate) struct RenderModelPreview {
     pub ce_contrails: Vec<ce_contrails::CeContrailAt>,
     pub ce_light_volumes: Vec<ce_widgets::CeLightVolume>,
     pub ce_lightning: Vec<ce_widgets::CeLightning>,
+    pub ce_glows: Vec<ce_widgets::CeGlow>,
 }
 
 #[derive(Debug, Clone, Default)]
