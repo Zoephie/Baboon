@@ -416,6 +416,15 @@ pub(super) fn load_model_preview(
             });
             (preview.h2_flares, preview.h2_point_lights, preview.h2_gel_lights) = found;
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &markers);
+            let systems = super::h3_particles::read_h3_particles(source, model_tag, 0, &markers, |marker| {
+                let place = super::attachment::MarkerFrame {
+                    axes: marker.axes,
+                    position: marker.position,
+                    node: marker.node_index,
+                };
+                (place, marker.node_index.max(0) as usize)
+            });
+            preview.h3_particles = systems.into_iter().map(Arc::new).collect();
             preview.markers = markers;
         }
         let weapons_family = matches!(

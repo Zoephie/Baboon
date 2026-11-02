@@ -2443,7 +2443,18 @@ void main() {
         }
         color.a = 1.0;
     }
-    color *= v_color;
+    if (u_albedo == 9) {
+        vec3 fourth = color.rgb * color.rgb;
+        fourth *= fourth;
+        vec3 toward = mix(fourth, color.rgb, v_color.rgb);
+        color.rgb = mix(toward, color.rgb * v_color.rgb, u_modulation.x);
+        color.a *= v_color.a;
+    } else if (u_albedo == 10) {
+        color.rgb *= v_color.rgb * v_color.a;
+        color.a *= v_color.a;
+    } else {
+        color *= v_color;
+    }
     if (u_lit) {
         vec3 ambient = 0.886227 * u_lighting[0].rgb;
         vec3 normal = normalize(v_normal);
@@ -2461,7 +2472,7 @@ void main() {
         color.rgb += u_add;
     }
     // `convert_to_render_target_premultiplied_alpha`.
-    if (u_premultiplied) {
+    if (u_premultiplied && u_albedo != 10) {
         color.rgb *= color.a;
     }
     out_color = color;
@@ -3061,6 +3072,7 @@ impl ModelGlRenderer {
                 self.draw_batches(gl, frame, true, &self.slots[slot].materials);
             }
             if !self.h3_draws(frame) && self.draws_object_sprites(frame) {
+                self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                 self.draw_ce_flares(gl, frame, slot, SpriteStage::Rest);
             }
 
