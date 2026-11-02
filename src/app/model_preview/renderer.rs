@@ -2482,11 +2482,13 @@ vec4 albedo(vec2 sprite, float external_alpha) {
 }
 void main() {
     if (u_albedo == 11) {
-        // `effect_shader_alphablend_distortion_0.psh`, on the raw `v8u8` bytes
-        // the decode biased and swapped (U is its green, V its red): each byte
-        // read as unsigned, less its rounding, and the frame read that far off.
+        // `effect_shader_alphablend_distortion_0.psh` (U is the decode's green,
+        // V its red). MCC makes `v8u8` an `R8G8_SNORM` texture (`dword_EBC5B8`),
+        // so the shader's unsigned-to-signed `bump - round(bump)` runs on bytes
+        // already signed, and folds the strong ones back towards nothing.
         vec2 signed_byte = round(texture(u_base, v_sprite).gr * 127.0);
-        vec2 bump = mix((signed_byte + 1.0) / 255.0, signed_byte / 255.0, step(0.0, signed_byte));
+        vec2 snorm = max(signed_byte / 127.0, -1.0);
+        vec2 bump = snorm - round(snorm);
         vec2 screen = (gl_FragCoord.xy - u_screen.xy) / u_screen.zw;
         // Its screen v runs down the frame, this one's up.
         vec2 read = screen + u_modulation.x / 64.0 * vec2(bump.x, -bump.y);
