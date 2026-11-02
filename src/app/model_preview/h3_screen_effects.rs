@@ -244,6 +244,8 @@ struct H3ScreenDefinition {
     time_falloff: Option<TagFunction>,
     angle_falloff: Option<TagFunction>,
     object_falloff: Option<H3ObjectFalloff>,
+    /// Its tag was last saved before `object falloff` existed.
+    predates_object_falloff: bool,
     /// ODST's `shader effect`, with its `render layer` and `sort order`.
     shader: Option<(String, i32, i32)>,
 }
@@ -370,6 +372,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
         time_falloff: falloff("time falloff"),
         angle_falloff: falloff("angle falloff"),
         object_falloff,
+        predates_object_falloff: element.descend("object falloff").is_none(),
         shader: read_screen_shader(source, element),
     })
 }
@@ -388,6 +391,14 @@ fn read_definitions(source: &TagSource, root: TagStruct<'_>) -> Vec<H3ScreenDefi
         definitions.extend(read_definition(source, element, delay));
     }
     definitions
+}
+
+/// `screen_effect_evaluate_falloff`: on a live object ODST multiplies by a
+/// function that nothing fills in for a tag older than the field, and one with
+/// no data is 0. `on_new` only helps elements made since. Halo 3 has no such
+/// function, and what is on no object never reads it.
+fn shows_on_object(odst: bool, predates_object_falloff: bool, unattached: bool) -> bool {
+    !odst || !predates_object_falloff || unattached
 }
 
 /// An `area_screen_effect` on an effect of an object.
@@ -438,7 +449,12 @@ pub(super) fn read_h3_screen_effects(
         let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "area_screen_effect", b"sefc") else {
             return;
         };
-        let definitions = Arc::new(read_definitions(source, tag.root()));
+        let odst = source.game() == Some(GameId::Halo3Odst);
+        let mut definitions = read_definitions(source, tag.root());
+        definitions.retain(|definition| {
+            shows_on_object(odst, definition.predates_object_falloff, part.unattached)
+        });
+        let definitions = Arc::new(definitions);
         if definitions.is_empty() {
             return;
         }
@@ -521,6 +537,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_odst_loses_what_is_older_than_object_falloff_and_only_on_an_object() {
+        assert!(!shows_on_object(true, true, false));
+        assert!(shows_on_object(true, true, true), "on no object it is never read");
+        assert!(shows_on_object(true, false, false), "a newer tag has its function");
+        assert!(shows_on_object(false, true, false), "Halo 3 has no such function");
+    }
+
+    #[test]
     fn motion_suck_adds_up_along_the_way_to_each_effect() {
         let mut settings = H3ScreenSettings::default();
         assert_eq!(settings.suck(), None, "nothing moved");
@@ -553,6 +577,7 @@ mod tests {
             time_falloff: None,
             angle_falloff: None,
             object_falloff: None,
+            predates_object_falloff: false,
             shader: None,
         }
     }
