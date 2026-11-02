@@ -85,10 +85,16 @@ uniform vec4 tone_curve_constants;
 uniform mat4 hue_saturation;
 uniform float contrast;
 uniform float exposure;
+uniform float view_scale;
 out vec4 color;
 void main() {
-    vec4 accumulated = texelFetch(accumulation, ivec2(gl_FragCoord.xy), 0);
     vec2 place = gl_FragCoord.xy / vec2(textureSize(accumulation, 0));
+    // A wider lens frames the same picture smaller, about the middle.
+    place = (place - 0.5) * view_scale + 0.5;
+    vec4 accumulated = texture(accumulation, place);
+    if (place.x < 0.0 || place.x > 1.0 || place.y < 0.0 || place.y > 1.0) {
+        accumulated = vec4(0.0);
+    }
     vec3 blend = (accumulated.rgb + texture(bloom, place).rgb) * exposure;
     blend = (vec4(blend, 1.0) * hue_saturation).rgb;
     float luminance = dot(blend, vec3(0.333));
@@ -106,6 +112,32 @@ void main() {
 }
 ";
 
+/// `c_screen_postprocess::blur_display`, for how much of it covers the frame.
+const BLUR_FRAGMENT: &str = "#version 410 core
+uniform sampler2D picture;
+uniform vec2 spread;
+uniform float cover;
+out vec4 color;
+void main() {
+    vec2 pixel = 1.0 / vec2(textureSize(picture, 0));
+    vec2 place = gl_FragCoord.xy * pixel;
+    vec3 sum = vec3(0.0);
+    float total = 0.0;
+    for (int y = -8; y <= 8; y++) {
+        for (int x = -8; x <= 8; x++) {
+            vec2 at = vec2(x, y) / 4.0;
+            float weight = exp(-0.5 * dot(at, at));
+            sum += texture(picture, place + at * spread * pixel * 8.0).rgb * weight;
+            total += weight;
+        }
+    }
+    color = vec4(sum / total, cover);
+}
+";
+
+/// The preview lens' half angle, in `PERSPECTIVE_FOV_Y`'s terms.
+const HALF_LENS: f32 = 30.0 * std::f32::consts::PI / 180.0;
+
 /// The targets a frame draws through.
 pub(super) struct H3Targets {
     size: [i32; 2],
@@ -116,6 +148,11 @@ pub(super) struct H3Targets {
     accumulation: glow::NativeTexture,
     /// A copy of the scene behind the object, for active camo.
     behind: glow::NativeTexture,
+    /// The finished frame as light, for what draws over all of it.
+    picture: glow::NativeTexture,
+    picture_framebuffer: glow::NativeFramebuffer,
+    /// `behind`, to blit into.
+    behind_framebuffer: glow::NativeFramebuffer,
     /// A copy of the depth, for what fades against it.
     depth_copy: glow::NativeTexture,
     depth_copy_framebuffer: glow::NativeFramebuffer,
@@ -171,6 +208,13 @@ impl H3Targets {
             let normal = target_texture(gl, size, glow::RGBA16F)?;
             let accumulation = target_texture(gl, size, glow::RGBA16F)?;
             let behind = target_texture(gl, size, glow::SRGB8_ALPHA8)?;
+            let picture = target_texture(gl, size, glow::SRGB8_ALPHA8)?;
+            let picture_framebuffer = gl.create_framebuffer().ok()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
+            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(picture), 0);
+            let behind_framebuffer = gl.create_framebuffer().ok()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(behind_framebuffer));
+            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(behind), 0);
             let albedo_framebuffer = gl.create_framebuffer().ok()?;
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_framebuffer));
             for (attachment, texture) in
@@ -244,6 +288,9 @@ impl H3Targets {
                 normal,
                 accumulation,
                 behind,
+                picture,
+                picture_framebuffer,
+                behind_framebuffer,
                 depth_copy,
                 depth_copy_framebuffer,
                 distortion,
@@ -261,11 +308,14 @@ impl H3Targets {
             gl.delete_framebuffer(self.depth_copy_framebuffer);
             gl.delete_framebuffer(self.distortion_framebuffer);
             gl.delete_framebuffer(self.scene_copy_framebuffer);
+            gl.delete_framebuffer(self.picture_framebuffer);
+            gl.delete_framebuffer(self.behind_framebuffer);
             for texture in [
                 self.albedo,
                 self.normal,
                 self.accumulation,
                 self.behind,
+                self.picture,
                 self.depth_copy,
                 self.distortion,
                 self.scene_copy,
@@ -461,6 +511,7 @@ fn frame_value(frame: &ModelGpuFrame, name: &str, size: [i32; 2]) -> Option<H3Va
     match name {
         "v_always_true" | "p_shader_pc_specular_enabled" | "actually_calc_albedo" => Some(H3Value::Integer(1)),
         "Position_Compression_Scale" => floats([1.0; 4]),
+        "screenspace_xform" => floats([1.0, 1.0, 0.0, 0.0]),
         "UV_Compression_Scale_Offset" => floats([1.0, 1.0, 0.0, 0.0]),
         "k_ps_dominant_light_direction" if frame.light_follows_camera => {
             floats(dominant_light(&frame_probe(frame)).0)
@@ -678,11 +729,10 @@ impl ModelGlRenderer {
         pass: &Arc<H3Pass>,
         shield: Option<&H3Shield>,
     ) {
-        let Some((offset, count)) =
-            model_draw_range(batch.index_start, batch.index_count, frame.preview.indices.len())
-        else {
+        let range = model_draw_range(batch.index_start, batch.index_count, frame.preview.indices.len());
+        if range.is_none() && !pass.fullscreen {
             return;
-        };
+        }
         unsafe {
             let Some(mut program) = self.h3_program(gl, pass) else {
                 return;
@@ -735,7 +785,12 @@ impl ModelGlRenderer {
                     .or_else(|| frame_value(frame, name, size))
                     .or_else(|| material.values.get(name).cloned());
                 let object = batch.material_index as usize;
-                let values = frame.h2_values_of(object);
+                let screen_values = self.h3_screen_alpha.map(|alpha| {
+                    let mut values = frame.h2_values_of(object).cloned().unwrap_or_default();
+                    values.insert("alpha".to_owned(), alpha);
+                    values
+                });
+                let values = screen_values.as_ref().or(frame.h2_values_of(object));
                 for animation in material.animations.iter().filter(|animation| animation.uniform == *name) {
                     let mut slot = match value {
                         Some(H3Value::Floats(slot)) => slot,
@@ -775,6 +830,9 @@ impl ModelGlRenderer {
                     "albedo_texture" => targets.map(|targets| targets.albedo),
                     "normal_texture" => targets.map(|targets| targets.normal),
                     "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
+                    other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
+                        targets.map(|targets| targets.behind)
+                    }
                     "UserParameterTexture_dynamic_light_gel_texture" => {
                         self.h3_light.as_ref().and_then(|(_, gel)| *gel)
                     }
@@ -794,7 +852,12 @@ impl ModelGlRenderer {
                 let location = program.location(gl, name);
                 gl.uniform_1_i32(location.as_ref(), unit as i32);
             }
-            gl.draw_elements(glow::TRIANGLES, count, glow::UNSIGNED_INT, offset);
+            match range {
+                Some((offset, count)) if !pass.fullscreen => {
+                    gl.draw_elements(glow::TRIANGLES, count, glow::UNSIGNED_INT, offset);
+                }
+                _ => gl.draw_arrays(glow::TRIANGLES, 0, 3),
+            }
             self.h3_programs.insert(Arc::as_ptr(pass) as usize, Some(program));
         }
     }
@@ -1092,9 +1155,10 @@ impl ModelGlRenderer {
             let view = ce_flare_view(&frame.camera);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             let effects = &frame.preview.h3_screen_effects;
-            let screen =
+            let (screen, shaders) =
                 h3_screen_effects::h3_screen_settings(effects, values, &mut uploaded.h3_onsets, bones, &view, frame.time);
             self.h3_composite(gl, accumulation, bloom, screen);
+            self.h3_finish_picture(gl, frame, slot, framebuffer, size, &screen, &shaders);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1185,12 +1249,101 @@ impl ModelGlRenderer {
             gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &columns);
             gl.uniform_1_f32(gl.get_uniform_location(program, "contrast").as_ref(), screen.gamma());
             gl.uniform_1_f32(gl.get_uniform_location(program, "exposure").as_ref(), screen.exposure());
+            gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
             gl.disable(glow::DEPTH_TEST);
             gl.enable(glow::BLEND);
             // The accumulation is premultiplied: what adds light covers nothing.
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
             gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            gl.enable(glow::DEPTH_TEST);
+        }
+    }
+
+    /// `c_player_view`'s last steps: `render_screen_shaders`, then the blur, on
+    /// a surface that holds light rather than the encoded frame, as the game's
+    /// sRGB one does.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn h3_finish_picture(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        framebuffer: glow::NativeFramebuffer,
+        size: [i32; 2],
+        screen: &h3_screen_effects::H3ScreenSettings,
+        shaders: &[h3_screen_effects::H3ScreenShader],
+    ) {
+        let blur = screen.blur();
+        if shaders.is_empty() && blur.is_none() {
+            return;
+        }
+        let Some(targets) = self.h3_targets.as_ref() else {
+            return;
+        };
+        let (behind, picture_framebuffer, behind_framebuffer) =
+            (targets.behind, targets.picture_framebuffer, targets.behind_framebuffer);
+        unsafe {
+            // Raw bytes across, so what was encoded reads back as light.
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(picture_framebuffer));
+            gl.disable(glow::FRAMEBUFFER_SRGB);
+            gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
+            gl.enable(glow::FRAMEBUFFER_SRGB);
+            gl.disable(glow::DEPTH_TEST);
+            gl.disable(glow::CULL_FACE);
+            gl.depth_mask(false);
+            gl.color_mask(true, true, true, false);
+            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            // A shader reads the picture through texcoords that run top down.
+            let screen_copy = |gl: &glow::Context, upright: bool| {
+                gl.disable(glow::FRAMEBUFFER_SRGB);
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(picture_framebuffer));
+                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(behind_framebuffer));
+                let (top, bottom) = if upright { (0, size[1]) } else { (size[1], 0) };
+                gl.blit_framebuffer(0, 0, size[0], size[1], 0, top, size[0], bottom, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
+                gl.enable(glow::FRAMEBUFFER_SRGB);
+            };
+            for shader in shaders {
+                let found = frame.preview.materials.iter().position(|material| material.shader_path == shader.path);
+                let textures = frame.textures.as_ref();
+                let material = found.and_then(|at| textures?.get(at)?.h3.as_ref().map(|material| (at, material)));
+                let Some((at, material)) = material else {
+                    continue;
+                };
+                screen_copy(gl, false);
+                h3_set_blend(gl, material.blend);
+                self.h3_screen_alpha = Some(shader.alpha);
+                let batch = RenderModelPreviewBatch { material_index: at as u16, ..Default::default() };
+                self.h3_draw_pass(gl, frame, slot, &batch, material, &material.lit, None);
+                self.h3_screen_alpha = None;
+            }
+            if let Some((spread, cover)) = blur {
+                if self.h3_blur_program.is_none() {
+                    self.h3_blur_program = screen_program(gl, BLUR_FRAGMENT);
+                }
+                if let Some(program) = self.h3_blur_program {
+                    screen_copy(gl, true);
+                    gl.use_program(Some(program));
+                    gl.active_texture(glow::TEXTURE0);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(behind));
+                    gl.uniform_1_i32(gl.get_uniform_location(program, "picture").as_ref(), 0);
+                    gl.uniform_2_f32_slice(gl.get_uniform_location(program, "spread").as_ref(), &spread);
+                    gl.uniform_1_f32(gl.get_uniform_location(program, "cover").as_ref(), cover);
+                    gl.enable(glow::BLEND);
+                    gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                    gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+                    gl.draw_arrays(glow::TRIANGLES, 0, 3);
+                }
+            }
+            gl.disable(glow::FRAMEBUFFER_SRGB);
+            gl.color_mask(true, true, true, true);
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(picture_framebuffer));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(framebuffer));
+            gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.enable(glow::DEPTH_TEST);
         }
     }

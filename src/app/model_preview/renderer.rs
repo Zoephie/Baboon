@@ -892,7 +892,8 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
         .chain(h3_volumes.flat_map(|at| at.scale_names()))
         .chain(h3_systems.flat_map(|at| at.scale_names()))
         .chain(h3_strips.flat_map(|at| at.scale_names()))
-        .chain(h3_screens.map(|at| at.scale_name()))
+        .chain(h3_screens.clone().map(|at| at.scale_name()))
+        .chain(h3_screens.flat_map(|at| at.object_inputs()))
         .chain(lights.map(|light| light.scale_name()))
         .chain(gels.map(|light| light.scale_name()))
         .filter(|name| !name.is_empty());
@@ -2664,6 +2665,9 @@ struct ModelGlRenderer {
     /// Linked passes by their address; none for one that failed.
     h3_programs: HashMap<usize, Option<h3_draw::H3Program>>,
     h3_composite_program: Option<glow::NativeProgram>,
+    h3_blur_program: Option<glow::NativeProgram>,
+    /// How much of its effect the `shader_screen` drawing now is.
+    h3_screen_alpha: Option<f32>,
     h3_bloom: Option<h3_bloom::H3Bloom>,
     h3_empty_vertices: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
@@ -2775,6 +2779,8 @@ impl ModelGlRenderer {
                 h3_light: None,
                 h3_programs: HashMap::new(),
                 h3_composite_program: None,
+                h3_blur_program: None,
+                h3_screen_alpha: None,
                 h3_bloom: None,
                 h3_empty_vertices: None,
                 h2_gel: None,

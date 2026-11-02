@@ -52,7 +52,7 @@ struct H3Category {
 #[derive(Debug, Clone)]
 pub(crate) struct H3Definition {
     /// The `.fx` this family compiles: `shader`, `terrain`..
-    name: String,
+    pub(crate) name: String,
     /// `use automatic macros`: categories and options named as defines too.
     automatic_macros: bool,
     categories: Vec<H3Category>,
@@ -276,6 +276,16 @@ impl H3Sources {
         Ok(Arc::new(pass_of(vertex, pixel)))
     }
 
+    /// A `shader_screen`'s pixel shader, fed by a triangle over the picture
+    /// rather than the world vertices its family's `default_vs` reads.
+    pub(crate) fn screen_pass(&mut self, definition: &H3Definition, options: &[usize]) -> Result<Arc<H3Pass>, String> {
+        let (vertex, pixel) = self.stages(definition, options, "default", VERTEX_SKINNED, false)?;
+        let mut pass = pass_of(vertex, pixel);
+        pass.vertex = SCREEN_VERTEX.to_owned();
+        pass.fullscreen = true;
+        Ok(Arc::new(pass))
+    }
+
     /// An entry point's two stages.
     #[cfg(test)]
     pub(crate) fn translate_entry(
@@ -303,9 +313,22 @@ impl H3Sources {
     }
 }
 
+/// `default_vs` of `screen.fx`, for a triangle that covers the picture.
+const SCREEN_VERTEX: &str = "#version 410 core
+out vec4 v_TEXCOORD0;
+void main() {
+    vec2 corner = vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4.0 - 1.0;
+    gl_Position = vec4(corner, 0.0, 1.0);
+    vec2 uv = vec2(corner.x * 0.5 + 0.5, 0.5 - corner.y * 0.5);
+    v_TEXCOORD0 = vec4(uv, uv);
+}
+";
+
 /// What a pass names, whichever stage reads it.
 #[derive(Debug)]
 pub(crate) struct H3Pass {
+    /// Over the whole picture, with no geometry: a `shader_screen`.
+    pub(crate) fullscreen: bool,
     pub(crate) vertex: String,
     pub(crate) pixel: String,
     pub(crate) uniforms: Vec<(String, Type)>,
@@ -318,6 +341,38 @@ pub(crate) struct H3Pass {
 const H3_NODES: usize = MAX_PREVIEW_BONES + 1;
 
 /// A skinned vertex without weights rides the spare node, which holds still.
+/// Direct3D lets a stage write less of a semantic than the next reads, as
+/// `cortana.fx`'s `static_sh_vs` does with `COLOR1`, the rest reading 0; GLSL
+/// will not link that. The vertex stage writes them all instead.
+fn widen_varyings(vertex: &str, pixel: &str) -> String {
+    let mut source = vertex.to_owned();
+    for line in vertex.lines() {
+        let Some((width, name)) = line.strip_prefix("out vec").and_then(|rest| rest.split_once(' ')) else {
+            continue;
+        };
+        let name = name.trim_end_matches(';');
+        let Ok(width) = width.parse::<usize>() else {
+            continue;
+        };
+        let wanted = (2..=4).find(|wider| *wider > width && pixel.lines().any(|line| line == format!("in vec{wider} {name};")));
+        let Some(wider) = wanted else {
+            continue;
+        };
+        let zeros = ", 0.0".repeat(wider - width);
+        source = source.replace(line, &format!("out vec{wider} {name};"));
+        let prefix = format!("{name} = ");
+        let widened: Vec<String> = source
+            .lines()
+            .map(|line| match line.trim_start().strip_prefix(&prefix).and_then(|value| value.strip_suffix(';')) {
+                Some(value) => format!("    {name} = vec{wider}({value}{zeros});"),
+                None => line.to_owned(),
+            })
+            .collect();
+        source = widened.join("\n");
+    }
+    source
+}
+
 fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
     let mut uniforms = vertex.uniforms;
     let nodes = uniforms.iter_mut().find_map(|(name, ty)| match ty {
@@ -340,7 +395,10 @@ fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
         }
     }
     // Flat in the source, three rows to a node.
-    let source = vertex.source.replace("Nodes[210]", &format!("Nodes[{}]", H3_NODES * 3));
+    // The albedo pass lays depth that later passes test equal against, from
+    // other shaders' arithmetic: Direct3D's `precise` positions, in GLSL terms.
+    let invariant = vertex.source.replacen('\n', "\ninvariant gl_Position;\n", 1);
+    let source = widen_varyings(&invariant, &pixel.source).replace("Nodes[210]", &format!("Nodes[{}]", H3_NODES * 3));
     let source = source.replace(
         "hlsl_p0.node_weights = a_BLENDWEIGHT;",
         "hlsl_p0.node_weights = a_BLENDWEIGHT;
@@ -365,7 +423,7 @@ fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
         "vec3 l_true_scene_color = l_ldr_color.xyz;",
         "vec3 l_true_scene_color = 2.0 * sin(asin(clamp(l_ldr_color.xyz, 0.0, 1.0)) / 3.0);",
     );
-    H3Pass { vertex: source, pixel: pixel_source, uniforms, textures }
+    H3Pass { fullscreen: false, vertex: source, pixel: pixel_source, uniforms, textures }
 }
 
 impl H3Sources {
@@ -503,6 +561,8 @@ impl H3Texels {
 pub(crate) struct H3Material {
     pub(crate) albedo: Option<Arc<H3Pass>>,
     pub(crate) lit: Arc<H3Pass>,
+    /// ODST's maps bound to the picture itself, by extern mode.
+    pub(crate) screen_maps: Vec<String>,
     /// A decal family: `lit` is its `default`, drawn into the albedo target
     /// unless its `render_pass` puts it after the lights.
     pub(crate) decal: bool,
@@ -575,7 +635,8 @@ impl H3Animation {
             }
             values.and_then(|values| values.get(name)).copied().unwrap_or(0.0)
         };
-        let timed = self.input == "unique_id";
+        // ODST's `render_time` is the clock itself.
+        let timed = self.input == "unique_id" || self.input == "render_time";
         if !timed && (!self.input.is_empty() || !self.range.is_empty()) {
             return (named(&self.input), named(&self.range));
         }
@@ -669,5 +730,22 @@ mod texel_tests {
         assert!(H3Texels::default_srgb(BitmapFormat::A8r8g8b8));
         assert!(!H3Texels::default_srgb(BitmapFormat::DxnSnorm));
         assert!(!H3Texels::default_srgb(BitmapFormat::Abgrfp16));
+    }
+}
+
+#[cfg(test)]
+mod varying_tests {
+    use super::widen_varyings;
+
+    #[test]
+    fn a_vertex_stage_writes_as_much_as_the_pixel_stage_reads() {
+        let vertex = "out vec3 v_COLOR1;\nout vec2 v_TEXCOORD0;\nvoid main() {\n    v_COLOR1 = a.xyz;\n    v_TEXCOORD0 = b;\n}";
+        let pixel = "in vec4 v_COLOR1;\nin vec2 v_TEXCOORD0;";
+        let widened = widen_varyings(vertex, pixel);
+        assert!(widened.contains("out vec4 v_COLOR1;"), "{widened}");
+        assert!(widened.contains("v_COLOR1 = vec4(a.xyz, 0.0);"), "{widened}");
+        assert!(widened.contains("out vec2 v_TEXCOORD0;"));
+        assert!(widened.contains("v_TEXCOORD0 = b;"));
+        assert_eq!(widen_varyings(vertex, "in vec3 v_COLOR1;\nin vec2 v_TEXCOORD0;"), vertex);
     }
 }

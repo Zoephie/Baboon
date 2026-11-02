@@ -20,6 +20,13 @@ const LUMINANCE: [f32; 3] = [0.212_656, 0.715_158, 0.072_185_6];
 /// `set_hue_saturaton_and_color_filters`' `scale`.
 const CONTRAST_SCALE: f32 = 10.0;
 
+/// `render_postprocess_blur`'s `flt`s, as ODST has them.
+const BLUR_OFFSET: f32 = -0.5;
+const BLUR_FLOOR: f32 = 0.35;
+const BLUR_BLEND: f32 = 300.0;
+/// `shader_count`'s limit in `s_screen_effect_shader_sample_result`.
+const MOST_SCREEN_SHADERS: usize = 8;
+
 /// What `evaluate_falloff` gives a function for its range.
 const FALLOFF_RANGE: f32 = 0.5;
 
@@ -38,6 +45,10 @@ pub(crate) struct H3ScreenSettings {
     gamma_reduce: f32,
     color_filter: [f32; 3],
     color_floor: [f32; 3],
+    /// ODST's `horizontal blur` and `vertical blur`.
+    blur: [f32; 2],
+    /// ODST's `fov in` and `fov out`, in stops of the view's tangent.
+    fov: [f32; 2],
 }
 
 impl Default for H3ScreenSettings {
@@ -54,6 +65,8 @@ impl Default for H3ScreenSettings {
             gamma_reduce: 0.0,
             color_filter: [1.0; 3],
             color_floor: [0.0; 3],
+            blur: [0.0; 2],
+            fov: [0.0; 2],
         }
     }
 }
@@ -76,6 +89,33 @@ impl H3ScreenSettings {
             self.color_filter[channel] = self.color_filter[channel].min(toward);
             most(&mut self.color_floor[channel], other.color_floor[channel]);
         }
+        for axis in 0..2 {
+            most(&mut self.blur[axis], other.blur[axis]);
+            most(&mut self.fov[axis], other.fov[axis]);
+        }
+    }
+
+    /// `c_player_view::render_postprocess_blur`: the blurred copy's spread by
+    /// axis, and how much of it covers the picture. None with neither blur on.
+    pub(crate) fn blur(&self) -> Option<([f32; 2], f32)> {
+        let [horizontal, vertical] = self.blur;
+        if horizontal <= 0.0 && vertical <= 0.0 {
+            return None;
+        }
+        let spread = self.blur.map(|blur| (blur + BLUR_OFFSET).max(BLUR_FLOOR));
+        Some((spread, (horizontal.max(vertical) * BLUR_BLEND / 255.0).clamp(0.0, 1.0)))
+    }
+
+    /// How much wider the view is than the preview's lens, by
+    /// `screen_effect_apply_field_of_view_scale`.
+    pub(crate) fn view_scale(&self, half_lens: f32) -> f32 {
+        let [fov_in, fov_out] = self.fov;
+        if (fov_out - fov_in).abs() <= 0.0001 {
+            return 1.0;
+        }
+        let half = (2f32.powf(fov_out - fov_in) * half_lens.tan()).atan();
+        let whole = (half * 2.0).clamp(1f32.to_radians(), 150f32.to_radians());
+        (whole * 0.5).tan() / half_lens.tan()
     }
 
     /// `set_hue_saturaton_and_color_filters`, for a color on the left of it.
@@ -179,6 +219,27 @@ struct H3ScreenDefinition {
     time_falloff: Option<TagFunction>,
     angle_falloff: Option<TagFunction>,
     object_falloff: Option<H3ObjectFalloff>,
+    /// ODST's `shader effect`, with its `render layer` and `sort order`.
+    shader: Option<(String, i32, i32)>,
+}
+
+/// A `shader_screen` to draw this frame, at this much of its effect.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct H3ScreenShader {
+    pub(crate) path: String,
+    pub(crate) alpha: f32,
+    layer: i32,
+    order: i32,
+}
+
+/// `s_screen_effect_shader_sample_result::accumulate_settings`: ahead of the
+/// first that sorts at or past it, and no more than the game keeps.
+fn insert_shader(shaders: &mut Vec<H3ScreenShader>, shader: H3ScreenShader) {
+    if shaders.len() >= MOST_SCREEN_SHADERS {
+        return;
+    }
+    let before = shaders.iter().position(|known| (known.layer, known.order) >= (shader.layer, shader.order));
+    shaders.insert(before.unwrap_or(shaders.len()), shader);
 }
 
 /// ODST's `screen_effect_scalar_object_function_struct`.
@@ -211,10 +272,11 @@ impl H3ScreenDefinition {
                 * at(&self.angle_falloff, angle / std::f32::consts::PI)
         };
         let object = self.object_falloff.as_ref().map_or(1.0, |falloff| {
-            let read = |name: &str| values.and_then(|values| values.get(name)).copied();
+            let read = |name: &str| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
             // With no input named, it reads how far through its life it is.
-            let input = read(&falloff.input).unwrap_or(time_input.clamp(0.0, 1.0));
-            falloff.mapping.evaluate(input.clamp(0.0, 1.0), read(&falloff.range).unwrap_or(FALLOFF_RANGE))
+            let input = if falloff.input.is_empty() { time_input } else { read(&falloff.input) };
+            let range = if falloff.range.is_empty() { FALLOFF_RANGE } else { read(&falloff.range) };
+            falloff.mapping.evaluate(input.clamp(0.0, 1.0), range)
         });
         camera * at(&self.time_falloff, time_input) * object
     }
@@ -227,7 +289,16 @@ fn shows_in_third_person(flagged: impl Fn(&str) -> bool) -> bool {
     !(flagged("unattached") || flagged("first person") || flagged("third person")) || flagged("third person")
 }
 
-fn read_definition(element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinition> {
+fn read_screen_shader(source: &TagSource, element: TagStruct<'_>) -> Option<(String, i32, i32)> {
+    let path = element.read_tag_ref_path("shader effect").filter(|path| !path.is_empty())?;
+    let tag = load_referenced_tag_from_source(source, &path, "shader_screen", b"rmss").ok()?;
+    let root = tag.root();
+    let layer = i32::from(root.read_enum_name("render layer").as_deref() != Some("pre-UI"));
+    let order = root.read_int_any("sort order").unwrap_or(0) as i32;
+    Some((path, layer, order))
+}
+
+fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinition> {
     let flags = element.read_flag_names("flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     // The preview's camera is a third person's, on nothing.
@@ -259,6 +330,8 @@ fn read_definition(element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinit
             gamma_reduce: real("gamma reduce"),
             color_filter: color("color filter"),
             color_floor: color("color floor"),
+            blur: [real("horizontal blur"), real("vertical blur")],
+            fov: [real("fov in"), real("fov out")],
         },
         radius: real("maximum distance"),
         delay,
@@ -269,12 +342,13 @@ fn read_definition(element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinit
         time_falloff: falloff("time falloff"),
         angle_falloff: falloff("angle falloff"),
         object_falloff,
+        shader: read_screen_shader(source, element),
     })
 }
 
 /// `s_area_screen_effect_definition::postprocess`: played in turn, each starts
 /// as the last ends, whatever its own `delay` says.
-fn read_definitions(root: TagStruct<'_>) -> Vec<H3ScreenDefinition> {
+fn read_definitions(source: &TagSource, root: TagStruct<'_>) -> Vec<H3ScreenDefinition> {
     let flags = root.read_flag_names("global flags").unwrap_or_default();
     let in_turn = flags.iter().any(|(_, name)| name.starts_with("play sequentially"));
     let mut start = 0.0;
@@ -283,7 +357,7 @@ fn read_definitions(root: TagStruct<'_>) -> Vec<H3ScreenDefinition> {
         let lifetime = element.read_real("lifetime").unwrap_or(0.0);
         let delay = if in_turn { start } else { element.read_real("delay").unwrap_or(0.0) };
         start += lifetime;
-        definitions.extend(read_definition(element, delay));
+        definitions.extend(read_definition(source, element, delay));
     }
     definitions
 }
@@ -304,6 +378,12 @@ impl H3ScreenEffectAt {
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
+
+    /// The object functions its object falloffs read.
+    pub(crate) fn object_inputs(&self) -> impl Iterator<Item = &str> {
+        let falloffs = self.definitions.iter().filter_map(|definition| definition.object_falloff.as_ref());
+        falloffs.flat_map(|falloff| [falloff.input.as_str(), falloff.range.as_str()]).filter(|name| !name.is_empty())
+    }
 }
 
 pub(super) fn read_h3_screen_effects(
@@ -322,7 +402,7 @@ pub(super) fn read_h3_screen_effects(
         let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "area_screen_effect", b"sefc") else {
             return;
         };
-        let definitions = Arc::new(read_definitions(tag.root()));
+        let definitions = Arc::new(read_definitions(source, tag.root()));
         if definitions.is_empty() {
             return;
         }
@@ -342,6 +422,23 @@ pub(super) fn read_h3_screen_effects(
     effects
 }
 
+/// Every `shader_screen` these can draw, as materials of no batch, which gives
+/// them the textures and passes of any other.
+pub(super) fn add_screen_shader_materials(preview: &mut RenderModelPreview) {
+    let group = u32::from_be_bytes(*b"rmss");
+    let wanted: Vec<String> = preview
+        .h3_screen_effects
+        .iter()
+        .flat_map(|effect| effect.definitions.iter())
+        .filter_map(|definition| definition.shader.as_ref().map(|(path, ..)| path.clone()))
+        .collect();
+    for shader_path in wanted {
+        if !preview.materials.iter().any(|material| material.shader_path == shader_path) {
+            preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group: group, ..Default::default() });
+        }
+    }
+}
+
 /// `screen_effect_sample`: what every running effect comes to from this camera.
 pub(crate) fn h3_screen_settings<'a>(
     effects: &[H3ScreenEffectAt],
@@ -350,8 +447,9 @@ pub(crate) fn h3_screen_settings<'a>(
     bones: Option<&[[f32; 4]]>,
     view: &CeFlareView,
     time: f32,
-) -> H3ScreenSettings {
+) -> (H3ScreenSettings, Vec<H3ScreenShader>) {
     let mut settings = H3ScreenSettings::default();
+    let mut shaders = Vec::new();
     for effect in effects {
         let scope = values(effect.object);
         let on = effect.scale_by.is_empty()
@@ -371,11 +469,15 @@ pub(crate) fn h3_screen_settings<'a>(
                 let falloff = definition.falloff(distance, angle, age, scope);
                 if falloff > 0.0 {
                     settings.accumulate(&definition.settings, falloff);
+                    if let Some((path, layer, order)) = &definition.shader {
+                        let shader = H3ScreenShader { path: path.clone(), alpha: falloff, layer: *layer, order: *order };
+                        insert_shader(&mut shaders, shader);
+                    }
                 }
             }
         }
     }
-    settings
+    (settings, shaders)
 }
 
 #[cfg(test)]
@@ -403,7 +505,44 @@ mod tests {
             time_falloff: None,
             angle_falloff: None,
             object_falloff: None,
+            shader: None,
         }
+    }
+
+    #[test]
+    fn a_blur_spreads_by_axis_and_covers_by_the_stronger() {
+        assert_eq!(H3ScreenSettings::default().blur(), None);
+        let (spread, cover) = H3ScreenSettings { blur: [2.0, 0.0], ..Default::default() }.blur().unwrap();
+        assert_eq!(spread, [1.5, BLUR_FLOOR]);
+        assert_eq!(cover, 1.0);
+        let (_, cover) = H3ScreenSettings { blur: [0.0, 0.17], ..Default::default() }.blur().unwrap();
+        assert!((cover - 0.2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_view_widens_by_stops_up_to_its_limit() {
+        let half = 30f32.to_radians();
+        assert_eq!(H3ScreenSettings::default().view_scale(half), 1.0);
+        let one_stop = H3ScreenSettings { fov: [0.0, 1.0], ..Default::default() }.view_scale(half);
+        assert!((one_stop - 2.0).abs() < 1e-4, "{one_stop}");
+        let narrower = H3ScreenSettings { fov: [1.0, 0.0], ..Default::default() }.view_scale(half);
+        assert!((narrower - 0.5).abs() < 1e-4, "{narrower}");
+        let most = H3ScreenSettings { fov: [0.0, 9.0], ..Default::default() }.view_scale(half);
+        assert!((most - 75f32.to_radians().tan() / half.tan()).abs() < 1e-3, "{most}");
+    }
+
+    #[test]
+    fn screen_shaders_sort_by_layer_then_order_and_stop_at_the_limit() {
+        let shader = |name: &str, layer, order| H3ScreenShader { path: name.to_owned(), alpha: 1.0, layer, order };
+        let mut shaders = Vec::new();
+        insert_shader(&mut shaders, shader("post", 1, 0));
+        insert_shader(&mut shaders, shader("b", 0, 5));
+        insert_shader(&mut shaders, shader("a", 0, 2));
+        insert_shader(&mut shaders, shader("c", 0, 5));
+        let names: Vec<_> = shaders.iter().map(|shader| shader.path.as_str()).collect();
+        assert_eq!(names, ["a", "c", "b", "post"], "the later of equals goes first");
+        (0..9).for_each(|at| insert_shader(&mut shaders, shader("more", 2, at)));
+        assert_eq!(shaders.len(), MOST_SCREEN_SHADERS);
     }
 
     #[test]

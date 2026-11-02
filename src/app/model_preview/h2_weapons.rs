@@ -590,6 +590,7 @@ fn fold_attached(
         super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview);
         let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
         preview.h3_screen_effects.extend(screens);
+        super::h3_screen_effects::add_screen_shader_materials(preview);
         preview.h3_lights.extend(lights.into_iter().map(|light| light.on_attached(name)));
         preview.h3_flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
     } else {

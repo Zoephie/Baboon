@@ -5,6 +5,7 @@
 use super::*;
 use blam_tags::render_method::{
     BitmapAddressMode, ParameterSource, RenderMethod, RenderMethodAnimatedParameterType,
+    RenderMethodBitmapExternMode,
     RenderMethodDefinition, RenderMethodOption, RenderMethodParameter, RenderMethodParameterType, ResolvedRenderMethod,
     ResolvedValue,
 };
@@ -606,7 +607,11 @@ fn prepare_h3_material(
     // `render_albedo_decals`: into the albedo target, to be lit with what's under.
     let decal = definition.is_decal();
     let lit_entry = if decal { &"default" } else { lit_entry };
-    let lit = sources.pass(&definition, &options, lit_entry, own_albedo)?;
+    let lit = if definition.name == "screen" {
+        sources.screen_pass(&definition, &options)?
+    } else {
+        sources.pass(&definition, &options, lit_entry, own_albedo)?
+    };
     let albedo = (opaque && definition.entry_points.iter().any(|entry| entry == "albedo"))
         .then(|| sources.pass(&definition, &options, "albedo", false))
         .transpose()?;
@@ -623,9 +628,16 @@ fn prepare_h3_material(
             *slot = Some(sources.pass(&definition, &options, entry, own_albedo)?);
         }
     }
+    let screen_maps = method
+        .parameters
+        .iter()
+        .filter(|parameter| parameter.bitmap_extern_mode == Some(RenderMethodBitmapExternMode::Screen))
+        .map(|parameter| parameter.parameter_name.clone())
+        .collect();
     let mut material = H3Material {
         albedo,
         lit,
+        screen_maps,
         decal,
         after_lighting: definition.after_lighting(&options),
         sort_layer: values.sort_layer,
