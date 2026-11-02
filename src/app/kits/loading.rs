@@ -1143,6 +1143,7 @@ impl Baboon {
         };
         kit.field_index.invalidate();
         kit.generation = new_generation;
+        self.refresh_recent_entries_for(kit_index);
         error
     }
 }

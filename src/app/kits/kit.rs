@@ -317,6 +317,7 @@ impl Baboon {
         let Some(index) = self.model.kit_index(id) else {
             return;
         };
+        self.remember_closed_tag_keys(index, self.views[id].tabs_from_tree());
         let closing_campaign_evolved = self.model.kits[index]
             .source
             .as_ref()

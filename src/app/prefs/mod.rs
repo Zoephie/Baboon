@@ -271,6 +271,10 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
         ),
         recent_folders: load_path_list(&value, "recent_folders"),
         editing_kit_favorites: load_editing_kit_favorites(&value),
+        editing_kit_recents: load_kit_path_lists(&value, "editing_kit_recents").into_iter().map(|kit| {
+            EditingKitRecents { tags_root: kit.tags_root, tags: kit.tags.into_iter().take(5).collect() }
+        }).filter(|kit| !kit.tags.is_empty()).collect(),
+        recents_handled_session: value.get("recents_handled_session").and_then(Value::as_str).map(str::to_owned),
         custom_color_swatches: load_custom_color_swatches(&value),
         palette_last_dir: value
             .get("palette_last_dir")
@@ -391,7 +395,11 @@ fn load_editing_kit_paths(value: &Value) -> HashMap<String, PathBuf> {
 }
 
 fn load_editing_kit_favorites(value: &Value) -> Vec<EditingKitFavorites> {
-    let Some(kits) = value.get("editing_kit_favorites").and_then(Value::as_array) else {
+    load_kit_path_lists(value, "editing_kit_favorites")
+}
+
+fn load_kit_path_lists(value: &Value, field: &str) -> Vec<EditingKitFavorites> {
+    let Some(kits) = value.get(field).and_then(Value::as_array) else {
         return Vec::new();
     };
     let mut favorites: Vec<EditingKitFavorites> = Vec::new();
@@ -821,6 +829,11 @@ fn prefs_to_value(
         "terminal_open_games": games,
     });
     value["app_shortcuts"] = json!(prefs.app_shortcuts);
+    value["editing_kit_recents"] = json!(prefs.editing_kit_recents.iter().filter(|kit| !kit.tags.is_empty()).map(|kit| {
+        json!({ "tags_root": kit.tags_root.display().to_string(),
+            "tags": kit.tags.iter().map(|path| path.display().to_string()).collect::<Vec<_>>() })
+    }).collect::<Vec<_>>());
+    value["recents_handled_session"] = json!(prefs.recents_handled_session);
     value["kit_shortcut_layouts"] = json!(prefs.kit_shortcut_layouts);
     value["shortcut_order"] = json!(prefs.shortcut_order);
     value["shortcut_overrides"] = json!(prefs.shortcut_overrides);
@@ -1193,6 +1206,19 @@ mod tests {
             vec![PathBuf::from("objects/brute.model")]
         );
         assert!(favorites[1].folders.is_empty());
+    }
+
+    #[test]
+    fn recent_closed_tags_round_trip_in_order_and_reject_unsafe_and_duplicate_paths() {
+        let prefs = prefs_from_value(&json!({ "editing_kit_recents": [
+            { "tags_root": "C:/kit/tags", "tags": ["../outside.model", "objects/b.model", "objects/b.model", "objects/a.model",
+                "objects/c.model", "objects/d.model", "objects/e.model", "objects/f.model"] }
+        ], "recents_handled_session": "snapshot-token" }));
+        assert_eq!(prefs.editing_kit_recents[0].tags, ["b", "a", "c", "d", "e"].map(|name| PathBuf::from(format!("objects/{name}.model"))));
+        let decoded = prefs_from_value(&prefs_to_value(&prefs, &HashSet::new(), true));
+        assert_eq!(decoded.editing_kit_recents, prefs.editing_kit_recents);
+        assert_eq!(decoded.recents_handled_session.as_deref(), Some("snapshot-token"));
+        assert!(prefs_from_value(&json!({})).editing_kit_recents.is_empty());
     }
 
     #[test]

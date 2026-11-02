@@ -964,6 +964,9 @@ fn draw_kit_browser_inner(
                 if add_shortcut {
                     cx.open_dialog(crate::app::shell::shortcuts::AddShortcutDialog::for_kit(cx.model, kit_index));
                 }
+                let recent_action = draw_recents(ui, &view.browser.recent_entries, selected.as_deref(),
+                    &filter, show_prefixes, double_click_to_open, &favorite_keys,
+                    view.browser.search_scope, &search_keywords, game);
                 browser_favorites_divider(ui, true);
 
                 let tree_action = if !filter.is_empty() {
@@ -1098,7 +1101,7 @@ fn draw_kit_browser_inner(
                         }
                     }
                 };
-                favorite_action.or(tree_action)
+                favorite_action.or(recent_action).or(tree_action)
             })
             .inner;
         if !load_requests.is_empty() {

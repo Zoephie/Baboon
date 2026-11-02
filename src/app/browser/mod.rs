@@ -17,6 +17,9 @@ mod filter;
 mod folder_table;
 mod tree;
 mod navigation;
+mod recents;
+use recents::draw_recents;
+pub(in crate::app) use recents::recent_relative_path;
 use navigation::*;
 pub(in crate::app) use navigation::invalidate_browser_navigation;
 
@@ -353,6 +356,7 @@ pub(in crate::app) struct BrowserFeature {
 /// each with what it was built from.
 #[derive(Default)]
 pub(in crate::app) struct KitBrowser {
+    pub(in crate::app) recent_entries: Vec<TagEntry>,
     /// Tag key or `folder_pane_key` selected independently of the editor tabs.
     pub(in crate::app) selected_tag: Option<String>,
     /// How this kit's browser lists tags, and in what order. Per kit because

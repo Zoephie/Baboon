@@ -127,6 +127,7 @@ impl Baboon {
     /// tags root. Kit-scoped because a finished background refactor refreshes
     /// the workspace it belonged to, which need not be the focused one.
     pub(in crate::app) fn refresh_favorite_entries_for(&mut self, kit: usize) {
+        self.refresh_recent_entries_for(kit);
         self.model.kits[kit].active_favorite_entries.clear();
         self.model.kits[kit].active_favorite_folders.clear();
         let Some(root) = self.model.loaded_tags_root_for(kit) else {
@@ -290,6 +291,10 @@ impl Baboon {
         let Some(root) = self.model.loaded_tags_root_for(kit) else {
             return;
         };
+        if let Some(recents) = self.model.prefs.editing_kit_recents.iter_mut().find(|kit| same_recent_path(&kit.tags_root, &root)) {
+            remap_favorite_paths(&root, &mut recents.tags, old_to_new_keys);
+        }
+        self.refresh_recent_entries_for(kit);
         let Some(index) = self.model.favorite_kit_index(&root) else {
             return;
         };

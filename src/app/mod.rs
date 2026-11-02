@@ -276,8 +276,12 @@ impl Baboon {
             .then(load_last_session)
             .flatten()
             .and_then(|session| {
-                LastOpenedWindowsPrompt::from_session(session, &prefs.custom_editing_kit_profiles)
+                let mut prompt = LastOpenedWindowsPrompt::from_session(session, &prefs.custom_editing_kit_profiles)?;
+                prompt.recents_token = shell::session::last_session_recents_token();
+                Some(prompt)
             });
+        let skipped_session = (prefs.session_restore == SessionRestore::Never)
+            .then(|| last_session.as_ref().map(|prompt| prompt.skipped_recents(&prefs, false))).flatten();
         let (last_opened_windows, auto_restore_session) = match prefs.session_restore {
             SessionRestore::Always => match last_session {
                 Some(prompt) if prompt.has_reopenable_kits() => (None, Some(prompt.checked_kits())),
@@ -300,6 +304,7 @@ impl Baboon {
         if let Some(kits) = auto_restore_session {
             app.begin_last_session_restore(kits, cc.egui_ctx.clone());
         }
+        if let Some(skipped) = skipped_session { skipped.apply(&mut app.model.prefs); }
         match startup_arguments {
             StartupArguments::Normal => {}
             StartupArguments::Launch(launch) => {

@@ -1092,6 +1092,7 @@ mod tests {
             pending_launch_tags: _,
         } = RestorePlan::default();
         let KitBrowser {
+            recent_entries: _,
             // Carried by `rekey_tag_in_kit`, including each folder browser.
             selected_tag: _,
             // Dropped by `rekey_tag_in_kit`, deliberately.

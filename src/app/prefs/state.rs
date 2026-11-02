@@ -117,6 +117,13 @@ pub(in crate::app) struct EditingKitFavorites {
     pub(in crate::app) folders: Vec<PathBuf>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) struct EditingKitRecents {
+    pub(in crate::app) tags_root: PathBuf,
+    /// Most recently closed first; paths are relative to tags_root.
+    pub(in crate::app) tags: Vec<PathBuf>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::app) struct EditingKitShortcut {
     pub(in crate::app) label: &'static str,
@@ -500,6 +507,8 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) tool_commands_collapsed_categories: HashSet<String>,
     pub(in crate::app) recent_folders: Vec<PathBuf>,
     pub(in crate::app) editing_kit_favorites: Vec<EditingKitFavorites>,
+    pub(in crate::app) editing_kit_recents: Vec<EditingKitRecents>,
+    pub(in crate::app) recents_handled_session: Option<String>,
     pub(in crate::app) custom_color_swatches: Vec<Option<ColorPaletteSwatch>>,
     pub(in crate::app) palette_last_dir: Option<PathBuf>,
     /// Editing-kit profiles and folder aliases naming a game this build does
@@ -576,6 +585,8 @@ impl Default for GuiPrefs {
             tool_commands_collapsed_categories: HashSet::new(),
             recent_folders: Vec::new(),
             editing_kit_favorites: Vec::new(),
+            editing_kit_recents: Vec::new(),
+            recents_handled_session: None,
             custom_color_swatches: default_color_swatches(),
             palette_last_dir: None,
             unusable_kit_entries: UnusableKitEntries::default(),

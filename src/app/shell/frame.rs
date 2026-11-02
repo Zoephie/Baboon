@@ -3908,6 +3908,7 @@ mod tests {
                 welcome,
                 |h| {
                     h.app.dialogs.open(LastOpenedWindowsPrompt {
+                        recents_token: None,
                         kits: vec![crate::app::shell::session::LastOpenedWindowsKit {
                             checked: true,
                             source_kind: crate::app::shell::session::LastSessionSourceKind::LooseFolder,
