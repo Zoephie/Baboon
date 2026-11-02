@@ -75,16 +75,12 @@ fn inverse(value: f32) -> f32 {
     if value > 0.0 { 1.0 / value } else { 0.0 }
 }
 
-fn transition(map_to: usize, value: f32) -> f32 {
-    let value = value.clamp(0.0, 1.0);
-    match map_to {
-        1 => value.powf(0.5),
-        2 => value.powf(0.25),
-        3 => value.powi(2),
-        4 => value.powi(4),
-        5 => ((value * std::f32::consts::PI - std::f32::consts::FRAC_PI_2).sin() + 1.0) * 0.5,
-        _ => value,
-    }
+/// `object_compute_function_values`' clock for the object `owner` (0 the
+/// opened one, 1 the weapon it holds): the game's time plus 57 ticks per
+/// object index, so like objects run out of step. The game uses the object's
+/// datum index; the owner stands in for it.
+pub(super) fn object_time(time: f32, owner: u8) -> f32 {
+    time + 57.0 * f32::from(owner) / TICKS_PER_SECOND
 }
 
 impl CeFunction {
@@ -167,7 +163,7 @@ impl CeFunction {
         if self.scale_result_by != 0 {
             value *= values[self.scale_result_by];
         }
-        let mut value = transition(self.map_to, value);
+        let mut value = super::ce_lights::transition_evaluate(self.map_to as i32, value);
         if self.scale_by > 0.0 {
             value *= self.scale_by;
         }
@@ -341,7 +337,7 @@ pub(super) fn draw_ce_function_controls(
     if values != before {
         set.insert(key, values);
     }
-    let time = ui.input(|input| input.time) as f32;
+    let time = object_time(ui.input(|input| input.time) as f32, key.1);
     let outputs = functions.outputs(&values, time);
     for (index, function) in functions.functions.iter().take(OUTPUTS.len()).enumerate() {
         let text = format!("{}: {:.2}  {}", OUTPUTS[index], outputs[index], function.usage);
@@ -474,7 +470,8 @@ mod tests {
         let glow = CeFunction { scale_function_by: 1, map_to: 2, ..function(0) };
         let objects = CeObjectFunctions { functions: vec![glow], ..Default::default() };
         assert_eq!(objects.outputs(&[0.0; 4], 3.0)[0], 0.0);
-        assert!((objects.outputs(&[0.5, 0.0, 0.0, 0.0], 3.0)[0] - 0.5f32.powf(0.25)).abs() < 1e-5);
+        // `transition_function_evaluate` reads a byte table: within a step of it.
+        assert!((objects.outputs(&[0.5, 0.0, 0.0, 0.0], 3.0)[0] - 0.5f32.powf(0.25)).abs() < 1.0 / 255.0);
     }
 
     #[test]

@@ -303,9 +303,15 @@ impl H2LiquidAt {
         view: &CeFlareView,
         time: f32,
     ) -> Vec<CeAntennaQuad> {
-        // `sub_515280`: what an effect's part of no duration asks for is all of it.
-        let running = self.scale_by.is_empty() || values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0) > 0.0;
-        if !running {
+        // `sub_515280`: what an effect's part of no duration asks for is all
+        // of it. `rasterizer_liquid_draw` keeps the scale as a byte and dims
+        // the whole arc by it.
+        let scale = if self.scale_by.is_empty() {
+            1.0
+        } else {
+            values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0).clamp(0.0, 1.0)
+        };
+        if scale <= 0.0 {
             return Vec::new();
         }
         let (origin, forward) = posed_on(self.node, self.position, self.forward, bones);
@@ -348,7 +354,7 @@ impl H2LiquidAt {
                 })
                 .collect();
             for (index, core) in arc.cores.iter().enumerate() {
-                let bright = shine * core.time.evaluate(index as f32 + time, 0.0) * core.facing.evaluate(facing, 0.0);
+                let bright = shine * scale * core.time.evaluate(index as f32 + time, 0.0) * core.facing.evaluate(facing, 0.0);
                 let alpha = bright.clamp(0.0, 1.0);
                 if alpha <= 0.0 {
                     continue;
@@ -360,13 +366,21 @@ impl H2LiquidAt {
                     if thick <= 0.0 {
                         continue;
                     }
+                    // `sub_94C450`: a segment with either end behind the eye
+                    // draws nothing; the sprite sits halfway along it.
+                    let behind = |point: [f32; 3]| {
+                        dot(std::array::from_fn(|axis| point[axis] - view.eye[axis]), view.forward) <= 0.0
+                    };
+                    if behind(points[at]) || behind(points[at + 1]) {
+                        continue;
+                    }
                     let segment: [f32; 3] = std::array::from_fn(|axis| points[at + 1][axis] - points[at][axis]);
                     let (across, rise) = (dot(segment, view.right), dot(segment, view.up));
                     let length = (across * across + rise * rise).sqrt();
                     let (cos, sin) = if length > 0.0 { (across / length, rise / length) } else { (1.0, 0.0) };
                     let side: [f32; 3] = std::array::from_fn(|axis| view.right[axis] * cos + view.up[axis] * sin);
                     let lift: [f32; 3] = std::array::from_fn(|axis| view.up[axis] * cos - view.right[axis] * sin);
-                    let center = points[at];
+                    let center: [f32; 3] = std::array::from_fn(|axis| (points[at][axis] + points[at + 1][axis]) * 0.5);
                     let corner = |x: f32, y: f32, u: f32, v: f32| -> [f32; 5] {
                         let [a, b, c] = std::array::from_fn(|axis| center[axis] + side[axis] * x * long + lift[axis] * y * thick);
                         [a, b, c, u, v]

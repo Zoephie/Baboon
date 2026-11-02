@@ -48,6 +48,8 @@ enum Spacing {
 pub(crate) struct H2Volume {
     count: usize,
     fuzzy: bool,
+    /// `scaled by marker`, read off the first volume for them all.
+    scaled_by_marker: bool,
     spacing: Spacing,
     offset: TagFunction,
     radius: TagFunction,
@@ -69,6 +71,11 @@ pub(crate) struct H2LightVolume {
     forward: [f32; 3],
     falloff: [f32; 2],
     scale_by: String,
+    /// What `render_submit_object_attachments` gives it: the marker's scale,
+    /// for offsets and radii, if its first volume asks; and which change
+    /// color tints it, if any.
+    marker_scale: f32,
+    change_color: Option<usize>,
     volumes: Arc<Vec<H2Volume>>,
 }
 
@@ -116,6 +123,7 @@ fn read_volume(source: &TagSource, volume: TagStruct<'_>, glow: Option<&Arc<H2Im
     Some(H2Volume {
         count,
         fuzzy: flagged("fuzzy"),
+        scaled_by_marker: flagged("scaled by marker"),
         spacing: postprocessed_spacing(
             &radius,
             count,
@@ -165,15 +173,15 @@ pub(super) fn read_h2_light_volumes(
         let Some((kind, path)) = attachment.read_tag_ref_with_group("type").filter(|(_, path)| !path.is_empty()) else {
             continue;
         };
-        let (path, first_only) = if kind == volume_group {
-            (path, false)
+        let (path, attached) = if kind == volume_group {
+            (path, true)
         } else if kind == light_group {
             let Ok(light) = load_referenced_tag_from_source(source, &path, "light", b"ligh") else {
                 continue;
             };
             let named = light.root().read_tag_ref_path("light volume").filter(|path| !path.is_empty());
             match named.filter(|_| super::h2_lights::light_can_shine(light.root())) {
-                Some(named) => (named, true),
+                Some(named) => (named, false),
                 None => continue,
             }
         } else {
@@ -188,10 +196,13 @@ pub(super) fn read_h2_light_volumes(
         let volumes = elements(root, "volumes");
         let volumes: Vec<H2Volume> =
             volumes.iter().filter_map(|volume| read_volume(source, *volume, glow.as_ref())).collect();
+        let scaled_by_marker = volumes.first().is_some_and(|volume| volume.scaled_by_marker);
         let volumes = Arc::new(volumes);
         let name = marker_name(attachment, "marker");
+        // `sub_86F0D0`: none, or one of the four. A light's own volume is white.
+        let change_color = usize::try_from(attachment.read_int_any("change color").unwrap_or(0) - 1).ok().filter(|_| attached);
         let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
-        for marker in named.take(if first_only { 1 } else { usize::MAX }) {
+        for marker in named.take(if attached { usize::MAX } else { 1 }) {
             let (place, node) = frame(marker);
             found.push(H2LightVolume {
                 object: owner,
@@ -201,6 +212,8 @@ pub(super) fn read_h2_light_volumes(
                 forward: place.axes[0],
                 falloff: [real("falloff distance from camera"), real("cutoff distance from camera")],
                 scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
+                marker_scale: if attached && scaled_by_marker { marker.scale } else { 1.0 },
+                change_color,
                 volumes: Arc::clone(&volumes),
             });
         }
@@ -400,9 +413,11 @@ impl H2LightVolume {
         &self,
         volume: &H2Volume,
         values: Option<&H2FunctionValues>,
+        change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
     ) -> Vec<CeAntennaQuad> {
+        let tint_by = self.change_color.and_then(|index| change_colors.get(index)).copied().unwrap_or([1.0; 3]);
         let (origin, forward) = posed_on(self.node, self.position, self.forward, bones);
         let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - origin[axis]);
         let distance = dot(to_eye, to_eye).sqrt();
@@ -418,18 +433,29 @@ impl H2LightVolume {
         let amount = volume.aspect.as_ref().map_or(0.0, |aspect| {
             aspect_amount(aspect.threshold, aspect.exponent, facing_cosine)
         });
-        // The axis on the screen, which the quads turn to lie along.
-        let (across, up) = (dot(forward, view.right), dot(forward, view.up));
-        let length = (across * across + up * up).sqrt();
-        let (cos, sin) = if length > 0.0 { (across / length, up / length) } else { (1.0, 0.0) };
+        // `light_volume_sprite_aspect`: only a volume stretching along its
+        // axis turns its quads to lie along it, as the axis runs on the
+        // screen (both ends projected; here the projection's derivative at
+        // the origin, which points the same way).
+        let (cos, sin) = if amount > 0.0 {
+            let depth = dot(to_eye, view.forward).abs().max(f32::EPSILON);
+            let toward = dot(forward, view.forward);
+            let (x, y) = (-dot(to_eye, view.right), -dot(to_eye, view.up));
+            let across = dot(forward, view.right) * depth - x * toward;
+            let up = dot(forward, view.up) * depth - y * toward;
+            let length = (across * across + up * up).sqrt();
+            if length > 0.0 { (across / length, up / length) } else { (1.0, 0.0) }
+        } else {
+            (1.0, 0.0)
+        };
         let side: [f32; 3] = std::array::from_fn(|axis| view.right[axis] * cos + view.up[axis] * sin);
         let lift: [f32; 3] = std::array::from_fn(|axis| view.up[axis] * cos - view.right[axis] * sin);
         let geometric = (volume.spacing == Spacing::Geometric).then(|| Geometric::of(&volume.radius, volume.count, facing));
         (0..volume.count)
             .filter_map(|sprite| {
                 let along = volume.place_along(sprite, facing, geometric.as_ref());
-                let offset = volume.offset.evaluate(along, facing);
-                let radius = volume.radius.evaluate(along, facing);
+                let offset = volume.offset.evaluate(along, facing) * self.marker_scale;
+                let radius = volume.radius.evaluate(along, facing) * self.marker_scale;
                 let shine = volume.brightness.evaluate(along, facing);
                 let (wide, high) = volume.aspect.as_ref().map_or((1.0, 1.0), |aspect| {
                     let base = aspect.parallel_scale;
@@ -450,7 +476,9 @@ impl H2LightVolume {
                 }
                 let alpha = (shine * brightness).clamp(0.0, 1.0);
                 let color = volume.color.evaluate_color(along, facing);
-                let tint = [color.red, color.green, color.blue].map(|channel| channel.clamp(0.0, 1.0) * alpha);
+                let tint = std::array::from_fn::<f32, 3, _>(|channel| {
+                    [color.red, color.green, color.blue][channel].clamp(0.0, 1.0) * tint_by[channel] * alpha
+                });
                 let center: [f32; 3] = std::array::from_fn(|axis| origin[axis] + forward[axis] * offset);
                 let corner = |x: f32, y: f32, u: f32, v: f32| -> [f32; 5] {
                     let [a, b, c] = std::array::from_fn(|axis| {

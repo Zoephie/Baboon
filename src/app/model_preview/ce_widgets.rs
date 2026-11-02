@@ -77,12 +77,7 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
         return None;
     }
     let name = root.read_string("attachment marker").unwrap_or_default();
-    let (node, position, forward) = if name.is_empty() {
-        (0, [0.0; 3], [1.0, 0.0, 0.0])
-    } else {
-        let marker = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name))?;
-        (marker.node_index.max(0) as usize, marker.position, marker.axes[0])
-    };
+    let (node, position, forward) = super::ce_lights::marker_or_origin(markers, &name, owner)?;
     // `rasterizer_widget_set_texture`: no map is the globals' `glow`.
     let image = match root.read_tag_ref_path("map").filter(|path| !path.is_empty()) {
         Some(map) => {
@@ -273,7 +268,8 @@ pub(crate) struct CeLightning {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CeLightningQuad {
     pub(crate) corners: [[f32; 5]; 4],
-    pub(crate) color: [f32; 4],
+    /// Each corner's color: `lightning_submit` writes one per vertex.
+    pub(crate) colors: [[f32; 4]; 4],
 }
 
 fn slot(value: Option<i128>) -> Option<usize> {
@@ -283,6 +279,12 @@ fn slot(value: Option<i128>) -> Option<usize> {
 fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightning> {
     let tag = load_referenced_tag_from_source(source, path, "lightning", b"elec").ok()?;
     let root = tag.root();
+    // `lightning_submit` draws nothing unless the first marker is found; an
+    // empty name counts, as the object's origin.
+    let first = elements(root, "markers").first()?.read_string("attachment marker").unwrap_or_default();
+    if !first.is_empty() && !markers.iter().any(|marker| marker.name.eq_ignore_ascii_case(&first)) {
+        return None;
+    }
     let found = elements(root, "markers")
         .iter()
         .map(|entry| {
@@ -491,8 +493,8 @@ impl CeLightning {
         for at in 0..last {
             let (top, bottom, near) = vertex(at);
             let (next_top, next_bottom, far) = vertex(at + 1);
-            let color = std::array::from_fn(|channel| ((near[channel] + far[channel]) * 0.5).clamp(0.0, 1.0));
-            quads.push(CeLightningQuad { corners: [top, next_top, bottom, next_bottom], color });
+            let [near, far] = [near, far].map(|color| color.map(|channel| channel.clamp(0.0, 1.0)));
+            quads.push(CeLightningQuad { corners: [top, next_top, bottom, next_bottom], colors: [near, far, near, far] });
         }
     }
 }
@@ -1103,7 +1105,7 @@ impl CeGlowField {
                     index,
                     CeLightningQuad {
                         corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
-                        color: [red.clamp(0.0, 1.0), green.clamp(0.0, 1.0), blue.clamp(0.0, 1.0), particle.fade.clamp(0.0, 1.0)],
+                        colors: [[red, green, blue, particle.fade].map(|channel| channel.clamp(0.0, 1.0)); 4],
                     },
                 ));
             }

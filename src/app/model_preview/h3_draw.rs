@@ -1026,17 +1026,9 @@ impl ModelGlRenderer {
         let uploaded = &mut self.slots[slot];
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let written = uploaded.h3_cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
-        unsafe {
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(uploaded.vertex_buffer));
-            for (first, moved) in written {
-                let mut vertices = frame.preview.vertices[first..first + moved.len()].to_vec();
-                for (vertex, moved) in vertices.iter_mut().zip(&moved) {
-                    vertex.position = moved.position;
-                    vertex.normal = moved.normal;
-                }
-                let offset = first * size_of::<RenderModelPreviewVertex>();
-                gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, offset as i32, slice_bytes(&vertices));
-            }
+        for (first, moved) in written {
+            let moved = moved.iter().map(|vertex| (vertex.position, vertex.normal));
+            unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
         }
     }
 

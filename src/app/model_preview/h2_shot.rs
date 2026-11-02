@@ -161,6 +161,14 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         });
     }
     let time = std::env::var("H2_SHOT_TIME").map_or(0.0, |time| time.parse().unwrap());
+    // `H2_SHOT_MODE=solid|wire|solid_wire|textured|textured_wire`.
+    let render_mode = match std::env::var("H2_SHOT_MODE").as_deref() {
+        Ok("solid") => ModelRenderMode::Solid,
+        Ok("wire") => ModelRenderMode::Wireframe,
+        Ok("solid_wire") => ModelRenderMode::SolidWireframe,
+        Ok("textured_wire") => ModelRenderMode::TexturedWireframe,
+        _ => state.render_mode,
+    };
     let frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
@@ -168,11 +176,11 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         textures_id: data.textures_id,
         visible_batches,
         camera: camera.gpu_uniforms(),
-        render_mode: state.render_mode,
+        render_mode,
         background: preview_background(&egui::Visuals::dark()),
         show_backfaces: state.show_backfaces,
         show_grid: false,
-        textures: data.textures.clone(),
+        textures: render_mode.uses_textures().then(|| data.textures.clone()).flatten(),
         bones: animation_skinning_rows(&data, &state).map(Arc::new),
         game_shaders: state.h2_game_shaders,
         default_lights: state.h2_default_lights,

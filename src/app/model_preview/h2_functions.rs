@@ -19,15 +19,55 @@ pub(crate) type H2FunctionInputs = HashMap<(u64, String), f32>;
 /// Every name an object answers to this frame.
 pub(crate) type H2FunctionValues = HashMap<String, f32>;
 
-const INVERT: i128 = 1;
-const MAPPING_CONTROLS_ACTIVE: i128 = 2;
-const ALWAYS_ACTIVE: i128 = 4;
+/// A function's `flags`, by option name.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct FunctionFlags {
+    invert: bool,
+    /// `mapping does not controls active`: an inactive input passes through
+    /// unmapped, and the curve's value does not decide whether it is on.
+    mapping_does_not_control_active: bool,
+    always_active: bool,
+    /// `random time offset`: a periodic function runs ahead by a fraction of
+    /// a second that differs per object.
+    random_time_offset: bool,
+}
+
+impl FunctionFlags {
+    fn read(entry: TagStruct<'_>) -> Self {
+        let names = entry.read_flag_names("flags").unwrap_or_default();
+        // Option names carry their explanation after a `#`.
+        let set = |wanted: &str| names.iter().any(|(_, name)| name.split('#').next() == Some(wanted));
+        Self {
+            invert: set("invert"),
+            mapping_does_not_control_active: set("mapping does not controls active"),
+            always_active: set("always active"),
+            random_time_offset: set("random time offset"),
+        }
+    }
+}
+
+/// The time functions run on, and the seconds a `random time offset` one
+/// runs ahead for this object: `object_function_evaluate` hashes the object's
+/// handle, `((1664525 * object + 1013904223) >> 16) / 65535`. The preview's
+/// owner (0 the opened object) stands in for the handle.
+#[derive(Debug, Clone, Copy, Default)]
+struct Clock {
+    time: f32,
+    offset: f32,
+}
+
+impl Clock {
+    fn of(time: f32, owner: u8) -> Self {
+        let hashed = u32::from(owner).wrapping_mul(1_664_525).wrapping_add(1_013_904_223) >> 16;
+        Self { time, offset: hashed as f32 / 65_535.0 }
+    }
+}
 /// How far `scale by` can chain before it has to be a loop.
 const DEEPEST_CHAIN: usize = 8;
 
 #[derive(Debug, Clone)]
 struct H2ObjectFunction {
-    flags: i128,
+    flags: FunctionFlags,
     import: String,
     export: String,
     turn_off_with: String,
@@ -60,7 +100,7 @@ impl H2ObjectFunction {
         owner: &H2ObjectFunctions,
         inputs: &H2FunctionValues,
         scripted: &H2FunctionValues,
-        time: f32,
+        clock: Clock,
         depth: usize,
     ) -> (f32, bool) {
         // A script's value for the import is the function's, unmapped.
@@ -68,28 +108,29 @@ impl H2ObjectFunction {
             return (*value, true);
         }
         let (input, mut active) = exported(&self.import, inputs);
-        let mapping_controls = self.flags & MAPPING_CONTROLS_ACTIVE != 0;
+        let mapping_passes = self.flags.mapping_does_not_control_active;
         let mut value;
         if self.is_periodic() {
+            let time = if self.flags.random_time_offset { clock.time + clock.offset } else { clock.time };
             value = self.function.evaluate(time, 1.0) * input;
-        } else if !active && mapping_controls {
+        } else if !active && mapping_passes {
             value = input;
         } else {
-            let inverted = if self.flags & INVERT != 0 { 1.0 - input } else { input };
+            let inverted = if self.flags.invert { 1.0 - input } else { input };
             value = self.function.evaluate(inverted, 1.0);
-            if !mapping_controls {
+            if !mapping_passes {
                 active = value > 0.0;
             }
         }
         if !self.scale_by.is_empty() {
-            let (scale, scaled) = owner.value(&self.scale_by, inputs, scripted, time, depth + 1);
+            let (scale, scaled) = owner.value(&self.scale_by, inputs, scripted, clock, depth + 1);
             value *= scale;
             active = active && scaled;
         }
         if active && self.min_value > 0.0 {
             active = value > self.min_value;
         }
-        if self.flags & ALWAYS_ACTIVE != 0 {
+        if self.flags.always_active {
             active = true;
         }
         if active && !self.turn_off_with.is_empty() {
@@ -109,7 +150,7 @@ impl H2ObjectFunctions {
         name: &str,
         inputs: &H2FunctionValues,
         scripted: &H2FunctionValues,
-        time: f32,
+        clock: Clock,
         depth: usize,
     ) -> (f32, bool) {
         if let Some(value) = scripted.get(name) {
@@ -123,7 +164,7 @@ impl H2ObjectFunctions {
         }
         let last = self.functions.iter().rev().find(|function| function.export == name);
         match last {
-            Some(function) => function.evaluate(self, inputs, scripted, time, depth),
+            Some(function) => function.evaluate(self, inputs, scripted, clock, depth),
             None => exported(name, inputs),
         }
     }
@@ -169,13 +210,16 @@ impl H2ObjectFunctions {
     }
 
     /// Every name this frame, for what reads them.
+    /// `owner` is 0 for the opened object, else the attached one's number.
     pub(crate) fn values(
         &self,
         inputs: &H2FunctionInputs,
         geometry_id: u64,
         extra: &[String],
         time: f32,
+        owner: u8,
     ) -> H2FunctionValues {
+        let clock = Clock::of(time, owner);
         let mut set = H2FunctionValues::new();
         let names = self.imports().into_iter().map(str::to_owned).chain(extra.iter().cloned());
         for name in names {
@@ -196,7 +240,7 @@ impl H2ObjectFunctions {
             .collect();
         let mut values = set.clone();
         for function in &self.functions {
-            let (value, _) = self.value(&function.export, &set, &scripted, time, 0);
+            let (value, _) = self.value(&function.export, &set, &scripted, clock, 0);
             values.insert(function.export.clone(), value);
         }
         values
@@ -213,7 +257,7 @@ pub(crate) fn read_h2_object_functions(object: &TagFile) -> Option<H2ObjectFunct
         .filter_map(|entry| {
             let entry = *entry;
             Some(H2ObjectFunction {
-                flags: entry.read_int_any("flags").unwrap_or(0),
+                flags: FunctionFlags::read(entry),
                 import: name(entry, "import name"),
                 export: name(entry, "export name"),
                 turn_off_with: name(entry, "turn off with"),
@@ -370,7 +414,7 @@ mod tests {
 
     fn function(import: &str, export: &str) -> H2ObjectFunction {
         H2ObjectFunction {
-            flags: 0,
+            flags: FunctionFlags::default(),
             import: import.to_owned(),
             export: export.to_owned(),
             turn_off_with: String::new(),
@@ -382,7 +426,7 @@ mod tests {
 
     fn value(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> f32 {
         let inputs = inputs.iter().map(|(name, value)| ((*name).to_owned(), *value)).collect();
-        H2ObjectFunctions { functions }.value(name, &inputs, &H2FunctionValues::new(), 0.0, 0).0
+        H2ObjectFunctions { functions }.value(name, &inputs, &H2FunctionValues::new(), Clock::default(), 0).0
     }
 
     #[test]
@@ -390,10 +434,10 @@ mod tests {
         let functions = H2ObjectFunctions { functions: vec![function("", "invincibility"), function("zero", "effects")] };
         let none = H2FunctionValues::new();
         let scripted: H2FunctionValues = [("invincibility".to_owned(), 1.0)].into_iter().collect();
-        assert_eq!(functions.value("invincibility", &none, &none, 0.0, 0).0, 0.0, "an empty import reads nothing");
-        assert_eq!(functions.value("invincibility", &none, &scripted, 0.0, 0).0, 1.0);
+        assert_eq!(functions.value("invincibility", &none, &none, Clock::default(), 0).0, 0.0, "an empty import reads nothing");
+        assert_eq!(functions.value("invincibility", &none, &scripted, Clock::default(), 0).0, 1.0);
         let by_import: H2FunctionValues = [("zero".to_owned(), 0.75)].into_iter().collect();
-        assert_eq!(functions.value("effects", &none, &by_import, 0.0, 0).0, 0.75, "the import's script value, unmapped");
+        assert_eq!(functions.value("effects", &none, &by_import, Clock::default(), 0).0, 0.75, "the import's script value, unmapped");
     }
 
     #[test]
@@ -411,7 +455,7 @@ mod tests {
 
     #[test]
     fn invert_and_scale_by_shape_the_value() {
-        let inverted = H2ObjectFunction { flags: INVERT, ..function("speed", "glow") };
+        let inverted = H2ObjectFunction { flags: FunctionFlags { invert: true, ..Default::default() }, ..function("speed", "glow") };
         assert_eq!(value(vec![inverted], "glow", &[("speed", 0.25)]), 0.75);
         let scaled = H2ObjectFunction { scale_by: "power".to_owned(), ..function("speed", "glow") };
         assert_eq!(value(vec![scaled], "glow", &[("speed", 0.5), ("power", 0.5)]), 0.25);

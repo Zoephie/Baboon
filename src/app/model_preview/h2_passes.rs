@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
+use blam_tags::tag_function::FunctionType;
 
 use super::h2_functions::H2FunctionValues;
 
@@ -524,6 +525,9 @@ pub(crate) struct H2Animation {
     /// The object function this reads instead of time, and what it reads
     /// with no such function.
     held_input: Option<(String, f32)>,
+    /// `range name`: the object function the range reads, and what it reads
+    /// with no such function. Unnamed, `object_get_function_value` gives 1.
+    range_input: Option<(String, f32)>,
     function: Arc<TagFunction>,
 }
 
@@ -532,6 +536,7 @@ impl PartialEq for H2Animation {
         self.kind == other.kind
             && self.period == other.period
             && self.held_input == other.held_input
+            && self.range_input == other.range_input
             && self.function.to_bytes() == other.function.to_bytes()
     }
 }
@@ -550,25 +555,40 @@ impl From<f32> for H2Clock<'_> {
 }
 
 impl H2Animation {
+    /// `sub_915520`: the named function's value, or with no name the time
+    /// over the period, wrapped unless the function is periodic. The game
+    /// divides by a period of 0 as well, which leaves it NaN; the preview
+    /// reads the time as it is instead.
     fn input(&self, clock: H2Clock<'_>) -> f32 {
         match &self.held_input {
             Some((name, rest)) => {
                 clock.values.and_then(|values| values.get(name)).copied().unwrap_or(*rest)
             }
-            None if self.period > 0.0 => (clock.time / self.period).rem_euclid(1.0),
+            None if self.period > 0.0 => {
+                let input = clock.time / self.period;
+                if self.function.function_type() == FunctionType::Periodic { input } else { input.rem_euclid(1.0) }
+            }
             None => clock.time,
         }
     }
 
+    fn range(&self, clock: H2Clock<'_>) -> f32 {
+        match &self.range_input {
+            Some((name, rest)) => clock.values.and_then(|values| values.get(name)).copied().unwrap_or(*rest),
+            None => 1.0,
+        }
+    }
+
     fn scalar<'a>(&self, clock: impl Into<H2Clock<'a>>) -> f32 {
-        self.function.evaluate(self.input(clock.into()), 0.0)
+        let clock = clock.into();
+        self.function.evaluate(self.input(clock), self.range(clock))
     }
 
     fn vector<'a>(&self, clock: impl Into<H2Clock<'a>>) -> [f32; 4] {
         let clock = clock.into();
         match self.kind {
             H2AnimationKind::Color => {
-                let color = self.function.evaluate_color(self.input(clock), 0.0);
+                let color = self.function.evaluate_color(self.input(clock), self.range(clock));
                 [color.red, color.green, color.blue, 1.0]
             }
             _ => [self.scalar(clock); 4],
@@ -664,6 +684,13 @@ fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
                     let rest = object_input(&name);
                     (name, rest)
                 });
+            let range_input = property
+                .read_string_id("range name")
+                .filter(|name| !name.is_empty())
+                .map(|name| {
+                    let rest = object_input(&name);
+                    (name, rest)
+                });
             let kind = match property.read_enum_name("type")?.as_str() {
                 "bitmap scale uniform" => H2AnimationKind::ScaleUniform,
                 "bitmap scale x" => H2AnimationKind::ScaleX,
@@ -681,6 +708,7 @@ fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
                 kind,
                 period: property.read_real("time period").unwrap_or(0.0),
                 held_input,
+                range_input,
                 function: Arc::new(animation_function(&property)?),
             })
         })
@@ -1242,7 +1270,8 @@ impl H2DrawPass {
             .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
             .chain(self.animated_row_values.iter().flat_map(|(_, _, animations)| animations))
             .chain(self.animated_tints())
-            .filter_map(|animation| animation.held_input.as_ref().map(|(name, _)| name.as_str()))
+            .flat_map(|animation| [&animation.held_input, &animation.range_input])
+            .filter_map(|input| input.as_ref().map(|(name, _)| name.as_str()))
     }
 
     /// Whether it changes with the object's outputs.
@@ -1922,6 +1951,7 @@ mod tests {
             kind,
             period,
             held_input: None,
+            range_input: None,
             function: Arc::new(TagFunction::parse_encoded(
                 blam_tags::tag_function::FunctionEncoding::H2,
                 &function.to_bytes(),

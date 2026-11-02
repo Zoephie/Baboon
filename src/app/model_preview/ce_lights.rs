@@ -106,11 +106,27 @@ pub(super) fn antenna_sprite(bitmap: &TagFile, sequence: usize) -> Option<([f32;
     (pixels > 0.0).then_some((rect, [registration.x, registration.y], index, pixels / width))
 }
 
-fn read_antenna(source: &TagSource, path: &str, markers: &[RenderModelPreviewMarker]) -> Option<CeAntenna> {
+/// `object_get_marker_by_name` as a widget reads it: the marker, or, when the
+/// object has none by that name (or the name is empty), the object's origin,
+/// where the game still draws it. The origin is known only for the opened
+/// object (`owner` 0); a held object's widget without its marker is left out.
+pub(super) fn marker_or_origin(
+    markers: &[RenderModelPreviewMarker],
+    name: &str,
+    owner: u8,
+) -> Option<(usize, [f32; 3], [f32; 3])> {
+    let found = markers.iter().find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(name));
+    match found {
+        Some(marker) => Some((marker.node_index.max(0) as usize, marker.position, marker.axes[0])),
+        None => (owner == 0).then_some((0, [0.0; 3], [1.0, 0.0, 0.0])),
+    }
+}
+
+fn read_antenna(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeAntenna> {
     let tag = load_referenced_tag_from_source(source, path, "antenna", b"ant!").ok()?;
     let root = tag.root();
-    let name = root.read_string("attachment marker name")?;
-    let marker = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name))?;
+    let name = root.read_string("attachment marker name").unwrap_or_default();
+    let (node, position, forward) = marker_or_origin(markers, &name, owner)?;
     let bitmap_path = root.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty())?;
     let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
     let mut image_index = None;
@@ -130,9 +146,9 @@ fn read_antenna(source: &TagSource, path: &str, markers: &[RenderModelPreviewMar
     }
     let image = decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, image_index?)?;
     Some(CeAntenna {
-        node: marker.node_index.max(0) as usize,
-        position: marker.position,
-        forward: marker.axes[0],
+        node,
+        position,
+        forward,
         segments,
         image: Arc::new(image),
     })
@@ -142,6 +158,7 @@ fn read_antenna(source: &TagSource, path: &str, markers: &[RenderModelPreviewMar
 pub(super) fn read_ce_antennas(
     source: &TagSource,
     object: &TagFile,
+    owner: u8,
     markers: &[RenderModelPreviewMarker],
 ) -> Vec<CeAntenna> {
     let Some(block) = object_block(object, "widgets") else {
@@ -152,7 +169,7 @@ pub(super) fn read_ce_antennas(
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(group, _)| *group == antenna_group)
-        .filter_map(|(_, path)| read_antenna(source, &path, markers))
+        .filter_map(|(_, path)| read_antenna(source, &path, owner, markers))
         .collect()
 }
 

@@ -2070,6 +2070,9 @@ struct RunningEmitter {
     /// Where it was a step ago, for what it spawns on the way.
     previous: Option<[f32; 3]>,
     random: Random,
+    /// `c_particle_system::get_random_seed`: picked once as the system is
+    /// made and shared by all its emitters.
+    system_seeds: [f32; SYSTEM_SEEDS],
 }
 
 /// Everything in flight on a preview.
@@ -2113,6 +2116,7 @@ struct H3ChildInstance {
 const MOST_INSTANCES: usize = 320;
 
 fn fresh_emitters(system: &H3ParticleSystem, seed: u32) -> Vec<RunningEmitter> {
+    let system_seeds = std::array::from_fn(|at| Random(at as u32 + 1 + seed / 7).next());
     let emitters = system.emitters.iter().enumerate();
     emitters
         .map(|(index, _)| RunningEmitter {
@@ -2122,6 +2126,7 @@ fn fresh_emitters(system: &H3ParticleSystem, seed: u32) -> Vec<RunningEmitter> {
             started: false,
             previous: None,
             random: Random(seed.wrapping_mul(977) ^ (index as u32).wrapping_mul(131)),
+            system_seeds,
         })
         .collect()
 }
@@ -2162,11 +2167,7 @@ fn step_location(
             (std::array::from_fn(|row| frame.1[row][2]), frame.0[2] - ground)
         };
         if let Some(mut state) = state {
-            let random = &mut running.random;
-            state.system_seeds = std::array::from_fn(|at| {
-                let mut seeded = Random(at as u32 + 1 + random.0 / 7);
-                seeded.next()
-            });
+            state.system_seeds = running.system_seeds;
             emitter.pulse(&system.look, state, running, STEP, frame, system.world, births, at);
             let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
             emitter.step(state, &mut running.particles, STEP, home, deaths, ground, system.look.dies_at_rest);

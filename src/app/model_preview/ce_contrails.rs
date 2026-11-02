@@ -332,7 +332,8 @@ pub(crate) struct CeContrailQuad {
     pub(crate) contrail: usize,
     pub(crate) image: usize,
     pub(crate) corners: [[f32; 5]; 4],
-    pub(crate) color: [f32; 4],
+    /// Each corner's color, as `render_contrail` writes one per vertex.
+    pub(crate) colors: [[f32; 4]; 4],
 }
 
 /// What a slot keeps of its contrails.
@@ -539,8 +540,9 @@ impl CeContrailField {
                 for at in 0..last {
                     let (top, bottom, near) = vertex(at);
                     let (next_top, next_bottom, far) = vertex(at + 1);
-                    let color = std::array::from_fn(|channel| (near[channel] + far[channel]) * 0.5);
-                    quads.push(CeContrailQuad { contrail: index, image, corners: [top, next_top, bottom, next_bottom], color });
+                    let [near, far] = [near, far].map(|color| color.map(|channel| channel.clamp(0.0, 1.0)));
+                    let colors = [near, far, near, far];
+                    quads.push(CeContrailQuad { contrail: index, image, corners: [top, next_top, bottom, next_bottom], colors });
                 }
             }
         }
@@ -566,7 +568,10 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
     for (line, (node, position, forward)) in running.points.iter_mut().zip(&contrail.markers) {
         let (origin, forward) = posed_on(*node, *position, *forward, bones);
         let forward = unit(forward);
-        for _ in 0..count {
+        // `contrail_add_points` spreads what one tick adds along the way
+        // from the last head point to the marker; the last lands on it.
+        let head = line.first().map(|point| (point.place, point.velocity, point.density));
+        for added in 1..=count {
             if line.len() >= MOST_POINTS {
                 break;
             }
@@ -580,18 +585,29 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
             let direction: [f32; 3] = std::array::from_fn(|axis| {
                 forward[axis] * spread.cos() + (side[axis] * turn.cos() + lift[axis] * turn.sin()) * spread.sin()
             });
+            let velocity = direction.map(|axis| axis * speed);
+            let (place, velocity, point_density) = match head.filter(|_| added < count) {
+                Some((from, from_velocity, from_density)) => {
+                    let t = added as f32 / count as f32;
+                    let lerp = |from: [f32; 3], to: [f32; 3]| -> [f32; 3] {
+                        std::array::from_fn(|axis| from[axis] * (1.0 - t) + to[axis] * t)
+                    };
+                    (lerp(from, origin), lerp(from_velocity, velocity), from_density * (1.0 - t) + density * t)
+                }
+                None => (origin, velocity, density),
+            };
             line.insert(
                 0,
                 Point {
-                    place: origin,
-                    velocity: direction.map(|axis| axis * speed),
+                    place,
+                    velocity,
                     state: -1,
                     age: 0.0,
                     inverse: 0.0,
                     moving_on: true,
                     done: false,
                     new: true,
-                    density,
+                    density: point_density,
                 },
             );
         }

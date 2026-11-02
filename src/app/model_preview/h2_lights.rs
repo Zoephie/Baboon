@@ -98,6 +98,9 @@ pub(crate) struct H2Flare {
     brightness: Option<Arc<TagFunction>>,
     color: Option<Arc<TagFunction>>,
     rotation: Option<Arc<TagFunction>>,
+    /// The animation's `synchronized`: every instance runs on the same clock.
+    /// Without it, `lens_flare_draw_callback` shifts each one's.
+    synchronized: bool,
     pub(crate) images: Vec<Arc<H2Image>>,
 }
 
@@ -444,12 +447,35 @@ pub(crate) struct H2FlareAt {
     pub(crate) flare: Arc<H2Flare>,
 }
 
+impl H2FlareAt {
+    /// `lens_flare_draw_callback` for an unsynchronized flare: seconds ahead,
+    /// the first byte of a hash over 256 and the second whole. The game hashes
+    /// the address of the flare's draw record; the preview hashes where the
+    /// flare sits, which is as fixed for it and differs between flares.
+    fn unsynchronized_offset(&self) -> f32 {
+        let seed = self.position.iter().fold(self.node as u32, |seed, axis| {
+            seed.rotate_left(5) ^ axis.to_bits()
+        });
+        let hashed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223).to_le_bytes();
+        f32::from(hashed[0]) / 256.0 + f32::from(hashed[1])
+    }
+}
+
 /// `object_attachment_scale`: no name is 1, and a name nothing answers to is 0,
 /// as `object_get_function_value` leaves it.
 /// The second of two fields that share a name, by its place in the struct.
 fn second_field_int(root: TagStruct<'_>, name: &str) -> Option<i128> {
     let field = root.fields().filter(|field| field.name() == name).nth(1)?;
     root.read_int_any(&format!("{name}#{}", field.ordinal()))
+}
+
+/// The set options of the second of two flags fields that share a name.
+fn second_field_flags(root: TagStruct<'_>, name: &str) -> Vec<String> {
+    let Some(field) = root.fields().filter(|field| field.name() == name).nth(1) else {
+        return Vec::new();
+    };
+    let names = root.read_flag_names(&format!("{name}#{}", field.ordinal())).unwrap_or_default();
+    names.into_iter().map(|(_, name)| name).collect()
 }
 
 /// What a light's colors and size interpolate by: its attachment's function,
@@ -532,6 +558,7 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
         brightness: scale_function(root, "brightness"),
         color: scale_function(root, "color"),
         rotation: scale_function(root, "rotation"),
+        synchronized: second_field_flags(root, "flags").iter().any(|name| name == "synchronized"),
         images,
     })
 }
@@ -1177,6 +1204,7 @@ impl H2FlareAt {
             fade *= (-cutoff * slope - dot(forward, to_light) * slope).clamp(0.0, 1.0);
         }
         let [chained, outer] = occlusion;
+        let time = if flare.synchronized { time } else { time + self.unsynchronized_offset() };
         let mut brightness = fade * chained;
         let not_inner = fade * outer;
         if let Some(function) = &flare.brightness {
@@ -1310,6 +1338,7 @@ mod tests {
                 brightness: None,
                 color: None,
                 rotation: None,
+                synchronized: true,
                 images: Vec::new(),
             }),
         }

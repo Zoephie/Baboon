@@ -477,9 +477,10 @@ fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) 
 #[derive(Debug, Clone)]
 struct CeEffectParticle {
     location: usize,
-    /// `create`: 1 only draws in first person, which a preview never is.
+    /// `create`: only in first person, which a preview never is.
     first_person_only: bool,
-    water_only: bool,
+    /// Whether the preview's object would make it; see [`created_here`].
+    created: bool,
     direction: [f32; 3],
     offset: [f32; 3],
     def: usize,
@@ -501,10 +502,8 @@ struct CeEffectParticle {
 #[derive(Debug, Clone)]
 struct CeLightPart {
     location: usize,
-    /// `create in`: any environment, air only, water only, space only.
-    environment: i128,
-    /// `violence mode`: either, violent only, nonviolent only.
-    violence: i128,
+    /// Whether the preview's object would make it; see [`created_here`].
+    created: bool,
     light: usize,
     scales_a: u32,
     scales_b: u32,
@@ -524,8 +523,8 @@ struct CeEvent {
 #[derive(Debug, Clone)]
 struct CeSystemPart {
     location: usize,
-    environment: i128,
-    violence: i128,
+    /// Whether the preview's object would make it; see [`created_here`].
+    created: bool,
     /// `face down regardless of location`.
     face_down: bool,
     velocity: [f32; 2],
@@ -538,6 +537,9 @@ struct CeSystemPart {
 /// An `effect` tag.
 #[derive(Debug, Clone)]
 pub(crate) struct CeEffectDef {
+    /// `deleted when attachment deactivates`: `effect_update` deletes it,
+    /// for good, once its function goes off.
+    deleted_when_off: bool,
     loop_start: Option<usize>,
     loop_stop: Option<usize>,
     locations: Vec<String>,
@@ -614,8 +616,7 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
                 let flags = |name: &str| part.read_int_any(name).unwrap_or(0) as u32;
                 system_parts.push(CeSystemPart {
                     location: part.read_int_any("location").unwrap_or(-1).max(0) as usize,
-                    environment: part.read_int_any("create in").unwrap_or(0),
-                    violence: part.read_int_any("violence mode").unwrap_or(0),
+                    created: created_here(part),
                     face_down: part.read_int_any("flags").unwrap_or(0) & 1 != 0,
                     velocity: bounds_of(part, "velocity bounds"),
                     cone: part.read_real("velocity cone angle").unwrap_or(0.0),
@@ -642,8 +643,7 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
             let flags = |name: &str| part.read_int_any(name).unwrap_or(0) as u32;
             light_parts.push(CeLightPart {
                 location: part.read_int_any("location").unwrap_or(-1).max(0) as usize,
-                environment: part.read_int_any("create in").unwrap_or(0),
-                violence: part.read_int_any("violence mode").unwrap_or(0),
+                created: created_here(part),
                 light,
                 scales_a: flags("A scales values"),
                 scales_b: flags("B scales values"),
@@ -669,8 +669,8 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
             let flags = |name: &str| entry.read_int_any(name).unwrap_or(0) as u32;
             entries.push(CeEffectParticle {
                 location: entry.read_int_any("location").unwrap_or(0).max(0) as usize,
-                first_person_only: entry.read_int_any("create").unwrap_or(0) == 1,
-                water_only: matches!(entry.read_int_any("create in").unwrap_or(0), 2),
+                first_person_only: entry.read_enum_name("create").as_deref() == Some("only in first person"),
+                created: created_here(entry),
                 direction: direction_of(entry, "relative direction"),
                 offset: match entry.field("relative offset").and_then(|field| field.value()) {
                     Some(TagFieldData::RealVector3d(vector)) => [vector.i, vector.j, vector.k],
@@ -702,7 +702,9 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
     if events.is_empty() || (particles.is_empty() && lights.is_empty() && systems.is_empty()) {
         return None;
     }
+    let flags = root.read_flag_names("flags").unwrap_or_default();
     Some(CeEffectDef {
+        deleted_when_off: flags.iter().any(|(_, name)| name == "deleted when attachment deactivates"),
         loop_start: index("loop start event"),
         loop_stop: index("loop stop event"),
         locations,
@@ -878,6 +880,8 @@ struct RunningEffect {
     counts: Vec<f32>,
     finished: bool,
     stopping: bool,
+    /// Deleted by `effect_update`: finished and never set going again.
+    deleted: bool,
     scale_a: f32,
     scale_b: f32,
     color: [f32; 3],
@@ -1308,6 +1312,7 @@ fn new_running() -> RunningEffect {
         counts: Vec::new(),
         finished: false,
         stopping: false,
+        deleted: false,
         scale_a: 1.0,
         scale_b: 1.0,
         color: [1.0; 3],
@@ -1408,10 +1413,22 @@ struct Made<'a> {
 
 /// `effect_generate_parts`, for the parts that make lights: one at every
 /// instance of the location. An effect `effect_new_looping` made leaves out
+/// Whether an event's particle or part is made for the preview's object:
+/// violent (`effect_part_allowed_by_disposition` leaves out what is for
+/// nonviolent mode only) and in air with no level about it
+/// (`effect_allowed_by_environment`: water needs water under the point, and
+/// space only is never made).
+fn created_here(entry: TagStruct<'_>) -> bool {
+    let environment = entry.read_enum_name("create in");
+    let violence = entry.read_enum_name("violence mode");
+    matches!(environment.as_deref(), None | Some("any environment" | "air only"))
+        && violence.as_deref() != Some("nonviolent mode only")
+}
+
 /// what is for nonviolent mode only; the preview is never under water.
 fn generate_parts(index: usize, running: &RunningEffect, effect: &CeEffectAt, lights: &mut Vec<CeRunningLight>, tick: u32) {
     for part in &effect.def.events[running.event].lights {
-        if part.violence == 2 || !matches!(part.environment, 0 | 1) {
+        if !part.created {
             continue;
         }
         let Some(instances) = effect.locations.get(part.location) else {
@@ -1461,7 +1478,7 @@ fn generate_systems(
     ground: f32,
 ) {
     for part in &effect.def.events[running.event].systems {
-        if part.violence == 2 || !matches!(part.environment, 0 | 1) {
+        if !part.created {
             continue;
         }
         let (Some(instances), Some(def)) = (effect.locations.get(part.location), effect.def.systems.get(part.system)) else {
@@ -1568,6 +1585,17 @@ fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &Ce
         None => (1.0, true),
     };
     running.scale_a = scale_a;
+    if running.deleted {
+        return;
+    }
+    if !on && def.deleted_when_off {
+        // The object's slot for it is cleared too, and `attachments_new`
+        // runs only as the object is made: it never comes back. What it
+        // made lives on.
+        running.finished = true;
+        running.deleted = true;
+        return;
+    }
     if on {
         if running.finished {
             running.finished = false;
@@ -1668,7 +1696,7 @@ fn generate_particles(
         let count = running.counts.get(at).copied().unwrap_or(0.0);
         let due = (integral(entry.distribution, fraction) * count) as i32
             - (integral(entry.distribution, running.last_fraction) * count) as i32;
-        if due <= 0 || entry.first_person_only || entry.water_only {
+        if due <= 0 || entry.first_person_only || !entry.created {
             continue;
         }
         let Some(instances) = effect.locations.get(entry.location) else {
