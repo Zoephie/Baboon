@@ -81,9 +81,10 @@ pub(super) fn draw_model_viewport(
         }
     }
     if let Some(scroll) = viewport_wheel_zoom(ui, &response) {
-        let old_scale = state.scale.clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE);
+        let least = min_preview_scale(&data.preview);
+        let old_scale = state.scale.clamp(least, MAX_PREVIEW_SCALE);
         let new_scale =
-            (old_scale * (scroll / 450.0).exp()).clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE);
+            (old_scale * (scroll / 450.0).exp()).clamp(least, MAX_PREVIEW_SCALE);
         // Zoom toward the cursor: shift the orbit point so the geometry
         // under the pointer stays put. Without this, zooming into a BSP
         // always dives at its center and the doorway drifts offscreen.
@@ -4500,6 +4501,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_models_size_does_not_change_how_far_the_view_pulls_back() {
+        let widest = |half: f32| {
+            let preview = RenderModelPreview {
+                bounds_min: [-half; 3],
+                bounds_max: [half; 3],
+                ..Default::default()
+            };
+            let (_, radius) = preview_center_radius(&preview);
+            (radius * 1.1 / min_preview_scale(&preview), radius * 1.1 / 0.02)
+        };
+        let (tiny, tiny_at_a_fixed_scale) = widest(0.01);
+        let (level, level_at_a_fixed_scale) = widest(500.0);
+        assert!((tiny - level).abs() < 1.0, "{tiny} {level}");
+        assert!(tiny_at_a_fixed_scale * 1000.0 < level_at_a_fixed_scale);
+    }
+
     fn camera(scale: f32, perspective: bool) -> PreviewCamera {
         PreviewCamera {
             rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0)),
@@ -5053,11 +5071,18 @@ struct ProjectedPoint {
 /// The camera's zoom bounds. Wide on purpose: 5× was plenty for a vehicle but
 /// nothing on a structure BSP, where inspecting a doorway on a whole level
 /// needs a couple hundred times the fitted view.
-pub(in crate::app) const MIN_PREVIEW_SCALE: f32 = 0.02;
+/// How far the view pulls back: half its shorter side, in world units. The
+/// same for every model, whose own size only sets where zoom 1× is.
+const WIDEST_PREVIEW_VIEW: f32 = 10_000.0;
 pub(in crate::app) const MAX_PREVIEW_SCALE: f32 = 500.0;
 
 /// A preview's bounds center and bounding-sphere radius — the fit every
 /// camera computation derives from.
+pub(in crate::app) fn min_preview_scale(preview: &RenderModelPreview) -> f32 {
+    let (_, radius) = preview_center_radius(preview);
+    (radius * 1.1 / WIDEST_PREVIEW_VIEW).min(1.0)
+}
+
 fn preview_center_radius(preview: &RenderModelPreview) -> ([f32; 3], f32) {
     let (min, max) = (preview.bounds_min, preview.bounds_max);
     let center = [
@@ -5136,14 +5161,16 @@ impl PreviewCamera {
             .as_deref()
             .map(|pose| pose.reach)
             .unwrap_or(0.0);
+        let scale = state.scale.clamp(min_preview_scale(&data.preview), MAX_PREVIEW_SCALE);
         Self {
             rect,
             center,
             radius,
-            depth_radius: radius + focus_length + reach,
+            // What the view spans must draw however small the model is.
+            depth_radius: (radius + focus_length + reach).max(radius * 1.1 / scale),
             yaw: state.yaw,
             pitch: state.pitch,
-            scale: state.scale.clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE),
+            scale,
             perspective: state.perspective,
         }
     }

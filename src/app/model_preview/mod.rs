@@ -1575,22 +1575,23 @@ fn draw_model_view_settings_menu(
             );
         },
     );
+    let least = min_preview_scale(&data.preview);
     preview_header_menu(ui, ButtonIcon::Find, "Camera", |ui| {
         ui.set_min_width(280.0);
         ui.horizontal(|ui| {
             ui.label("Zoom");
             ui.add(
-                egui::Slider::new(&mut state.scale, MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                egui::Slider::new(&mut state.scale, least..=MAX_PREVIEW_SCALE)
                     .logarithmic(true)
                     .show_value(false)
                     .clamping(egui::SliderClamping::Always),
             );
-            let drag_speed = (state.scale * 0.05).max(0.01) as f64;
+            let drag_speed = (state.scale * 0.05) as f64;
             ui.add(
                 egui::DragValue::new(&mut state.scale)
-                    .range(MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                    .range(least..=MAX_PREVIEW_SCALE)
                     .speed(drag_speed)
-                    .max_decimals(2)
+                    .max_decimals(5)
                     .suffix("×"),
             );
         });
@@ -1934,20 +1935,21 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
     // surfaces. Keep backfaces visible unconditionally; classic tag viewers
     // continue to use their own independent toggle in draw_model_preview_panel.
     state.show_backfaces = true;
+    let least = min_preview_scale(&data.preview);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Scale").color(subtle_dark()));
         ui.add(
-            egui::Slider::new(&mut state.scale, MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+            egui::Slider::new(&mut state.scale, least..=MAX_PREVIEW_SCALE)
                 .logarithmic(true)
                 .show_value(false)
                 .clamping(egui::SliderClamping::Always),
         );
-        let drag_speed = (state.scale * 0.05).max(0.01) as f64;
+        let drag_speed = (state.scale * 0.05) as f64;
         ui.add(
             egui::DragValue::new(&mut state.scale)
-                .range(MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                .range(least..=MAX_PREVIEW_SCALE)
                 .speed(drag_speed)
-                .max_decimals(2)
+                .max_decimals(5)
                 .suffix("×"),
         );
         if ui.button("Reset view").clicked() {
