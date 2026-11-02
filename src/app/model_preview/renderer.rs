@@ -1848,6 +1848,8 @@ struct ModelGpuSlot {
     ce_pctl: ce_particle_systems::CeParticleSystemField,
     /// By system, sheet, then image.
     ce_pctl_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
+    /// Effects' particle systems: by effect, system, sheet, then image.
+    ce_effect_pctl_textures: Vec<Vec<Vec<Vec<Option<glow::NativeTexture>>>>>,
     ce_flags: ce_flags::CeFlagField,
     ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
@@ -1920,6 +1922,7 @@ impl ModelGpuSlot {
                 ce_glows: Default::default(),
                 ce_pctl: Default::default(),
                 ce_pctl_textures: Vec::new(),
+                ce_effect_pctl_textures: Vec::new(),
                 ce_flags: Default::default(),
                 ce_glow_textures: Vec::new(),
                 h3_strips: Default::default(),
@@ -2505,7 +2508,22 @@ unsafe fn draw_ce_particles(
                 sprites.push((texture, lightning.blend, lightning.nonlinear_tint, quad.color, quad.corners));
             }
         }
-        // `particle_systems_render`.
+        // `particle_systems_render`, for those effects' parts made.
+        let pixel_of = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
+        for (effect, system, quad) in uploaded.ce_particles.system_quads(effects, view, pixel_of) {
+            let texture = uploaded
+                .ce_effect_pctl_textures
+                .get(effect)
+                .and_then(|systems| systems.get(system))
+                .and_then(|sheets| sheets.get(quad.sheet))
+                .and_then(|images| images.get(quad.image))
+                .copied()
+                .flatten();
+            if let Some(texture) = texture {
+                sprites.push((texture, quad.blend, quad.nonlinear_tint, quad.color, quad.corners));
+            }
+        }
+        // And those on the object's attachments.
         let systems = &frame.preview.ce_particle_systems;
         if !systems.is_empty() {
             uploaded.ce_pctl.advance(systems, || (outputs0, colors0), bones, ground, frame.time);
@@ -3729,12 +3747,27 @@ impl ModelGlRenderer {
                     .ce_particle_systems
                     .iter()
                     .map(|system| {
-                        system.sheets.iter().map(|sheet| {
+                        system.def.sheets.iter().map(|sheet| {
                             sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
                         }).collect()
                     })
                     .collect();
                 uploaded.ce_pctl = Default::default();
+                for texture in uploaded.ce_effect_pctl_textures.drain(..).flatten().flatten().flatten().flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.ce_effect_pctl_textures = frame
+                    .preview
+                    .ce_effects
+                    .iter()
+                    .map(|effect| {
+                        effect.def.systems.iter().map(|system| {
+                            system.sheets.iter().map(|sheet| {
+                                sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
+                            }).collect()
+                        }).collect()
+                    })
+                    .collect();
                 uploaded.ce_contrail_textures = frame
                     .preview
                     .ce_contrails

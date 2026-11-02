@@ -11,6 +11,10 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
+use super::ce_particle_systems::{
+    CePctlDef, CePctlQuad, CeRunningSystem, Random as SystemRandom, new_unattached, read_pctl_def, unattached_quads,
+    update_unattached,
+};
 use super::ce_passes::argb;
 use super::h2_passes::{H2Image, ce_color_interpolate};
 use super::materials::decode_h2_image;
@@ -422,6 +426,22 @@ struct CeEvent {
     duration: [f32; 2],
     particles: Vec<CeEffectParticle>,
     lights: Vec<CeLightPart>,
+    systems: Vec<CeSystemPart>,
+}
+
+/// One of an event's `parts` that makes a particle system.
+#[derive(Debug, Clone)]
+struct CeSystemPart {
+    location: usize,
+    environment: i128,
+    violence: i128,
+    /// `face down regardless of location`.
+    face_down: bool,
+    velocity: [f32; 2],
+    cone: f32,
+    system: usize,
+    scales_a: u32,
+    scales_b: u32,
 }
 
 /// An `effect` tag.
@@ -433,6 +453,7 @@ pub(crate) struct CeEffectDef {
     events: Vec<CeEvent>,
     pub(crate) particles: Vec<CeParticleDef>,
     pub(crate) lights: Vec<CeEffectLightDef>,
+    pub(crate) systems: Vec<Arc<CePctlDef>>,
 }
 
 fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
@@ -468,13 +489,46 @@ fn read_effect_def(source: &TagSource, path: &str) -> Option<CeEffectDef> {
     let mut lights: Vec<CeEffectLightDef> = Vec::new();
     let mut light_paths: Vec<String> = Vec::new();
     let light_group = u32::from_be_bytes(*b"ligh");
+    let system_group = u32::from_be_bytes(*b"pctl");
+    let mut systems: Vec<Arc<CePctlDef>> = Vec::new();
+    let mut system_paths: Vec<String> = Vec::new();
     for event in elements(root, "events") {
         let mut light_parts = Vec::new();
+        let mut system_parts = Vec::new();
         for part in elements(event, "parts") {
             let Some((group, path)) = part.read_tag_ref_with_group("type") else {
                 continue;
             };
-            if group != light_group || path.is_empty() {
+            if path.is_empty() {
+                continue;
+            }
+            if group == system_group {
+                let system = match system_paths.iter().position(|known| *known == path) {
+                    Some(at) => at,
+                    None => {
+                        let Some(def) = read_pctl_def(source, &path) else {
+                            continue;
+                        };
+                        systems.push(Arc::new(def));
+                        system_paths.push(path);
+                        systems.len() - 1
+                    }
+                };
+                let flags = |name: &str| part.read_int_any(name).unwrap_or(0) as u32;
+                system_parts.push(CeSystemPart {
+                    location: part.read_int_any("location").unwrap_or(-1).max(0) as usize,
+                    environment: part.read_int_any("create in").unwrap_or(0),
+                    violence: part.read_int_any("violence mode").unwrap_or(0),
+                    face_down: part.read_int_any("flags").unwrap_or(0) & 1 != 0,
+                    velocity: bounds_of(part, "velocity bounds"),
+                    cone: part.read_real("velocity cone angle").unwrap_or(0.0),
+                    system,
+                    scales_a: flags("A scales values"),
+                    scales_b: flags("B scales values"),
+                });
+                continue;
+            }
+            if group != light_group {
                 continue;
             }
             let light = match light_paths.iter().position(|known| *known == path) {
@@ -545,9 +599,10 @@ fn read_effect_def(source: &TagSource, path: &str) -> Option<CeEffectDef> {
             duration: bounds_of(event, "duration bounds"),
             particles: entries,
             lights: light_parts,
+            systems: system_parts,
         });
     }
-    if events.is_empty() || (particles.is_empty() && lights.is_empty()) {
+    if events.is_empty() || (particles.is_empty() && lights.is_empty() && systems.is_empty()) {
         return None;
     }
     Some(CeEffectDef {
@@ -557,6 +612,7 @@ fn read_effect_def(source: &TagSource, path: &str) -> Option<CeEffectDef> {
         events,
         particles,
         lights,
+        systems,
     })
 }
 
@@ -759,9 +815,13 @@ pub(crate) struct CeParticleField {
     effects: Vec<RunningEffect>,
     particles: Vec<CeParticle>,
     lights: Vec<CeRunningLight>,
+    /// Particle systems parts have made: the effect, which of its systems,
+    /// and the system as it runs.
+    systems: Vec<(usize, usize, CeRunningSystem)>,
     /// `game_time_get`.
     tick: u32,
     random: Option<Random>,
+    system_random: Option<SystemRandom>,
 }
 
 /// What an attached effect reads of its object.
@@ -847,6 +907,8 @@ impl CeParticleField {
                 .collect();
             self.particles.clear();
             self.lights.clear();
+            self.systems.clear();
+            self.system_random = Some(SystemRandom::seeded(0x5eed_4321));
             self.tick = 0;
             self.random = Some(Random(0x1234_5678));
             let mut random = self.random.take().unwrap();
@@ -866,9 +928,25 @@ impl CeParticleField {
             for (index, effect) in effects.iter().enumerate() {
                 let state = inputs(effect.object);
                 let running = &mut self.effects[index];
-                let made = Made { particles: &mut self.particles, lights: &mut self.lights, tick: self.tick };
+                let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
+                let made = Made {
+                    particles: &mut self.particles,
+                    lights: &mut self.lights,
+                    systems: &mut self.systems,
+                    system_random,
+                    ground,
+                    tick: self.tick,
+                };
                 update_effect(index, running, effect, &state, made, &mut random, bones, STEP);
             }
+            // `particle_systems_update`; those with no type in a state go.
+            let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
+            self.systems.retain_mut(|(effect, def, running)| {
+                effects
+                    .get(*effect)
+                    .and_then(|effect| effect.def.systems.get(*def))
+                    .is_some_and(|def| update_unattached(def, running, ground, STEP, system_random))
+            });
             // `lights_preprocess_scene` lets go of those past their duration.
             let tick = self.tick;
             self.lights.retain(|light| {
@@ -882,6 +960,27 @@ impl CeParticleField {
         }
         self.time = Some(now);
         self.random = Some(random);
+    }
+
+    /// The sprites of the particle systems effects' parts have made, with
+    /// the effect and system each came from.
+    pub(crate) fn system_quads(
+        &mut self,
+        effects: &[CeEffectAt],
+        view: &CeFlareView,
+        pixel: impl Fn([f32; 3]) -> f32,
+    ) -> Vec<(usize, usize, CePctlQuad)> {
+        let mut quads = Vec::new();
+        let random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
+        for (effect, def, running) in &mut self.systems {
+            let Some(system) = effects.get(*effect).and_then(|at| at.def.systems.get(*def)) else {
+                continue;
+            };
+            for quad in unattached_quads(system, running, 0, view, &pixel, random) {
+                quads.push((*effect, *def, quad));
+            }
+        }
+        quads
     }
 
     /// The lights effects' parts have made, as `lights_preprocess_scene`
@@ -999,6 +1098,9 @@ impl CeParticleField {
 struct Made<'a> {
     particles: &'a mut Vec<CeParticle>,
     lights: &'a mut Vec<CeRunningLight>,
+    systems: &'a mut Vec<(usize, usize, CeRunningSystem)>,
+    system_random: &'a mut SystemRandom,
+    ground: f32,
     tick: u32,
 }
 
@@ -1035,6 +1137,68 @@ fn generate_parts(index: usize, running: &RunningEffect, effect: &CeEffectAt, li
     }
 }
 
+/// `effect_real_random_range`, with a pair of bits of the scale flags.
+fn effect_random_range(value: [f32; 2], running: &RunningEffect, first_bit: u32, a: u32, b: u32, random: &mut Random) -> f32 {
+    let [lower, delta] = scaled(value, running, first_bit, a, b);
+    random.range(0.0, delta) + lower
+}
+
+/// `effect_generate_parts` for the parts that make particle systems:
+/// `particle_system_new_unattached` at every instance of the location,
+/// going by `effect_random_translational_velocity` along the location's
+/// forward (or straight down), tinted by the effect's color.
+#[allow(clippy::too_many_arguments)]
+fn generate_systems(
+    index: usize,
+    running: &RunningEffect,
+    effect: &CeEffectAt,
+    systems: &mut Vec<(usize, usize, CeRunningSystem)>,
+    random: &mut Random,
+    system_random: &mut SystemRandom,
+    bones: Option<&[[f32; 4]]>,
+    ground: f32,
+) {
+    for part in &effect.def.events[running.event].systems {
+        if part.violence == 2 || !matches!(part.environment, 0 | 1) {
+            continue;
+        }
+        let (Some(instances), Some(def)) = (effect.locations.get(part.location), effect.def.systems.get(part.system)) else {
+            continue;
+        };
+        let mut scale = 1.0;
+        if part.scales_a & 0x20 != 0 {
+            scale = running.scale_a;
+        }
+        if part.scales_b & 0x20 != 0 {
+            scale *= running.scale_b;
+        }
+        for instance in instances {
+            let (point, mut forward) = posed_on(instance.node, instance.position, instance.axes[0], bones);
+            if part.face_down {
+                forward = [0.0, 0.0, -1.0];
+            }
+            let speed = effect_random_range(part.velocity, running, VELOCITY_BITS, part.scales_a, part.scales_b, random);
+            let mut cone = part.cone;
+            if part.scales_a & (1 << CONE_BIT) != 0 {
+                cone *= running.scale_a;
+            }
+            if part.scales_b & (1 << CONE_BIT) != 0 {
+                cone *= running.scale_b;
+            }
+            let angle = random.next() * cone;
+            let mut direction = forward;
+            if angle != 0.0 {
+                let (sine, cosine) = angle.sin_cos();
+                direction = rotate_about(direction, random.direction(), sine, cosine);
+            }
+            let velocity = direction.map(|axis| axis * speed);
+            let [red, green, blue] = running.color;
+            let made = new_unattached(def, point, velocity, [1.0, red, green, blue], scale, ground, system_random);
+            systems.push((index, part.system, made));
+        }
+    }
+}
+
 /// `effect_set_event`.
 fn set_event(running: &mut RunningEffect, def: &CeEffectDef, event: usize, random: &mut Random) {
     if let Some(found) = def.events.get(event) {
@@ -1057,7 +1221,7 @@ fn update_effect(
     bones: Option<&[[f32; 4]]>,
     dt: f32,
 ) {
-    let Made { particles, lights, tick } = made;
+    let Made { particles, lights, systems, system_random, ground, tick } = made;
     let def = &effect.def;
     // `object_get_function_value`: none is on at one.
     let (scale_a, on) = match effect.primary {
@@ -1129,6 +1293,7 @@ fn update_effect(
                 })
                 .collect();
             generate_parts(index, running, effect, lights, tick);
+            generate_systems(index, running, effect, systems, random, system_random, bones, ground);
         }
     }
 }

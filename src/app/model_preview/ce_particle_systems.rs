@@ -103,16 +103,24 @@ struct ParticleType {
     particle_states: Vec<ParticleState>,
 }
 
+/// A `particle_system` tag.
+#[derive(Debug, Clone)]
+pub(crate) struct CePctlDef {
+    types: Vec<ParticleType>,
+    /// `point physics`, which moves a system on no object.
+    physics: Option<CePointPhysics>,
+    /// Every bitmap its particle states name, for the textures.
+    pub(crate) sheets: Vec<Arc<CeSpriteSheet>>,
+}
+
 /// A particle system on one of the object's attachments.
 #[derive(Debug, Clone)]
 pub(crate) struct CeParticleSystemAt {
-    types: Vec<ParticleType>,
+    pub(crate) def: Arc<CePctlDef>,
     /// The attachment's marker, each place it is on the model.
     markers: Vec<(usize, [f32; 3], [f32; 3])>,
     primary: Option<usize>,
     change_color: Option<usize>,
-    /// Every bitmap its particle states name, for the textures.
-    pub(crate) sheets: Vec<Arc<CeSpriteSheet>>,
 }
 
 fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
@@ -140,14 +148,11 @@ fn read_physics(source: &TagSource, holder: TagStruct<'_>) -> Option<CePointPhys
     Some(CePointPhysics::read(&tag))
 }
 
-fn read_system(
-    source: &TagSource,
-    path: &str,
-    sheets: &mut Vec<Arc<CeSpriteSheet>>,
-    sheet_paths: &mut Vec<String>,
-) -> Option<Vec<ParticleType>> {
+pub(super) fn read_pctl_def(source: &TagSource, path: &str) -> Option<CePctlDef> {
     let tag = load_referenced_tag_from_source(source, path, "particle_system", b"pctl").ok()?;
     let root = tag.root();
+    let mut sheets: Vec<Arc<CeSpriteSheet>> = Vec::new();
+    let mut sheet_paths: Vec<String> = Vec::new();
     let mut types = Vec::new();
     for entry in elements(root, "particle types") {
         let int = |name: &str| entry.read_int_any(name).unwrap_or(0);
@@ -227,7 +232,7 @@ fn read_system(
     if types.is_empty() || types.iter().any(|kind| kind.states.is_empty()) {
         return None;
     }
-    Some(types)
+    Some(CePctlDef { types, physics: read_physics(source, root), sheets })
 }
 
 fn function_slot(value: Option<i128>) -> Option<usize> {
@@ -252,9 +257,7 @@ pub(super) fn read_ce_particle_systems(
         if kind != group || path.is_empty() {
             continue;
         }
-        let mut sheets = Vec::new();
-        let mut sheet_paths = Vec::new();
-        let Some(types) = read_system(source, &path, &mut sheets, &mut sheet_paths) else {
+        let Some(def) = read_pctl_def(source, &path) else {
             continue;
         };
         let name = attachment.read_string("marker").unwrap_or_default();
@@ -270,11 +273,10 @@ pub(super) fn read_ce_particle_systems(
                 .collect()
         };
         systems.push(CeParticleSystemAt {
-            types,
+            def: Arc::new(def),
             markers: found,
             primary: function_slot(attachment.read_int_any("primary scale")),
             change_color: function_slot(attachment.read_int_any("change color")),
-            sheets,
         });
     }
     systems
@@ -315,18 +317,28 @@ struct RunningType {
 
 /// `particle_system_datum`.
 #[derive(Debug, Clone)]
-struct RunningSystem {
+pub(crate) struct CeRunningSystem {
     on: bool,
     scale: f32,
     /// Alpha, red, green, blue.
     color: [f32; 4],
+    /// What `light_particle` found under it; alpha-blended sprites take it.
+    lighting: [f32; 3],
+    /// On an object, which its type states may loop on; else on its own.
+    attached: bool,
+    position: [f32; 3],
+    velocity: [f32; 3],
     types: Vec<RunningType>,
     first: bool,
 }
 
-struct Random(u32);
+pub(crate) struct Random(u32);
 
 impl Random {
+    pub(crate) fn seeded(seed: u32) -> Self {
+        Self(seed)
+    }
+
     fn next(&mut self) -> f32 {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         (self.0 >> 8) as f32 / 16_777_216.0
@@ -353,7 +365,7 @@ impl Random {
 #[derive(Default)]
 pub(crate) struct CeParticleSystemField {
     time: Option<f32>,
-    systems: Vec<RunningSystem>,
+    systems: Vec<CeRunningSystem>,
     random: Option<Random>,
 }
 
@@ -422,7 +434,7 @@ impl CeParticleSystemField {
     ) {
         if self.systems.len() != systems.len() || self.time.is_none_or(|last| time < last) {
             let mut random = Random(0x5eed_1234);
-            self.systems = systems.iter().map(|system| new_system(system, &mut random)).collect();
+            self.systems = systems.iter().map(|system| new_system(&system.def, true, &mut random)).collect();
             self.random = Some(random);
             self.time = Some(time - PRE_ROLL);
         }
@@ -457,68 +469,88 @@ impl CeParticleSystemField {
         let mut quads = Vec::new();
         let mut random = self.random.take().unwrap_or(Random(1));
         for (index, (system, running)) in systems.iter().zip(&mut self.systems).enumerate() {
-            for (kind, run) in system.types.iter().zip(&mut running.types) {
-                if run.state.is_none() || kind.flags & DISABLED != 0 {
-                    continue;
-                }
-                let multipliers = run.variables;
-                for particle in &mut run.particles {
-                    if !particle.valid {
-                        continue;
-                    }
-                    let Some(current) = particle.state.and_then(|at| kind.particle_states.get(at)) else {
-                        continue;
-                    };
-                    let next = particle.transition.and_then(|at| kind.particle_states.get(at));
-                    let mut fade = 1.0;
-                    if next.is_some() {
-                        fade = if particle.length != 0.0 { (particle.time_left / particle.length).clamp(0.0, 1.0) } else { 0.0 };
-                    }
-                    let mix = |at: usize| match next {
-                        Some(_) => particle.transition_variables[at] * (1.0 - fade) + particle.variables[at] * fade,
-                        None => particle.variables[at],
-                    };
-                    let color: [f32; 4] = std::array::from_fn(|channel| mix(3 + channel) * multipliers[COLOR + channel]);
-                    let scale = mix(0) * multipliers[SCALE];
-                    let mut fade_next = 0.0;
-                    match next {
-                        Some(next)
-                            if next.blend != current.blend
-                                || next.map_flags != current.map_flags
-                                || next.sequence != current.sequence => fade_next = 1.0 - fade,
-                        _ => fade = 1.0,
-                    }
-                    let sequence = current.sequence + i32::from(kind.rotational);
-                    let count = current.sheet.count(sequence);
-                    if count == 0 {
-                        continue;
-                    }
-                    let sprite = if particle.sprite == -1.0 {
-                        let at = random.index(count);
-                        particle.sprite = at as f32;
-                        at
-                    } else {
-                        (particle.sprite as i32).rem_euclid(count as i32) as usize
-                    };
-                    let size = if scale == 0.0 { pixel(particle.position) } else { scale };
-                    for (state, fade, nudge) in [(current, fade, 0.0), (next.unwrap_or(current), fade_next, 0.001)] {
-                        if fade <= 0.01 {
-                            continue;
-                        }
-                        // The second sits a thousandth nearer, in view space.
-                        let center: [f32; 3] = std::array::from_fn(|axis| particle.position[axis] - view.forward[axis] * nudge);
-                        let shown = Shown { state, center, axis: particle.axis, rotation: particle.rotation, size, color, fade };
-                        if kind.rotational {
-                            shown.rotational(sprite, kind.flags & ROTATIONAL_SIDEWAYS != 0, view, index, &mut quads);
-                        } else {
-                            shown.simple(sprite, view, index, &mut quads);
-                        }
-                    }
-                }
-            }
+            system_quads(&system.def, running, index, view, &pixel, &mut random, &mut quads);
         }
         self.random = Some(random);
         quads
+    }
+}
+
+/// `particle_system_render` for one system.
+fn system_quads(
+    def: &CePctlDef,
+    running: &mut CeRunningSystem,
+    index: usize,
+    view: &CeFlareView,
+    pixel: &impl Fn([f32; 3]) -> f32,
+    random: &mut Random,
+    quads: &mut Vec<CePctlQuad>,
+) {
+    let lighting = running.lighting;
+    for (kind, run) in def.types.iter().zip(&mut running.types) {
+        if run.state.is_none() || kind.flags & DISABLED != 0 {
+            continue;
+        }
+        let multipliers = run.variables;
+        for particle in &mut run.particles {
+            if !particle.valid {
+                continue;
+            }
+            let Some(current) = particle.state.and_then(|at| kind.particle_states.get(at)) else {
+                continue;
+            };
+            let next = particle.transition.and_then(|at| kind.particle_states.get(at));
+            let mut fade = 1.0;
+            if next.is_some() {
+                fade = if particle.length != 0.0 { (particle.time_left / particle.length).clamp(0.0, 1.0) } else { 0.0 };
+            }
+            let mix = |at: usize| match next {
+                Some(_) => particle.transition_variables[at] * (1.0 - fade) + particle.variables[at] * fade,
+                None => particle.variables[at],
+            };
+            let mut color: [f32; 4] = std::array::from_fn(|channel| mix(3 + channel) * multipliers[COLOR + channel]);
+            // Alpha blend takes the light where the system is.
+            if current.blend == 0 {
+                for channel in 0..3 {
+                    color[1 + channel] *= lighting[channel];
+                }
+            }
+            let scale = mix(0) * multipliers[SCALE];
+            let mut fade_next = 0.0;
+            match next {
+                Some(next)
+                    if next.blend != current.blend
+                        || next.map_flags != current.map_flags
+                        || next.sequence != current.sequence => fade_next = 1.0 - fade,
+                _ => fade = 1.0,
+            }
+            let sequence = current.sequence + i32::from(kind.rotational);
+            let count = current.sheet.count(sequence);
+            if count == 0 {
+                continue;
+            }
+            let sprite = if particle.sprite == -1.0 {
+                let at = random.index(count);
+                particle.sprite = at as f32;
+                at
+            } else {
+                (particle.sprite as i32).rem_euclid(count as i32) as usize
+            };
+            let size = if scale == 0.0 { pixel(particle.position) } else { scale };
+            for (state, fade, nudge) in [(current, fade, 0.0), (next.unwrap_or(current), fade_next, 0.001)] {
+                if fade <= 0.01 {
+                    continue;
+                }
+                // The second sits a thousandth nearer, in view space.
+                let center: [f32; 3] = std::array::from_fn(|axis| particle.position[axis] - view.forward[axis] * nudge);
+                let shown = Shown { state, center, axis: particle.axis, rotation: particle.rotation, size, color, fade };
+                if kind.rotational {
+                    shown.rotational(sprite, kind.flags & ROTATIONAL_SIDEWAYS != 0, view, index, quads);
+                } else {
+                    shown.simple(sprite, view, index, quads);
+                }
+            }
+        }
     }
 }
 
@@ -610,8 +642,8 @@ impl Shown<'_> {
 
 /// `particle_system_new_attached` and `particle_system_initialize`: every
 /// type in its first state for a time from its bounds.
-fn new_system(system: &CeParticleSystemAt, random: &mut Random) -> RunningSystem {
-    let types = system
+fn new_system(def: &CePctlDef, attached: bool, random: &mut Random) -> CeRunningSystem {
+    let types = def
         .types
         .iter()
         .map(|kind| {
@@ -620,13 +652,73 @@ fn new_system(system: &CeParticleSystemAt, random: &mut Random) -> RunningSystem
             RunningType { state: Some(0), time_left: length, length, forward: true, ..RunningType::default() }
         })
         .collect();
-    RunningSystem { on: true, scale: 1.0, color: [1.0; 4], types, first: true }
+    CeRunningSystem {
+        on: true,
+        scale: 1.0,
+        color: [1.0; 4],
+        lighting: [1.0; 3],
+        attached,
+        position: [0.0; 3],
+        velocity: [0.0; 3],
+        types,
+        first: true,
+    }
+}
+
+/// `particle_system_new_unattached`, as an effect's part makes one: at a
+/// point, going, tinted and scaled as the effect says, lit by what
+/// `light_particle` finds below it, which in a preview is nothing: grey.
+/// `particle_system_initialize` steps it a thousandth of a second at once.
+pub(crate) fn new_unattached(
+    def: &CePctlDef,
+    position: [f32; 3],
+    velocity: [f32; 3],
+    color: [f32; 4],
+    scale: f32,
+    ground: f32,
+    random: &mut Random,
+) -> CeRunningSystem {
+    let mut running = new_system(def, false, random);
+    running.position = position;
+    running.velocity = velocity;
+    running.color = color;
+    running.scale = scale;
+    running.lighting = [0.5; 3];
+    update_unattached(def, &mut running, ground, 0.001, random);
+    running.first = false;
+    running
+}
+
+/// `particle_system_update` for a system on no object: its own point physics
+/// moves it, and it makes particles where it is. False once no type is in
+/// a state, when `particle_system_delete` takes it.
+pub(crate) fn update_unattached(def: &CePctlDef, running: &mut CeRunningSystem, ground: f32, dt: f32, random: &mut Random) -> bool {
+    // `particle_system_update_default`, which explosion uses too.
+    if let Some(physics) = def.physics {
+        physics.step(&mut running.position, &mut running.velocity, 1.0, ground, dt);
+    }
+    let markers = [(running.position, [0.0; 3])];
+    step_types(def, running, &markers, ground, dt, random)
+}
+
+/// `particle_system_render` for a system on no object.
+pub(crate) fn unattached_quads(
+    def: &CePctlDef,
+    running: &mut CeRunningSystem,
+    index: usize,
+    view: &CeFlareView,
+    pixel: impl Fn([f32; 3]) -> f32,
+    random: &mut Random,
+) -> Vec<CePctlQuad> {
+    let mut quads = Vec::new();
+    system_quads(def, running, index, view, &pixel, random, &mut quads);
+    quads
 }
 
 #[allow(clippy::too_many_arguments)]
 fn update_system(
     system: &CeParticleSystemAt,
-    running: &mut RunningSystem,
+    running: &mut CeRunningSystem,
     outputs: &[f32; 4],
     change_colors: &[[f32; 3]; 4],
     bones: Option<&[[f32; 4]]>,
@@ -648,7 +740,22 @@ fn update_system(
         .iter()
         .map(|&(node, position, forward)| posed_on(node, position, forward, bones))
         .collect();
-    for (kind, run) in system.types.iter().zip(&mut running.types) {
+    step_types(&system.def, running, &markers, ground, dt, random);
+}
+
+/// The types of a system through their states, making and moving their
+/// particles: true while any type is in a state.
+fn step_types(
+    def: &CePctlDef,
+    running: &mut CeRunningSystem,
+    markers: &[([f32; 3], [f32; 3])],
+    ground: f32,
+    dt: f32,
+    random: &mut Random,
+) -> bool {
+    let mut active = false;
+    let (velocity, attached) = (running.velocity, running.attached);
+    for (kind, run) in def.types.iter().zip(&mut running.types) {
         if kind.flags & DISABLED != 0 {
             continue;
         }
@@ -663,7 +770,8 @@ fn update_system(
                         state,
                         &mut run.forward,
                         kind.states.len(),
-                        kind.flags & TYPE_STATES_LOOP != 0,
+                        // A system on no object never goes round again.
+                        kind.flags & TYPE_STATES_LOOP != 0 && attached,
                         kind.flags & TYPE_STATES_BOUNCE != 0,
                     );
                     if run.transition.is_none() {
@@ -703,21 +811,25 @@ fn update_system(
             }
         }
         if running.on {
-            new_particles(kind, run, running.first, scale, &markers, dt, random);
+            new_particles(kind, run, running.first, scale, markers, velocity, dt, random);
         }
         update_particles(kind, run, ground, dt, random);
+        active = true;
     }
+    active
 }
 
 /// `particle_system_new_particles`: the type's initial count the first time,
 /// else what its creation rate makes of the time, at random among the
 /// attachment's markers.
+#[allow(clippy::too_many_arguments)]
 fn new_particles(
     kind: &ParticleType,
     run: &mut RunningType,
     first: bool,
     scale: f32,
     markers: &[([f32; 3], [f32; 3])],
+    system_velocity: [f32; 3],
     dt: f32,
     random: &mut Random,
 ) {
@@ -747,11 +859,13 @@ fn new_particles(
         made += 1;
         let rotation = random.range(0.0, std::f32::consts::TAU);
         let (position, forward) = markers[random.index(markers.len())];
-        let (position, velocity, axis) = match physics {
+        let (position, mut velocity, axis) = match physics {
             1 => explosion(kind, position, random),
             2 => jet(kind, position, forward, random),
             _ => (position, [0.0; 3], [0.0; 3]),
         };
+        // Each creation adds the system's own velocity.
+        velocity = std::array::from_fn(|axis| velocity[axis] + system_velocity[axis]);
         run.particles.push_front(PsParticle {
             forward: true,
             valid: true,
