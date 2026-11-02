@@ -15,9 +15,17 @@ use crate::core::source::TagSource;
 const MOST_VERTICES: usize = 121;
 /// `k_maximum_attachments_per_cloth`.
 const MOST_ATTACHMENTS: usize = 6;
-/// `cloth_constrain_positions_relaxation`'s.
-const MOST_ITERATIONS: usize = 15;
+/// `k_maximum_collision_spheres_per_cloth`.
+const MOST_SPHERES: usize = 8;
+/// `cloth_constrain_positions_relaxation`'s, past the tag's own limit because
+/// a moving object adds to them; a preview's stands still.
+const MOST_ITERATIONS: i32 = 15;
 const ERROR_MAX: f32 = 2.0;
+/// How many links it keeps of those that touch a pin.
+const MOST_HELD_LINKS: usize = 1210;
+/// The shortest a link is measured at, and how near a sphere's centre a point
+/// has no way out but `global_left3d`.
+const NEARLY_ZERO: f32 = 0.0001;
 /// What a game tick is, which everything here counts in.
 const TICK: f32 = 1.0 / 30.0;
 /// `cloth_update_positions_verlet`'s gravity, with its tick rate.
@@ -217,6 +225,14 @@ struct ClothPin {
     position: [f32; 3],
 }
 
+/// A marker that the sheet stays out of.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ClothSphere {
+    node: usize,
+    position: [f32; 3],
+    radius: f32,
+}
+
 /// `cloth_setup_attachments`: the markers in order along an axis, first to the
 /// sheet's first corner and last to the far one of its first column.
 fn cloth_pins(
@@ -259,7 +275,8 @@ pub(crate) struct H3ClothAt {
     indices: Vec<usize>,
     links: Vec<ClothLink>,
     pins: Vec<ClothPin>,
-    iterations: usize,
+    spheres: Vec<ClothSphere>,
+    iterations: i32,
     gravity: f32,
     drag: f32,
     wind_scale: f32,
@@ -290,7 +307,8 @@ fn read_cloth(
     markers: &[RenderModelPreviewMarker],
     frame: &impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
 ) -> Option<(H3ClothAt, Vec<[f32; 2]>)> {
-    let int = |name: &str| root.read_int_any(name).unwrap_or(0).max(0) as usize;
+    // The ranges are `tool.exe`'s postprocess, which tags on disk have not been through.
+    let int = |name: &str| root.read_int_any(name).unwrap_or(0).clamp(2, 32) as usize;
     let size = [int("grid x dimension"), int("grid y dimension")];
     let spacing = [root.read_real("grid spacing x")?, root.read_real("grid spacing y")?];
     let (places, uvs, indices) = flag_grid(size, spacing);
@@ -298,7 +316,7 @@ fn read_cloth(
         return None;
     }
     let properties = root.descend("properties")?;
-    let real = |name: &str| properties.read_real(name).unwrap_or(0.0);
+    let real = |name: &str, low: f32, high: f32| properties.read_real(name).unwrap_or(0.0).clamp(low, high);
     let flags = root.read_flag_names("flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     let placed = |name: &str| -> Vec<(usize, [f32; 3])> {
@@ -316,18 +334,27 @@ fn read_cloth(
     }
     let secondary = placed(&marker_name(root, "secondary axis attachment name")).first().copied();
     let high = places.len() / size[0].max(1);
-    let links = generate_links(&places, &indices, real("longest_rod"));
+    let spheres = elements(root, "collision spheres")
+        .into_iter()
+        .take(MOST_SPHERES)
+        .filter_map(|sphere| {
+            let (node, position) = *placed(&marker_name(sphere, "object marker name")).first()?;
+            Some(ClothSphere { node, position, radius: sphere.read_real("radius")? })
+        })
+        .collect();
+    let links = generate_links(&places, &indices, real("longest_rod", 1.0, 10.0));
     let pins = cloth_pins(attach, secondary, [size[0], high], places.len(), flagged("Uses grid attach top"));
     let cloth = H3ClothAt {
         places,
         indices,
         links,
         pins,
-        iterations: properties.read_int_any("Number iterations").unwrap_or(1).max(1) as usize,
-        gravity: real("weight") * GRAVITY,
-        drag: real("drag"),
-        wind_scale: real("wind_scale"),
-        flappiness: real("wind_flappiness_scale"),
+        spheres,
+        iterations: properties.read_int_any("Number iterations").unwrap_or(1).clamp(1, 8) as i32,
+        gravity: real("weight", -10.0, 10.0) * GRAVITY,
+        drag: real("drag", 0.0, 0.5),
+        wind_scale: real("wind_scale", 0.0, 3.0),
+        flappiness: properties.read_real("wind_flappiness_scale").unwrap_or(0.0),
         first_vertex: 0,
     };
     Some((cloth, uvs))
@@ -428,18 +455,23 @@ impl RunningCloth {
         }
     }
 
-    /// `cloth_constrain_positions_relaxation`.
-    fn relax(&mut self, cloth: &H3ClothAt, pins: &[[f32; 3]]) {
+    /// `cloth_constrain_positions_relaxation`. A sheet that has come apart goes
+    /// back to rest and has that pass over, until the sixteenth ends it. Gives
+    /// back how many passes it took.
+    fn relax(&mut self, cloth: &H3ClothAt, pins: &[[f32; 3]]) -> usize {
+        let count = cloth.iterations.clamp(1, MOST_ITERATIONS);
         let held = |vertex: usize| cloth.pins.iter().any(|pin| pin.vertex == vertex);
-        for _ in 0..cloth.iterations.min(MOST_ITERATIONS) {
+        let mut passes = 0;
+        let mut done = 0;
+        loop {
             self.pin(cloth, pins);
             let mut worst = 0.0_f32;
-            for link in cloth.links.iter().filter(|link| held(link.ends[0]) || held(link.ends[1])) {
+            for link in cloth.links.iter().filter(|link| held(link.ends[0]) || held(link.ends[1])).take(MOST_HELD_LINKS) {
                 let [a, b] = link.ends;
                 let rod = minus(self.places[b], self.places[a]);
                 let length = dot(rod, rod).sqrt();
                 let delta = length - link.length;
-                let share = rod.map(|axis| axis * delta * 0.5 / length.max(f32::EPSILON));
+                let share = rod.map(|axis| axis * delta * 0.5 / length.max(NEARLY_ZERO));
                 if !held(a) {
                     let times = if held(b) { 2.0 } else { 1.0 };
                     self.places[a] = std::array::from_fn(|axis| self.places[a][axis] + share[axis] * times);
@@ -454,14 +486,36 @@ impl RunningCloth {
                 let [a, b] = link.ends;
                 let rod = minus(self.places[b], self.places[a]);
                 let length = dot(rod, rod).sqrt();
-                let share = rod.map(|axis| axis * (length - link.length) * 0.5 / length.max(f32::EPSILON));
+                let share = rod.map(|axis| axis * (length - link.length) * 0.5 / length.max(NEARLY_ZERO));
                 self.places[a] = std::array::from_fn(|axis| self.places[a][axis] + share[axis]);
                 self.places[b] = std::array::from_fn(|axis| self.places[b][axis] - share[axis]);
             }
             if worst > ERROR_MAX {
                 *self = Self::at_rest(cloth, pins);
+                done -= 1;
             }
             self.pin(cloth, pins);
+            passes += 1;
+            done = if passes == 16 { count } else { done } + 1;
+            if done >= count {
+                return passes;
+            }
+        }
+    }
+
+    /// `cloth_collide`: every point, pins too, out to each sphere's skin.
+    fn collide(&mut self, spheres: &[([f32; 3], f32)]) {
+        for place in &mut self.places {
+            for &(center, radius) in spheres {
+                let out = minus(*place, center);
+                let squared = dot(out, out);
+                if squared <= NEARLY_ZERO {
+                    *place = [center[0], center[1] + radius, center[2]];
+                } else if radius * radius > squared {
+                    let scale = radius / squared.sqrt();
+                    *place = std::array::from_fn(|axis| out[axis] * scale + center[axis]);
+                }
+            }
         }
     }
 
@@ -535,7 +589,13 @@ impl H3ClothField {
             let wind = self.wind.step(self.ticks);
             for (cloth, running) in cloths.iter().zip(&mut self.running) {
                 let pins = pins_of(cloth);
+                let spheres: Vec<([f32; 3], f32)> = cloth
+                    .spheres
+                    .iter()
+                    .map(|sphere| (posed_on(sphere.node, sphere.position, [1.0, 0.0, 0.0], bones).0, sphere.radius))
+                    .collect();
                 running.relax(cloth, &pins);
+                running.collide(&spheres);
                 running.integrate(cloth, wind);
                 running.calculate_normals(cloth);
             }
@@ -617,6 +677,7 @@ mod tests {
             indices,
             links,
             pins,
+            spheres: Vec::new(),
             iterations: 5,
             gravity: 0.5 * GRAVITY,
             drag: 0.01,
@@ -627,6 +688,32 @@ mod tests {
         let targets: Vec<[f32; 3]> = cloth.pins.iter().map(|pin| pin.position).collect();
         let running = RunningCloth::at_rest(&cloth, &targets);
         (cloth, running, targets)
+    }
+
+    #[test]
+    fn a_sheet_that_comes_apart_has_its_pass_over_up_to_the_sixteenth() {
+        let (mut cloth, mut running, pins) = hung();
+        assert_eq!(running.relax(&cloth, &pins), 5, "a sound sheet takes what the tag asks");
+        cloth.iterations = 40;
+        assert_eq!(running.relax(&cloth, &pins), 15, "and no more than the limit");
+        cloth.iterations = 5;
+        let held = cloth.pins[0].vertex;
+        let link = cloth.links.iter_mut().find(|link| link.ends.contains(&held)).unwrap();
+        link.length += 100.0;
+        assert_eq!(running.relax(&cloth, &pins), 16, "one that never settles stops all the same");
+    }
+
+    #[test]
+    fn spheres_push_points_to_their_skin_and_leave_the_rest() {
+        let center = [1.0, 2.0, 3.0];
+        let mut running = RunningCloth {
+            places: vec![[1.0, 2.0, 3.5], [1.0, 2.0, 5.5], [1.0, 2.0, 3.005]],
+            ..RunningCloth::default()
+        };
+        running.collide(&[(center, 1.0)]);
+        assert_eq!(running.places[0], [1.0, 2.0, 4.0], "inside goes out along its own line");
+        assert_eq!(running.places[1], [1.0, 2.0, 5.5], "outside stays");
+        assert_eq!(running.places[2], [1.0, 3.0, 3.0], "at the centre it goes to the left");
     }
 
     #[test]
