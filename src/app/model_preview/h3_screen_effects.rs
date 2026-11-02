@@ -49,6 +49,8 @@ pub(crate) struct H3ScreenSettings {
     blur: [f32; 2],
     /// ODST's `fov in` and `fov out`, in stops of the view's tangent.
     fov: [f32; 2],
+    /// ODST's `vision mode`.
+    vision: f32,
 }
 
 impl Default for H3ScreenSettings {
@@ -67,6 +69,7 @@ impl Default for H3ScreenSettings {
             color_floor: [0.0; 3],
             blur: [0.0; 2],
             fov: [0.0; 2],
+            vision: 0.0,
         }
     }
 }
@@ -93,6 +96,11 @@ impl H3ScreenSettings {
             most(&mut self.blur[axis], other.blur[axis]);
             most(&mut self.fov[axis], other.fov[axis]);
         }
+        most(&mut self.vision, other.vision);
+    }
+
+    pub(crate) fn vision(&self) -> f32 {
+        self.vision
     }
 
     /// `c_player_view::render_postprocess_blur`: the blurred copy's spread by
@@ -332,6 +340,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
             color_floor: color("color floor"),
             blur: [real("horizontal blur"), real("vertical blur")],
             fov: [real("fov in"), real("fov out")],
+            vision: real("vision mode"),
         },
         radius: real("maximum distance"),
         delay,
@@ -380,6 +389,10 @@ impl H3ScreenEffectAt {
     }
 
     /// The object functions its object falloffs read.
+    pub(crate) fn turns_on_vision(&self) -> bool {
+        self.definitions.iter().any(|definition| definition.settings.vision > 0.0)
+    }
+
     pub(crate) fn object_inputs(&self) -> impl Iterator<Item = &str> {
         let falloffs = self.definitions.iter().filter_map(|definition| definition.object_falloff.as_ref());
         falloffs.flat_map(|falloff| [falloff.input.as_str(), falloff.range.as_str()]).filter(|name| !name.is_empty())

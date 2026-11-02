@@ -40,6 +40,7 @@ pub(crate) mod h3_leaves;
 pub(crate) mod h3_light_volumes;
 pub(crate) mod h3_particles;
 pub(crate) mod h3_screen_effects;
+pub(crate) mod h3_vision;
 pub(crate) mod h3_strips;
 pub(crate) mod h3_lights;
 pub(in crate::app) mod h3_prt;
@@ -129,6 +130,8 @@ pub(crate) struct RenderModelPreview {
     pub h3_cloth: Vec<h3_cloth::H3ClothAt>,
     pub h3_leaves: Vec<Arc<h3_leaves::H3LeavesAt>>,
     pub h3_screen_effects: Vec<h3_screen_effects::H3ScreenEffectAt>,
+    /// ODST's VISR, for an object with an effect that turns it on.
+    pub h3_vision: Option<Arc<h3_vision::H3Vision>>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,

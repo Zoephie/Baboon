@@ -227,6 +227,14 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         gl.clear_color(r, g, b, 1.0);
         gl.clear_depth_f32(1.0);
         gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+        // VISR's ping counts from when it comes on, which takes a frame before.
+        if std::env::var_os("H2_SHOT_VISION").is_some() {
+            let end = std::mem::replace(&mut frame.time, 0.0);
+            renderer.paint(gl, &frame);
+            frame.time = end;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+        }
         renderer.paint(gl, &frame);
         assert_eq!(gl.get_error(), 0, "GL error during the frame");
         let mut pixels = vec![0u8; (width * height * 4) as usize];

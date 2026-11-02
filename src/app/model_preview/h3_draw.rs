@@ -135,6 +135,61 @@ void main() {
 }
 ";
 
+/// `hud_camera_nightvision`'s `default_ps`, its narrow filter. The game's depth
+/// runs far to near, so the edges are of `game_depth`, not of this one.
+const VISION_FRAGMENT: &str = "#version 410 core
+uniform sampler2D depth;
+uniform sampler2D mask;
+uniform mat4 screen_to_world;
+uniform vec3 eye;
+uniform vec3 forward;
+uniform vec2 planes;
+uniform float falloff;
+uniform vec3 ping;
+uniform vec4 default_color;
+uniform vec4 ping_color;
+out vec4 color;
+vec3 world_at(ivec2 at, float raw) {
+    vec2 size = vec2(textureSize(depth, 0));
+    vec4 place = screen_to_world * vec4((vec2(at) + 0.5) / size * 2.0 - 1.0, raw * 2.0 - 1.0, 1.0);
+    return place.xyz / place.w;
+}
+float game_depth(ivec2 at) {
+    float raw = texelFetch(depth, at, 0).r;
+    if (raw >= 1.0) {
+        return 0.0;
+    }
+    float along = dot(world_at(at, raw) - eye, forward);
+    return planes.x * (planes.y - along) / (along * (planes.y - planes.x));
+}
+void main() {
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    float raw = texelFetch(depth, at, 0).r;
+    vec2 place = gl_FragCoord.xy / vec2(textureSize(depth, 0));
+    float cover = texture(mask, vec2(place.x, 1.0 - place.y)).r;
+    if (raw >= 1.0 || cover <= 0.0) {
+        discard;
+    }
+    float middle = game_depth(at);
+    vec2 laplacian = vec2(
+        game_depth(at + ivec2(1, 0)) + game_depth(at - ivec2(1, 0)) - 2.0 * middle,
+        game_depth(at + ivec2(0, 1)) + game_depth(at - ivec2(0, 1)) - 2.0 * middle);
+    float gradient = clamp(length(laplacian) / middle, 0.0, 1.0);
+    if (gradient <= 1.0 / 255.0) {
+        discard;
+    }
+    if (laplacian.x + laplacian.y > 0.0) {
+        gradient *= ping_color.a;
+    }
+    float distance_away = length(world_at(at, raw) - eye);
+    cover *= pow(2.0, -pow(distance_away * falloff, 8.0));
+    float after = ping.x - distance_away;
+    float boost = pow(clamp(1.0 + ping.z * after, 0.0, 1.0), 4.0) * step(distance_away, ping.x);
+    cover *= step(distance_away, ping.y);
+    color = vec4(gradient * (default_color.rgb + ping_color.rgb * boost), default_color.a) * cover;
+}
+";
+
 /// The preview lens' half angle, in `PERSPECTIVE_FOV_Y`'s terms.
 const HALF_LENS: f32 = 30.0 * std::f32::consts::PI / 180.0;
 
@@ -1275,7 +1330,8 @@ impl ModelGlRenderer {
         shaders: &[h3_screen_effects::H3ScreenShader],
     ) {
         let blur = screen.blur();
-        if shaders.is_empty() && blur.is_none() {
+        let vision = frame.preview.h3_vision.clone().filter(|_| screen.vision() > 0.0);
+        if shaders.is_empty() && blur.is_none() && vision.is_none() {
             return;
         }
         let Some(targets) = self.h3_targets.as_ref() else {
@@ -1283,6 +1339,8 @@ impl ModelGlRenderer {
         };
         let (behind, picture_framebuffer, behind_framebuffer) =
             (targets.behind, targets.picture_framebuffer, targets.behind_framebuffer);
+        let (accumulation_framebuffer, depth_copy, depth_copy_framebuffer) =
+            (targets.accumulation_framebuffer, targets.depth_copy, targets.depth_copy_framebuffer);
         unsafe {
             // Raw bytes across, so what was encoded reads back as light.
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer));
@@ -1339,12 +1397,81 @@ impl ModelGlRenderer {
                 }
             }
             gl.disable(glow::FRAMEBUFFER_SRGB);
+            if let Some(vision) = vision {
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(accumulation_framebuffer));
+                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(depth_copy_framebuffer));
+                let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
+                gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], mask, glow::NEAREST);
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
+                self.h3_draw_vision(gl, frame, slot, &vision, screen.vision(), depth_copy);
+            }
             gl.color_mask(true, true, true, true);
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(picture_framebuffer));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(framebuffer));
             gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], glow::COLOR_BUFFER_BIT, glow::NEAREST);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.enable(glow::DEPTH_TEST);
+        }
+    }
+
+    /// `c_hud_camera_view`: over the frame as it will show, not over its light.
+    unsafe fn h3_draw_vision(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        vision: &h3_vision::H3Vision,
+        amount: f32,
+        depth: glow::NativeTexture,
+    ) {
+        let time = frame.time;
+        let clock = &mut self.slots[slot].h3_vision_clock;
+        let on_for = match *clock {
+            Some((last, seconds)) if time >= last => seconds + (time - last),
+            _ => 0.0,
+        };
+        *clock = Some((time, on_for));
+        let constants = vision.constants(amount, on_for);
+        let matrix = view_projection(&frame.camera);
+        let Some(to_world) = h3_vision::inverted(&matrix) else {
+            return;
+        };
+        unsafe {
+            if self.h3_vision_program.is_none() {
+                self.h3_vision_program = screen_program(gl, VISION_FRAGMENT);
+            }
+            if self.h3_vision_mask.is_none() {
+                let Some((image, texels, mips)) = vision.mask() else {
+                    return;
+                };
+                self.h3_vision_mask = upload_h2_image_linear(gl, image, *texels, mips, None);
+            }
+            let (Some(program), Some(mask)) = (self.h3_vision_program, self.h3_vision_mask) else {
+                return;
+            };
+            let view = ce_flare_view(&frame.camera);
+            gl.use_program(Some(program));
+            let spot = |name: &str| gl.get_uniform_location(program, name);
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(depth));
+            gl.uniform_1_i32(spot("depth").as_ref(), 0);
+            gl.active_texture(glow::TEXTURE1);
+            gl.bind_texture(glow::TEXTURE_2D, Some(mask));
+            gl.uniform_1_i32(spot("mask").as_ref(), 1);
+            gl.active_texture(glow::TEXTURE0);
+            gl.uniform_matrix_4_f32_slice(spot("screen_to_world").as_ref(), false, &to_world);
+            gl.uniform_3_f32_slice(spot("eye").as_ref(), &view.eye);
+            gl.uniform_3_f32_slice(spot("forward").as_ref(), &view.forward);
+            gl.uniform_2_f32(spot("planes").as_ref(), h3_vision::GAME_NEAR, h3_vision::GAME_FAR);
+            gl.uniform_1_f32(spot("falloff").as_ref(), constants.falloff);
+            gl.uniform_3_f32_slice(spot("ping").as_ref(), &constants.ping);
+            gl.uniform_4_f32_slice(spot("default_color").as_ref(), &constants.color);
+            gl.uniform_4_f32_slice(spot("ping_color").as_ref(), &constants.ping_color);
+            // `_alpha_blend_multiply_add`, which is premultiplied.
+            gl.enable(glow::BLEND);
+            gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
     }
 
