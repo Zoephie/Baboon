@@ -82,6 +82,54 @@ fn unit(a: [f32; 3]) -> [f32; 3] {
     if length > 0.0 { a.map(|axis| axis / length) } else { a }
 }
 
+/// `matrix3x3_to_quaternion`, normalized, as `c_short_quaternion` stores it.
+/// A leaf's orientation lives only here between ticks, always a true rotation.
+fn packed(axes: [[f32; 3]; 3]) -> [i16; 4] {
+    let m: [f32; 9] = std::array::from_fn(|at| axes[at / 3][at % 3]);
+    let trace = m[0] + m[4] + m[8];
+    let mut q = [0.0; 4];
+    if trace > 0.0 {
+        q[3] = (trace + 1.0).sqrt() * 0.5;
+        let by = 0.25 / q[3];
+        q[0] = (m[5] - m[7]) * by;
+        q[1] = (m[6] - m[2]) * by;
+        q[2] = (m[1] - m[3]) * by;
+    } else {
+        let mut i = usize::from(m[4] > m[0]);
+        if m[8] > m[i * 4] {
+            i = 2;
+        }
+        let (j, k) = ((i + 1) % 3, (i + 2) % 3);
+        let root = ((m[i * 4] - m[j * 4] - m[k * 4]) + 1.0).sqrt() * 0.5;
+        let by = 0.25 / root;
+        q[i] = root;
+        q[3] = (m[3 * j + k] - m[3 * k + j]) * by;
+        q[j] = (m[3 * j + i] + m[3 * i + j]) * by;
+        q[k] = (m[3 * k + i] + m[3 * i + k]) * by;
+    }
+    if q[3] < 0.0 {
+        q = q.map(|part| -part);
+    }
+    words_of(q)
+}
+
+fn words_of(q: [f32; 4]) -> [i16; 4] {
+    let length = q.iter().map(|part| part * part).sum::<f32>().sqrt();
+    q.map(|part| (part / length * 32767.0) as i16)
+}
+
+/// `c_short_quaternion::get_real_matrix4x3`: `quaternion_to_matrix3x3`'s axes.
+fn unpacked(words: [i16; 4]) -> [[f32; 3]; 3] {
+    let [x, y, z, w] = words.map(|word| f32::from(word) / 32767.0);
+    let length = x * x + y * y + z * z + w * w;
+    let scale = if length <= EPSILON { 0.0 } else { 2.0 / length };
+    [
+        [1.0 - (z * z + y * y) * scale, (x * y + w * z) * scale, (x * z - w * y) * scale],
+        [(x * y - w * z) * scale, 1.0 - (z * z + x * x) * scale, (y * z + w * x) * scale],
+        [(x * z + w * y) * scale, (y * z - w * x) * scale, 1.0 - (y * y + x * x) * scale],
+    ]
+}
+
 /// `normals_interpolate`.
 fn normals_between(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let angle = dot(a, b).clamp(-1.0, 1.0).acos();
@@ -140,6 +188,30 @@ impl H3LeavesAt {
 
     pub(crate) fn origin(&self) -> [f32; 3] {
         self.origin
+    }
+
+    /// `c_word_quantized_position::set_real_point3d`, in `movement_bounding_box`.
+    fn word_position(&self, place: [f32; 3]) -> [u16; 3] {
+        let span = self.cylinder * 2.0;
+        std::array::from_fn(|axis| {
+            let low = self.origin[axis] - self.cylinder;
+            if span > 0.0 { (((place[axis] - low) / span).clamp(0.0, 1.0) * 65535.0) as u16 } else { 0 }
+        })
+    }
+
+    /// `c_word_quantized_position::get_real_point3d`.
+    fn place_of(&self, words: [u16; 3]) -> [f32; 3] {
+        let span = self.cylinder * 2.0;
+        std::array::from_fn(|axis| {
+            let low = self.origin[axis] - self.cylinder;
+            if span > 0.0 { f32::from(words[axis]) / 65535.0 * span + low } else { low }
+        })
+    }
+
+    /// Opposite corners around where leaves let go.
+    pub(crate) fn emission_corners(&self) -> [[f32; 3]; 2] {
+        let corner = |side: f32| std::array::from_fn(|axis| self.origin[axis] + side * self.sphere);
+        [corner(-1.0), corner(1.0)]
     }
 }
 
@@ -234,9 +306,8 @@ pub(super) fn read_h3_leaves(
 
 #[derive(Debug, Clone)]
 struct Leaf {
-    place: [f32; 3],
-    /// `orientation`'s forward, left and up.
-    axes: [[f32; 3]; 3],
+    position: [u16; 3],
+    orientation: [i16; 4],
     kind: usize,
     normal: [f32; 3],
     pendulum: [f32; 3],
@@ -296,8 +367,8 @@ impl RunningLeaves {
         velocity[2] = -velocity[2].abs();
         let velocity = unit(velocity).map(|axis| axis * leaf_type.starting_velocity);
         self.leaves[slot] = Some(Leaf {
-            place,
-            axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            position: system.word_position(place),
+            orientation: [0, 0, 0, i16::MAX],
             kind,
             normal,
             pendulum,
@@ -331,6 +402,8 @@ impl RunningLeaves {
                 continue;
             };
             let kind = &system.types[leaf.kind];
+            let mut axes = unpacked(leaf.orientation);
+            let place = system.place_of(leaf.position);
             let facing = unit(leaf.velocity);
             // `velocity_scale` is still last tick's when the tumble reads it.
             let speed = dot(leaf.velocity, leaf.velocity).sqrt();
@@ -361,42 +434,42 @@ impl RunningLeaves {
                     let slowed = arm[2] / PENDULUM_SLOWDOWN;
                     pendulum *= slowed * slowed;
                 }
-                let pivot: [f32; 3] = std::array::from_fn(|axis| leaf.place[axis] + arm[axis]);
+                let pivot: [f32; 3] = std::array::from_fn(|axis| place[axis] + arm[axis]);
                 let mut swung = turned_about(arm, swing_axis, pendulum);
                 if (swung[2] - 1.0).abs() < EPSILON {
                     swung = turned_about(swung, swing_axis, pendulum);
                 }
                 let hung: [f32; 3] = std::array::from_fn(|axis| pivot[axis] - swung[axis]);
-                drift = std::array::from_fn(|axis| hung[axis] - leaf.place[axis]);
+                drift = std::array::from_fn(|axis| hung[axis] - place[axis]);
                 let mut normal = unit(std::array::from_fn(|axis| pivot[axis] - hung[axis]));
                 normal[2] *= if upward { 1.0 } else { -1.0 };
                 leaf.normal = normal;
-                let desired = normals_between(leaf.axes[0], normal, (1.0 - share) * dt);
-                let axis = unit(cross(leaf.axes[0], desired));
+                let desired = normals_between(axes[0], normal, (1.0 - share) * dt);
+                let axis = unit(cross(axes[0], desired));
                 if axis != [0.0; 3] {
-                    let angle = dot(leaf.axes[0], desired).clamp(-1.0, 1.0).acos();
-                    leaf.axes = multiplied(leaf.axes, axis, angle);
+                    let angle = dot(axes[0], desired).clamp(-1.0, 1.0).acos();
+                    axes = multiplied(axes, axis, angle);
                 }
             }
             if tumble > 0.0 {
                 let across = unit(cross([0.0, 0.0, 1.0], facing));
                 let across = if across == [0.0; 3] { [0.0, 1.0, 0.0] } else { across };
-                leaf.axes = multiplied(leaf.axes, across, tumble);
+                axes = multiplied(axes, across, tumble);
             }
             if kind.rotation > 0.0 {
                 let step = dt * share * TURNS_PER_SECOND * f32::from(u16::MAX) * kind.rotation;
                 leaf.rotation = leaf.rotation.wrapping_add(step as u16);
                 let turn = f32::from(leaf.rotation) / f32::from(u16::MAX) * std::f32::consts::TAU;
-                leaf.axes[1] = turned_about(leaf.axes[1], leaf.axes[0], turn);
-                leaf.axes[2] = turned_about(leaf.axes[2], leaf.axes[0], turn);
+                axes[1] = turned_about(axes[1], axes[0], turn);
+                axes[2] = turned_about(axes[2], axes[0], turn);
             }
+            leaf.orientation = packed(axes);
             leaf.velocity[2] -= kind.mass;
             for axis in 0..3 {
                 leaf.velocity[axis] += force[axis];
-                let moved = leaf.place[axis] + leaf.velocity[axis] * dt + drift[axis];
-                // `c_word_quantized_position` holds it to the movement bounds.
-                leaf.place[axis] = moved.clamp(system.origin[axis] - system.cylinder, system.origin[axis] + system.cylinder);
             }
+            let moved = std::array::from_fn(|axis| place[axis] + leaf.velocity[axis] * dt + drift[axis]);
+            leaf.position = system.word_position(moved);
         }
     }
 
@@ -466,6 +539,8 @@ impl H3LeafField {
                 continue;
             };
             let kind = &system.types[leaf.kind];
+            let axes = unpacked(leaf.orientation);
+            let place = system.place_of(leaf.position);
             let mut random = (at as u32).wrapping_mul(2_362_187);
             let mut next = || {
                 random = random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
@@ -478,10 +553,10 @@ impl H3LeafField {
                 .map(|[y, z]| {
                     let depth = (next() * 2.0 - 1.0) * size * DEPTH_OF_WIDTH;
                     std::array::from_fn(|axis| {
-                        leaf.place[axis]
-                            + leaf.axes[0][axis] * depth
-                            + leaf.axes[1][axis] * y * size
-                            + leaf.axes[2][axis] * z * size
+                        place[axis]
+                            + axes[0][axis] * depth
+                            + axes[1][axis] * y * size
+                            + axes[2][axis] * z * size
                     })
                 })
                 .collect();
@@ -495,7 +570,7 @@ impl H3LeafField {
                     next_sprite: uv,
                     billboard: uv,
                     color: [red, green, blue, 1.0],
-                    normal: leaf.axes[0],
+                    normal: axes[0],
                     ..Default::default()
                 });
             }
@@ -550,8 +625,7 @@ mod tests {
         let field = run(&system, 0.0);
         let leaves: Vec<_> = field.running[0].leaves.iter().flatten().collect();
         assert!(!leaves.is_empty());
-        assert!(leaves.iter().any(|leaf| leaf.place[2] < 10.0), "they have been falling a while");
-        assert!(leaves.iter().all(|leaf| leaf.place.iter().all(|axis| axis.is_finite())));
+        assert!(leaves.iter().any(|leaf| system.place_of(leaf.position)[2] < 10.0), "they have been falling a while");
     }
 
     #[test]
@@ -576,7 +650,8 @@ mod tests {
         let system = Arc::new(system);
         let field = run(&system, 0.0);
         for leaf in field.running[0].leaves.iter().flatten() {
-            assert!((0..3).all(|axis| (leaf.place[axis] - system.origin[axis]).abs() <= 0.5 + 1e-4));
+            let place = system.place_of(leaf.position);
+            assert!((0..3).all(|axis| (place[axis] - system.origin[axis]).abs() <= 0.5 + 1e-4));
         }
     }
 
@@ -595,6 +670,69 @@ mod tests {
         // Both shipped systems have none, so theirs keep gaining to the box's floor.
         assert!(fall_after(0.0, 300) < 2.0 * fall_after(0.0, 150) * 0.99);
         assert!((fall_after(0.5, 300) - fall_after(0.5, 150)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_emission_corners_surround_the_sphere_at_the_origin() {
+        let [low, high] = system().emission_corners();
+        assert_eq!(low, [-1.0, -1.0, 9.0]);
+        assert_eq!(high, [1.0, 1.0, 11.0]);
+    }
+
+    #[test]
+    fn a_leaf_stays_a_rotation_for_its_whole_life() {
+        let mut system = system();
+        system.emission_rate = [1.0, 2.0];
+        system.lifetime = 35.0;
+        system.sphere = 3.0;
+        let system = Arc::new(system);
+        let mut field = H3LeafField::default();
+        field.advance(std::slice::from_ref(&system), 0.0);
+        for tick in 0..1200 {
+            field.advance(std::slice::from_ref(&system), (tick + 1) as f32 * TICK);
+            for leaf in field.running[0].leaves.iter().flatten() {
+                let axes = unpacked(leaf.orientation);
+                for axis in axes {
+                    assert!((dot(axis, axis) - 1.0).abs() < 1e-3, "tick {tick}: {axes:?}");
+                }
+                assert!(dot(axes[0], axes[1]).abs() < 1e-3, "tick {tick}: {axes:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_rotation_survives_its_quaternion_on_every_branch() {
+        let turns = [
+            ([0.0, 0.0, 1.0], 0.0),
+            ([0.0, 0.0, 1.0], 1.0),
+            ([1.0, 0.0, 0.0], 3.0),
+            ([0.0, 1.0, 0.0], 3.0),
+            ([0.0, 0.0, 1.0], 3.0),
+            (unit([1.0, 2.0, 3.0]), 2.5),
+        ];
+        for (axis, angle) in turns {
+            let axes = multiplied([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], axis, angle);
+            let back = unpacked(packed(axes));
+            for (got, want) in back.iter().flatten().zip(axes.iter().flatten()) {
+                assert!((got - want).abs() < 1e-3, "{axis:?} {angle}: {back:?} {axes:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_skewed_matrix_comes_back_a_rotation() {
+        let back = unpacked(packed([[1.0, 0.02, 0.0], [0.0, 1.0, 0.03], [0.01, 0.0, 1.0]]));
+        assert!((dot(back[0], back[0]) - 1.0).abs() < 1e-3);
+        assert!(dot(back[0], back[1]).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_position_is_held_to_the_box_and_truncates_to_a_word() {
+        let system = system();
+        assert_eq!(system.word_position([0.0, 0.0, -500.0])[2], 0);
+        assert_eq!(system.word_position([0.0, 0.0, 500.0])[2], u16::MAX);
+        let place = system.place_of(system.word_position([1.23456, -3.0, 10.0]));
+        assert!(place[0] <= 1.23456 && 1.23456 - place[0] < 40.0 / 65535.0);
     }
 
     #[test]

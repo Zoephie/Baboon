@@ -387,6 +387,11 @@ pub(super) fn load_model_preview(
             super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview);
             let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
             let leaves = super::h3_leaves::read_h3_leaves(source, model_tag, &markers, middle);
+            // Framed by a null model alone, the eye sits among the leaves and
+            // one passing the lens fills the view.
+            for corner in leaves.iter().flat_map(|system| system.emission_corners()) {
+                expand_preview_bounds_local(&mut preview.bounds_min, &mut preview.bounds_max, corner);
+            }
             preview.h3_leaves = leaves.into_iter().map(Arc::new).collect();
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
