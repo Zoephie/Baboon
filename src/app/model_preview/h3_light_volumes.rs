@@ -15,7 +15,7 @@ use super::h2_passes::tag_function_at;
 use super::h3_effects::{
     H3EffectTimes, for_each_attached_part, part_frame, part_markers, read_part_placement,
 };
-use super::h3_shaders::{H3Blend, read_h3_definition};
+use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::materials::{H3Bitmap, read_h3_bitmap};
 use super::renderer::H3_EXPOSURE;
 use super::*;
@@ -200,6 +200,7 @@ pub(crate) struct H3VolumeDefinition {
     brightness_ratio: f32,
     blend: H3Blend,
     bitmap: H3Bitmap,
+    sampler: Option<H3Sampler>,
     sort_layer: i32,
 }
 
@@ -229,6 +230,8 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         parameter.read_string_id("parameter name").as_deref() == Some("base_map")
     })?;
     let map = base.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
+    let baked = super::materials::resolve_embedded_method(source, shader)
+        .and_then(|resolved| super::materials::read_resolved_map(source, &resolved, "base_map"));
     let definition = shader.read_tag_ref_path("definition").filter(|path| !path.is_empty())?;
     let definition = read_h3_definition(source, &definition)?;
     let options: Vec<usize> = elements(shader, "options")
@@ -260,7 +263,11 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         intensity,
         brightness_ratio: element.read_real("brightness ratio").unwrap_or(1.0),
         blend: definition.blend(&options),
-        bitmap: read_h3_bitmap(source, &map, 0, SamplerKind::Texture2D)?,
+        sampler: baked.as_ref().map(|(_, sampler)| *sampler),
+        bitmap: match baked {
+            Some((bitmap, _)) => bitmap,
+            None => read_h3_bitmap(source, &map, 0, SamplerKind::Texture2D)?,
+        },
         sort_layer: super::h3_particles::h3_sort_layer(shader),
     })
 }
@@ -382,6 +389,10 @@ impl H3LightVolumeAt {
     /// Its sort position: `submit` hands the transparents its location.
     pub(crate) fn origin(&self, bones: Option<&[[f32; 4]]>) -> [f32; 3] {
         posed_on(self.node, self.position, self.forward, bones).0
+    }
+
+    pub(crate) fn sampler(&self) -> Option<H3Sampler> {
+        self.definition.sampler
     }
 
     pub(crate) fn bitmap(&self) -> &H3Bitmap {

@@ -484,6 +484,35 @@ pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: S
     })
 }
 
+/// A render method held inside another tag, resolved as the bake would.
+pub(super) fn resolve_embedded_method(source: &TagSource, shader: TagStruct<'_>) -> Option<ResolvedRenderMethod> {
+    let method = RenderMethod::from_struct(&shader).ok()?;
+    let definition = cached_render_method_definition(source, &method.definition_path, &mut HashMap::new())?;
+    let mut options = HashMap::new();
+    let resolved = ResolvedRenderMethod::resolve(&method, &definition, |option_path| {
+        cached_render_method_option(source, option_path, &mut options).map(|option| (*option).clone())
+    });
+    Some(resolved)
+}
+
+/// A map of a resolved method, with the sampler the bake gave it: the option's
+/// default wherever the shader's `bitmap flags` claim no field of it.
+pub(super) fn read_resolved_map(
+    source: &TagSource,
+    resolved: &ResolvedRenderMethod,
+    name: &str,
+) -> Option<(H3Bitmap, H3Sampler)> {
+    let ParameterSource::Inline(ResolvedValue::Bitmap(binding)) = &resolved.find(name)?.source else {
+        return None;
+    };
+    let bitmap = read_h3_bitmap(source, &binding.bitmap_path, binding.bitmap_index, SamplerKind::Texture2D)?;
+    let sampler = H3Sampler {
+        address: [binding.address_mode_x, binding.address_mode_y],
+        filter: binding.filter_mode,
+    };
+    Some((bitmap, sampler))
+}
+
 /// A map's `_xform`: its scale, then its offset. A shader's animators override
 /// the option's default scale.
 fn h3_xform(values: &Values<'_>, parameter: &str) -> [f32; 4] {

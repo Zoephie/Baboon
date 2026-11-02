@@ -3083,9 +3083,10 @@ impl ModelGlRenderer {
                     gl.delete_texture(texture);
                 }
                 let maps = |look: &h3_particles::H3SpriteShader| {
-                    [&look.base_map, &look.alpha_map, &look.palette_map].map(|map| {
+                    let [base, alpha, palette] = look.samplers;
+                    [(&look.base_map, base), (&look.alpha_map, alpha), (&look.palette_map, palette)].map(|(map, sampler)| {
                         map.as_ref().and_then(|(image, texels, mips)| {
-                            h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)
+                            h3_draw::upload_h2_image_linear(gl, image, *texels, mips, sampler)
                         })
                     })
                 };
@@ -3141,7 +3142,7 @@ impl ModelGlRenderer {
                     .iter()
                     .map(|at| {
                         let (image, texels, mips) = at.bitmap();
-                        h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)
+                        h3_draw::upload_h2_image_linear(gl, image, *texels, mips, at.sampler())
                     })
                     .collect();
                 uploaded.flare_geometry = Some(frame.geometry_id);

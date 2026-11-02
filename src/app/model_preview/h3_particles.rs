@@ -16,8 +16,8 @@ use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;
 use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_markers, part_runs_by};
 use super::h3_strips::{H3StripAt, read_carried_strips};
-use super::h3_shaders::{H3Blend, read_h3_definition};
-use super::materials::{H3Bitmap, read_h3_bitmap};
+use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
+use super::materials::{H3Bitmap, read_h3_bitmap, read_resolved_map, resolve_embedded_method};
 use super::renderer::H3_EXPOSURE;
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -392,6 +392,8 @@ pub(crate) struct H3SpriteShader {
     pub(crate) base_map: Option<H3Bitmap>,
     pub(crate) alpha_map: Option<H3Bitmap>,
     pub(crate) palette_map: Option<H3Bitmap>,
+    /// `base_map`'s, `alpha_map`'s and `palette`'s, as baked.
+    pub(crate) samplers: [Option<H3Sampler>; 3],
 }
 
 impl H3SpriteShader {
@@ -413,6 +415,7 @@ impl H3SpriteShader {
             base_map: Some(base_map),
             alpha_map: None,
             palette_map: None,
+            samplers: [None; 3],
         }
     }
 
@@ -434,6 +437,7 @@ impl H3SpriteShader {
             base_map: None,
             alpha_map: None,
             palette_map: None,
+            samplers: [None; 3],
         }
     }
 }
@@ -462,6 +466,7 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
         .and_then(|animated| tag_function_at(&animated, "function"))
         .map(|function| function.evaluate_color(0.0, 0.0))
         .map_or([0.0; 3], |color| [color.red, color.green, color.blue]);
+    let ([base_map, alpha_map, palette_map], samplers) = read_maps(source, shader);
     Some(H3SpriteShader {
         albedo: H3ParticleAlbedo::named(&chosen("albedo")),
         blend: definition.blend(&options),
@@ -495,9 +500,10 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
                 .and_then(|animated| tag_function_at(&animated, "function"))
                 .map_or(1.0, |function| function.evaluate(0.0, 0.0))
         }),
-        base_map: read_map(source, shader, "base_map"),
-        alpha_map: read_map(source, shader, "alpha_map"),
-        palette_map: read_map(source, shader, "palette"),
+        base_map,
+        alpha_map,
+        palette_map,
+        samplers,
     })
 }
 
@@ -509,6 +515,19 @@ fn parameter<'a>(shader: TagStruct<'a>, name: &str) -> Option<TagStruct<'a>> {
 fn read_map(source: &TagSource, shader: TagStruct<'_>, name: &str) -> Option<H3Bitmap> {
     let path = parameter(shader, name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
     read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
+}
+
+/// A sprite shader's maps, and the sampler each is baked with. Failing to
+/// resolve leaves what it authored, on the preview's default sampler.
+fn read_maps(source: &TagSource, shader: TagStruct<'_>) -> ([Option<H3Bitmap>; 3], [Option<H3Sampler>; 3]) {
+    const MAPS: [&str; 3] = ["base_map", "alpha_map", "palette"];
+    let Some(resolved) = resolve_embedded_method(source, shader) else {
+        return (MAPS.map(|name| read_map(source, shader, name)), [None; 3]);
+    };
+    let [base, alpha, palette] = MAPS.map(|name| read_resolved_map(source, &resolved, name));
+    let split = |map: Option<(H3Bitmap, H3Sampler)>| map.map_or((None, None), |(bitmap, sampler)| (Some(bitmap), Some(sampler)));
+    let ((base, base_sampler), (alpha, alpha_sampler), (palette, palette_sampler)) = (split(base), split(alpha), split(palette));
+    ([base, alpha, palette], [base_sampler, alpha_sampler, palette_sampler])
 }
 
 /// `postprocess_frame_animation`'s `m_sprite`, from a sprite's left, right, top
