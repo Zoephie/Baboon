@@ -593,8 +593,10 @@ fn prepare_h3_material(
         .ok_or_else(|| format!("{} did not read", method.definition_path))?;
     let options: Vec<usize> = method.options.iter().map(|option| (*option).max(0) as usize).collect();
     let blend = definition.blend(&options);
+    // ODST's `black` has only `albedo`, which is all it needs to be black.
     let lit_entry = H3_LIT_ENTRIES
         .iter()
+        .chain(&["albedo"])
         .find(|entry| definition.entry_points.iter().any(|known| known == *entry))
         .ok_or("no lit entry point")?;
     let opaque = blend == H3Blend::Opaque;
@@ -787,7 +789,12 @@ pub(super) fn read_h3_shield_settings(source: &TagSource, path: &str) -> Option<
         values.insert(name.to_owned(), value);
     };
     set("extrusion_distance", H3Value::Floats([real("Extrusion Distance"); 4]));
-    set("texture_quantities", H3Value::Floats([real("Texture Scale"), real("Scroll Speed"), 0.0, 0.0]));
+    let flags = root.read_flag_names("flags").unwrap_or_default();
+    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    // `render_object_shield_impact`: z is ODST's, for the second noise.
+    let secondary = real(if flagged("use secondary") { "Secondary texture scale" } else { "Texture Scale" });
+    set("texture_quantities", H3Value::Floats([real("Texture Scale"), real("Scroll Speed"), secondary, 0.0]));
+    set("shield_impact_edge_fade", H3Value::Floats([real("Edge Fade"); 4]));
     for (uniform, sharpness, scale, threshold) in [
         ("plasma1_settings", "Plasma Sharpness 1", "Plasma Scale 1", "Plasma Threshold 1"),
         ("plasma2_settings", "Plasma Sharpness 2", "Plasma Scale 2", "Plasma Threshold 2"),
@@ -816,7 +823,7 @@ pub(super) fn read_h3_shield_settings(source: &TagSource, path: &str) -> Option<
             frames: Vec::new(),
         });
     }
-    Some(Arc::new(H3ShieldSettings { values, textures }))
+    Some(Arc::new(H3ShieldSettings { procedural: flagged("use procedural uv"), values, textures }))
 }
 
 /// The pass, on the global settings a model that names none of its own uses.
@@ -827,7 +834,9 @@ fn h3_shield(source: &TagSource, caches: &mut ResolveCaches) -> Option<Arc<H3Shi
     let settings = read_h3_shield_settings(source, "globals\\global_shield_impact_settings");
     let sources = caches.h3_sources.get_or_insert_with(|| H3Sources::new(source));
     let shield = settings.and_then(|settings| {
-        Some(Arc::new(H3Shield { pass: sources.explicit_pass("shield_impact").ok()?, settings }))
+        let pass = sources.explicit_pass("shield_impact").ok()?;
+        let procedural = sources.explicit_pass("shield_impact_procedural_uv").ok();
+        Some(Arc::new(H3Shield { pass, procedural, settings }))
     });
     caches.h3_shield = Some(shield.clone());
     shield

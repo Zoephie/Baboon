@@ -526,12 +526,15 @@ pub(crate) struct H3Material {
 #[derive(Debug)]
 pub(crate) struct H3Shield {
     pub(crate) pass: Arc<H3Pass>,
+    /// ODST's `shield_impact_procedural_uv`, for settings that ask for it.
+    pub(crate) procedural: Option<Arc<H3Pass>>,
     pub(crate) settings: Arc<H3ShieldSettings>,
 }
 
 /// A `shield_impact` tag, as constants and its two noise maps by uniform suffix.
 #[derive(Debug)]
 pub(crate) struct H3ShieldSettings {
+    pub(crate) procedural: bool,
     pub(crate) values: HashMap<String, H3Value>,
     pub(crate) textures: Vec<H3Texture>,
 }

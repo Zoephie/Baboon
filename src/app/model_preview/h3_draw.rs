@@ -1070,7 +1070,10 @@ impl ModelGlRenderer {
                 h3_set_blend(gl, H3Blend::Additive);
                 for (batch, material) in &batches {
                     if let Some(shield) = material.shield.as_ref() {
-                        self.h3_draw_pass(gl, frame, slot, batch, material, &shield.pass, Some(shield));
+                        // `render_object_shield_impact`: by the settings that win.
+                        let settings = frame.preview.h3_shield.as_ref().unwrap_or(&shield.settings);
+                        let pass = shield.procedural.as_ref().filter(|_| settings.procedural).unwrap_or(&shield.pass);
+                        self.h3_draw_pass(gl, frame, slot, batch, material, pass, Some(shield));
                     }
                 }
                 gl.color_mask(true, true, true, true);

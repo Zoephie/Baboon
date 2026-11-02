@@ -73,13 +73,13 @@ use h2_passes::{H2ChangeColors, read_h2_change_colors};
 use variants::*;
 
 // The material resolver understands the render-method shaders validated for
-// H3EK and HREK, Halo 2's template-and-parameters `shader`, and Halo CE's
+// H3EK, H3ODSTEK and HREK, Halo 2's template-and-parameters `shader`, and Halo CE's
 // model and environment shaders. Other kits may share a tag container
 // generation, but that alone does not make their texture path supported.
 fn model_preview_supports_textures(game: Option<GameId>) -> bool {
     matches!(
         game,
-        Some(GameId::Halo3 | GameId::HaloReach | GameId::Halo2 | GameId::HaloCe)
+        Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo2 | GameId::HaloCe)
     )
 }
 

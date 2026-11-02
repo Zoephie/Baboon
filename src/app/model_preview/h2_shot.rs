@@ -48,6 +48,8 @@ fn headless_gl() -> glow::Context {
 fn shot_game() -> GameId {
     if std::env::var_os("H2_SHOT_CE").is_some() {
         GameId::HaloCe
+    } else if std::env::var_os("H2_SHOT_ODST").is_some() {
+        GameId::Halo3Odst
     } else if std::env::var_os("H2_SHOT_H3").is_some() {
         GameId::Halo3
     } else {
@@ -285,7 +287,7 @@ fn h3_sweep() {
     let family = std::env::var("H3_FAMILY").unwrap_or_else(|_| "shader".to_owned());
     let source = TagSource::LooseFolder {
         root: root.clone().into(),
-        game: Some(GameId::Halo3),
+        game: Some(if root.contains("odst") { GameId::Halo3Odst } else { GameId::Halo3 }),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = headless_gl();
