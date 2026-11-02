@@ -14,7 +14,7 @@ use super::ce_lights::{CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, part_markers, read_part_placement};
-use super::h3_particles::{H3ParticleVertex, H3SpriteShader, lightmap_tint, read_ends, read_sprite_shader};
+use super::h3_particles::{H3ParticleVertex, H3SpriteShader, lightmap_tint, read_ends, read_sprite_shader, slerped};
 use super::h3_shaders::H3Blend;
 use super::renderer::H3_EXPOSURE;
 use super::*;
@@ -166,9 +166,10 @@ impl StripProperty {
         [color.red, color.green, color.blue]
     }
 
+    /// `map_to_vector3d_range`: a direction goes around, not across. Opposite
+    /// ends have no way around, and it divides by nothing as the shader does.
     fn vector(&self, state: &StripState) -> [f32; 3] {
-        let t = self.scalar(state);
-        std::array::from_fn(|axis| self.ends[0][axis] + (self.ends[1][axis] - self.ends[0][axis]) * t)
+        slerped(self.ends, self.scalar(state))
     }
 }
 
@@ -1125,6 +1126,19 @@ mod tests {
             edge_fade: None,
             shader: Arc::new(H3SpriteShader::blank()),
         }
+    }
+
+    #[test]
+    fn a_vector_goes_around_and_opposite_ends_have_no_way_to() {
+        let state = StripState::default();
+        let mut property = constant(0.5);
+        property.ends = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let turned = property.vector(&state);
+        assert!((dot(turned, turned) - 1.0).abs() < 1e-3, "{turned:?} is not across the corner");
+        property.ends = [[0.0, 0.0, 0.1], [0.0, 0.0, -0.1]];
+        assert!(!property.vector(&state)[2].is_finite());
+        property.ends = [[0.0, 0.0, 0.2], [0.0; 3]];
+        assert!((property.vector(&state)[2] - 0.2 * std::f32::consts::FRAC_PI_4.sin()).abs() < 1e-5);
     }
 
     #[test]

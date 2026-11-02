@@ -236,7 +236,7 @@ impl H3ParticleProperty {
 
 /// Unnormalized, as the game's is, and with no special case but what keeps it
 /// from dividing by nothing.
-fn slerped([from, to]: [[f32; 3]; 2], t: f32) -> [f32; 3] {
+pub(super) fn slerped([from, to]: [[f32; 3]; 2], t: f32) -> [f32; 3] {
     let lengths = dot(from, from).sqrt() * dot(to, to).sqrt();
     let lengths = if lengths == 0.0 { 1.0 } else { lengths };
     let mut cos = dot(from, to) / lengths;
