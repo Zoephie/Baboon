@@ -392,7 +392,7 @@ impl RunningLeaves {
         force[2] = -force[2].abs();
         let direction = force;
         let [low, high] = system.wind_range;
-        let strength = if low != 0.0 || high != 0.0 { strength.clamp(low, high) } else { strength };
+        let strength = if low != 0.0 || high != 0.0 { strength.max(low).min(high) } else { strength };
         let force = force.map(|axis| axis * dt * strength * 30.0);
         let force = away_from_pole([0.0, 0.0, 1.0], WIND_EXCLUSION, force);
         let share = (strength / (system.wind_scale * MOST_WIND).max(EPSILON)).clamp(0.0, 1.0);

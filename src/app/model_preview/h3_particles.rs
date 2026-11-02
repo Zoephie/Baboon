@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use blam_tags::render_method::{ParameterSource, ResolvedValue};
+use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, ParameterSource, ResolvedValue};
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
@@ -17,12 +17,12 @@ use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;
 use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_markers, part_runs_by};
 use super::h3_strips::{H3StripAt, read_carried_strips};
-use super::h3_leaves::normals_between;
 use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::materials::{H3Bitmap, read_h3_bitmap, read_resolved_map, resolve_embedded_method};
 use super::renderer::H3_EXPOSURE;
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
+use crate::core::game::GameId;
 use crate::core::source::TagSource;
 
 /// The game's tick, which everything here steps by.
@@ -241,6 +241,13 @@ pub(super) fn read_ends(property: TagStruct<'_>) -> [[f32; 3]; 2] {
     [end("Starting interpolant"), end("Ending interpolant")]
 }
 
+/// `initialize_particle`'s nudge to a speed of none, which what faces its
+/// velocity needs one to have. Halo 3 gives it to everything, ODST only to those.
+fn still_particles_move(odst: bool, billboard: H3Billboard) -> bool {
+    use H3Billboard::{ScreenParallel, ScreenPerpendicular, VelocityHorizontal};
+    !odst || matches!(billboard, ScreenParallel | ScreenPerpendicular | VelocityHorizontal)
+}
+
 /// `c_particle_definition`'s billboard styles, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum H3Billboard {
@@ -319,6 +326,8 @@ impl H3ParticleAlbedo {
 /// A `.particle`.
 #[derive(Debug)]
 pub(crate) struct H3ParticleLook {
+    /// Whether a speed of none is nudged to a little.
+    still_moves: bool,
     billboard: H3Billboard,
     flip_u: bool,
     flip_v: bool,
@@ -423,6 +432,8 @@ pub(crate) struct H3SpriteShader {
 impl H3SpriteShader {
     /// What a leaf draws with: only a map, cut out at half its alpha.
     pub(crate) fn alpha_tested(blend: H3Blend, base_map: H3Bitmap) -> Self {
+        // `leaf_system_render_opaque` binds its plate clamped and bilinear.
+        let plate = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
         Self {
             albedo: H3ParticleAlbedo::Diffuse,
             blend,
@@ -440,7 +451,7 @@ impl H3SpriteShader {
             alpha_map: None,
             palette_map: None,
             second_map: None,
-            samplers: [None; 4],
+            samplers: [Some(plate), None, None, None],
             constants: H3AlbedoConstants::default(),
         }
     }
@@ -714,8 +725,10 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
     let (frames, corner) = read_frames(source, shader, first, [offset.x, offset.y], start, animated("one shot"));
     let mut seeds = SeedAllocator::default();
+    let billboard = H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default());
     Some(H3ParticleLook {
-        billboard: H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default()),
+        billboard,
+        still_moves: still_particles_move(source.game() == Some(GameId::Halo3Odst), billboard),
         flip_u: flagged("random u mirror"),
         flip_v: flagged("random v mirror"),
         random_rotation: flagged("random starting rotation"),
@@ -815,7 +828,8 @@ fn read_custom_points(source: &TagSource, emitter: TagStruct<'_>) -> Vec<H3Custo
 }
 
 /// `initialize_particle`'s custom shape: `emission radius` chooses the point
-/// and `emission angle` how far its normal strays toward a random direction.
+/// and `emission angle` how far its normal leans to a random direction, in a
+/// straight line rather than around the sphere.
 fn emit_from_points(
     points: &[H3CustomPoint],
     radius: f32,
@@ -828,7 +842,8 @@ fn emit_from_points(
     let at = ((points.len() as f32 * radius) as i32).clamp(0, points.len() as i32 - 1) as usize;
     let point = points[at];
     let stray = (angle_degrees / 180.0).clamp(0.0, 1.0);
-    (point.position, normals_between(point.normal, random.direction(), stray))
+    let toward = random.direction();
+    (point.position, std::array::from_fn(|axis| (1.0 - stray) * point.normal[axis] + stray * toward[axis]))
 }
 
 impl H3EmissionShape {
@@ -967,10 +982,10 @@ impl H3ParticleFlock {
             if let Some((place, velocity)) = neighbor {
                 let weight = self.separation_weight.scalar(&state);
                 if weight != 0.0 {
-                    let away = minus(particle.position, *place);
-                    let ratio = dot(away, away).sqrt() / self.separation_distance.scalar(&state).max(0.1);
+                    let toward = minus(*place, particle.position);
+                    let ratio = dot(toward, toward).sqrt() / self.separation_distance.scalar(&state).max(0.1);
                     let scale = if ratio < 1.0 { -ratio * weight } else { weight };
-                    add(unit(away).map(|axis| axis * scale));
+                    add(unit(toward).map(|axis| axis * scale));
                 }
                 let (mine, theirs) = (unit(particle.velocity), unit(*velocity));
                 let weight = self.alignment_weight.scalar(&state);
@@ -1451,7 +1466,10 @@ fn emit(shape: H3EmissionShape, radius: f32, angle_degrees: f32, random: &mut Ra
             (random.direction().map(|axis| axis * radius), velocity)
         }
         H3EmissionShape::Debris => ([0.0, sin_turn * radius, cos_turn * radius], [0.0, 0.0, 1.0]),
-        H3EmissionShape::Line => ([0.0, random.range(-radius, radius), 0.0], spread(angle)),
+        H3EmissionShape::Line => {
+            let cone = random.range(0.0, angle);
+            ([0.0, random.range(-radius, radius), 0.0], spread(cone))
+        }
         // An attached effect has no impact, whose size is all that spreads these.
         H3EmissionShape::ImpactContour => {
             let cone = angle;
@@ -1704,7 +1722,7 @@ impl H3Emitter {
             };
             let length = (velocity[0].powi(2) + velocity[1].powi(2) + velocity[2].powi(2)).sqrt().max(1e-6);
             let speed = self.speed.scalar(&particle_state);
-            let speed = if speed == 0.0 { 0.001 } else { speed };
+            let speed = if speed == 0.0 && look.still_moves { 0.001 } else { speed };
             velocity = velocity.map(|axis| axis / length * speed);
             let (offset, turned) = frame;
             let to_world = |vector: [f32; 3]| -> [f32; 3] {
@@ -2366,6 +2384,14 @@ mod tests {
         let (_, strayed) = emit_from_points(&points, 0.0, 90.0, &mut random);
         assert!(strayed != [0.0, 0.0, 1.0]);
         assert_eq!(emit_from_points(&[], 0.5, 0.0, &mut random), ([0.0; 3], [0.0; 3]));
+    }
+
+    #[test]
+    fn only_odst_lets_a_particle_that_faces_nothing_stay_still() {
+        assert!(still_particles_move(false, H3Billboard::ScreenFacing));
+        assert!(!still_particles_move(true, H3Billboard::ScreenFacing));
+        assert!(still_particles_move(true, H3Billboard::ScreenParallel));
+        assert!(still_particles_move(true, H3Billboard::VelocityHorizontal));
     }
 
     #[test]

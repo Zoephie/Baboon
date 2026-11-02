@@ -264,7 +264,6 @@ pub(crate) struct H3ClothAt {
     drag: f32,
     wind_scale: f32,
     flappiness: f32,
-    windless: bool,
     /// The sheet's two sides in the model's vertices, each `places` long.
     first_vertex: usize,
 }
@@ -329,7 +328,6 @@ fn read_cloth(
         drag: real("drag"),
         wind_scale: real("wind_scale"),
         flappiness: real("wind_flappiness_scale"),
-        windless: flagged("Doesn't use wind"),
         first_vertex: 0,
     };
     Some((cloth, uvs))
@@ -538,7 +536,7 @@ impl H3ClothField {
             for (cloth, running) in cloths.iter().zip(&mut self.running) {
                 let pins = pins_of(cloth);
                 running.relax(cloth, &pins);
-                running.integrate(cloth, if cloth.windless { [0.0; 3] } else { wind });
+                running.integrate(cloth, wind);
                 running.calculate_normals(cloth);
             }
         }
@@ -610,7 +608,7 @@ mod tests {
         assert_eq!(pins[3].node, 4, "the secondary takes the last vertex");
     }
 
-    fn hung(windless: bool) -> (H3ClothAt, RunningCloth, Vec<[f32; 3]>) {
+    fn hung() -> (H3ClothAt, RunningCloth, Vec<[f32; 3]>) {
         let (places, _, indices) = flag_grid([4, 4], [0.1, 0.1]);
         let links = generate_links(&places, &indices, 2.0);
         let pins = cloth_pins(vec![(0, [0.0, 0.0, 1.0]), (0, [0.0, 0.0, 0.7])], None, [4, 4], 16, false);
@@ -624,7 +622,6 @@ mod tests {
             drag: 0.01,
             wind_scale: 0.15,
             flappiness: 0.25,
-            windless,
             first_vertex: 0,
         };
         let targets: Vec<[f32; 3]> = cloth.pins.iter().map(|pin| pin.position).collect();
@@ -634,7 +631,7 @@ mod tests {
 
     #[test]
     fn a_sheet_stays_on_its_pins_and_near_its_size() {
-        let (cloth, mut running, pins) = hung(false);
+        let (cloth, mut running, pins) = hung();
         let mut wind = H3Wind::default();
         for tick in 0..300 {
             let blown = wind.step(tick as f32);
@@ -652,7 +649,7 @@ mod tests {
     #[test]
     fn gravity_pulls_what_is_not_pinned_and_wind_stirs_it() {
         let settled = |gravity: f32| {
-            let (mut cloth, mut running, pins) = hung(true);
+            let (mut cloth, mut running, pins) = hung();
             cloth.gravity = gravity;
             for _ in 0..120 {
                 running.relax(&cloth, &pins);
@@ -664,7 +661,7 @@ mod tests {
         let (weightless, weighted) = (settled(0.0), settled(0.5 * GRAVITY));
         assert!(weighted[2] < weightless[2] - 1e-4, "{weighted:?} against {weightless:?}");
         assert!(weighted[1].abs() < 1e-3, "nothing pushes it out of its plane");
-        let (cloth, mut blown, pins) = hung(false);
+        let (cloth, mut blown, pins) = hung();
         let mut wind = H3Wind::default();
         for tick in 0..120 {
             let push = wind.step(tick as f32);
