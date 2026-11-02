@@ -539,6 +539,14 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
 /// `sub_8EB720`, and what tool's postprocess gives a tag for the game: the
 /// light, whether it lights the model on the sphere path, and its flare. `None`
 /// for a light the game makes nothing of in a third person view.
+/// Whether a `light` can ever be on in a third person view: nothing else sets
+/// the bit `sub_8ED2A0` turns a light on through.
+pub(super) fn light_can_shine(root: TagStruct<'_>) -> bool {
+    let flags = root.read_int_any("flags").unwrap_or(0);
+    flags & (NO_ILLUMINATION | LIGHT_ONLY_FIRST_PERSON) == 0
+        && root.read_int_any("default lightmap setting") != Some(LIGHTMAPS_ONLY)
+}
+
 fn read_h2_light(
     source: &TagSource,
     path: &str,
@@ -546,11 +554,7 @@ fn read_h2_light(
     let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
     let root = tag.root();
     let flags = root.read_int_any("flags").unwrap_or(0);
-    // Nothing else sets the bit `sub_8ED2A0` turns a light on through.
-    if flags & (NO_ILLUMINATION | LIGHT_ONLY_FIRST_PERSON) != 0 {
-        return None;
-    }
-    if root.read_int_any("default lightmap setting") == Some(LIGHTMAPS_ONLY) {
+    if !light_can_shine(root) {
         return None;
     }
     let flare = root.read_tag_ref_path("lens flare").filter(|path| !path.is_empty());
