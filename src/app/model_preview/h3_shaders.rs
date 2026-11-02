@@ -621,12 +621,45 @@ pub(crate) struct H3Animation {
     pub(crate) input: String,
     pub(crate) range: String,
     pub(crate) period: f32,
+    /// Which input names run on the clock, by game and shader.
+    pub(crate) clock: H3Clock,
+}
+
+/// How `evaluate_function` reads an animated parameter's input when it names
+/// the clock rather than an object function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum H3Clock {
+    /// Halo 3 (`evaluate_function`, March 2007 build): `unique_id` is time
+    /// shifted by the object's index, so like objects run out of step.
+    #[default]
+    Halo3,
+    /// ODST (`sub_140946C30`): `unique_id` shifted by the object's index
+    /// times 1.37317.
+    Odst,
+    /// An ODST screen shader (`sub_14096D0E0`): `time` and `render_time` are
+    /// the clock as well.
+    OdstScreen,
+}
+
+impl H3Clock {
+    /// Seconds `unique_id` runs ahead for the object of `owner`, or none if
+    /// `input` is not a clock here. The game uses the object's datum index;
+    /// the preview's owner (0 the opened object) stands in for it.
+    fn phase(self, input: &str, owner: u8) -> Option<f32> {
+        let owner = f32::from(owner);
+        match (self, input) {
+            (Self::Halo3, "unique_id") => Some(owner),
+            (Self::Odst | Self::OdstScreen, "unique_id") => Some(owner * 1.37317),
+            (Self::OdstScreen, "time" | "render_time") => Some(0.0),
+            _ => None,
+        }
+    }
 }
 
 impl H3Animation {
     /// `evaluate_function`: an object's named values, or else time around a
     /// period, which only a periodic function runs past 1.
-    fn sample(&self, time: f32, values: Option<&H2FunctionValues>) -> (f32, f32) {
+    fn sample(&self, time: f32, owner: u8, values: Option<&H2FunctionValues>) -> (f32, f32) {
         // `object_get_function_value`: no name at all reads full, so a parameter
         // with an input and no range runs on its function's upper curve.
         let named = |name: &str| {
@@ -635,12 +668,11 @@ impl H3Animation {
             }
             values.and_then(|values| values.get(name)).copied().unwrap_or(0.0)
         };
-        // ODST's `render_time` is the clock itself.
-        let timed = self.input == "unique_id" || self.input == "render_time";
-        if !timed && (!self.input.is_empty() || !self.range.is_empty()) {
+        let phase = self.clock.phase(&self.input, owner);
+        if phase.is_none() && (!self.input.is_empty() || !self.range.is_empty()) {
             return (named(&self.input), named(&self.range));
         }
-        let input = time / self.period;
+        let input = (time + phase.unwrap_or(0.0)) / self.period;
         if self.function.function_type() == FunctionType::Periodic {
             (input, 0.0)
         } else {
@@ -649,8 +681,8 @@ impl H3Animation {
     }
 
     /// Write this into `value`, the constant as it stands.
-    pub(crate) fn apply(&self, value: &mut [f32; 4], time: f32, values: Option<&H2FunctionValues>) {
-        let (input, range) = self.sample(time, values);
+    pub(crate) fn apply(&self, value: &mut [f32; 4], time: f32, owner: u8, values: Option<&H2FunctionValues>) {
+        let (input, range) = self.sample(time, owner, values);
         if self.writes == H3Animated::Color {
             let color = self.function.evaluate_color(input, range);
             value[..3].copy_from_slice(&[color.red, color.green, color.blue]);
@@ -667,8 +699,8 @@ impl H3Animation {
     }
 
     /// `render_method_submit_volatile_per_node`'s choice among `count` images.
-    pub(crate) fn frame(&self, count: usize, time: f32, values: Option<&H2FunctionValues>) -> usize {
-        let (input, range) = self.sample(time, values);
+    pub(crate) fn frame(&self, count: usize, time: f32, owner: u8, values: Option<&H2FunctionValues>) -> usize {
+        let (input, range) = self.sample(time, owner, values);
         let frame = (self.function.evaluate(input, range) % count as f32).floor() as isize;
         frame.clamp(0, count as isize - 1) as usize
     }
@@ -691,6 +723,7 @@ mod texel_tests {
             input: input.to_owned(),
             range: range.to_owned(),
             period: 1.0,
+            clock: H3Clock::Halo3,
         }
     }
 
@@ -698,15 +731,36 @@ mod texel_tests {
     fn an_empty_name_beside_a_named_one_reads_full() {
         let values = H2FunctionValues::from([("power".to_owned(), 0.25), ("heat".to_owned(), 0.5)]);
         let values = Some(&values);
-        assert_eq!(animation("power", "").sample(0.0, values), (0.25, 1.0));
-        assert_eq!(animation("", "heat").sample(0.0, values), (1.0, 0.5));
-        assert_eq!(animation("power", "heat").sample(0.0, values), (0.25, 0.5));
-        assert_eq!(animation("missing", "").sample(0.0, values), (0.0, 1.0));
+        assert_eq!(animation("power", "").sample(0.0, 0, values), (0.25, 1.0));
+        assert_eq!(animation("", "heat").sample(0.0, 0, values), (1.0, 0.5));
+        assert_eq!(animation("power", "heat").sample(0.0, 0, values), (0.25, 0.5));
+        assert_eq!(animation("missing", "").sample(0.0, 0, values), (0.0, 1.0));
+    }
+
+    #[test]
+    fn render_time_is_the_clock_only_in_odst_screen_shaders() {
+        let values = H2FunctionValues::new();
+        let mut timed = animation("render_time", "");
+        assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.0, 1.0), "an object function, and none is set");
+        timed.clock = H3Clock::Odst;
+        assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.0, 1.0));
+        timed.clock = H3Clock::OdstScreen;
+        assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.25, 0.0));
+    }
+
+    #[test]
+    fn unique_id_runs_each_object_out_of_step() {
+        let mut unique = animation("unique_id", "");
+        unique.period = 4.0;
+        assert_eq!(unique.sample(1.0, 0, None), (0.25, 0.0));
+        assert_eq!(unique.sample(1.0, 2, None), (0.75, 0.0), "Halo 3: time plus the object's index");
+        unique.clock = H3Clock::Odst;
+        assert_eq!(unique.sample(1.0, 2, None).0, (1.0 + 2.0 * 1.37317) / 4.0);
     }
 
     #[test]
     fn nothing_named_runs_on_time() {
-        assert_eq!(animation("", "").sample(0.25, None), (0.25, 0.0));
+        assert_eq!(animation("", "").sample(0.25, 0, None), (0.25, 0.0));
     }
 
     #[test]

@@ -160,6 +160,7 @@ impl H2Bloom {
         scene_framebuffer: glow::NativeFramebuffer,
         scene_color: glow::NativeTexture,
         size: [i32; 2],
+        show_backfaces: bool,
     ) {
         let small = [(size[0] / DOWNSAMPLE).max(1), (size[1] / DOWNSAMPLE).max(1)];
         unsafe {
@@ -220,6 +221,14 @@ impl H2Bloom {
             gl.disable(glow::BLEND);
             gl.color_mask(true, true, true, true);
             gl.depth_mask(true);
+            // What it switched off for the full-screen passes, back for
+            // whatever draws the model after.
+            gl.enable(glow::DEPTH_TEST);
+            if show_backfaces {
+                gl.disable(glow::CULL_FACE);
+            } else {
+                gl.enable(glow::CULL_FACE);
+            }
             gl.bind_texture(glow::TEXTURE_2D, None);
         }
     }

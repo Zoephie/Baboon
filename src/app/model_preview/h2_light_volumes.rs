@@ -416,7 +416,7 @@ impl H2LightVolume {
         let facing_cosine = dot(unit_eye, forward).abs();
         let facing = 1.0 - volume.facing.evaluate((1.0 - facing_cosine).clamp(0.0, 1.0), 0.0);
         let amount = volume.aspect.as_ref().map_or(0.0, |aspect| {
-            aspect_amount(aspect.threshold.to_radians(), aspect.exponent, facing_cosine)
+            aspect_amount(aspect.threshold, aspect.exponent, facing_cosine)
         });
         // The axis on the screen, which the quads turn to lie along.
         let (across, up) = (dot(forward, view.right), dot(forward, view.up));
@@ -442,7 +442,9 @@ impl H2LightVolume {
                         )
                     }
                 });
-                let (half_wide, half_high) = (radius * wide, radius * high);
+                // `rasterizer_light_volume_draw_sprites` never draws a sprite
+                // narrower along the axis than across it.
+                let (half_wide, half_high) = ((radius * wide).max(radius * high), radius * high);
                 if half_wide <= 0.0 || half_high <= 0.0 {
                     return None;
                 }

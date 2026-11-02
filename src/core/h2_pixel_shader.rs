@@ -40,7 +40,7 @@ pub(crate) struct ConstantBinding {
     pub(crate) source: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SamplerKind {
     Texture2D,
     Cube,

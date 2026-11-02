@@ -139,6 +139,36 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+impl super::ce_functions::ReadsOutputs for CeLightVolume {
+    fn object(&self) -> u8 {
+        self.object
+    }
+    fn outputs_read(&self) -> Vec<usize> {
+        self.source.into_iter().collect()
+    }
+}
+
+impl super::ce_functions::ReadsOutputs for CeLightning {
+    fn object(&self) -> u8 {
+        self.object
+    }
+    fn outputs_read(&self) -> Vec<usize> {
+        [self.jitter_source, self.thickness_source, self.tint_source, self.brightness_source].into_iter().flatten().collect()
+    }
+}
+
+impl super::ce_functions::ReadsOutputs for CeGlow {
+    fn object(&self) -> u8 {
+        self.object
+    }
+    fn outputs_read(&self) -> Vec<usize> {
+        [self.rotation.source, self.translation.source, self.distance_source, self.size_source, self.color_source]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+}
+
 impl CeLightVolume {
     /// `light_volume_submit` and `light_volume_render`: sprites along the
     /// marker, brighter as it faces the camera the way the tag says.
@@ -147,9 +177,6 @@ impl CeLightVolume {
         let length = dot(forward, forward).sqrt().max(0.0001);
         let forward = forward.map(|axis| axis / length);
         let value = self.source.map(|slot| outputs[slot]);
-        if value.is_some_and(|value| value <= 0.0) {
-            return Vec::new();
-        }
         let depth = dot(view.forward, std::array::from_fn(|axis| origin[axis] - view.eye[axis]));
         let [near, far] = self.fade;
         let mut fade = 1.0;
@@ -1059,6 +1086,11 @@ impl CeGlowField {
             for particle in &running.particles {
                 let scale = if particle.present_size == 0.0 { pixel(particle.position) } else { particle.present_size };
                 let size = glow.image_width * scale;
+                // `glow_update` divides by the tag's values unguarded; one with
+                // a zero there goes NaN in the game too. Nothing to draw.
+                if !(size.is_finite() && particle.position.iter().all(|axis| axis.is_finite())) {
+                    continue;
+                }
                 let corner = |u: f32, v: f32| {
                     let x = u - center_uv[0];
                     let y = center_uv[1] - v;

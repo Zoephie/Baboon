@@ -1502,7 +1502,9 @@ impl Baboon {
         match result {
             Ok(entries) => {
                 if let Some(Ok(data)) = state.data.as_mut() {
-                    if let (Some(clip), Some(weapons)) = (state.ce_clip_after_load.take(), &data.ce_weapons) {
+                    // Taken only by the game it is for: H2 reads it below.
+                    let ce_clip = data.ce_weapons.as_ref().and_then(|weapons| Some((state.ce_clip_after_load.take()?, weapons)));
+                    if let Some((clip, weapons)) = ce_clip {
                         let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
                         let class = held.map_or("unarmed", |weapon| weapon.class.as_str());
                         state.animation.selected = super::ce_attachments::clip_after_weapon_change(

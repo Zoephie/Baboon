@@ -1431,6 +1431,13 @@ pub(super) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderMod
         expand_preview_bounds_local(&mut dst.bounds_min, &mut dst.bounds_max, vertex.position);
         dst.vertices.push(*vertex);
     }
+    // The PRT attributes stay parallel to the vertices: overlays have none.
+    if let Some(prt) = dst.h2_prt.as_mut() {
+        prt.pad(src.vertices.len());
+    }
+    if let Some(prt) = dst.h3_prt.as_mut() {
+        prt.pad(src.vertices.len());
+    }
     for batch in &src.batches {
         let start = batch.index_start as usize;
         let end = start
@@ -1669,7 +1676,7 @@ impl Baboon {
                 merge_preview_append(&mut merged, overlay);
             }
             data.preview = Arc::new(merged);
-            data.geometry_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);
+            data.mesh_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);
         }
         // The layer filter also consults region selection, so collision-only
         // regions need entries. Shared names retain the render model's active
@@ -2615,7 +2622,8 @@ mod tests {
         let Some(Ok(data)) = state.data.as_ref() else {
             panic!("preview data");
         };
-        assert_ne!(data.geometry_id, geometry_id, "the geometry did change");
+        assert_ne!(data.mesh_id, geometry_id, "the mesh did change");
+        assert_eq!(data.geometry_id, geometry_id, "the effects and inputs keep theirs");
 
         app.handle_model_textures_resolved(
             stamp,

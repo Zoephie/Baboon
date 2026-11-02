@@ -112,6 +112,7 @@ pub(super) fn draw_model_viewport(
     let frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
+        mesh_id: data.mesh_id,
         textures_id: data.textures_id,
         visible_batches,
         camera: camera.gpu_uniforms(),
@@ -672,11 +673,10 @@ fn animated_error_point(point: &ModelErrorPoint, skinning_rows: Option<&[[f32; 4
     let Some(rows) = skinning_rows else {
         return point.position;
     };
-    let weight_sum: f32 = point.node_weights.iter().sum();
-    if weight_sum <= f32::EPSILON {
-        return point.position;
-    }
+    // As the vertex shader does: by the weights of the nodes that exist,
+    // over their sum.
     let mut result = [0.0; 3];
+    let mut applied = 0.0;
     for (&index, &weight) in point.node_indices.iter().zip(&point.node_weights) {
         if index < 0 || weight <= 0.0 {
             continue;
@@ -685,6 +685,7 @@ fn animated_error_point(point: &ModelErrorPoint, skinning_rows: Option<&[[f32; 4
         let Some(matrix) = rows.get(start..start + 3) else {
             continue;
         };
+        applied += weight;
         for axis in 0..3 {
             result[axis] += weight
                 * (matrix[axis][0] * point.position[0]
@@ -693,7 +694,10 @@ fn animated_error_point(point: &ModelErrorPoint, skinning_rows: Option<&[[f32; 4
                     + matrix[axis][3]);
         }
     }
-    result
+    if applied <= f32::EPSILON {
+        return point.position;
+    }
+    result.map(|axis| axis / applied)
 }
 
 fn point_in_polygon(point: egui::Pos2, polygon: &[egui::Pos2]) -> bool {
@@ -840,6 +844,8 @@ pub(in crate::app) const MAX_PREVIEW_BONES: usize = 256;
 struct ModelGpuFrame {
     preview: Arc<RenderModelPreview>,
     geometry_id: u64,
+    /// See `ModelPreviewData::mesh_id`.
+    mesh_id: u64,
     /// What `textures` belongs to; see `ModelPreviewData::textures_id`.
     textures_id: u64,
     visible_batches: Vec<usize>,
@@ -1815,6 +1821,8 @@ struct ModelGpuSlot {
     grid_axis_start: i32,
     grid_built: bool,
     /// GL textures per material, in `RenderModelPreview::materials` order.
+    /// The `mesh_id` the buffers hold.
+    mesh_id: Option<u64>,
     /// Per batch, where its transparent passes sort from.
     h2_sort_points: Vec<[f32; 3]>,
     materials: Vec<MaterialGlTextures>,
@@ -1893,6 +1901,7 @@ impl ModelGpuSlot {
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             Ok(Self {
+                mesh_id: None,
                 h2_sort_points: Vec::new(),
                 vertex_array,
                 vertex_buffer,
@@ -1944,6 +1953,7 @@ impl ModelGpuSlot {
     }
 
     unsafe fn upload_geometry(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        self.mesh_id = Some(frame.mesh_id);
         self.h2_sort_points = h2_sort_points(&frame.preview);
         unsafe {
             gl.bind_vertex_array(Some(self.vertex_array));
@@ -2032,7 +2042,13 @@ impl ModelGpuSlot {
     /// Bring the slot's textures in line with the frame's, uploading only
     /// when they changed or arrived.
     unsafe fn sync_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
-        let wanted = frame.textures.as_ref().map(|_| frame.textures_id);
+        // Untextured modes keep what is uploaded: switching back must not
+        // upload every map again in the paint callback. They draw without it
+        // (see `bound_materials`).
+        if frame.textures.is_none() {
+            return;
+        }
+        let wanted = Some(frame.textures_id);
         if self.uploaded_textures == wanted {
             return;
         }
@@ -2759,7 +2775,7 @@ unsafe fn ce_effect_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<
     }
 }
 
-const PARTICLE_VERTEX: &str = "#version 410 core
+const PARTICLE_VERTEX: &str = "#version 330 core
 layout(location = 0) in vec4 a_clip;
 layout(location = 1) in vec2 a_sprite;
 layout(location = 2) in vec2 a_next_sprite;
@@ -2787,7 +2803,7 @@ void main() {
 }
 ";
 
-const PARTICLE_FRAGMENT: &str = "#version 410 core
+const PARTICLE_FRAGMENT: &str = "#version 330 core
 in vec2 v_sprite;
 in vec2 v_next_sprite;
 in vec2 v_billboard;
@@ -3055,6 +3071,7 @@ impl H3ParticleGl {
             let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| *texels != h3_shaders::H3Texels::Signed);
             gl.uniform_1_i32(self.unsigned.as_ref(), i32::from(unsigned));
             if look.distortion.is_some() {
+                gl.blend_equation(glow::FUNC_ADD);
                 gl.blend_func(glow::ONE, glow::ONE);
             } else {
                 h3_draw::h3_set_blend(gl, look.blend);
@@ -3393,7 +3410,9 @@ impl ModelGlRenderer {
                     }
                 }
             }
-            if upload {
+            // Overlays merging in keep the slot, and its running effects,
+            // and change only the buffers.
+            if upload || self.slots[slot].mesh_id != Some(frame.mesh_id) {
                 self.slots[slot].upload_geometry(gl, frame);
             }
             self.slots[slot].sync_textures(gl, frame);
@@ -3516,7 +3535,7 @@ impl ModelGlRenderer {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
                 gl.uniform_1_f32(Some(&self.unlit), 0.0);
                 self.prepare_h2_programs(gl, frame);
-                self.draw_batches(gl, frame, false, &self.slots[slot].materials);
+                self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials));
                 if self.h3_draws(frame) {
                     let order = frame.visible_batches.clone();
                     self.draw_h3(gl, frame, slot, &order);
@@ -3654,7 +3673,7 @@ impl ModelGlRenderer {
                 gl.line_width(1.0);
                 gl.depth_func(glow::LEQUAL);
                 gl.uniform_1_f32(Some(&self.unlit), 1.0);
-                self.draw_batches(gl, frame, true, &self.slots[slot].materials);
+                self.draw_batches(gl, frame, true, Self::bound_materials(frame, &self.slots[slot].materials));
             }
             if !self.h3_draws(frame) && self.draws_object_sprites(frame) {
                 self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
@@ -4046,8 +4065,13 @@ impl ModelGlRenderer {
                         gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                     }
                 }
-                gl.disable(glow::DEPTH_TEST);
-                gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                // Antennas are depth tested as well: `antenna_render_proper`
+                // draws as a transparent group, tested and not written.
+                if h3 {
+                    gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+                } else {
+                    gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                }
                 gl.color_mask(true, true, true, h3);
             }
             let quads = if antennas { preview_antennas(frame, &uploaded.antenna_textures, bones, &view) } else { Vec::new() };
@@ -4358,11 +4382,23 @@ impl ModelGlRenderer {
             gl.depth_mask(true);
             gl.depth_func(glow::LEQUAL);
             gl.enable(glow::DEPTH_TEST);
+            // Sprites draw both sides; what comes after (bloom's masks)
+            // culls as the model does.
+            if frame.show_backfaces {
+                gl.disable(glow::CULL_FACE);
+            } else {
+                gl.enable(glow::CULL_FACE);
+            }
             gl.disable(glow::BLEND);
             gl.bind_texture(glow::TEXTURE_2D, None);
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
         }
+    }
+
+    /// The slot's uploaded maps, or none in a mode that draws without them.
+    fn bound_materials<'a>(frame: &ModelGpuFrame, uploaded: &'a [MaterialGlTextures]) -> &'a [MaterialGlTextures] {
+        if frame.textures.is_some() { uploaded } else { &[] }
     }
 
     fn h2_passes(frame: &ModelGpuFrame, material: usize, layer: H2Layer) -> &[H2DrawPass] {
@@ -4645,7 +4681,7 @@ impl ModelGlRenderer {
                 self.h2_bloom = H2Bloom::new(gl, H2_GLSL_VERSION);
             }
             if let Some(bloom) = &mut self.h2_bloom {
-                bloom.apply(gl, framebuffer, color, size);
+                bloom.apply(gl, framebuffer, color, size, frame.show_backfaces);
             }
         }
     }
@@ -6352,13 +6388,16 @@ fn append_instances_to_preview(
         let vertex_base = preview.vertices.len() as u32;
         let mut remapped = HashMap::new();
         let mut indices = Vec::with_capacity(source.len());
-        for &index in source {
+        // A triangle naming a vertex the mesh lacks is dropped whole, so the
+        // triangles after it keep their corners.
+        let triangles = source.chunks_exact(3).filter(|corners| {
+            corners.iter().all(|&index| (index as usize) < mesh.vertices.len())
+        });
+        for &index in triangles.flatten() {
             let next = vertex_base + remapped.len() as u32;
             let at = *remapped.entry(index).or_insert(next);
             if at == next {
-                let Some(vertex) = mesh.vertices.get(index as usize) else {
-                    continue;
-                };
+                let vertex = &mesh.vertices[index as usize];
                 let placed = turned(point3_to_array(vertex.position));
                 let position = std::array::from_fn(|axis| placed[axis] * scale + origin[axis]);
                 expand_preview_bounds_local(&mut preview.bounds_min, &mut preview.bounds_max, position);

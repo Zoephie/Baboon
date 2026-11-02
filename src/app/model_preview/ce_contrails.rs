@@ -450,7 +450,9 @@ impl CeContrailField {
                     for point in line.iter_mut() {
                         step_point(point, &def.states, ground, STEP, random);
                     }
-                    while line.len() > 1 && line.last().is_some_and(|point| point.done) {
+                    // `contrail_update_points` drops the last point only once the
+                    // one before it is done too, so a done point anchors the tail.
+                    while line.len() > 1 && line[line.len() - 1].done && line[line.len() - 2].done {
                         line.pop();
                     }
                     if line.len() == 1 && line[0].done {
@@ -495,12 +497,14 @@ impl CeContrailField {
                     let (width, [alpha, red, green, blue]) = point_look(point, &def.states);
                     let half = width * 0.5;
                     let along: [f32; 3] = std::array::from_fn(|axis| to[axis] - from[axis]);
+                    // `render_contrail`: the first vertex of each pair (the far
+                    // edge of the texture) lies on the minus side of `across`.
                     let (across, normal) = match def.render_type {
-                        0 => ([0.0, 0.0, 1.0], unit([along[1], -along[0], 0.0])),
-                        1 | 2 => (unit([along[1], -along[0], 0.0]), [0.0, 0.0, 1.0]),
+                        0 => ([0.0, 0.0, 1.0], unit([-along[1], along[0], 0.0])),
+                        1 | 2 => (unit([-along[1], along[0], 0.0]), [0.0, 0.0, 1.0]),
                         _ => {
                             let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - from[axis]);
-                            let across = unit(cross(along, to_eye));
+                            let across = unit(cross(to_eye, along));
                             (across, unit(cross(across, along)))
                         }
                     };
@@ -511,7 +515,7 @@ impl CeContrailField {
                         let distance = dot(to_eye, to_eye).sqrt().max(0.0001);
                         fade = (dot(normal, to_eye) / distance).abs();
                         if def.flags & EDGE_FADES_SLOWLY != 0 {
-                            fade = fade.clamp(0.0, 1.0).powf(0.25);
+                            fade = super::ce_lights::transition_evaluate(2, fade);
                         }
                         if def.fade_mode == 2 {
                             fade = 1.0 - fade;
@@ -541,6 +545,15 @@ impl CeContrailField {
             }
         }
         quads
+    }
+}
+
+impl super::ce_functions::ReadsOutputs for CeContrailAt {
+    fn object(&self) -> u8 {
+        self.object
+    }
+    fn outputs_read(&self) -> Vec<usize> {
+        self.primary.into_iter().collect()
     }
 }
 

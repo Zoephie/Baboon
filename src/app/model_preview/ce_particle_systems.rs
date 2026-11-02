@@ -127,6 +127,31 @@ pub(crate) struct CeParticleSystemAt {
     change_color: Option<usize>,
 }
 
+impl super::ce_functions::ReadsOutputs for CeParticleSystemAt {
+    fn object(&self) -> u8 {
+        self.object
+    }
+    fn outputs_read(&self) -> Vec<usize> {
+        self.primary.into_iter().collect()
+    }
+}
+
+/// The most states one step may pass through. The game has no such bound
+/// (`particle_system_update`), but a state whose durations are all zero or
+/// less would never let it out; tool rejects such tags, the editor does not.
+const MOST_STATE_CHANGES: u32 = 256;
+
+/// Counts a state change; past [`MOST_STATE_CHANGES`] the step stops where it
+/// is, as caught up.
+fn caught_up(changes: &mut u32, time_left: &mut f32) -> bool {
+    *changes += 1;
+    if *changes > MOST_STATE_CHANGES {
+        *time_left = 0.0;
+        return true;
+    }
+    false
+}
+
 fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
     match holder.field(name).and_then(|field| field.value()) {
         Some(TagFieldData::RealBounds(bounds) | TagFieldData::AngleBounds(bounds) | TagFieldData::FractionBounds(bounds)) => {
@@ -782,8 +807,12 @@ fn step_types(
             continue;
         }
         run.time_left -= dt;
+        let mut changes = 0;
         while let Some(state) = run.state {
             if run.time_left >= 0.0 {
+                break;
+            }
+            if caught_up(&mut changes, &mut run.time_left) {
                 break;
             }
             let bounds = match run.transition {
@@ -956,8 +985,12 @@ fn update_particles(kind: &ParticleType, run: &mut RunningType, ground: f32, dt:
         if !particle.valid {
             particle.state = None;
         }
+        let mut changes = 0;
         while let Some(state) = particle.state {
             if particle.time_left >= 0.0 {
+                break;
+            }
+            if caught_up(&mut changes, &mut particle.time_left) {
                 break;
             }
             let bounds = match particle.transition {

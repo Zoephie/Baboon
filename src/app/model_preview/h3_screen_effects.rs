@@ -485,7 +485,8 @@ pub(super) fn add_screen_shader_materials(preview: &mut RenderModelPreview) {
         .filter_map(|definition| definition.shader.as_ref().map(|(path, ..)| path.clone()))
         .collect();
     for shader_path in wanted {
-        if !preview.materials.iter().any(|material| material.shader_path == shader_path) {
+        let present = |material: &RenderModelPreviewMaterial| material.shader_group == group && material.shader_path == shader_path;
+        if !preview.materials.iter().any(present) {
             preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group: group, ..Default::default() });
         }
     }

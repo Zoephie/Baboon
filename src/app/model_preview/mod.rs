@@ -383,6 +383,7 @@ fn model_preview_data(
         render_model_path,
         preview: Arc::new(preview),
         geometry_id,
+        mesh_id: geometry_id,
         textures_id: geometry_id,
         textures: None,
         variants,
@@ -414,14 +415,16 @@ fn draw_animation_combo(
         .unwrap_or("<None>");
     let popup_id = ui.make_persistent_id(("model_animation_popup", entry_key));
     let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    // The hidden set comes from the graph, read apart from this list.
+    let shown = animations.len() - hidden.range(..animations.len()).count();
     let response = picker_button(
         ui,
         popup_id,
         selected_text,
-        animations.len() - hidden.len(),
+        shown,
         width,
         text_dark(),
-        animations.len() > hidden.len(),
+        shown > 0,
     );
     let just_opened = response.clicked() && !open;
     if response.clicked() {
@@ -1198,7 +1201,14 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
                     *read |= output;
                 }
             }
-            ce_lights::mark_outputs_read(&data.preview.ce_lights, object, &mut read);
+            let preview = &data.preview;
+            ce_lights::mark_outputs_read(&preview.ce_lights, object, &mut read);
+            ce_functions::mark_outputs_read(&preview.ce_effects, object, &mut read);
+            ce_functions::mark_outputs_read(&preview.ce_contrails, object, &mut read);
+            ce_functions::mark_outputs_read(&preview.ce_particle_systems, object, &mut read);
+            ce_functions::mark_outputs_read(&preview.ce_light_volumes, object, &mut read);
+            ce_functions::mark_outputs_read(&preview.ce_lightning, object, &mut read);
+            ce_functions::mark_outputs_read(&preview.ce_glows, object, &mut read);
             read
         })
     };

@@ -281,6 +281,26 @@ impl CeObjectFunctions {
 }
 
 /// A model, and which of its objects.
+/// A Halo CE feature that reads object outputs (`A out`..`D out`), so its
+/// object's panel knows which inputs do something.
+pub(super) trait ReadsOutputs {
+    /// Whose outputs: 0 the opened object, 1 the weapon it holds.
+    fn object(&self) -> u8;
+    /// The output slots it reads, 0 to 3.
+    fn outputs_read(&self) -> Vec<usize>;
+}
+
+/// Sets `read[slot]` for each output `items` of `object` read.
+pub(super) fn mark_outputs_read<T: ReadsOutputs>(items: &[T], object: u8, read: &mut [bool; 4]) {
+    for item in items.iter().filter(|item| item.object() == object) {
+        for slot in item.outputs_read() {
+            if let Some(read) = read.get_mut(slot) {
+                *read = true;
+            }
+        }
+    }
+}
+
 pub(crate) type CeObjectKey = (u64, u8);
 /// Inputs set by hand, each for the object it was set on.
 pub(crate) type CeFunctionInputs = std::collections::HashMap<CeObjectKey, [f32; 4]>;

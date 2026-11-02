@@ -170,7 +170,9 @@ fn append_point_array_block(
             non_critical,
             color: read_error_color(&entry),
             layer,
-            shape: if face {
+            // Two points make no face; drawn as the edge they are, so the
+            // report still shows and can be hovered.
+            shape: if face && points.len() >= 3 {
                 ModelErrorShape::Face(points)
             } else {
                 ModelErrorShape::Polyline(points)
@@ -195,6 +197,8 @@ fn read_error_point(value: &TagStruct<'_>) -> Option<ModelErrorPoint> {
             node_indices[slot] =
                 match error_field(&element, "node index").and_then(|field| field.value()) {
                     Some(TagFieldData::CharInteger(index)) => index as i16,
+                    // NONE in a byte.
+                    Some(TagFieldData::ByteInteger(u8::MAX)) => -1,
                     Some(TagFieldData::ByteInteger(index)) => index as i16,
                     _ => -1,
                 };

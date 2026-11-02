@@ -164,6 +164,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
+        mesh_id: data.mesh_id,
         textures_id: data.textures_id,
         visible_batches,
         camera: camera.gpu_uniforms(),

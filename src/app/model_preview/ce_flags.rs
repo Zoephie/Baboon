@@ -46,6 +46,7 @@ pub(crate) struct CeFlagAt {
 fn read_flag(
     source: &TagSource,
     path: &str,
+    owner: u8,
     markers: &[RenderModelPreviewMarker],
     preview: &mut RenderModelPreview,
 ) -> Option<CeFlagAt> {
@@ -112,7 +113,7 @@ fn read_flag(
             }
         }
     }
-    preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, object: 0, ..Default::default() });
+    preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, object: owner, ..Default::default() });
     let name = path.rsplit('\\').next().unwrap_or(path).to_owned();
     let permutation = "flag".to_owned();
     preview.regions.push(RenderModelPreviewRegion { name: name.clone(), permutations: vec![permutation.clone()] });
@@ -200,7 +201,15 @@ fn cell_shapes(root: TagStruct<'_>, width: usize, height: usize, attachments: &[
 }
 
 /// The flags among `object`'s widgets, added to `preview` as meshes.
-pub(super) fn read_ce_flags(source: &TagSource, object: &TagFile, preview: &mut RenderModelPreview) -> Vec<CeFlagAt> {
+/// `markers` are the object's own, in the preview's space; `owner` is 0 for
+/// the opened object and 1 for the weapon it holds.
+pub(super) fn read_ce_flags(
+    source: &TagSource,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+    preview: &mut RenderModelPreview,
+) -> Vec<CeFlagAt> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();
     };
@@ -211,8 +220,7 @@ pub(super) fn read_ce_flags(source: &TagSource, object: &TagFile, preview: &mut 
         .filter(|(kind, path)| *kind == group && !path.is_empty())
         .map(|(_, path)| path)
         .collect();
-    let markers = preview.markers.clone();
-    paths.iter().filter_map(|path| read_flag(source, path, &markers, preview)).collect()
+    paths.iter().filter_map(|path| read_flag(source, path, owner, markers, preview)).collect()
 }
 
 /// Each flag's first vertex and its vertices' places and normals.

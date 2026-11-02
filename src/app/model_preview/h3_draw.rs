@@ -255,17 +255,45 @@ pub(super) struct H3Targets {
     scene_copy_framebuffer: glow::NativeFramebuffer,
 }
 
+/// A full-screen program for `fragment`, or none if it fails to compile or
+/// link. A failure is logged once and remembered, so callers that ask again
+/// each frame neither rebuild nor log it again.
 pub(super) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Option<glow::NativeProgram> {
+    thread_local! {
+        static FAILED: std::cell::RefCell<std::collections::HashSet<String>> = Default::default();
+    }
+    if FAILED.with(|failed| failed.borrow().contains(fragment)) {
+        return None;
+    }
+    let fail = |log: String| {
+        eprintln!("model preview: screen shader: {log}");
+        FAILED.with(|failed| failed.borrow_mut().insert(fragment.to_owned()));
+        None
+    };
     unsafe {
         let program = gl.create_program().ok()?;
         for (kind, source) in [(glow::VERTEX_SHADER, COMPOSITE_VERTEX), (glow::FRAGMENT_SHADER, fragment)] {
-            let shader = gl.create_shader(kind).ok()?;
+            let Ok(shader) = gl.create_shader(kind) else {
+                gl.delete_program(program);
+                return None;
+            };
             gl.shader_source(shader, source);
             gl.compile_shader(shader);
+            if !gl.get_shader_compile_status(shader) {
+                let log = gl.get_shader_info_log(shader);
+                gl.delete_shader(shader);
+                gl.delete_program(program);
+                return fail(log);
+            }
             gl.attach_shader(program, shader);
             gl.delete_shader(shader);
         }
         gl.link_program(program);
+        if !gl.get_program_link_status(program) {
+            let log = gl.get_program_info_log(program);
+            gl.delete_program(program);
+            return fail(log);
+        }
         Some(program)
     }
 }
@@ -803,8 +831,9 @@ impl ModelGlRenderer {
         });
         match animation.filter(|_| count > 0) {
             Some(animation) => {
-                let values = frame.h2_values_of(batch.material_index as usize);
-                frame_key(uniform, animation.frame(count, frame.time, values))
+                let object = batch.material_index as usize;
+                let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
+                frame_key(uniform, animation.frame(count, frame.time, owner, frame.h2_values_of(object)))
             }
             None => uniform.to_owned(),
         }
@@ -883,12 +912,13 @@ impl ModelGlRenderer {
                     values
                 });
                 let values = screen_values.as_ref().or(frame.h2_values_of(object));
+                let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                 for animation in material.animations.iter().filter(|animation| animation.uniform == *name) {
                     let mut slot = match value {
                         Some(H3Value::Floats(slot)) => slot,
                         _ => [0.0; 4],
                     };
-                    animation.apply(&mut slot, frame.time, values);
+                    animation.apply(&mut slot, frame.time, owner, values);
                     value = Some(H3Value::Floats(slot));
                 }
                 if let Some(value) = value {
@@ -1423,7 +1453,12 @@ impl ModelGlRenderer {
                 self.h3_draw_suck(gl, frame, &blur, moved, behind, depth_copy);
             }
             for shader in shaders {
-                let found = frame.preview.materials.iter().position(|material| material.shader_path == shader.path);
+                let screen = u32::from_be_bytes(*b"rmss");
+                let found = frame
+                    .preview
+                    .materials
+                    .iter()
+                    .position(|material| material.shader_group == screen && material.shader_path == shader.path);
                 let textures = frame.textures.as_ref();
                 let material = found.and_then(|at| textures?.get(at)?.h3.as_ref().map(|material| (at, material)));
                 let Some((at, material)) = material else {

@@ -746,6 +746,19 @@ pub(crate) struct CeEffectAt {
     locations: Vec<Vec<CeLocation>>,
 }
 
+impl super::ce_functions::ReadsOutputs for CeEffectAt {
+    fn object(&self) -> u8 {
+        self.object
+    }
+    /// One a particle made runs on no object and reads none.
+    fn outputs_read(&self) -> Vec<usize> {
+        if self.spawn.is_some() {
+            return Vec::new();
+        }
+        [self.primary, self.secondary].into_iter().flatten().collect()
+    }
+}
+
 fn function_slot(value: Option<i128>) -> Option<usize> {
     usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
 }

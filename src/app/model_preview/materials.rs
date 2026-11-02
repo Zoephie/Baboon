@@ -15,7 +15,7 @@ use super::ce_passes::{
 };
 use super::ce_attachments::elements;
 use super::h3_shaders::{
-    H3Animated, H3Animation, H3Blend, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
+    H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
     H3Sampler, H3Texels, H3Texture, H3Value,
 };
 use super::h2_stage::H2VertexStage;
@@ -201,8 +201,8 @@ struct ResolveCaches {
     /// The kit's `global shader`, read at most once; see [`prepare_h2_camo_passes`].
     h2_camo_shader: Option<Option<Arc<TagFile>>>,
     /// Pass maps by path and shape; a shader samples each in only one shape.
-    /// By path, whether flat, and image.
-    h2_images: HashMap<(String, bool, usize), Option<Arc<H2Image>>>,
+    /// By path, shape and image.
+    h2_images: HashMap<(String, SamplerKind, usize), Option<Arc<H2Image>>>,
     /// Halo CE's camouflage, read once.
     ce_camo: Option<Option<CeCamoSettings>>,
     /// How many images a Halo CE bitmap holds.
@@ -667,6 +667,11 @@ fn prepare_h3_material(
         .cloned()
         .chain([Arc::clone(&material.lit)])
         .collect();
+    let clock = match (source.game(), definition.name == "screen") {
+        (Some(GameId::Halo3Odst), true) => H3Clock::OdstScreen,
+        (Some(GameId::Halo3Odst), false) => H3Clock::Odst,
+        _ => H3Clock::Halo3,
+    };
     for parameter in &method.parameters {
         let uniform = match parameter.parameter_type.map(|kind| kind.get()) {
             Some(RenderMethodParameterType::Bitmap) => {
@@ -709,6 +714,7 @@ fn prepare_h3_material(
                 } else {
                     animated.time_period_in_seconds
                 },
+                clock,
             });
         }
     }
@@ -968,7 +974,7 @@ fn resolve_ce_shader(
     let mut common = caches.ce_model_common.take();
     let mut bitmap = |path: &str, kind: SamplerKind| {
         let image = ce_image_index(source, path, permutation, &mut caches.ce_image_counts);
-        let key = (path.to_owned(), kind == SamplerKind::Texture2D, image);
+        let key = (path.to_owned(), kind, image);
         if let Some(cached) = caches.h2_images.get(&key) {
             return cached.clone();
         }
@@ -1025,7 +1031,7 @@ fn expand_ce_digits(
                 .unwrap_or(1)
         });
         for digit in 0..count {
-            let key = (numeric.map.clone(), true, digit);
+            let key = (numeric.map.clone(), SamplerKind::Texture2D, digit);
             let image = caches
                 .h2_images
                 .entry(key)
@@ -1376,7 +1382,7 @@ fn prepare_h2_passes(
             cases.clone(),
             specular_brightness,
             |path, kind| {
-                let key = (path.to_owned(), kind == SamplerKind::Texture2D, 0);
+                let key = (path.to_owned(), kind, 0);
                 if let Some(cached) = caches.h2_images.get(&key) {
                     return cached.clone();
                 }
@@ -1596,11 +1602,13 @@ fn cached_bitmap(
     caches: &mut ResolveCaches,
 ) -> Option<TextureImage> {
     let key = (binding.path.clone(), binding.image_index);
-    // Keyed without the scale: the decode is the expensive half, and two
-    // materials may bind the same bitmap at different tilings.
+    // Keyed without how it is bound: the decode is the expensive half, and
+    // two materials may bind the same bitmap at different tilings and wraps.
     if let Some(cached) = caches.bitmaps.get(&key) {
         return cached.clone().map(|mut image| {
             image.scale = binding.scale;
+            image.repeat_x = binding.repeat_x;
+            image.repeat_y = binding.repeat_y;
             image
         });
     }

@@ -480,9 +480,14 @@ pub(in crate::app) struct ModelPreviewData {
     /// Shared so the deferred Glow callback can retain the immutable source
     /// geometry without cloning dense vertex/index buffers every frame.
     pub(in crate::app) preview: std::sync::Arc<RenderModelPreview>,
-    /// Monotonic identity used by the shared GL upload cache. Unlike a pointer,
-    /// it cannot be accidentally reused after a preview reload.
+    /// Monotonic identity of this load of the preview: what the GL slot,
+    /// the running effects and the function inputs belong to. Unlike a
+    /// pointer, it cannot be accidentally reused after a preview reload. Kept
+    /// when collision/physics overlays merge in, so they reset nothing.
     pub(in crate::app) geometry_id: u64,
+    /// Identity of the vertices and indices: `geometry_id` when loaded, new
+    /// each time overlays merge in, so the slot re-uploads its buffers.
+    pub(in crate::app) mesh_id: u64,
     /// Identity of the material list `textures` is resolved against. Set when
     /// the preview loads and kept when collision/physics overlays merge in:
     /// the merge only appends flat-coloured materials after the model's own,
