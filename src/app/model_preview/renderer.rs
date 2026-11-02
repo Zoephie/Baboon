@@ -1822,6 +1822,7 @@ struct ModelGpuSlot {
     ce_particle_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
     ce_contrails: ce_contrails::CeContrailField,
     ce_contrail_textures: Vec<Vec<Option<glow::NativeTexture>>>,
+    ce_light_volume_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
@@ -1886,6 +1887,7 @@ impl ModelGpuSlot {
                 ce_particle_textures: Vec::new(),
                 ce_contrails: Default::default(),
                 ce_contrail_textures: Vec::new(),
+                ce_light_volume_textures: Vec::new(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
                 h3_vision_clock: None,
@@ -3453,6 +3455,7 @@ impl ModelGlRenderer {
                 && preview.ce_antennas.is_empty()
                 && preview.ce_effects.is_empty()
                 && preview.ce_contrails.is_empty()
+                && preview.ce_light_volumes.is_empty()
                 && preview.h2_antennas.is_empty()
                 && preview.h2_flares.is_empty()
                 && preview.h3_flares.is_empty()
@@ -3567,6 +3570,11 @@ impl ModelGlRenderer {
                     gl.delete_texture(texture);
                 }
                 uploaded.ce_contrails = Default::default();
+                for texture in uploaded.ce_light_volume_textures.drain(..).flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.ce_light_volume_textures =
+                    frame.preview.ce_light_volumes.iter().map(|volume| upload_h2_image(gl, &volume.image)).collect();
                 uploaded.ce_contrail_textures = frame
                     .preview
                     .ce_contrails
@@ -3760,6 +3768,34 @@ impl ModelGlRenderer {
                     gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
                     gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                 }
+            }
+            if antennas && !frame.preview.ce_light_volumes.is_empty() {
+                // `rasterizer_widget_begin(5, 1)`: source alpha and one, depth
+                // tested, not written.
+                gl.enable(glow::DEPTH_TEST);
+                gl.depth_func(glow::LEQUAL);
+                gl.depth_mask(false);
+                gl.blend_equation(glow::FUNC_ADD);
+                gl.blend_func(glow::SRC_ALPHA, glow::ONE);
+                let outputs = frame.object_states.first().map_or([0.0; 4], |state| state.outputs);
+                let volumes = frame.preview.ce_light_volumes.iter().zip(&uploaded.ce_light_volume_textures);
+                for (volume, texture) in volumes {
+                    let Some(texture) = texture else {
+                        continue;
+                    };
+                    gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                    for quad in volume.quads(&outputs, bones, &view) {
+                        let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                            let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                            [a, b, c, d, u, v]
+                        });
+                        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                        let [red, green, blue, alpha] = quad.color;
+                        gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
+                        gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                    }
+                }
+                gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             }
             if antennas && !(frame.preview.ce_effects.is_empty() && frame.preview.ce_contrails.is_empty()) {
                 draw_ce_particles(gl, &mut self.ce_effect_gl, self.program, uploaded, frame, bones, &view);

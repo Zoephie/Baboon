@@ -30,6 +30,7 @@ mod ce_lights;
 mod ce_contrails;
 mod ce_particles;
 mod ce_passes;
+mod ce_widgets;
 mod h2_bloom;
 pub(in crate::app) mod h2_functions;
 mod h2_contrails;
@@ -153,6 +154,7 @@ pub(crate) struct RenderModelPreview {
     /// Halo CE effects the object's attachments hang on it.
     pub ce_effects: Vec<ce_particles::CeEffectAt>,
     pub ce_contrails: Vec<ce_contrails::CeContrailAt>,
+    pub ce_light_volumes: Vec<ce_widgets::CeLightVolume>,
 }
 
 #[derive(Debug, Clone, Default)]
