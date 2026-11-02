@@ -41,6 +41,8 @@ const ANIMATION_STOPS_AT_REST: i128 = 0x2;
 const STARTS_ON_RANDOM_FRAME: i128 = 0x4;
 const ANIMATE_ONCE_PER_FRAME: i128 = 0x8;
 const DIES_AT_REST: i128 = 0x10;
+const DIES_ON_STRUCTURE: i128 = 0x20;
+const DIES_IN_AIR: i128 = 0x100;
 const RANDOM_HORIZONTAL_MIRROR: i128 = 0x400;
 const RANDOM_VERTICAL_MIRROR: i128 = 0x800;
 
@@ -299,6 +301,27 @@ pub(crate) struct CeParticleDef {
     sequences: Vec<Vec<CeSpriteFrame>>,
     image_widths: Vec<f32>,
     pub(crate) images: Vec<Option<Arc<H2Image>>>,
+    /// `collision effect` and `death effect`, where they are effects: a
+    /// sound in their place makes nothing to see.
+    collision_effect: Option<Arc<CeEffectDef>>,
+    death_effect: Option<Arc<CeEffectDef>>,
+}
+
+/// Effects read so far, by path; none while one is being read, so an effect
+/// whose particles lead back to it stops there.
+#[derive(Default)]
+pub(super) struct CeEffectCache(std::collections::HashMap<String, Option<Arc<CeEffectDef>>>);
+
+impl CeEffectCache {
+    fn effect(&mut self, source: &TagSource, path: &str) -> Option<Arc<CeEffectDef>> {
+        if let Some(known) = self.0.get(path) {
+            return known.clone();
+        }
+        self.0.insert(path.to_owned(), None);
+        let def = read_effect_def(source, path, self).map(Arc::new);
+        self.0.insert(path.to_owned(), def.clone());
+        def
+    }
 }
 
 impl CeParticleDef {
@@ -312,7 +335,7 @@ impl CeParticleDef {
     }
 }
 
-fn read_particle_def(source: &TagSource, path: &str) -> Option<CeParticleDef> {
+fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) -> Option<CeParticleDef> {
     let tag = load_referenced_tag_from_source(source, path, "particle", b"part").ok()?;
     let root = tag.root();
     let flags = root.read_int_any("flags").unwrap_or(0);
@@ -376,6 +399,8 @@ fn read_particle_def(source: &TagSource, path: &str) -> Option<CeParticleDef> {
         fade_mode: short("framebuffer fade mode"),
         nonlinear_tint: shader_flags & 2 != 0,
         sprite_scale: if widest > 0.0 { 1.0 / widest } else { 1.0 },
+        collision_effect: spawned_effect(source, root, "collision effect", cache),
+        death_effect: spawned_effect(source, root, "death effect", cache),
         sequences,
         image_widths: sizes.iter().map(|size| size[0]).collect(),
         images,
@@ -475,7 +500,13 @@ fn direction_of(holder: TagStruct<'_>, name: &str) -> [f32; 3] {
     [yaw.cos() * pitch.cos(), yaw.sin() * pitch.cos(), pitch.sin()]
 }
 
-fn read_effect_def(source: &TagSource, path: &str) -> Option<CeEffectDef> {
+/// A particle's effect reference, where it names an effect.
+fn spawned_effect(source: &TagSource, root: TagStruct<'_>, name: &str, cache: &mut CeEffectCache) -> Option<Arc<CeEffectDef>> {
+    let (group, path) = root.read_tag_ref_with_group(name)?;
+    (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then(|| cache.effect(source, &path)).flatten()
+}
+
+fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) -> Option<CeEffectDef> {
     let tag = load_referenced_tag_from_source(source, path, "effect", b"effe").ok()?;
     let root = tag.root();
     let index = |name: &str| usize::try_from(root.read_int_any(name).unwrap_or(-1)).ok();
@@ -560,7 +591,7 @@ fn read_effect_def(source: &TagSource, path: &str) -> Option<CeEffectDef> {
             let def = match paths.iter().position(|known| *known == path) {
                 Some(at) => at,
                 None => {
-                    let Some(def) = read_particle_def(source, &path) else {
+                    let Some(def) = read_particle_def(source, &path, cache) else {
                         continue;
                     };
                     particles.push(def);
@@ -625,11 +656,23 @@ struct CeLocation {
     axes: [[f32; 3]; 3],
 }
 
-/// An effect hung on the object by one of its `attachments`.
+/// What `effect_new_unattached_from_markers` gives an effect a particle
+/// makes: its scales, its color, and its velocity per tick.
+#[derive(Debug, Clone, Copy)]
+struct CeSpawn {
+    scales: [f32; 2],
+    color: [f32; 3],
+    velocity: [f32; 3],
+}
+
+/// An effect hung on the object by one of its `attachments`, or made by a
+/// particle on its own.
 #[derive(Debug, Clone)]
 pub(crate) struct CeEffectAt {
     pub(crate) object: u8,
     pub(crate) def: Arc<CeEffectDef>,
+    /// What made it, if a particle did: it then runs once, on no object.
+    spawn: Option<CeSpawn>,
     /// `A out`.. of `primary scale`, `secondary scale` and `change color`.
     primary: Option<usize>,
     secondary: Option<usize>,
@@ -653,6 +696,8 @@ pub(super) fn read_ce_effects(
     };
     let effect_group = u32::from_be_bytes(*b"effe");
     let mut effects = Vec::new();
+    let mut cache = CeEffectCache::default();
+    let cache = &mut cache;
     for attachment in elements(block, "attachments") {
         let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
             continue;
@@ -660,7 +705,7 @@ pub(super) fn read_ce_effects(
         if group != effect_group || path.is_empty() {
             continue;
         }
-        let Some(def) = read_effect_def(source, &path) else {
+        let Some(def) = cache.effect(source, &path) else {
             continue;
         };
         // `object_get_marker_by_name`: no name is the origin; a missing one,
@@ -685,7 +730,8 @@ pub(super) fn read_ce_effects(
             .collect();
         effects.push(CeEffectAt {
             object: owner,
-            def: Arc::new(def),
+            def,
+            spawn: None,
             primary: function_slot(attachment.read_int_any("primary scale")),
             secondary: function_slot(attachment.read_int_any("secondary scale")),
             change_color: function_slot(attachment.read_int_any("change color")),
@@ -788,8 +834,11 @@ struct CeParticle {
 /// with texture coordinates, and the vertex color the `effect` shader reads.
 #[derive(Debug, Clone)]
 pub(crate) struct CeParticleQuad {
+    /// [`def_key`] of the effect it came from, and which of its particles.
     pub(crate) effect: usize,
     pub(crate) def: usize,
+    pub(crate) blend: i32,
+    pub(crate) nonlinear_tint: bool,
     pub(crate) image: usize,
     pub(crate) corners: [[f32; 5]; 4],
     pub(crate) color: [f32; 4],
@@ -818,6 +867,8 @@ pub(crate) struct CeParticleField {
     /// Particle systems parts have made: the effect, which of its systems,
     /// and the system as it runs.
     systems: Vec<(usize, usize, CeRunningSystem)>,
+    /// Effects particles have made, after the object's in every index.
+    spawned: Vec<CeEffectAt>,
     /// `game_time_get`.
     tick: u32,
     random: Option<Random>,
@@ -888,26 +939,13 @@ impl CeParticleField {
         ground: f32,
         time: f32,
     ) {
-        if self.effects.len() != effects.len() || self.time.is_none_or(|last| time < last) {
-            self.effects = effects
-                .iter()
-                .map(|_| RunningEffect {
-                    event: 0,
-                    in_event: false,
-                    time: 0.0,
-                    duration: 0.0,
-                    last_fraction: -1.0,
-                    counts: Vec::new(),
-                    finished: false,
-                    stopping: false,
-                    scale_a: 1.0,
-                    scale_b: 1.0,
-                    color: [1.0; 3],
-                })
-                .collect();
+        let own = effects.len();
+        if self.effects.len() != own + self.spawned.len() || self.time.is_none_or(|last| time < last) {
+            self.effects = effects.iter().map(|_| new_running()).collect();
             self.particles.clear();
             self.lights.clear();
             self.systems.clear();
+            self.spawned.clear();
             self.system_random = Some(SystemRandom::seeded(0x5eed_4321));
             self.tick = 0;
             self.random = Some(Random(0x1234_5678));
@@ -925,6 +963,8 @@ impl CeParticleField {
         while now + STEP <= time {
             now += STEP;
             self.tick += 1;
+            let effects: Vec<CeEffectAt> = effects.iter().chain(&self.spawned).cloned().collect();
+            let effects = effects.as_slice();
             for (index, effect) in effects.iter().enumerate() {
                 let state = inputs(effect.object);
                 let running = &mut self.effects[index];
@@ -952,14 +992,75 @@ impl CeParticleField {
             self.lights.retain(|light| {
                 effects.get(light.effect).and_then(|effect| effect.def.lights.get(light.def)).is_some_and(|def| def.alive(tick - light.born))
             });
-            let defs: Vec<&Arc<CeEffectDef>> = effects.iter().map(|effect| &effect.def).collect();
+            let mut made: Vec<CeEffectAt> = Vec::new();
             self.particles.retain_mut(|particle| {
-                let def = &defs[particle.effect].particles[particle.def];
-                update_particle(particle, def, &mut random, ground, STEP)
+                let def = &effects[particle.effect].def.particles[particle.def];
+                let (fate, collided) = update_particle(particle, def, &mut random, ground, STEP);
+                // `particle_effect_new` for what it hit, then what it died of.
+                if let (Some(scale), Some(effect)) = (collided, &def.collision_effect) {
+                    made.extend(spawn_effect(effect, particle, scale));
+                }
+                if let (Fate::Died, Some(effect)) = (fate, &def.death_effect) {
+                    made.extend(spawn_effect(effect, particle, 0.0));
+                }
+                fate == Fate::Alive
             });
+            for effect in made {
+                if self.spawned.len() >= MOST_SPAWNED {
+                    break;
+                }
+                let mut running = new_running();
+                set_event(&mut running, &effect.def, 0, &mut random);
+                self.effects.push(running);
+                self.spawned.push(effect);
+            }
+            self.forget_spawned(own);
         }
         self.time = Some(now);
         self.random = Some(random);
+    }
+
+    /// Lets go of the effects particles made that have run their events and
+    /// left nothing behind, renumbering what came after them. `first` is
+    /// how many are the object's own.
+    fn forget_spawned(&mut self, first: usize) {
+        let total = self.effects.len();
+        let mut used = vec![false; total];
+        for particle in &self.particles {
+            used[particle.effect] = true;
+        }
+        for light in &self.lights {
+            used[light.effect] = true;
+        }
+        for (effect, _, _) in &self.systems {
+            used[*effect] = true;
+        }
+        let gone: Vec<bool> = (0..total).map(|at| at >= first && self.effects[at].finished && !used[at]).collect();
+        if !gone.contains(&true) {
+            return;
+        }
+        let mut renumbered = Vec::with_capacity(total);
+        let mut next = 0;
+        for &dropped in &gone {
+            renumbered.push(next);
+            if !dropped {
+                next += 1;
+            }
+        }
+        let effects = std::mem::take(&mut self.effects);
+        self.effects = effects.into_iter().zip(&gone).filter(|(_, dropped)| !**dropped).map(|(effect, _)| effect).collect();
+        let spawned = std::mem::take(&mut self.spawned);
+        self.spawned =
+            spawned.into_iter().zip(&gone[first..]).filter(|(_, dropped)| !**dropped).map(|(effect, _)| effect).collect();
+        for particle in &mut self.particles {
+            particle.effect = renumbered[particle.effect];
+        }
+        for light in &mut self.lights {
+            light.effect = renumbered[light.effect];
+        }
+        for (effect, _, _) in &mut self.systems {
+            *effect = renumbered[*effect];
+        }
     }
 
     /// The sprites of the particle systems effects' parts have made, with
@@ -970,29 +1071,39 @@ impl CeParticleField {
         view: &CeFlareView,
         pixel: impl Fn([f32; 3]) -> f32,
     ) -> Vec<(usize, usize, CePctlQuad)> {
+        let effects = self.all(effects);
         let mut quads = Vec::new();
         let random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
         for (effect, def, running) in &mut self.systems {
-            let Some(system) = effects.get(*effect).and_then(|at| at.def.systems.get(*def)) else {
+            let Some(at) = effects.get(*effect) else {
+                continue;
+            };
+            let Some(system) = at.def.systems.get(*def) else {
                 continue;
             };
             for quad in unattached_quads(system, running, 0, view, &pixel, random) {
-                quads.push((*effect, *def, quad));
+                quads.push((def_key(&at.def), *def, quad));
             }
         }
         quads
     }
 
+    /// The object's effects, then those particles have made.
+    fn all(&self, effects: &[CeEffectAt]) -> Vec<CeEffectAt> {
+        effects.iter().chain(&self.spawned).cloned().collect()
+    }
+
     /// The lights effects' parts have made, as `lights_preprocess_scene`
     /// has them now, with the effect and light each came from.
     pub(crate) fn lights(&self, effects: &[CeEffectAt]) -> Vec<(usize, usize, CeLight)> {
+        let effects = self.all(effects);
         self.lights
             .iter()
             .filter_map(|light| {
                 let effect = effects.get(light.effect)?;
                 let def = effect.def.lights.get(light.def)?;
                 let made = def.at(effect.object, light.node, light.position, light.forward, self.tick - light.born, light.scale)?;
-                Some((light.effect, light.def, made))
+                Some((def_key(&effect.def), light.def, made))
             })
             .collect()
     }
@@ -1006,6 +1117,7 @@ impl CeParticleField {
         view: &CeFlareView,
         pixels: impl Fn([f32; 3], f32) -> f32,
     ) -> Vec<CeParticleQuad> {
+        let effects = self.all(effects);
         let mut quads = Vec::new();
         for particle in &self.particles {
             let Some(effect) = effects.get(particle.effect) else {
@@ -1083,8 +1195,10 @@ impl CeParticleField {
                 [place[0], place[1], place[2], u, v]
             };
             quads.push(CeParticleQuad {
-                effect: particle.effect,
+                effect: def_key(&effect.def),
                 def: particle.def,
+                blend: def.blend,
+                nonlinear_tint: def.nonlinear_tint,
                 image: sprite.image,
                 corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
                 color: [red, green, blue, shown_alpha],
@@ -1092,6 +1206,102 @@ impl CeParticleField {
         }
         quads
     }
+}
+
+/// `effect_new` leaves an effect before its first event.
+fn new_running() -> RunningEffect {
+    RunningEffect {
+        event: 0,
+        in_event: false,
+        time: 0.0,
+        duration: 0.0,
+        last_fraction: -1.0,
+        counts: Vec::new(),
+        finished: false,
+        stopping: false,
+        scale_a: 1.0,
+        scale_b: 1.0,
+        color: [1.0; 3],
+    }
+}
+
+/// The most effects particles may have made at once. The game's effect
+/// array is shared with every other effect; the preview keeps its own.
+const MOST_SPAWNED: usize = 128;
+
+/// Where none of an effect's own markers stand: [`posed_on`] leaves a place
+/// on no node of the skeleton where it is.
+const WORLD_NODE: usize = usize::MAX / 8;
+
+/// How a particle's update ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fate {
+    Alive,
+    /// `datum_delete`: gone, and nothing more.
+    Deleted,
+    /// `particle_die`: gone, making its death effect.
+    Died,
+}
+
+/// `perpendicular3d`: a vector square to `a`, from its two largest parts.
+fn perpendicular(a: [f32; 3]) -> [f32; 3] {
+    let [x, y, z] = a.map(f32::abs);
+    if x > y || x > z {
+        if y > z { [a[1], -a[0], 0.0] } else { [-a[2], 0.0, a[0]] }
+    } else {
+        [0.0, a[2], -a[1]]
+    }
+}
+
+/// `particle_effect_new` for an effect: `effect_new_unattached_from_markers`
+/// with two markers where the particle is, `velocity` along its way and
+/// `gravity` straight down; a location naming neither takes the first.
+fn spawn_effect(def: &Arc<CeEffectDef>, particle: &CeParticle, scale: f32) -> Option<CeEffectAt> {
+    let along = unit(particle.direction);
+    let frame = |forward: [f32; 3]| {
+        let up = unit(perpendicular(forward));
+        CeLocation { node: WORLD_NODE, position: particle.place, axes: [forward, cross(up, forward), up] }
+    };
+    let locations = def
+        .locations
+        .iter()
+        .map(|name| vec![if name == "gravity" { frame([0.0, 0.0, -1.0]) } else { frame(along) }])
+        .collect();
+    Some(CeEffectAt {
+        object: u8::MAX,
+        def: def.clone(),
+        spawn: Some(CeSpawn {
+            scales: [scale, 0.0],
+            color: [1.0; 3],
+            velocity: particle.velocity.map(|axis| axis * 0.033_333_335),
+        }),
+        primary: None,
+        secondary: None,
+        change_color: None,
+        locations,
+    })
+}
+
+/// What identifies an effect's tag among those the preview has read.
+pub(crate) fn def_key(def: &Arc<CeEffectDef>) -> usize {
+    Arc::as_ptr(def) as usize
+}
+
+/// Every effect tag the object's effects can come to run: their own, and
+/// those their particles make when they hit something or die.
+pub(crate) fn reachable_defs(effects: &[CeEffectAt]) -> Vec<Arc<CeEffectDef>> {
+    let mut found: Vec<Arc<CeEffectDef>> = Vec::new();
+    let mut pending: Vec<Arc<CeEffectDef>> = effects.iter().map(|effect| effect.def.clone()).collect();
+    while let Some(def) = pending.pop() {
+        if found.iter().any(|known| Arc::ptr_eq(known, &def)) {
+            continue;
+        }
+        for particle in &def.particles {
+            pending.extend(particle.collision_effect.iter().chain(&particle.death_effect).cloned());
+        }
+        found.push(def);
+    }
+    found
 }
 
 /// What an effect's update makes: particles and lights, and the tick.
@@ -1191,7 +1401,8 @@ fn generate_systems(
                 let (sine, cosine) = angle.sin_cos();
                 direction = rotate_about(direction, random.direction(), sine, cosine);
             }
-            let velocity = direction.map(|axis| axis * speed);
+            let inherited = effect.spawn.map_or([0.0; 3], |spawn| spawn.velocity);
+            let velocity: [f32; 3] = std::array::from_fn(|axis| direction[axis] * speed + inherited[axis]);
             let [red, green, blue] = running.color;
             let made = new_unattached(def, point, velocity, [1.0, red, green, blue], scale, ground, system_random);
             systems.push((index, part.system, made));
@@ -1221,7 +1432,20 @@ fn update_effect(
     bones: Option<&[[f32; 4]]>,
     dt: f32,
 ) {
-    let Made { particles, lights, systems, system_random, ground, tick } = made;
+    if let Some(spawn) = effect.spawn {
+        // Made once, as the particle said: it runs its events and is done.
+        [running.scale_a, running.scale_b] = spawn.scales;
+        running.color = spawn.color;
+    } else {
+        attached_inputs(running, effect, inputs, random);
+    }
+    run_events(index, running, effect, made, random, bones, dt);
+}
+
+/// What an attached effect takes of its object each tick: on while its
+/// primary scale is, restarting when it has run out, stopping when it goes
+/// off.
+fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &CeObjectInputs, random: &mut Random) {
     let def = &effect.def;
     // `object_get_function_value`: none is on at one.
     let (scale_a, on) = match effect.primary {
@@ -1247,6 +1471,21 @@ fn update_effect(
     }
     running.scale_b = effect.secondary.map_or(1.0, |output| inputs.outputs[output]);
     running.color = effect.change_color.map_or([1.0; 3], |channel| inputs.change_colors[channel]);
+}
+
+/// The second half of [`update_effect`]: the effect's events through the tick.
+#[allow(clippy::too_many_arguments)]
+fn run_events(
+    index: usize,
+    running: &mut RunningEffect,
+    effect: &CeEffectAt,
+    made: Made<'_>,
+    random: &mut Random,
+    bones: Option<&[[f32; 4]]>,
+    dt: f32,
+) {
+    let Made { particles, lights, systems, system_random, ground, tick } = made;
+    let def = &effect.def;
     let mut dt = dt;
     for _ in 0..MOST_EVENTS_A_TICK {
         if dt < 0.0 || running.finished {
@@ -1350,7 +1589,9 @@ fn generate_particles(
                     direction = rotate_about(direction, axis, sine, cosine);
                 }
                 let direction = turn_by_location(location, direction);
-                let velocity = direction.map(|axis| axis * speed);
+                // Each particle goes with the effect too, which moves per tick.
+                let inherited = effect.spawn.map_or([0.0; 3], |spawn| spawn.velocity.map(|axis| axis * 30.0));
+                let velocity: [f32; 3] = std::array::from_fn(|axis| direction[axis] * speed + inherited[axis]);
                 let attached = entry.flags & STAY_ATTACHED != 0;
                 let (place, direction, velocity) = if attached {
                     (local, direction, velocity)
@@ -1508,18 +1749,19 @@ fn next_frame(particle: &mut CeParticle, def: &CeParticleDef, random: &mut Rando
     }
 }
 
-/// `particles_update` for one particle: false where it dies.
-fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut Random, ground: f32, dt: f32) -> bool {
+/// `particles_update` for one particle: how it ends, and the scale of any
+/// collision effect its hitting structure makes.
+fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut Random, ground: f32, dt: f32) -> (Fate, Option<f32>) {
     let first = particle.age == 0.0;
     particle.age += dt;
     if particle.age >= particle.lifespan && !first && def.sequence_counts[2] == 0 {
-        return false;
+        return (Fate::Died, None);
     }
     // `particle_update_frame_time`.
     if def.flags & ANIMATION_STOPS_AT_REST == 0 || particle.flags & AT_REST == 0 {
         if def.flags & ANIMATE_ONCE_PER_FRAME != 0 {
             if !next_frame(particle, def, random) {
-                return false;
+                return (Fate::Died, None);
             }
         } else {
             let mut alive = true;
@@ -1541,16 +1783,17 @@ fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut 
                 }
             }
             if !alive {
-                return false;
+                return (Fate::Died, None);
             }
         }
     }
     // `particle_update_physics`.
     if particle.flags & AT_REST != 0 {
-        return true;
+        return (Fate::Alive, None);
     }
     let radius = def.radius_scale(particle.age, particle.lifespan) * particle.radius;
     let mut resting = false;
+    let mut collided = None;
     match (particle.node, def.physics) {
         (Some(_), Some(physics)) => {
             let drag = physics.air_friction * radius * radius;
@@ -1574,8 +1817,20 @@ fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut 
         }
         (None, Some(physics)) => {
             if physics.step(&mut particle.place, &mut particle.velocity, radius, ground, dt) {
+                // `particle_update_physics`: what it hit sets off its
+                // collision effect, as hard as it is going past half a unit.
+                let scale = (dot(particle.velocity, particle.velocity).sqrt() - 0.5).clamp(0.0, 1.0);
+                collided = Some(scale);
+                if def.flags & DIES_ON_STRUCTURE != 0 {
+                    let fate = if def.collision_effect.is_none() { Fate::Died } else { Fate::Deleted };
+                    return (fate, collided);
+                }
                 resting = true;
                 particle.frame_span += def.contact_deterioration;
+            }
+            // Always in air: the preview has no water.
+            if def.flags & DIES_IN_AIR != 0 {
+                return (Fate::Died, collided);
             }
         }
         (None, None) => {
@@ -1590,21 +1845,33 @@ fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut 
             particle.direction = particle.velocity;
         }
         particle.rotation += particle.angular_velocity * dt;
-        return true;
+        return (Fate::Alive, collided);
     }
     if particle.node.is_none() {
         if def.flags & DIES_AT_REST != 0 {
-            return false;
+            return (Fate::Died, collided);
         }
         particle.flags |= AT_REST;
     }
     particle.rotation += particle.angular_velocity * dt;
-    true
+    (Fate::Alive, collided)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_square_vector_comes_from_the_two_largest_parts() {
+        assert_eq!(perpendicular([0.0, 0.0, -1.0]), [0.0, -1.0, -0.0]);
+        assert_eq!(perpendicular([1.0, 0.0, 0.0]), [-0.0, 0.0, 1.0]);
+        assert_eq!(perpendicular([0.6, 0.8, 0.0]), [0.8, -0.6, 0.0]);
+        for a in [[0.3, -0.5, 0.8], [-0.9, 0.1, 0.2], [0.0, 1.0, 0.0]] {
+            let b = perpendicular(a);
+            assert!(dot(a, b).abs() < 1e-6);
+            assert!(dot(b, b) > 0.0);
+        }
+    }
 
     #[test]
     fn an_event_lets_go_its_particles_along_its_distribution() {

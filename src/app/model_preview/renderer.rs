@@ -1823,7 +1823,7 @@ struct ModelGpuSlot {
     /// Halo CE's lens flares: per light, then per image, of `flare_geometry`.
     flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     /// The flares of lights CE effects make: by effect, light, then image.
-    ce_effect_flare_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
+    ce_effect_flare_textures: HashMap<usize, Vec<Vec<Option<glow::NativeTexture>>>>,
     /// Each of `h2_gel_lights`' gels, of `gel_geometry`.
     gel_textures: Vec<Option<glow::NativeTexture>>,
     gel_geometry: Option<u64>,
@@ -1839,7 +1839,8 @@ struct ModelGpuSlot {
     h3_particles: h3_particles::H3ParticleField,
     /// Halo CE effect particles, and their images by effect, particle and image.
     ce_particles: ce_particles::CeParticleField,
-    ce_particle_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
+    /// By [`ce_particles::def_key`], particle, then image.
+    ce_particle_textures: HashMap<usize, Vec<Vec<Option<glow::NativeTexture>>>>,
     ce_contrails: ce_contrails::CeContrailField,
     ce_contrail_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     ce_light_volume_textures: Vec<Option<glow::NativeTexture>>,
@@ -1849,7 +1850,7 @@ struct ModelGpuSlot {
     /// By system, sheet, then image.
     ce_pctl_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
     /// Effects' particle systems: by effect, system, sheet, then image.
-    ce_effect_pctl_textures: Vec<Vec<Vec<Vec<Option<glow::NativeTexture>>>>>,
+    ce_effect_pctl_textures: HashMap<usize, Vec<Vec<Vec<Option<glow::NativeTexture>>>>>,
     ce_flags: ce_flags::CeFlagField,
     ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
@@ -1901,7 +1902,7 @@ impl ModelGpuSlot {
                 materials: Vec::new(),
                 uploaded_textures: None,
                 flare_textures: Vec::new(),
-                ce_effect_flare_textures: Vec::new(),
+                ce_effect_flare_textures: HashMap::new(),
                 gel_textures: Vec::new(),
                 gel_geometry: None,
                 h3_textures: Default::default(),
@@ -1914,7 +1915,7 @@ impl ModelGpuSlot {
                 h2_contrails: Default::default(),
                 h3_particles: Default::default(),
                 ce_particles: Default::default(),
-                ce_particle_textures: Vec::new(),
+                ce_particle_textures: HashMap::new(),
                 ce_contrails: Default::default(),
                 ce_contrail_textures: Vec::new(),
                 ce_light_volume_textures: Vec::new(),
@@ -1922,7 +1923,7 @@ impl ModelGpuSlot {
                 ce_glows: Default::default(),
                 ce_pctl: Default::default(),
                 ce_pctl_textures: Vec::new(),
-                ce_effect_pctl_textures: Vec::new(),
+                ce_effect_pctl_textures: HashMap::new(),
                 ce_flags: Default::default(),
                 ce_glow_textures: Vec::new(),
                 h3_strips: Default::default(),
@@ -2513,7 +2514,7 @@ unsafe fn draw_ce_particles(
         for (effect, system, quad) in uploaded.ce_particles.system_quads(effects, view, pixel_of) {
             let texture = uploaded
                 .ce_effect_pctl_textures
-                .get(effect)
+                .get(&effect)
                 .and_then(|systems| systems.get(system))
                 .and_then(|sheets| sheets.get(quad.sheet))
                 .and_then(|images| images.get(quad.image))
@@ -2558,18 +2559,15 @@ unsafe fn draw_ce_particles(
             }
         }
         for quad in uploaded.ce_particles.quads(effects, bones, view, pixels) {
-            let Some(def) = effects.get(quad.effect).and_then(|effect| effect.def.particles.get(quad.def)) else {
-                continue;
-            };
             let texture = uploaded
                 .ce_particle_textures
-                .get(quad.effect)
+                .get(&quad.effect)
                 .and_then(|defs| defs.get(quad.def))
                 .and_then(|images| images.get(quad.image))
                 .copied()
                 .flatten();
             if let Some(texture) = texture {
-                sprites.push((texture, def.blend, def.nonlinear_tint, quad.color, quad.corners));
+                sprites.push((texture, quad.blend, quad.nonlinear_tint, quad.color, quad.corners));
             }
         }
         gl.use_program(Some(effect_gl.program));
@@ -3685,18 +3683,18 @@ impl ModelGlRenderer {
                         vec![h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)]
                     }))
                     .collect();
-                for texture in uploaded.ce_effect_flare_textures.drain(..).flatten().flatten().flatten() {
+                for texture in uploaded.ce_effect_flare_textures.drain().flat_map(|(_, lights)| lights).flatten().flatten() {
                     gl.delete_texture(texture);
                 }
-                uploaded.ce_effect_flare_textures = frame
-                    .preview
-                    .ce_effects
+                let reachable = ce_particles::reachable_defs(&frame.preview.ce_effects);
+                uploaded.ce_effect_flare_textures = reachable
                     .iter()
-                    .map(|effect| {
-                        effect.def.lights.iter().map(|def| {
-                            let images = def.light.flare.iter().flat_map(|flare| &flare.images);
+                    .map(|def| {
+                        let lights = def.lights.iter().map(|light| {
+                            let images = light.light.flare.iter().flat_map(|flare| &flare.images);
                             images.map(|image| upload_h2_image(gl, image)).collect()
-                        }).collect()
+                        });
+                        (ce_particles::def_key(def), lights.collect())
                     })
                     .collect();
                 for texture in uploaded.antenna_textures.drain(..).flatten() {
@@ -3719,7 +3717,7 @@ impl ModelGlRenderer {
                         None => upload_h2_image(gl, &antenna.image),
                     }))
                     .collect();
-                for texture in uploaded.ce_particle_textures.drain(..).flatten().flatten().flatten() {
+                for texture in uploaded.ce_particle_textures.drain().flat_map(|(_, particles)| particles).flatten().flatten() {
                     gl.delete_texture(texture);
                 }
                 uploaded.ce_particles = Default::default();
@@ -3757,19 +3755,18 @@ impl ModelGlRenderer {
                     })
                     .collect();
                 uploaded.ce_pctl = Default::default();
-                for texture in uploaded.ce_effect_pctl_textures.drain(..).flatten().flatten().flatten().flatten() {
+                for texture in uploaded.ce_effect_pctl_textures.drain().flat_map(|(_, systems)| systems).flatten().flatten().flatten() {
                     gl.delete_texture(texture);
                 }
-                uploaded.ce_effect_pctl_textures = frame
-                    .preview
-                    .ce_effects
+                uploaded.ce_effect_pctl_textures = reachable
                     .iter()
-                    .map(|effect| {
-                        effect.def.systems.iter().map(|system| {
+                    .map(|def| {
+                        let systems = def.systems.iter().map(|system| {
                             system.sheets.iter().map(|sheet| {
                                 sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
                             }).collect()
-                        }).collect()
+                        });
+                        (ce_particles::def_key(def), systems.collect())
                     })
                     .collect();
                 uploaded.ce_contrail_textures = frame
@@ -3780,14 +3777,13 @@ impl ModelGlRenderer {
                         contrail.def.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
                     })
                     .collect();
-                uploaded.ce_particle_textures = frame
-                    .preview
-                    .ce_effects
+                uploaded.ce_particle_textures = reachable
                     .iter()
-                    .map(|effect| {
-                        effect.def.particles.iter().map(|particle| {
+                    .map(|def| {
+                        let particles = def.particles.iter().map(|particle| {
                             particle.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                        }).collect()
+                        });
+                        (ce_particles::def_key(def), particles.collect())
                     })
                     .collect();
                 for texture in uploaded.h2_liquid_textures.drain(..).flatten().flatten() {
@@ -4203,7 +4199,7 @@ impl ModelGlRenderer {
                     continue;
                 };
                 let sprites = light.sprites(&outputs, &colors, bones, &view, frame.time, occlusion);
-                let Some(textures) = uploaded.ce_effect_flare_textures.get(effect).and_then(|lights| lights.get(def)) else {
+                let Some(textures) = uploaded.ce_effect_flare_textures.get(&effect).and_then(|lights| lights.get(def)) else {
                     continue;
                 };
                 draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
