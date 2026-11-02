@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use blam_tags::render_method::{ParameterSource, ResolvedValue};
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
@@ -16,6 +17,7 @@ use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;
 use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_markers, part_runs_by};
 use super::h3_strips::{H3StripAt, read_carried_strips};
+use super::h3_leaves::normals_between;
 use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::materials::{H3Bitmap, read_h3_bitmap, read_resolved_map, resolve_embedded_method};
 use super::renderer::H3_EXPOSURE;
@@ -280,6 +282,22 @@ pub(crate) enum H3ParticleAlbedo {
     Palette = 3,
     PaletteBillboardAlpha = 4,
     PaletteSpriteAlpha = 5,
+    /// ODST's: tinted, less so the brighter the texel.
+    DiffuseModulated = 6,
+    /// ODST's: a ramp lit by the particle's palette value.
+    PaletteGlow = 7,
+    /// ODST's: two noises' difference, looked up in the palette.
+    PalettePlasma = 8,
+}
+
+/// What ODST's three new albedo options read.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct H3AlbedoConstants {
+    pub(crate) tint: [f32; 3],
+    pub(crate) modulation: f32,
+    pub(crate) alpha_modulation: f32,
+    pub(crate) base_xform: [f32; 4],
+    pub(crate) second_xform: [f32; 4],
 }
 
 impl H3ParticleAlbedo {
@@ -290,6 +308,9 @@ impl H3ParticleAlbedo {
             "palettized" => Self::Palette,
             "palettized_plus_billboard_alpha" => Self::PaletteBillboardAlpha,
             "palettized_plus_sprite_alpha" | "palettized_plus_alpha" => Self::PaletteSpriteAlpha,
+            "diffuse_modulated" => Self::DiffuseModulated,
+            "palettized_glow" => Self::PaletteGlow,
+            "palettized_plasma" => Self::PalettePlasma,
             _ => Self::Diffuse,
         }
     }
@@ -392,8 +413,11 @@ pub(crate) struct H3SpriteShader {
     pub(crate) base_map: Option<H3Bitmap>,
     pub(crate) alpha_map: Option<H3Bitmap>,
     pub(crate) palette_map: Option<H3Bitmap>,
-    /// `base_map`'s, `alpha_map`'s and `palette`'s, as baked.
-    pub(crate) samplers: [Option<H3Sampler>; 3],
+    /// `base_map2`, which only `palettized_plasma` reads.
+    pub(crate) second_map: Option<H3Bitmap>,
+    /// `base_map`'s, `alpha_map`'s, `palette`'s and `base_map2`'s, as baked.
+    pub(crate) samplers: [Option<H3Sampler>; 4],
+    pub(crate) constants: H3AlbedoConstants,
 }
 
 impl H3SpriteShader {
@@ -415,7 +439,9 @@ impl H3SpriteShader {
             base_map: Some(base_map),
             alpha_map: None,
             palette_map: None,
-            samplers: [None; 3],
+            second_map: None,
+            samplers: [None; 4],
+            constants: H3AlbedoConstants::default(),
         }
     }
 
@@ -437,7 +463,9 @@ impl H3SpriteShader {
             base_map: None,
             alpha_map: None,
             palette_map: None,
-            samplers: [None; 3],
+            second_map: None,
+            samplers: [None; 4],
+            constants: H3AlbedoConstants::default(),
         }
     }
 }
@@ -466,7 +494,7 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
         .and_then(|animated| tag_function_at(&animated, "function"))
         .map(|function| function.evaluate_color(0.0, 0.0))
         .map_or([0.0; 3], |color| [color.red, color.green, color.blue]);
-    let ([base_map, alpha_map, palette_map], samplers) = read_maps(source, shader);
+    let ([base_map, alpha_map, palette_map, second_map], samplers) = read_maps(source, shader);
     Some(H3SpriteShader {
         albedo: H3ParticleAlbedo::named(&chosen("albedo")),
         blend: definition.blend(&options),
@@ -503,7 +531,9 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
         base_map,
         alpha_map,
         palette_map,
+        second_map,
         samplers,
+        constants: read_albedo_constants(source, shader),
     })
 }
 
@@ -519,15 +549,68 @@ fn read_map(source: &TagSource, shader: TagStruct<'_>, name: &str) -> Option<H3B
 
 /// A sprite shader's maps, and the sampler each is baked with. Failing to
 /// resolve leaves what it authored, on the preview's default sampler.
-fn read_maps(source: &TagSource, shader: TagStruct<'_>) -> ([Option<H3Bitmap>; 3], [Option<H3Sampler>; 3]) {
-    const MAPS: [&str; 3] = ["base_map", "alpha_map", "palette"];
+fn read_maps(source: &TagSource, shader: TagStruct<'_>) -> ([Option<H3Bitmap>; 4], [Option<H3Sampler>; 4]) {
+    const MAPS: [&str; 4] = ["base_map", "alpha_map", "palette", "base_map2"];
     let Some(resolved) = resolve_embedded_method(source, shader) else {
-        return (MAPS.map(|name| read_map(source, shader, name)), [None; 3]);
+        return (MAPS.map(|name| read_map(source, shader, name)), [None; 4]);
     };
-    let [base, alpha, palette] = MAPS.map(|name| read_resolved_map(source, &resolved, name));
-    let split = |map: Option<(H3Bitmap, H3Sampler)>| map.map_or((None, None), |(bitmap, sampler)| (Some(bitmap), Some(sampler)));
-    let ((base, base_sampler), (alpha, alpha_sampler), (palette, palette_sampler)) = (split(base), split(alpha), split(palette));
-    ([base, alpha, palette], [base_sampler, alpha_sampler, palette_sampler])
+    let mut maps = MAPS.map(|name| read_resolved_map(source, &resolved, name)).into_iter();
+    let (bitmaps, samplers): (Vec<_>, Vec<_>) = std::array::from_fn::<_, 4, _>(|_| maps.next().flatten())
+        .map(|map| map.map_or((None, None), |(bitmap, sampler)| (Some(bitmap), Some(sampler))))
+        .into_iter()
+        .unzip();
+    let mut bitmaps = bitmaps.into_iter();
+    let mut samplers = samplers.into_iter();
+    (std::array::from_fn(|_| bitmaps.next().flatten()), std::array::from_fn(|_| samplers.next().flatten()))
+}
+
+/// A map's `_xform`, its scale then its offset, from its animators at rest.
+fn sprite_xform(shader: TagStruct<'_>, name: &str) -> [f32; 4] {
+    let mut xform = [1.0, 1.0, 0.0, 0.0];
+    let Some(found) = parameter(shader, name) else {
+        return xform;
+    };
+    for animated in elements(found, "animated parameters") {
+        let Some(function) = tag_function_at(&animated, "function") else {
+            continue;
+        };
+        let value = function.evaluate(0.0, 0.0);
+        match animated.read_enum_name("type").as_deref() {
+            Some("scale uniform") => xform[..2].fill(value),
+            Some("scale x") => xform[0] = value,
+            Some("scale y") => xform[1] = value,
+            Some("translation x") => xform[2] = value,
+            Some("translation y") => xform[3] = value,
+            _ => {}
+        }
+    }
+    xform
+}
+
+fn read_albedo_constants(source: &TagSource, shader: TagStruct<'_>) -> H3AlbedoConstants {
+    let resolved = resolve_embedded_method(source, shader);
+    let value = |name: &str| {
+        let found = resolved.as_ref()?.find(name)?;
+        let ParameterSource::Inline(value) = &found.source else {
+            return None;
+        };
+        Some(value.clone())
+    };
+    let real = |name: &str| match value(name) {
+        Some(ResolvedValue::Real(real)) => real,
+        _ => 0.0,
+    };
+    let tint = match value("tint_color") {
+        Some(ResolvedValue::Color([_, red, green, blue])) => [red, green, blue],
+        _ => [1.0; 3],
+    };
+    H3AlbedoConstants {
+        tint,
+        modulation: real("modulation_factor"),
+        alpha_modulation: real("alpha_modulation_factor"),
+        base_xform: sprite_xform(shader, "base_map"),
+        second_xform: sprite_xform(shader, "base_map2"),
+    }
 }
 
 /// `postprocess_frame_animation`'s `m_sprite`, from a sprite's left, right, top
@@ -697,6 +780,55 @@ enum H3EmissionShape {
     ImpactContour,
     ImpactArea,
     Breakable,
+    /// ODST's: from the points of the emitter's `custom shape`.
+    CustomPoints,
+}
+
+/// ODST's `s_particle_emitter_custom_points::s_point`, decompressed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct H3CustomPoint {
+    position: [f32; 3],
+    normal: [f32; 3],
+}
+
+/// A `particle_emitter_custom_points`.
+fn read_custom_points(source: &TagSource, emitter: TagStruct<'_>) -> Vec<H3CustomPoint> {
+    let path = emitter.read_tag_ref_path("custom shape").filter(|path| !path.is_empty());
+    let tag = path.and_then(|path| {
+        load_referenced_tag_from_source(source, &path, "particle_emitter_custom_points", b"pecp").ok()
+    });
+    let Some(tag) = tag else {
+        return Vec::new();
+    };
+    let root = tag.root();
+    let (scale, offset) = (root.read_vec3("compression scale"), root.read_vec3("compression offset"));
+    let word = |point: TagStruct<'_>, name: &str| point.read_int_any(name).unwrap_or(0) as f32;
+    let points = elements(root, "points").into_iter().map(|point| H3CustomPoint {
+        position: [
+            word(point, "position_x") * scale.i + offset.i,
+            word(point, "position_y") * scale.j + offset.j,
+            word(point, "position_z") * scale.k + offset.k,
+        ],
+        normal: ["normal_x", "normal_y", "normal_z"].map(|name| word(point, name) / 127.0),
+    });
+    points.collect()
+}
+
+/// `initialize_particle`'s custom shape: `emission radius` chooses the point
+/// and `emission angle` how far its normal strays toward a random direction.
+fn emit_from_points(
+    points: &[H3CustomPoint],
+    radius: f32,
+    angle_degrees: f32,
+    random: &mut Random,
+) -> ([f32; 3], [f32; 3]) {
+    if points.is_empty() {
+        return ([0.0; 3], [0.0; 3]);
+    }
+    let at = ((points.len() as f32 * radius) as i32).clamp(0, points.len() as i32 - 1) as usize;
+    let point = points[at];
+    let stray = (angle_degrees / 180.0).clamp(0.0, 1.0);
+    (point.position, normals_between(point.normal, random.direction(), stray))
 }
 
 impl H3EmissionShape {
@@ -710,6 +842,7 @@ impl H3EmissionShape {
             "halo" => Self::Halo,
             "debris" => Self::Debris,
             "line" => Self::Line,
+            "custom points" => Self::CustomPoints,
             "impact contour" => Self::ImpactContour,
             "impact area" => Self::ImpactArea,
             "breakable surface" => Self::Breakable,
@@ -930,6 +1063,7 @@ impl H3ParticleAxis {
 #[derive(Debug)]
 struct H3Emitter {
     shape: H3EmissionShape,
+    points: Vec<H3CustomPoint>,
     scroll: [f32; 2],
     axis: H3ParticleAxis,
     reference_axis: usize,
@@ -1020,6 +1154,7 @@ fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter>
         },
         axis_angle,
         scroll: [scroll.i, scroll.j],
+        points: read_custom_points(source, emitter),
         shape, offset, direction, radius, angle, starting, most, rate, lifespan, acceleration, speed,
         rotation, rotation_rate, size, scale, tint, alpha, black_point, physics, flock, collider,
     })
@@ -1329,7 +1464,7 @@ fn emit(shape: H3EmissionShape, radius: f32, angle_degrees: f32, random: &mut Ra
             let (sin, cos) = random.range(0.0, std::f32::consts::TAU).sin_cos();
             ([0.0; 3], [cone.cos(), sin * cone.sin(), cos * cone.sin()])
         }
-        H3EmissionShape::Breakable => ([0.0; 3], [0.0; 3]),
+        H3EmissionShape::Breakable | H3EmissionShape::CustomPoints => ([0.0; 3], [0.0; 3]),
     }
 }
 
@@ -1561,12 +1696,12 @@ impl H3Emitter {
             let seeds: [f32; SEEDS] = std::array::from_fn(|_| random.next());
             let mut particle_state = H3ParticleState { seeds, emission_time: state.system_age, ..state };
             particle_state.system_seeds = state.system_seeds;
-            let (position, mut velocity) = emit(
-                self.shape,
-                self.radius.scalar(&particle_state),
-                self.angle.scalar(&particle_state),
-                random,
-            );
+            let (radius, angle) = (self.radius.scalar(&particle_state), self.angle.scalar(&particle_state));
+            let (position, mut velocity) = if self.shape == H3EmissionShape::CustomPoints {
+                emit_from_points(&self.points, radius, angle, random)
+            } else {
+                emit(self.shape, radius, angle, random)
+            };
             let length = (velocity[0].powi(2) + velocity[1].powi(2) + velocity[2].powi(2)).sqrt().max(1e-6);
             let speed = self.speed.scalar(&particle_state);
             let speed = if speed == 0.0 { 0.001 } else { speed };
@@ -2218,6 +2353,20 @@ impl H3ParticleSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_custom_shape_picks_its_point_by_radius_and_strays_by_angle() {
+        let mut random = Random(1);
+        let point = |x: f32| H3CustomPoint { position: [x, 0.0, 0.0], normal: [0.0, 0.0, 1.0] };
+        let points = [point(1.0), point(2.0), point(3.0), point(4.0)];
+        assert_eq!(emit_from_points(&points, 0.0, 0.0, &mut random), (point(1.0).position, [0.0, 0.0, 1.0]));
+        assert_eq!(emit_from_points(&points, 0.5, 0.0, &mut random).0, point(3.0).position);
+        assert_eq!(emit_from_points(&points, 1.0, 0.0, &mut random).0, point(4.0).position, "the last, not past it");
+        assert_eq!(emit_from_points(&points, -1.0, 0.0, &mut random).0, point(1.0).position);
+        let (_, strayed) = emit_from_points(&points, 0.0, 90.0, &mut random);
+        assert!(strayed != [0.0, 0.0, 1.0]);
+        assert_eq!(emit_from_points(&[], 0.5, 0.0, &mut random), ([0.0; 3], [0.0; 3]));
+    }
 
     #[test]
     fn a_line_runs_along_y_and_a_breakable_has_nothing_of_its_own() {

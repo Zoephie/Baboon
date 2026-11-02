@@ -131,7 +131,7 @@ fn unpacked(words: [i16; 4]) -> [[f32; 3]; 3] {
 }
 
 /// `normals_interpolate`.
-fn normals_between(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+pub(super) fn normals_between(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let angle = dot(a, b).clamp(-1.0, 1.0).acos();
     let (from, axis, by) = if t <= 0.5 { (a, cross(a, b), angle * t) } else { (b, cross(b, a), angle * (1.0 - t)) };
     let axis = unit(axis);

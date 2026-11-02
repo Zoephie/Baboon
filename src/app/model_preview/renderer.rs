@@ -1755,9 +1755,9 @@ struct ModelGpuSlot {
     h3_onsets: h3_effects::H3EffectOnsets,
     h3_cloth: h3_cloth::H3ClothField,
     h3_leaves: h3_leaves::H3LeafField,
-    leaf_textures: Vec<[Option<glow::NativeTexture>; 3]>,
-    strip_textures: Vec<[Option<glow::NativeTexture>; 3]>,
-    particle_textures: Vec<[Option<glow::NativeTexture>; 3]>,
+    leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
+    strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
+    particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
 }
 
 impl ModelGpuSlot {
@@ -2361,6 +2361,11 @@ uniform bool u_unsigned;
 uniform sampler2D u_base;
 uniform sampler2D u_alpha;
 uniform sampler2D u_palette;
+uniform sampler2D u_base2;
+uniform vec4 u_base_xform;
+uniform vec4 u_base2_xform;
+uniform vec3 u_tint;
+uniform vec2 u_modulation;
 uniform int u_albedo;
 uniform bool u_black_point;
 uniform bool u_multiply;
@@ -2373,7 +2378,25 @@ float view_depth(float window) {
     float ndc = window * 2.0 - 1.0;
     return (ndc - u_depth.y) / (u_depth.x - ndc * u_depth.z);
 }
-vec4 albedo(vec2 sprite) {
+vec4 albedo(vec2 sprite, float external_alpha) {
+    if (u_albedo == 6) {
+        vec4 diffuse = texture(u_base, sprite);
+        float brightness = dot(diffuse.rgb, diffuse.rgb) / sqrt(3.0);
+        diffuse.rgb *= mix(u_tint, vec3(1.0), u_modulation.x * brightness);
+        return diffuse;
+    }
+    if (u_albedo == 7) {
+        float ramp = texture(u_base, sprite).g;
+        float glow = v_extra.y * ramp;
+        return vec4(clamp(u_tint * glow * pow(2.0, glow * 6.0), 0.0, 1.0), ramp);
+    }
+    if (u_albedo == 8) {
+        float noise_a = texture(u_base, sprite * u_base_xform.xy + u_base_xform.zw).r;
+        float noise_b = texture(u_base2, sprite * u_base2_xform.xy + u_base2_xform.zw).r;
+        float alpha = texture(u_alpha, v_billboard).a;
+        float index = clamp(abs(noise_a - noise_b) + (1.0 - alpha * external_alpha) * u_modulation.y, 0.0, 1.0);
+        return vec4(texture(u_palette, vec2(index, v_extra.y)).rgb, alpha);
+    }
     vec4 base = texture(u_base, sprite);
     vec4 tone = base;
     float row = v_extra.y;
@@ -2388,13 +2411,14 @@ vec4 albedo(vec2 sprite) {
     return tone;
 }
 void main() {
-    vec4 color = mix(albedo(v_sprite), albedo(v_next_sprite), v_extra.x);
     float depth_fade = 1.0;
     if (u_fade > 0.0) {
         float scene = texelFetch(u_scene_depth, ivec2(gl_FragCoord.xy), 0).r;
         float behind = (view_depth(scene) - view_depth(gl_FragCoord.z)) / u_depth.w;
         depth_fade = clamp(behind / u_fade, 0.0, 1.0);
     }
+    float external_alpha = v_color.a * depth_fade;
+    vec4 color = mix(albedo(v_sprite, external_alpha), albedo(v_next_sprite, external_alpha), v_extra.x);
     if (u_distortion != 0.0) {
         // `compute_normalized_distortion`, in the frame's own widths and heights.
         vec2 map = u_unsigned ? (color.xy * 255.0 - 128.0) / 127.0 : color.xy;
@@ -2486,6 +2510,10 @@ struct H3ParticleGl {
     lit: Option<glow::NativeUniformLocation>,
     premultiplied: Option<glow::NativeUniformLocation>,
     alpha_test: Option<glow::NativeUniformLocation>,
+    tint: Option<glow::NativeUniformLocation>,
+    modulation: Option<glow::NativeUniformLocation>,
+    base_xform: Option<glow::NativeUniformLocation>,
+    second_xform: Option<glow::NativeUniformLocation>,
     lighting: Option<glow::NativeUniformLocation>,
     distortion: Option<glow::NativeUniformLocation>,
     unsigned: Option<glow::NativeUniformLocation>,
@@ -2499,7 +2527,7 @@ impl H3ParticleGl {
         gl: &glow::Context,
         look: &h3_particles::H3SpriteShader,
         vertices: &[[f32; PARTICLE_FLOATS]],
-        textures: [Option<glow::NativeTexture>; 3],
+        textures: [Option<glow::NativeTexture>; 4],
         no_map: Option<glow::NativeTexture>,
         depth: Option<glow::NativeTexture>,
         camera: &ModelGpuCamera,
@@ -2510,8 +2538,8 @@ impl H3ParticleGl {
             gl.bind_vertex_array(Some(self.vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.buffer));
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(vertices), glow::STREAM_DRAW);
-            for (unit, texture) in textures.into_iter().enumerate() {
-                gl.active_texture(glow::TEXTURE0 + unit as u32);
+            for (unit, texture) in [0, 1, 2, 4].into_iter().zip(textures) {
+                gl.active_texture(glow::TEXTURE0 + unit);
                 gl.bind_texture(glow::TEXTURE_2D, texture.or(no_map));
             }
             gl.active_texture(glow::TEXTURE3);
@@ -2527,6 +2555,11 @@ impl H3ParticleGl {
                 camera.scale,
             );
             gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
+            let constants = look.constants;
+            gl.uniform_3_f32_slice(self.tint.as_ref(), &constants.tint);
+            gl.uniform_2_f32(self.modulation.as_ref(), constants.modulation, constants.alpha_modulation);
+            gl.uniform_4_f32_slice(self.base_xform.as_ref(), &constants.base_xform);
+            gl.uniform_4_f32_slice(self.second_xform.as_ref(), &constants.second_xform);
             gl.uniform_1_i32(self.black_point.as_ref(), i32::from(look.black_point));
             let multiply = look.blend == H3Blend::Multiply;
             gl.uniform_1_i32(self.multiply.as_ref(), i32::from(multiply));
@@ -2572,7 +2605,7 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             offset += size * size_of::<f32>() as i32;
         }
         gl.use_program(Some(program));
-        for (unit, name) in ["u_base", "u_alpha", "u_palette", "u_scene_depth"].into_iter().enumerate() {
+        for (unit, name) in ["u_base", "u_alpha", "u_palette", "u_scene_depth", "u_base2"].into_iter().enumerate() {
             gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
         }
         Some(H3ParticleGl {
@@ -2586,6 +2619,10 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             lit: gl.get_uniform_location(program, "u_lit"),
             premultiplied: gl.get_uniform_location(program, "u_premultiplied"),
             alpha_test: gl.get_uniform_location(program, "u_alpha_test"),
+            tint: gl.get_uniform_location(program, "u_tint"),
+            modulation: gl.get_uniform_location(program, "u_modulation"),
+            base_xform: gl.get_uniform_location(program, "u_base_xform"),
+            second_xform: gl.get_uniform_location(program, "u_base2_xform"),
             lighting: gl.get_uniform_location(program, "u_lighting"),
             distortion: gl.get_uniform_location(program, "u_distortion"),
             unsigned: gl.get_uniform_location(program, "u_unsigned"),
@@ -3083,8 +3120,14 @@ impl ModelGlRenderer {
                     gl.delete_texture(texture);
                 }
                 let maps = |look: &h3_particles::H3SpriteShader| {
-                    let [base, alpha, palette] = look.samplers;
-                    [(&look.base_map, base), (&look.alpha_map, alpha), (&look.palette_map, palette)].map(|(map, sampler)| {
+                    let [base, alpha, palette, second] = look.samplers;
+                    [
+                        (&look.base_map, base),
+                        (&look.alpha_map, alpha),
+                        (&look.palette_map, palette),
+                        (&look.second_map, second),
+                    ]
+                    .map(|(map, sampler)| {
                         map.as_ref().and_then(|(image, texels, mips)| {
                             h3_draw::upload_h2_image_linear(gl, image, *texels, mips, sampler)
                         })
