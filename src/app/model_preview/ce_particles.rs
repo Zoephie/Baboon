@@ -15,7 +15,7 @@ use super::ce_particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, Random as SystemRandom, new_unattached, read_pctl_def, unattached_quads,
     update_unattached,
 };
-use super::ce_passes::argb;
+use super::ce_passes::{CeMapAnimation, argb, read_effect_map_animation};
 use super::h2_passes::{H2Image, ce_color_interpolate};
 use super::materials::decode_h2_image;
 use super::*;
@@ -191,6 +191,61 @@ struct CeSpriteFrame {
     image: usize,
 }
 
+/// An effect shader's second map: drawn over the sprite where anchored to
+/// it or to the screen, or read as depth for a `zsprite`.
+#[derive(Debug, Clone)]
+pub(crate) struct CeSecondaryMap {
+    /// `anchor`: with primary, with screen space, zsprite.
+    anchor: i128,
+    pub(crate) image: Arc<H2Image>,
+    animation: CeMapAnimation,
+    /// `zsprite radius scale`, where nothing means one.
+    zsprite_scale: f32,
+}
+
+/// What a sprite draws its second map with.
+#[derive(Debug, Clone)]
+pub(crate) struct CeSecondaryDraw {
+    pub(crate) map: Arc<CeSecondaryMap>,
+    /// 1 over the sprite, 2 over the screen, 3 as depth.
+    pub(crate) mode: i32,
+    /// `C_TEXTURE1_XFORM`'s two rows.
+    pub(crate) rows: [[f32; 4]; 2],
+    /// How far toward the camera the map's green moves a zsprite's pixels.
+    pub(crate) radius: f32,
+}
+
+/// An effect shader's `bitmap` and how it is laid, by the field's name.
+pub(super) fn read_secondary_map(source: &TagSource, holder: TagStruct<'_>, bitmap_field: &str) -> Option<Arc<CeSecondaryMap>> {
+    let path = holder.read_tag_ref_path(bitmap_field).filter(|path| !path.is_empty())?;
+    let image = decode_h2_image(source, &path, SamplerKind::Texture2D, 0)?;
+    Some(Arc::new(CeSecondaryMap {
+        anchor: holder.read_int_any("anchor").unwrap_or(0),
+        image: Arc::new(image),
+        animation: read_effect_map_animation(holder),
+        zsprite_scale: holder.read_real("zsprite radius scale").unwrap_or(0.0),
+    }))
+}
+
+impl CeSecondaryMap {
+    /// What `rasterizer_transparent_geometry_group_draw` sets for it, with
+    /// the `secondary map radius` the draw gives the shader.
+    /// Sprites draw with no object's animation, which reads every source as one.
+    pub(crate) fn draw(self: &Arc<Self>, time: f32, radius: f32) -> CeSecondaryDraw {
+        let scale = if self.zsprite_scale == 0.0 { 1.0 } else { self.zsprite_scale };
+        CeSecondaryDraw {
+            map: self.clone(),
+            mode: match self.anchor {
+                1 => 2,
+                2 => 3,
+                _ => 1,
+            },
+            rows: self.animation.rows(time, &[1.0; 4]),
+            radius: radius * scale,
+        }
+    }
+}
+
 /// A bitmap's sprites by sequence, each image's size, and the images any
 /// sprite is cut from, decoded.
 #[derive(Debug, Clone, Default)]
@@ -307,6 +362,14 @@ pub(crate) struct CeParticleDef {
     /// sound in their place makes nothing to see.
     collision_effect: Option<Arc<CeEffectDef>>,
     death_effect: Option<Arc<CeEffectDef>>,
+    /// The shader's second `bitmap`, after the particle's own.
+    secondary: Option<Arc<CeSecondaryMap>>,
+}
+
+/// The path of the `n`th field named `name` that has one.
+fn nth_field_path(holder: TagStruct<'_>, name: &str, n: usize) -> Option<String> {
+    let field = holder.fields().filter(|field| field.name() == name).nth(n)?;
+    Some(format!("{name}#{}", field.ordinal()))
 }
 
 /// Effects read so far, by path; none while one is being read, so an effect
@@ -401,6 +464,7 @@ fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) 
         fade_mode: short("framebuffer fade mode"),
         nonlinear_tint: shader_flags & 2 != 0,
         sprite_scale: if widest > 0.0 { 1.0 / widest } else { 1.0 },
+        secondary: nth_field_path(root, "bitmap", 1).and_then(|field| read_secondary_map(source, root, &field)),
         collision_effect: spawned_effect(source, root, "collision effect", cache),
         death_effect: spawned_effect(source, root, "death effect", cache),
         sequences,
@@ -841,6 +905,7 @@ pub(crate) struct CeParticleQuad {
     pub(crate) def: usize,
     pub(crate) blend: i32,
     pub(crate) nonlinear_tint: bool,
+    pub(crate) secondary: Option<CeSecondaryDraw>,
     pub(crate) image: usize,
     pub(crate) corners: [[f32; 5]; 4],
     pub(crate) color: [f32; 4],
@@ -1075,6 +1140,7 @@ impl CeParticleField {
     ) -> Vec<(usize, usize, CePctlQuad)> {
         let effects = self.all(effects);
         let mut quads = Vec::new();
+        let time = self.tick as f32 * STEP;
         let random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
         for (effect, def, running) in &mut self.systems {
             let Some(at) = effects.get(*effect) else {
@@ -1083,7 +1149,7 @@ impl CeParticleField {
             let Some(system) = at.def.systems.get(*def) else {
                 continue;
             };
-            for quad in unattached_quads(system, running, 0, view, &pixel, random) {
+            for quad in unattached_quads(system, running, 0, view, &pixel, random, time) {
                 quads.push((def_key(&at.def), *def, quad));
             }
         }
@@ -1121,6 +1187,9 @@ impl CeParticleField {
     ) -> Vec<CeParticleQuad> {
         let effects = self.all(effects);
         let mut quads = Vec::new();
+        // `render_particles` gives a particle's shader the average radius of
+        // its kind drawn with it: sum and count, by effect and kind.
+        let mut radii: std::collections::HashMap<(usize, usize), (f32, f32)> = std::collections::HashMap::new();
         for particle in &self.particles {
             let Some(effect) = effects.get(particle.effect) else {
                 continue;
@@ -1135,6 +1204,9 @@ impl CeParticleField {
             if diameter <= def.fade_end_size {
                 continue;
             }
+            let entry = radii.entry((def_key(&effect.def), particle.def)).or_insert((0.0, 0.0));
+            entry.0 += radius;
+            entry.1 += 1.0;
             let mut scale = radius * 2.0 * def.sprite_scale;
             if diameter < def.minimum_size {
                 scale *= def.minimum_size / diameter;
@@ -1201,10 +1273,24 @@ impl CeParticleField {
                 def: particle.def,
                 blend: def.blend,
                 nonlinear_tint: def.nonlinear_tint,
+                secondary: None,
                 image: sprite.image,
                 corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
                 color: [red, green, blue, shown_alpha],
             });
+        }
+        // Then each kind's second map, with what its kind's sprites average.
+        let time = self.tick as f32 * STEP;
+        for quad in &mut quads {
+            let Some(effect) = effects.iter().find(|effect| def_key(&effect.def) == quad.effect) else {
+                continue;
+            };
+            let Some(map) = effect.def.particles.get(quad.def).and_then(|def| def.secondary.as_ref()) else {
+                continue;
+            };
+            let (sum, count) = radii.get(&(quad.effect, quad.def)).copied().unwrap_or((0.0, 0.0));
+            let average = if count > 0.0 { sum / count } else { 0.0 };
+            quad.secondary = Some(map.draw(time, average));
         }
         quads
     }

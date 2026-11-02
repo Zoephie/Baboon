@@ -1851,6 +1851,8 @@ struct ModelGpuSlot {
     ce_pctl_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
     /// Effects' particle systems: by effect, system, sheet, then image.
     ce_effect_pctl_textures: HashMap<usize, Vec<Vec<Vec<Option<glow::NativeTexture>>>>>,
+    /// Effect shaders' second maps, by the map, made on first draw.
+    ce_secondary_textures: HashMap<usize, glow::NativeTexture>,
     ce_flags: ce_flags::CeFlagField,
     ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
@@ -1924,6 +1926,7 @@ impl ModelGpuSlot {
                 ce_pctl: Default::default(),
                 ce_pctl_textures: Vec::new(),
                 ce_effect_pctl_textures: HashMap::new(),
+                ce_secondary_textures: HashMap::new(),
                 ce_flags: Default::default(),
                 ce_glow_textures: Vec::new(),
                 h3_strips: Default::default(),
@@ -2493,7 +2496,7 @@ unsafe fn draw_ce_particles(
         uploaded.ce_contrails.advance(contrails, outputs, bones, ground, frame.time);
         let change_colors = |object: u8| states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors);
         // What each sprite draws with: texture, blend, nonlinear tint, color, corners.
-        type Sprite = (glow::NativeTexture, i32, bool, [f32; 4], [[f32; 5]; 4]);
+        type Sprite = (glow::NativeTexture, i32, bool, [f32; 4], [[f32; 5]; 4], Option<ce_particles::CeSecondaryDraw>);
         let mut sprites: Vec<Sprite> = Vec::new();
         // Made afresh every frame, as the game draws it.
         let seed = (frame.time * 1000.0) as u32;
@@ -2506,7 +2509,7 @@ unsafe fn draw_ce_particles(
             let outputs = state.map_or([0.0; 4], |state| state.outputs);
             let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
             for quad in lightning.quads(&outputs, &colors, bones, view, seed) {
-                sprites.push((texture, lightning.blend, lightning.nonlinear_tint, quad.color, quad.corners));
+                sprites.push((texture, lightning.blend, lightning.nonlinear_tint, quad.color, quad.corners, None));
             }
         }
         // `particle_systems_render`, for those effects' parts made.
@@ -2521,7 +2524,7 @@ unsafe fn draw_ce_particles(
                 .copied()
                 .flatten();
             if let Some(texture) = texture {
-                sprites.push((texture, quad.blend, quad.nonlinear_tint, quad.color, quad.corners));
+                sprites.push((texture, quad.blend, quad.nonlinear_tint, quad.color, quad.corners, quad.secondary));
             }
         }
         // And those on the object's attachments.
@@ -2536,7 +2539,7 @@ unsafe fn draw_ce_particles(
             for quad in uploaded.ce_pctl.quads(systems, view, pixel) {
                 let texture = uploaded.ce_pctl_textures.get(quad.system).and_then(|sheets| sheets.get(quad.sheet)).and_then(|images| images.get(quad.image)).copied().flatten();
                 if let Some(texture) = texture {
-                    sprites.push((texture, quad.blend, quad.nonlinear_tint, quad.color, quad.corners));
+                    sprites.push((texture, quad.blend, quad.nonlinear_tint, quad.color, quad.corners, quad.secondary));
                 }
             }
         }
@@ -2546,7 +2549,7 @@ unsafe fn draw_ce_particles(
         let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
         for (index, quad) in uploaded.ce_glows.quads(glows, view, pixel) {
             if let Some(texture) = uploaded.ce_glow_textures.get(index).copied().flatten() {
-                sprites.push((texture, 3, false, quad.color, quad.corners));
+                sprites.push((texture, 3, false, quad.color, quad.corners, None));
             }
         }
         for quad in uploaded.ce_contrails.quads(contrails, change_colors, view) {
@@ -2555,7 +2558,7 @@ unsafe fn draw_ce_particles(
             };
             let texture = uploaded.ce_contrail_textures.get(quad.contrail).and_then(|images| images.get(quad.image)).copied().flatten();
             if let Some(texture) = texture {
-                sprites.push((texture, contrail.def.blend, contrail.def.nonlinear_tint, quad.color, quad.corners));
+                sprites.push((texture, contrail.def.blend, contrail.def.nonlinear_tint, quad.color, quad.corners, None));
             }
         }
         for quad in uploaded.ce_particles.quads(effects, bones, view, pixels) {
@@ -2567,7 +2570,7 @@ unsafe fn draw_ce_particles(
                 .copied()
                 .flatten();
             if let Some(texture) = texture {
-                sprites.push((texture, quad.blend, quad.nonlinear_tint, quad.color, quad.corners));
+                sprites.push((texture, quad.blend, quad.nonlinear_tint, quad.color, quad.corners, quad.secondary));
             }
         }
         gl.use_program(Some(effect_gl.program));
@@ -2578,7 +2581,28 @@ unsafe fn draw_ce_particles(
         gl.depth_func(glow::LEQUAL);
         gl.depth_mask(false);
         gl.enable(glow::BLEND);
-        for (texture, function, nonlinear, color, corners) in sprites {
+        // `C_ZSPRITE_PARAMS`' radius moves a pixel toward the eye; these are
+        // how far clip z and w go for each unit of that.
+        let zsprite_z = camera.scale * camera.depth_scale * camera.depth_map[0];
+        let zsprite_w = camera.scale * camera.perspective;
+        for (texture, function, nonlinear, color, corners, secondary) in sprites {
+            match &secondary {
+                Some(draw) => {
+                    let key = Arc::as_ptr(&draw.map) as usize;
+                    if !uploaded.ce_secondary_textures.contains_key(&key)
+                        && let Some(made) = upload_h2_image(gl, &draw.map.image)
+                    {
+                        uploaded.ce_secondary_textures.insert(key, made);
+                    }
+                    gl.active_texture(glow::TEXTURE1);
+                    gl.bind_texture(glow::TEXTURE_2D, uploaded.ce_secondary_textures.get(&key).copied());
+                    gl.active_texture(glow::TEXTURE0);
+                    gl.uniform_1_i32(effect_gl.mode.as_ref(), draw.mode);
+                    gl.uniform_4_f32_slice(effect_gl.rows.as_ref(), draw.rows.as_flattened());
+                    gl.uniform_3_f32(effect_gl.zsprite.as_ref(), draw.radius, zsprite_z, zsprite_w);
+                }
+                None => gl.uniform_1_i32(effect_gl.mode.as_ref(), 0),
+            }
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             let blend = ce_passes::framebuffer_blend(function);
             gl.blend_equation(gl_blend_equation(blend.equation));
@@ -2587,10 +2611,14 @@ unsafe fn draw_ce_particles(
             gl.uniform_1_i32(effect_gl.nonlinear.as_ref(), i32::from(nonlinear));
             let [red, green, blue, alpha] = color;
             gl.uniform_4_f32(effect_gl.color.as_ref(), red, green, blue, alpha);
-            let vertices = corners.map(|[x, y, z, u, v]| {
+            // The zsprite stream's corners, in `build_sprite`'s vertex order
+            // (left bottom, right bottom, right top, left top): 00, 01, 11, 10.
+            let units = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
+            let mut vertices = [[0.0f32; 8]; 4];
+            for (vertex, ([x, y, z, u, v], unit)) in vertices.iter_mut().zip(corners.into_iter().zip(units)) {
                 let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
-                [a, b, c, d, u, v]
-            });
+                *vertex = [a, b, c, d, u, v, unit[0], unit[1]];
+            }
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
             gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
         }
@@ -2599,16 +2627,60 @@ unsafe fn draw_ce_particles(
 
 /// `fx/eff_common.h`: what Halo CE's particles, contrails and light volumes
 /// draw with. The fog it folds into the vertex alpha is 1 with no level.
+/// `effect.vsh`, `effect_multitexture.vsh`, `effect_multitexture_screenspace.vsh`
+/// and `effect_zsprite.vsh` as far as a sprite needs: its place, its map's
+/// coordinates, and the corner of the sprite the zsprite stream gives it.
+const CE_EFFECT_VERTEX: &str = "#version 330
+layout(location = 0) in vec4 a_clip;
+layout(location = 1) in vec2 a_uv;
+layout(location = 2) in vec2 a_unit;
+out vec2 v_uv;
+out vec2 v_unit;
+out vec4 v_clip;
+void main() {
+    gl_Position = a_clip;
+    v_uv = a_uv;
+    v_unit = a_unit;
+    v_clip = a_clip;
+}
+";
+
 const CE_EFFECT_FRAGMENT: &str = "#version 330
 in vec2 v_uv;
+in vec2 v_unit;
+in vec4 v_clip;
 uniform sampler2D u_map;
+uniform sampler2D u_second;
 uniform vec4 u_color;
 uniform int u_blend;
 uniform int u_nonlinear;
+// 0 none, 1 a second color map over the sprite, 2 over the screen, 3 zsprite.
+uniform int u_mode;
+uniform vec4 u_rows[2];
+// The zsprite's radius, and how clip z and w move per unit toward the eye.
+uniform vec3 u_zsprite;
 out vec4 out_color;
 void main() {
     vec4 t0 = texture(u_map, v_uv);
     vec4 r0 = vec4(u_nonlinear != 0 ? mix(pow(t0.rgb, vec3(4.0)), t0.rgb, u_color.rgb) : t0.rgb * u_color.rgb, t0.a);
+    if (u_mode == 1 || u_mode == 2) {
+        vec4 at = u_mode == 1 ? vec4(v_uv, 0.0, 1.0) : vec4(v_clip.xy / v_clip.w, 1.0, 1.0);
+        vec4 t1 = texture(u_second, vec2(dot(at, u_rows[0]), dot(at, u_rows[1])));
+        r0 *= t1;
+    }
+    float depth = gl_FragCoord.z;
+    if (u_mode == 3) {
+        // The map's green says how far toward the eye the pixel stands, never
+        // through the near plane.
+        float toward = u_zsprite.x * texture(u_second, v_unit).g;
+        if (u_zsprite.z > 0.0) {
+            toward = min(toward, max((v_clip.w - 0.001) / u_zsprite.z, 0.0));
+        }
+        float z = v_clip.z - toward * u_zsprite.y;
+        float w = v_clip.w - toward * u_zsprite.z;
+        depth = (z / w) * 0.5 + 0.5;
+    }
+    gl_FragDepth = depth;
     float a = u_color.a;
     if (u_blend == 0) {
         r0.a *= a;
@@ -2632,11 +2704,18 @@ struct CeEffectGl {
     color: Option<glow::NativeUniformLocation>,
     blend: Option<glow::NativeUniformLocation>,
     nonlinear: Option<glow::NativeUniformLocation>,
+    mode: Option<glow::NativeUniformLocation>,
+    rows: Option<glow::NativeUniformLocation>,
+    zsprite: Option<glow::NativeUniformLocation>,
 }
+
+/// A CE effect sprite's vertex: clip position, map coordinates, and the
+/// sprite's corner for a zsprite's map.
+const CE_EFFECT_STRIDE: i32 = 8 * 4;
 
 unsafe fn ce_effect_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<CeEffectGl> {
     unsafe {
-        let program = link_h2_program(gl, main, CE_FLARE_VERTEX, CE_EFFECT_FRAGMENT)
+        let program = link_h2_program(gl, main, CE_EFFECT_VERTEX, CE_EFFECT_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))
             .ok()?;
         let vertex_array = gl.create_vertex_array().ok()?;
@@ -2644,11 +2723,14 @@ unsafe fn ce_effect_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<
         gl.bind_vertex_array(Some(vertex_array));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
         gl.enable_vertex_attrib_array(0);
-        gl.vertex_attrib_pointer_f32(0, 4, glow::FLOAT, false, CE_FLARE_STRIDE, 0);
+        gl.vertex_attrib_pointer_f32(0, 4, glow::FLOAT, false, CE_EFFECT_STRIDE, 0);
         gl.enable_vertex_attrib_array(1);
-        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, CE_FLARE_STRIDE, 16);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, CE_EFFECT_STRIDE, 16);
+        gl.enable_vertex_attrib_array(2);
+        gl.vertex_attrib_pointer_f32(2, 2, glow::FLOAT, false, CE_EFFECT_STRIDE, 24);
         gl.use_program(Some(program));
         gl.uniform_1_i32(gl.get_uniform_location(program, "u_map").as_ref(), 0);
+        gl.uniform_1_i32(gl.get_uniform_location(program, "u_second").as_ref(), 1);
         Some(CeEffectGl {
             program,
             vertex_array,
@@ -2656,6 +2738,9 @@ unsafe fn ce_effect_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<
             color: gl.get_uniform_location(program, "u_color"),
             blend: gl.get_uniform_location(program, "u_blend"),
             nonlinear: gl.get_uniform_location(program, "u_nonlinear"),
+            mode: gl.get_uniform_location(program, "u_mode"),
+            rows: gl.get_uniform_location(program, "u_rows"),
+            zsprite: gl.get_uniform_location(program, "u_zsprite"),
         })
     }
 }
@@ -3755,6 +3840,9 @@ impl ModelGlRenderer {
                     })
                     .collect();
                 uploaded.ce_pctl = Default::default();
+                for (_, texture) in uploaded.ce_secondary_textures.drain() {
+                    gl.delete_texture(texture);
+                }
                 for texture in uploaded.ce_effect_pctl_textures.drain().flat_map(|(_, systems)| systems).flatten().flatten().flatten() {
                     gl.delete_texture(texture);
                 }

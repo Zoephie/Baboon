@@ -16,7 +16,7 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeFlareView, posed_on};
-use super::ce_particles::{CePointPhysics, CeSpriteSheet, read_sprite_sheet};
+use super::ce_particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use super::*;
 use crate::core::source::TagSource;
 
@@ -88,6 +88,8 @@ struct ParticleState {
     blend: i32,
     map_flags: i128,
     nonlinear_tint: bool,
+    /// The shader's second `bitmap`.
+    secondary: Option<Arc<CeSecondaryMap>>,
 }
 
 #[derive(Debug, Clone)]
@@ -217,6 +219,7 @@ pub(super) fn read_pctl_def(source: &TagSource, path: &str) -> Option<CePctlDef>
                 blend: state.read_int_any("framebuffer blend function").unwrap_or(0) as i32,
                 map_flags: state.read_int_any("map flags").unwrap_or(0),
                 nonlinear_tint: state.read_int_any("shader flags").unwrap_or(0) & 2 != 0,
+                secondary: read_secondary_map(source, state, "bitmap"),
             });
         }
         types.push(ParticleType {
@@ -472,8 +475,9 @@ impl CeParticleSystemField {
     ) -> Vec<CePctlQuad> {
         let mut quads = Vec::new();
         let mut random = self.random.take().unwrap_or(Random(1));
+        let time = self.time.unwrap_or(0.0);
         for (index, (system, running)) in systems.iter().zip(&mut self.systems).enumerate() {
-            system_quads(&system.def, running, index, view, &pixel, &mut random, &mut quads);
+            system_quads(&system.def, running, index, view, &pixel, &mut random, time, &mut quads);
         }
         self.random = Some(random);
         quads
@@ -481,6 +485,7 @@ impl CeParticleSystemField {
 }
 
 /// `particle_system_render` for one system.
+#[allow(clippy::too_many_arguments)]
 fn system_quads(
     def: &CePctlDef,
     running: &mut CeRunningSystem,
@@ -488,6 +493,7 @@ fn system_quads(
     view: &CeFlareView,
     pixel: &impl Fn([f32; 3]) -> f32,
     random: &mut Random,
+    time: f32,
     quads: &mut Vec<CePctlQuad>,
 ) {
     let lighting = running.lighting;
@@ -547,7 +553,7 @@ fn system_quads(
                 }
                 // The second sits a thousandth nearer, in view space.
                 let center: [f32; 3] = std::array::from_fn(|axis| particle.position[axis] - view.forward[axis] * nudge);
-                let shown = Shown { state, center, axis: particle.axis, rotation: particle.rotation, size, color, fade };
+                let shown = Shown { state, time, radius: current.radius, center, axis: particle.axis, rotation: particle.rotation, size, color, fade };
                 if kind.rotational {
                     shown.rotational(sprite, kind.flags & ROTATIONAL_SIDEWAYS != 0, view, index, quads);
                 } else {
@@ -566,6 +572,7 @@ pub(crate) struct CePctlQuad {
     pub(crate) image: usize,
     pub(crate) blend: i32,
     pub(crate) nonlinear_tint: bool,
+    pub(crate) secondary: Option<CeSecondaryDraw>,
     pub(crate) color: [f32; 4],
     pub(crate) corners: [[f32; 5]; 4],
 }
@@ -573,6 +580,10 @@ pub(crate) struct CePctlQuad {
 /// What one draw of a particle takes.
 struct Shown<'a> {
     state: &'a ParticleState,
+    /// The game's time, for the second map's animation.
+    time: f32,
+    /// The current state's radius multiplier.
+    radius: f32,
     center: [f32; 3],
     axis: [f32; 3],
     rotation: f32,
@@ -592,12 +603,16 @@ impl Shown<'_> {
         };
         let [alpha, red, green, blue] = self.color;
         let alpha = if self.state.blend != 0 && !self.state.nonlinear_tint { fade } else { alpha * fade };
+        // `particle_system_render` gives the shader the first state's radius
+        // multiplier for its second map's radius, for either draw.
+        let secondary = self.state.secondary.as_ref().map(|map| map.draw(self.time, self.radius));
         quads.push(CePctlQuad {
             system,
             sheet: self.state.sheet_index,
             image,
             blend: self.state.blend,
             nonlinear_tint: self.state.nonlinear_tint,
+            secondary,
             color: [red, green, blue, alpha.clamp(0.0, 1.0)],
             corners,
         });
@@ -714,9 +729,10 @@ pub(crate) fn unattached_quads(
     view: &CeFlareView,
     pixel: impl Fn([f32; 3]) -> f32,
     random: &mut Random,
+    time: f32,
 ) -> Vec<CePctlQuad> {
     let mut quads = Vec::new();
-    system_quads(def, running, index, view, &pixel, random, &mut quads);
+    system_quads(def, running, index, view, &pixel, random, time, &mut quads);
     quads
 }
 

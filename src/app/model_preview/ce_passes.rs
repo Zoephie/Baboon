@@ -193,7 +193,7 @@ impl TextureWave {
 
 /// A map's transform as `shader_texture_animation_evaluate` works it out.
 #[derive(Debug, Clone, PartialEq)]
-struct CeMapAnimation {
+pub(super) struct CeMapAnimation {
     /// The first of its two texture rows.
     row: usize,
     /// The object output u, v and rotation read, if any.
@@ -696,6 +696,35 @@ fn function_source(root: TagStruct<'_>, field: &str) -> Option<usize> {
 
 fn nonzero(value: Option<f32>, default: f32) -> f32 {
     value.filter(|value| *value != 0.0).unwrap_or(default)
+}
+
+/// An effect shader's second map's animation, as the game reads it: no
+/// postprocess fills in its zeros, and it is scaled by one.
+pub(super) fn read_effect_map_animation(root: TagStruct<'_>) -> CeMapAnimation {
+    let center = root.read_point2d("rotation-animation center");
+    CeMapAnimation {
+        row: 0,
+        sources: [
+            function_source(root, "u-animation source"),
+            function_source(root, "v-animation source"),
+            function_source(root, "rotation-animation source"),
+        ],
+        waves: [TextureWave::read(root, "u", 0.0), TextureWave::read(root, "v", 0.0), TextureWave::read(root, "rotation", 0.0)],
+        center: [center.x, center.y],
+        scale: [1.0; 2],
+        offset: [0.0; 2],
+        rotation: 0.0,
+    }
+}
+
+impl CeMapAnimation {
+    /// The two rows of the transform at a time, for an object's outputs.
+    pub(super) fn rows(&self, time: f32, outputs: &[f32; 4]) -> [[f32; 4]; 2] {
+        let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+        let at = Self { row: 0, ..self.clone() };
+        at.apply(&mut rows, time, outputs);
+        [rows[0], rows[1]]
+    }
 }
 
 fn read_map_animation(
