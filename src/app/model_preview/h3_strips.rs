@@ -24,7 +24,7 @@ use crate::core::source::TagSource;
 const MOST_PROFILES: usize = 128;
 const FEWEST_PROFILES: f32 = 2.0;
 /// `k_real_epsilon`.
-const EPSILON: f32 = 1.1920929e-7;
+const EPSILON: f32 = 0.0001;
 const OWN_SEEDS: usize = 2;
 const PROFILE_SEEDS: usize = 4;
 
@@ -723,10 +723,12 @@ impl RunningContrail {
     fn pulse(&mut self, contrail: &ContrailDefinition, look: &StripLook, state: &StripState, at: [f32; 3], dt: f32) {
         let moved = minus(at, self.previous);
         let total = dot(moved, moved).sqrt();
+        // `normalize3d`: what is too short to have a direction has no length.
+        let (total, direction) =
+            if total < EPSILON { (0.0, [0.0; 3]) } else { (total, moved.map(|axis| axis / total)) };
         if self.initialized && total <= EPSILON {
             return;
         }
-        let direction = if total > 0.0 { moved.map(|axis| axis / total) } else { [0.0; 3] };
         let mut remaining = total;
         self.accumulator += contrail.emission_rate.scalar(state) * dt;
         if self.accumulator >= 1.0 {
@@ -1153,6 +1155,19 @@ mod tests {
             running.pulse(&contrail, &look, &state, [0.0; 3], 0.1);
         }
         assert_eq!(running.profiles.len(), first);
+    }
+
+    #[test]
+    fn a_move_under_the_epsilon_is_no_move() {
+        let (contrail, look) = (contrail(100.0, 10.0), look(None));
+        let state = StripState::default();
+        let mut running = RunningContrail::default();
+        running.pulse(&contrail, &look, &state, [0.0; 3], 0.1);
+        let started = running.profiles.len();
+        running.pulse(&contrail, &look, &state, [0.00005, 0.0, 0.0], 0.1);
+        assert_eq!(running.profiles.len(), started, "too little to have a direction");
+        running.pulse(&contrail, &look, &state, [0.0002, 0.0, 0.0], 0.1);
+        assert!(running.profiles.len() > started, "and this is enough");
     }
 
     #[test]
