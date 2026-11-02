@@ -31,8 +31,17 @@ pub(crate) struct CeAntenna {
     position: [f32; 3],
     forward: [f32; 3],
     segments: Vec<CeAntennaSegment>,
+    /// `antenna_render_proper`'s alpha for every sprite; see
+    /// [`ANTENNA_FADE_PIXELS`].
+    fade: f32,
     pub(crate) image: Arc<H2Image>,
 }
+
+/// What `antenna_render_proper` measures an antenna's `falloff pixels` and
+/// `cutoff pixels` against: a constant (`flt_A2AFDC` in MCC tag_test), not
+/// the antenna's size on screen, so its fade,
+/// `(100 - cutoff) / (falloff - cutoff)`, is the same at any distance.
+const ANTENNA_FADE_PIXELS: f32 = 100.0;
 
 /// One antenna sprite's corners, in strip order, with texture coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,6 +70,9 @@ impl CeAntenna {
         let (mut origin, forward) = posed_on(self.node, self.position, self.forward, bones);
         let length = dot(forward, forward).sqrt().max(0.0001);
         let forward = forward.map(|axis| axis / length);
+        if self.fade <= 0.0 {
+            return Vec::new();
+        }
         let mut quads = Vec::with_capacity(self.segments.len());
         for segment in &self.segments {
             let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - origin[axis]);
@@ -80,9 +92,10 @@ impl CeAntenna {
                     std::array::from_fn(|axis| origin[axis] + forward[axis] * along + across[axis] * side);
                 [place[0], place[1], place[2], u, v]
             };
+            let [red, green, blue, alpha] = segment.color;
             quads.push(CeAntennaQuad {
                 corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
-                color: segment.color,
+                color: [red, green, blue, alpha * self.fade],
             });
             origin = std::array::from_fn(|axis| origin[axis] + forward[axis] * segment.length);
         }
@@ -145,11 +158,16 @@ fn read_antenna(source: &TagSource, path: &str, owner: u8, markers: &[RenderMode
         });
     }
     let image = decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, image_index?)?;
+    let real = |name: &str| root.read_real(name).unwrap_or(0.0);
+    let (falloff, cutoff) = (real("falloff pixels"), real("cutoff pixels"));
+    let fade = (ANTENNA_FADE_PIXELS - cutoff) / (falloff - cutoff);
     Some(CeAntenna {
         node,
         position,
         forward,
         segments,
+        // The game's clamp, `>= 0 ? min(1) : 0`, which sends NaN to 0.
+        fade: if fade >= 0.0 { fade.min(1.0) } else { 0.0 },
         image: Arc::new(image),
     })
 }
@@ -1008,6 +1026,7 @@ mod tests {
             position: [0.0, 0.0, 1.0],
             forward: [0.0, 0.0, 2.0],
             segments: vec![segment.clone(), segment],
+            fade: 1.0,
             image: Arc::new(H2Image::Flat(crate::app::model_preview::materials::TextureImage {
                 rgba: Vec::new(),
                 width: 0,

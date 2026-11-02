@@ -147,8 +147,9 @@ impl super::ce_functions::ReadsOutputs for CeLightning {
     fn object(&self) -> u8 {
         self.object
     }
+    /// Its tint source names a change color, not an output.
     fn outputs_read(&self) -> Vec<usize> {
-        [self.jitter_source, self.thickness_source, self.tint_source, self.brightness_source].into_iter().flatten().collect()
+        [self.jitter_source, self.thickness_source, self.brightness_source].into_iter().flatten().collect()
     }
 }
 

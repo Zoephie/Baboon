@@ -934,7 +934,8 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
     let offset = root.read_point2d("center offset");
     let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
-    let (frames, corner) = read_frames(source, shader, first, [offset.x, offset.y], start, animated("one shot"));
+    let one_shot = animated("frame animation one shot");
+    let (frames, corner) = read_frames(source, shader, first, [offset.x, offset.y], start, one_shot);
     let mut seeds = SeedAllocator::default();
     let billboard = H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default());
     Some(H3ParticleLook {
@@ -982,7 +983,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         }),
         blur_aspect: flagged("motion blur").then(|| root.read_real("motion blur aspect scale").unwrap_or(0.0)),
         curvature: root.read_real("curvature").unwrap_or(0.0).clamp(0.0, 1.0) * 0.9999,
-        one_shot: animated("one shot"),
+        one_shot,
         backwards: animated("can animate backwards"),
         corner,
         frames,

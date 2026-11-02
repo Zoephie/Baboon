@@ -911,7 +911,14 @@ struct CeParticle {
     /// Alpha, then red, green and blue.
     color: [f32; 4],
     flags: u8,
+    /// Render frames since `render_particles` last drew it.
+    undrawn: u32,
 }
+
+/// `particles_update` (360 and MCC) deletes a particle not drawn for more
+/// than this many render frames; `render_particles` leaves one at or below
+/// its `fade end size` on screen undrawn, so small and distant ones die.
+const MOST_UNDRAWN_FRAMES: u32 = 15;
 
 /// What a sprite draws: the effect and particle it came from, its corners
 /// with texture coordinates, and the vertex color the `effect` shader reads.
@@ -1080,6 +1087,9 @@ impl CeParticleField {
             });
             let mut made: Vec<CeEffectAt> = Vec::new();
             self.particles.retain_mut(|particle| {
+                if particle.undrawn > MOST_UNDRAWN_FRAMES {
+                    return false;
+                }
                 let def = &effects[particle.effect].def.particles[particle.def];
                 let (fate, collided) = update_particle(particle, def, &mut random, ground, STEP);
                 // `particle_effect_new` for what it hit, then what it died of.
@@ -1196,9 +1206,10 @@ impl CeParticleField {
     }
 
     /// `render_particles` and `build_sprite`: each particle's quad, with
-    /// what `pixels` says a sphere of a radius at a point covers on screen.
+    /// what `pixels` says a sphere of a radius at a point covers on screen,
+    /// counting the frames each goes undrawn.
     pub(crate) fn quads(
-        &self,
+        &mut self,
         effects: &[CeEffectAt],
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
@@ -1209,7 +1220,7 @@ impl CeParticleField {
         // `render_particles` gives a particle's shader the average radius of
         // its kind drawn with it: sum and count, by effect and kind.
         let mut radii: std::collections::HashMap<(usize, usize), (f32, f32)> = std::collections::HashMap::new();
-        for particle in &self.particles {
+        for particle in &mut self.particles {
             let Some(effect) = effects.get(particle.effect) else {
                 continue;
             };
@@ -1221,8 +1232,10 @@ impl CeParticleField {
             let radius = def.radius_scale(particle.age, particle.lifespan) * particle.radius;
             let diameter = pixels(center, radius);
             if diameter <= def.fade_end_size {
+                particle.undrawn = particle.undrawn.saturating_add(1);
                 continue;
             }
+            particle.undrawn = 0;
             let entry = radii.entry((def_key(&effect.def), particle.def)).or_insert((0.0, 0.0));
             entry.0 += radius;
             entry.1 += 1.0;
@@ -1411,8 +1424,6 @@ struct Made<'a> {
     tick: u32,
 }
 
-/// `effect_generate_parts`, for the parts that make lights: one at every
-/// instance of the location. An effect `effect_new_looping` made leaves out
 /// Whether an event's particle or part is made for the preview's object:
 /// violent (`effect_part_allowed_by_disposition` leaves out what is for
 /// nonviolent mode only) and in air with no level about it
@@ -1425,7 +1436,8 @@ fn created_here(entry: TagStruct<'_>) -> bool {
         && violence.as_deref() != Some("nonviolent mode only")
 }
 
-/// what is for nonviolent mode only; the preview is never under water.
+/// `effect_generate_parts`, for the parts that make lights: one at every
+/// instance of the location, of the parts [`created_here`].
 fn generate_parts(index: usize, running: &RunningEffect, effect: &CeEffectAt, lights: &mut Vec<CeRunningLight>, tick: u32) {
     for part in &effect.def.events[running.event].lights {
         if !part.created {
@@ -1598,8 +1610,10 @@ fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &Ce
     }
     if on {
         if running.finished {
+            // `effect_update` (360 and MCC) clears only "finished": an effect
+            // that once stopped by going on past its loop stays marked as
+            // stopping, and its function going off never stops it again.
             running.finished = false;
-            running.stopping = false;
             set_event(running, def, 0, random);
         }
     } else if !running.finished && !running.stopping {
@@ -1822,6 +1836,7 @@ fn generate_particles(
                     radius,
                     color: [alpha, tinted[0], tinted[1], tinted[2]],
                     flags,
+                    undrawn: 0,
                 };
                 if next_sequence(&mut particle, particle_def, random) {
                     let count = particle_def.sprites_in(particle.sequence) as i32;

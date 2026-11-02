@@ -276,7 +276,6 @@ impl CeObjectFunctions {
     }
 }
 
-/// A model, and which of its objects.
 /// A Halo CE feature that reads object outputs (`A out`..`D out`), so its
 /// object's panel knows which inputs do something.
 pub(super) trait ReadsOutputs {
@@ -297,6 +296,7 @@ pub(super) fn mark_outputs_read<T: ReadsOutputs>(items: &[T], object: u8, read: 
     }
 }
 
+/// A model, and which of its objects.
 pub(crate) type CeObjectKey = (u64, u8);
 /// Inputs set by hand, each for the object it was set on.
 pub(crate) type CeFunctionInputs = std::collections::HashMap<CeObjectKey, [f32; 4]>;

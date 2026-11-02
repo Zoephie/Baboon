@@ -1586,6 +1586,8 @@ impl Baboon {
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
             return false;
         };
+        // Read as the base load reads it, unsaved edits and all.
+        let edits = super::loading::snapshot_edits(kit.parsed_tags.get(key));
         let stamp = KitStamp {
             kit: kit.id,
             generation: kit.generation,
@@ -1599,7 +1601,7 @@ impl Baboon {
         // overlays never arrive.
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         let build = move || -> Option<_> {
-                let model = crate::core::source::read_entry(&source, &entry).ok()?;
+                let model = super::loading::read_opened_tag(&source, &entry, edits).ok()?;
                 if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
                     && is_object_family_group(model.header.group_tag, source.game())
                 {

@@ -95,31 +95,7 @@ impl Baboon {
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
             return false;
         };
-        // Preserve unsaved model/variant edits. Clean documents are re-read on
-        // the worker so a large BSP does not have to serialize on the UI
-        // thread merely to hand the same bytes back to the parser.
-        let edited_model_bytes = kit
-            .parsed_tags
-            .get(key)
-            .filter(|document| document.dirty.is_set())
-            .map(|document| {
-                document
-                    .tag
-                    .write_to_bytes()
-                    .map_err(|error| format!("Could not snapshot edited model: {error}"))
-            });
-        // Edited bytes re-parse the way the kit reads them from disk: a
-        // classic (H2/CE) tag has no self-describing layout for
-        // `TagFile::read_from_bytes` to find.
-        let (game, definitions_root) = match &source {
-            TagSource::LooseFolder {
-                game,
-                definitions_root,
-                ..
-            } => (game.clone(), Some(definitions_root.clone())),
-            _ => (None, None),
-        };
-        let group_tag = entry.group_tag;
+        let edits = snapshot_edits(kit.parsed_tags.get(key));
         let names = kit.names.clone();
         let stamp = KitStamp {
             kit: kit.id,
@@ -151,17 +127,7 @@ impl Baboon {
 
         let (worker_key, panic_key) = (key.to_owned(), key.to_owned());
         let load = move || -> Result<_, String> {
-                let model_tag = match edited_model_bytes {
-                    Some(Ok(bytes)) => crate::core::source::read_tag_from_bytes(
-                        &bytes,
-                        game,
-                        definitions_root.as_deref(),
-                        group_tag,
-                    )
-                    .map_err(|error| error.to_string())?,
-                    Some(Err(error)) => return Err(error),
-                    None => read_entry(&source, &entry).map_err(|error| error.to_string())?,
-                };
+                let model_tag = read_opened_tag(&source, &entry, edits)?;
                 load_model_preview(&model_tag, &entry, &names, Some(&source), &settings)
         };
         spawn_worker(
@@ -224,10 +190,52 @@ impl Baboon {
                 if let Some(inputs) = state.ce_function_inputs.get(&(geometry_id, 0)).copied() {
                     state.ce_function_inputs.insert((data.geometry_id, 0), inputs);
                 }
+                // Halo 2's, by name. A name only the old weapon had is
+                // carried too, and reads nothing.
+                let carried: Vec<_> = state
+                    .h2_function_inputs
+                    .iter()
+                    .filter(|((id, _), _)| *id == geometry_id)
+                    .map(|((_, name), value)| ((data.geometry_id, name.clone()), *value))
+                    .collect();
+                state.h2_function_inputs.extend(carried);
             }
         }
         state.data = Some(result);
         false
+    }
+}
+
+/// The opened document's unsaved edits as bytes, taken on the UI thread for a
+/// worker to read with [`read_opened_tag`]; none for a clean document, which
+/// the worker re-reads from disk, so a large BSP does not serialize on the UI
+/// thread merely to hand the same bytes back to the parser.
+pub(super) fn snapshot_edits(document: Option<&crate::app::TagDocument>) -> Option<Result<Vec<u8>, String>> {
+    let document = document.filter(|document| document.dirty.is_set())?;
+    Some(document.tag.write_to_bytes().map_err(|error| format!("Could not snapshot edited model: {error}")))
+}
+
+/// The opened tag as the editor holds it: `edits` from [`snapshot_edits`],
+/// or the file when there are none.
+pub(super) fn read_opened_tag(
+    source: &TagSource,
+    entry: &TagEntry,
+    edits: Option<Result<Vec<u8>, String>>,
+) -> Result<TagFile, String> {
+    match edits {
+        // Edited bytes re-parse the way the kit reads them from disk: a
+        // classic (H2/CE) tag has no self-describing layout for
+        // `TagFile::read_from_bytes` to find.
+        Some(Ok(bytes)) => {
+            let (game, definitions_root) = match source {
+                TagSource::LooseFolder { game, definitions_root, .. } => (*game, Some(definitions_root.as_path())),
+                _ => (None, None),
+            };
+            crate::core::source::read_tag_from_bytes(&bytes, game, definitions_root, entry.group_tag)
+                .map_err(|error| error.to_string())
+        }
+        Some(Err(error)) => Err(error),
+        None => read_entry(source, entry).map_err(|error| error.to_string()),
     }
 }
 

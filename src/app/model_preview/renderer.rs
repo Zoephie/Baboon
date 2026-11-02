@@ -1831,11 +1831,11 @@ struct ModelGpuSlot {
     /// Vertex index where the world-axis lines begin; see `grid_line_vertices`.
     grid_axis_start: i32,
     grid_built: bool,
-    /// GL textures per material, in `RenderModelPreview::materials` order.
     /// The `mesh_id` the buffers hold.
     mesh_id: Option<u64>,
     /// Per batch, where its transparent passes sort from.
     h2_sort_points: Vec<[f32; 3]>,
+    /// GL textures per material, in `RenderModelPreview::materials` order.
     materials: Vec<MaterialGlTextures>,
     /// The `textures_id` the uploaded `materials` belong to, so a reloaded
     /// model, or another model given this slot, re-uploads rather than drawing
