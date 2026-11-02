@@ -387,7 +387,7 @@ fn read_cloth(
     markers: &[RenderModelPreviewMarker],
     frame: &impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
     halo2: bool,
-) -> Option<(H3ClothAt, Vec<[f32; 2]>)> {
+) -> Option<(H3ClothAt, Vec<[f32; 2]>, Option<(String, String)>)> {
     // The ranges are `tool.exe`'s postprocess, which tags on disk have not been through.
     let int = |name: &str| root.read_int_any(name).unwrap_or(0).clamp(2, 32) as usize;
     let size = [int("grid x dimension"), int("grid y dimension")];
@@ -413,10 +413,17 @@ fn read_cloth(
             })
             .collect()
     };
-    let attach = placed(&marker_name(root, "marker attachment name"));
+    let attach_name = marker_name(root, "marker attachment name");
+    let attach = placed(&attach_name);
     if attach.is_empty() {
         return None;
     }
+    // The game finds markers only on shown permutations, so a sheet hung on
+    // one goes with it.
+    let under = markers
+        .iter()
+        .find(|marker| marker.name.eq_ignore_ascii_case(&attach_name))
+        .and_then(|marker| marker.only_under.clone());
     let secondary = placed(&marker_name(root, "secondary axis attachment name")).first().copied();
     let high = places.len() / size[0].max(1);
     let spheres = elements(root, "collision spheres")
@@ -443,7 +450,7 @@ fn read_cloth(
         first_vertex: 0,
         halo2,
     };
-    Some((cloth, uvs))
+    Some((cloth, uvs, under))
 }
 
 /// `cloth_render_opaque`'s mesh: both sides, to be written over each frame.
@@ -483,7 +490,7 @@ pub(super) fn read_h3_cloth(
         let Some((shader_group, shader_path)) = root.read_tag_ref_with_group("Shader") else {
             continue;
         };
-        let Some((mut cloth, uvs)) = read_cloth(root, markers, &frame, halo2) else {
+        let Some((mut cloth, uvs, under)) = read_cloth(root, markers, &frame, halo2) else {
             continue;
         };
         cloth.first_vertex = preview.vertices.len();
@@ -503,8 +510,16 @@ pub(super) fn read_h3_cloth(
             object: owner,
             ..Default::default()
         });
-        let permutation = "cloth".to_owned();
-        preview.regions.push(RenderModelPreviewRegion { name: name.clone(), permutations: vec![permutation.clone()] });
+        // On the opened object it follows the region of the marker it hangs
+        // from; an attached object's regions are renamed when it is merged.
+        let (name, permutation) = match under.filter(|_| owner == 0) {
+            Some(under) => under,
+            None => {
+                let permutation = "cloth".to_owned();
+                preview.regions.push(RenderModelPreviewRegion { name: name.clone(), permutations: vec![permutation.clone()] });
+                (name, permutation)
+            }
+        };
         preview.batches.push(RenderModelPreviewBatch {
             region_name: name,
             permutation_name: permutation,
