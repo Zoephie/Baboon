@@ -1585,6 +1585,7 @@ const H2_SHADOW_MAP_SIZE: i32 = 2048;
 /// Past the units a pass's own samplers take.
 const H2_SHADOW_MAP_UNIT: u32 = 8;
 const H3_NORMAL_TARGET_UNIT: u32 = 9;
+const H2_GEL_MASK_UNIT: u32 = 10;
 /// `c_rasterizer::render_globals.k_shadow_resolution`.
 pub(super) const H3_SHADOW_MAP_SIZE: i32 = 512;
 /// `set_shadow_generate_mode`'s bias, the second in depth units.
@@ -3043,17 +3044,30 @@ impl ModelGlRenderer {
                             gels.map(|gel| gel.and_then(|gel| upload_h2_image(gl, gel))).collect();
                         uploaded.gel_geometry = Some(frame.geometry_id);
                     }
+                    let mut masked = false;
                     for (index, gel) in frame.preview.h2_gel_lights.iter().enumerate() {
                         let values = frame.h2_values_of_object(gel.object);
                         let Some((light, rows)) = gel.lit(values, bones, frame.time) else {
                             continue;
                         };
+                        let specular = h2_lights::has_specular(&light);
                         let (light, draws) = h2_lights::overbrighten(&light);
                         self.h2_gel = Some((self.slots[slot].gel_textures[index], rows.rows));
+                        if specular {
+                            self.draw_h2_passes(gl, frame, slot, &order, H2Layer::GelMask, Some(&light));
+                            masked = true;
+                        }
+                        let layer = if specular { H2Layer::LightFrustum } else { H2Layer::LightGel };
                         for _ in 0..draws {
-                            self.draw_h2_passes(gl, frame, slot, &order, H2Layer::LightGel, Some(&light));
+                            self.draw_h2_passes(gl, frame, slot, &order, layer, Some(&light));
                         }
                         self.h2_gel = None;
+                    }
+                    if masked {
+                        gl.color_mask(false, false, false, true);
+                        gl.clear_color(0.0, 0.0, 0.0, 1.0);
+                        gl.clear(glow::COLOR_BUFFER_BIT);
+                        gl.color_mask(true, true, true, true);
                     }
                     self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
                 }
@@ -4276,6 +4290,13 @@ impl ModelGlRenderer {
             if let Some((_, rows)) = &self.h2_gel {
                 let location = program.location(gl, "u_gel_rows");
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
+            }
+            if let (H2VertexStage::LightGel, Some(location), Some((gel, _))) =
+                (pass.stage, program.location(gl, "u_gel_map"), &self.h2_gel)
+            {
+                gl.active_texture(glow::TEXTURE0 + H2_GEL_MASK_UNIT);
+                gl.bind_texture(glow::TEXTURE_2D, gel.or(self.placeholder));
+                gl.uniform_1_i32(Some(&location), H2_GEL_MASK_UNIT as i32);
             }
             let location = program.location(gl, "zwriteout");
             gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 1.0, 1.0);

@@ -43,9 +43,6 @@ const SPHERE: i128 = 0;
 /// `type`: orthogonal lights assert in `sub_946960`, so these are the frustums.
 const PROJECTIVE: i128 = 2;
 const PYRAMID: i128 = 3;
-/// `flags`: without both, `render_light_get_diffuse_implementation_index`
-/// takes a shadow buffer or frame alpha pass the preview has no use for.
-const NO_SHADOW: i128 = 8;
 /// `falloff geometry`: `directional`, which tool's postprocess makes of default
 /// on a frustum.
 const DIRECTIONAL_FALLOFF: i128 = 1;
@@ -530,18 +527,17 @@ fn read_h2_light(
     let lit = flags & IGNORES_PARENTS != IGNORES_PARENTS;
     // Implementation 1 has no gel to read, so a sphere's own never shows.
     let lights_model = root.read_int_any("type") == Some(SPHERE) && lit;
-    let frustum = lit.then(|| read_h2_frustum(source, root, flags)).flatten();
+    let frustum = lit.then(|| read_h2_frustum(source, root)).flatten();
     Some((light, lights_model, frustum, flare))
 }
 
 /// The shape `sub_8EB100` and `sub_8E84F0` read from a frustum `light`, with
-/// tool's postprocess applied. None for a light drawing through a pass other
-/// than the gel's.
-fn read_h2_frustum(source: &TagSource, root: TagStruct<'_>, flags: i128) -> Option<H2Frustum> {
+/// tool's postprocess applied. A shadow's pass needs a map of the level from
+/// the light, which a preview has none of, so it lights without one.
+fn read_h2_frustum(source: &TagSource, root: TagStruct<'_>) -> Option<H2Frustum> {
     let kind = root.read_int_any("type")?;
-    let plain = flags & (NO_SPECULAR | NO_SHADOW) == NO_SPECULAR | NO_SHADOW;
     let falloff = matches!(root.read_int_any("falloff geometry"), Some(0 | DIRECTIONAL_FALLOFF));
-    if !matches!(kind, PROJECTIVE | PYRAMID) || !plain || !falloff {
+    if !matches!(kind, PROJECTIVE | PYRAMID) || !falloff {
         return None;
     }
     let gel = root.read_tag_ref_path("gel map").filter(|gel| !gel.is_empty());
@@ -854,8 +850,15 @@ impl H2GelLight {
         let (_, up) = posed_on(self.node, self.position, self.up, bones);
         let rows = self.frustum.rows(position, forward, up, size);
         let color = diffuse.map(|channel| (channel * brightness).min(BRIGHTEST));
-        Some((H2DefaultLight { position: rows.apex, color, specular: [0.0; 3], radius: 1.0 }, rows))
+        let specular = ce_color_interpolate(light.interpolation, light.specular[0], light.specular[1], value);
+        let specular = specular.map(|channel| (channel * brightness).min(BRIGHTEST));
+        Some((H2DefaultLight { position: rows.apex, color, specular, radius: 1.0 }, rows))
     }
+}
+
+/// `rasterizer_render_light`'s flag 1: whether a frustum takes implementation 0.
+pub(crate) fn has_specular(light: &H2DefaultLight) -> bool {
+    light.specular.iter().any(|channel| *channel > 0.01)
 }
 
 /// `sub_946960`: a color past 1 goes to the pass halved or quartered, for a
@@ -1072,6 +1075,14 @@ impl H2FlareAt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_frustum_takes_the_combined_pass_only_with_specular_to_show() {
+        let light = |specular| H2DefaultLight { position: [0.0; 3], color: [1.0; 3], specular, radius: 1.0 };
+        assert!(has_specular(&light([0.0, 0.5, 0.0])));
+        assert!(!has_specular(&light([0.01; 3])), "the game's limit is past one hundredth");
+        assert!(!has_specular(&light([0.0; 3])));
+    }
 
     fn view() -> CeFlareView {
         CeFlareView {

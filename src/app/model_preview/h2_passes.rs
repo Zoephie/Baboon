@@ -50,6 +50,11 @@ pub(crate) enum H2Layer {
     LightDiffuseVeryLow,
     /// A frustum light's gel pass, drawn once per light.
     LightGel,
+    /// A frustum light with specular: its diffuse pass's first implementation.
+    LightFrustum,
+    /// What `shadow_apply_combined`'s third implementation leaves in the frame's
+    /// alpha for `LightFrustum`.
+    GelMask,
     LightSpecular,
     Hologram,
     /// Takes over from every other opaque layer while camo is on.
@@ -68,7 +73,7 @@ pub(crate) enum H2Layer {
     ShadowApply,
 }
 
-pub(crate) const H2_LAYER_COUNT: usize = 23;
+pub(crate) const H2_LAYER_COUNT: usize = 25;
 
 /// The sphere lights `render_lights` falls back on with nothing else lighting
 /// the scene: a warm key and a cool fill.
@@ -110,6 +115,8 @@ impl H2Layer {
         Self::LightDiffuseLow,
         Self::LightDiffuseVeryLow,
         Self::LightGel,
+        Self::LightFrustum,
+        Self::GelMask,
         Self::LightSpecular,
         Self::Hologram,
         Self::ActiveCamo,
@@ -136,12 +143,13 @@ impl H2Layer {
             | Self::LightDiffuseHigh
             | Self::LightDiffuseLow
             | Self::LightDiffuseVeryLow
-            | Self::LightGel => "diffuse",
+            | Self::LightGel
+            | Self::LightFrustum => "diffuse",
             Self::LightSpecular => "specular",
             Self::Hologram => "hologram",
             Self::ActiveCamo => "active camo",
             Self::Bloom => "bloom",
-            Self::ShadowCaster | Self::ShadowMask | Self::ShadowApply | Self::ShieldDamaged | Self::Overshield => "",
+            Self::GelMask | Self::ShadowCaster | Self::ShadowMask | Self::ShadowApply | Self::ShieldDamaged | Self::Overshield => "",
             Self::Transparent => TRANSPARENT_LAYER,
         }
     }
@@ -187,7 +195,7 @@ impl H2Layer {
 /// The passes behind the preview's own key light shadow. Under the default
 /// lights the game draws no shadows at all: layers 10 and 11 only run for a
 /// light object that casts them.
-pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 3] {
+pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 4] {
     let pass = |stage, fragment: String, compare, write| H2DrawPass {
         stage,
         fragment,
@@ -242,6 +250,27 @@ void main() {{
                 H2Compare::Equal,
                 false,
             ),
+        ),
+        (
+            H2Layer::GelMask,
+            H2DrawPass {
+                channels: [false, false, false, true],
+                ..pass(
+                    H2VertexStage::LightGel,
+                    format!(
+                        "{H2_GLSL_VERSION}in vec4 v_tc3;
+in vec4 v_color1;
+uniform sampler2D u_gel_map;
+out vec4 color;
+void main() {{
+    color = vec4(1.0, 1.0, 1.0, v_color1.r > 0.5 ? textureProj(u_gel_map, v_tc3).b : 0.0);
+}}
+"
+                    ),
+                    H2Compare::Equal,
+                    false,
+                )
+            },
         ),
         (
             H2Layer::ShadowApply,

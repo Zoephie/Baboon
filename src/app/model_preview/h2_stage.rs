@@ -89,6 +89,13 @@ pub(in crate::app) enum H2VertexStage {
     LightGelDetail,
     /// A sphere light's specular pass: light and eye in tangent space.
     LightSpecular,
+    /// A frustum light's diffuse and specular together, through the frame's
+    /// alpha: light and eye in tangent space, the falloff in a color.
+    LightFrustum,
+    /// `LightFrustum` reading its albedo from the texaccum target.
+    LightFrustumTarget,
+    /// `LightFrustum` with a detail map at `tc4`.
+    LightFrustumDetail,
     /// Halo CE's `model.vsh` for a lone object: the two distant lights and
     /// ambient of `CeModelRows`, and the object's point lights, with no fog.
     CeModel,
@@ -175,6 +182,9 @@ impl H2VertexStage {
             "lightaccum_frustum_no_specular_gel" => Some(Self::LightGelTarget),
             "lightaccum_frustum_no_specular_gel_tex_detail" => Some(Self::LightGelDetail),
             "stencil_light_specular_tangentspace_sphere" => Some(Self::LightSpecular),
+            "lightaccum_frustum_tex" => Some(Self::LightFrustum),
+            "lightaccum_frustum" => Some(Self::LightFrustumTarget),
+            "lightaccum_frustum_tex_detail" => Some(Self::LightFrustumDetail),
             _ => None,
         }
     }
@@ -304,6 +314,15 @@ impl H2VertexStage {
     v_color0 = vec4(vec3(clamp(dot(to_light, u_gel_rows[2].xyz) + u_gel_rows[2].w, 0.0, 1.0)), 1.0);
     v_color1 = vec4(vec3(clamp(dot(to_light, u_gel_rows[3].xyz) + u_gel_rows[3].w, 0.0, 1.0)), 1.0);"
             }
+            Self::LightFrustum | Self::LightFrustumTarget | Self::LightFrustumDetail => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    vec3 to_light = u_light_position - position;
+    v_tc0.xy = base;
+    v_tc1.xyz = tangent_space(to_light, tangent, binormal, normal);
+    v_tc2.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc3.xyz = tangent_space(to_eye, tangent, binormal, normal);
+    v_color0 = vec4(vec3(dot(to_light, u_gel_rows[2].xyz) + u_gel_rows[2].w), 1.0);"
+            }
             Self::LightSpecular => {
                 "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
     v_tc1.xyz = tangent_space(u_light_position - position, tangent, binormal, normal);
@@ -419,6 +438,9 @@ impl H2VertexStage {
                     | Self::LightGelTarget
                     | Self::LightGelDetail
                     | Self::LightSpecular
+                    | Self::LightFrustum
+                    | Self::LightFrustumTarget
+                    | Self::LightFrustumDetail
                     | Self::ActiveCamo
                     | Self::TextureCamera
                     | Self::Water
@@ -497,7 +519,7 @@ impl H2VertexStage {
         let prelude = model_vertex_prelude(version_declaration);
         let (outputs, drawn) = (self.outputs(), self.drawn_position());
         let variant = match self {
-            Self::LightDiffuseTarget | Self::LightGelTarget => {
+            Self::LightDiffuseTarget | Self::LightGelTarget | Self::LightFrustumTarget => {
                 "v_tc0 = vec4((gl_Position.xy + gl_Position.w) * 0.5, gl_Position.ww);"
             }
             Self::CeTransparentReflection | Self::CeTransparentObject | Self::CeTransparentViewer => {
@@ -507,7 +529,7 @@ impl H2VertexStage {
                 "v_tc0 = vec4(row(0, vec3(gl_Position.xy, 0.0)) + u_texture_rows[0].w * (gl_Position.w - 1.0), \
                  row(1, vec3(gl_Position.xy, 0.0)) + u_texture_rows[1].w * (gl_Position.w - 1.0), 0.0, gl_Position.w);"
             }
-            Self::LightDiffuseDetail | Self::LightGelDetail => {
+            Self::LightDiffuseDetail | Self::LightGelDetail | Self::LightFrustumDetail => {
                 "v_tc4.xy = base * u_texture_rows[1].xy + u_texture_rows[1].zw;"
             }
             Self::Hologram | Self::Prt => {
@@ -620,7 +642,7 @@ mod tests {
     use super::*;
     use crate::core::h2_pixel_shader::{PixelShaderOptions, translate};
 
-    const STAGES: [H2VertexStage; 44] = [
+    const STAGES: [H2VertexStage; 47] = [
         H2VertexStage::CeActiveCamo,
         H2VertexStage::CePlasma,
         H2VertexStage::CeGlassLit,
@@ -640,6 +662,9 @@ mod tests {
         H2VertexStage::LightGelTarget,
         H2VertexStage::LightGelDetail,
         H2VertexStage::LightSpecular,
+        H2VertexStage::LightFrustum,
+        H2VertexStage::LightFrustumTarget,
+        H2VertexStage::LightFrustumDetail,
         H2VertexStage::Emissive,
         H2VertexStage::Environment,
         H2VertexStage::LightmapTarget,
