@@ -113,6 +113,9 @@ pub(crate) struct RenderModelPreview {
     pub bounds_max: [f32; 3],
     /// Halo 2 precomputed radiance transfer, on the few models that have it.
     pub h2_prt: Option<h2_prt::H2Prt>,
+    /// Halo 2: the function whose value above nothing turns on the model's
+    /// hologram shader.
+    pub h2_hologram_control: Option<String>,
     /// Halo CE: where a held weapon pulls the unit's hands.
     pub weapon_ik: Vec<ce_attachments::CeWeaponIk>,
     /// Halo CE: the lens flares of the object and what it holds.
@@ -210,8 +213,8 @@ pub(crate) struct RenderModelPreviewMaterial {
     /// Drawn over the whole model, from no batch of its own: a Halo CE
     /// object's `modifier shader`.
     pub overlay: bool,
-    /// Halo 2: which of a model's damage shaders this is, drawn from no batch
-    /// of its own while the object's shield says so.
+    /// Halo 2: which of a model's damage or hologram shaders this is, drawn
+    /// from no batch of its own while the object says so.
     pub shield: Option<h2_passes::H2Layer>,
     /// Halo CE: which image of each bitmap it draws, wrapping at their count.
     pub permutation: usize,

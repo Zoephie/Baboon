@@ -1,14 +1,20 @@
-//! An optional glow for Halo 2 materials. Bloom passes write a mask to the
-//! frame's alpha; `rasterizer_bloom_postprocess` then blurs what the mask
-//! lets through at a quarter of the size and adds it back. Its blur comes from
-//! here, but its brightness tracks the scene's exposure, which a lone model
-//! has none of, so `BRIGHTNESS` is this preview's own.
+//! An optional glow for Halo 2 materials. Bloom passes (the `selfibloomination`
+//! layer) write a mask to the frame's alpha. `rasterizer_bloom_postprocess`
+//! downsamples it with its third built-in shader (`off_EBC81C[2]`), which keeps
+//! `0.25 * mask` (`rasterizer_selfibloomination_scale` 0.25) and none of the
+//! colour under it (`..._to_bloom_amount` 0), blurs that, and its fourth adds
+//! twice the blurred mask back to every channel: a white glow. The same passes
+//! also bloom what is brighter than the level's threshold, scaled by its
+//! exposure; a lone model has neither, so that half is not drawn.
 
 use eframe::glow::{self, HasContext};
 
 /// The blur amount `rasterizer_postprocess_scene` passes, in downsampled texels.
 const BLUR_RADIUS: f32 = 3.992;
-const BRIGHTNESS: f32 = 1.0;
+/// `pPixelShader_6`'s doubling, times the self-bloom brightness, 1 unless overridden.
+const BRIGHTNESS: f32 = 2.0;
+/// `rasterizer_selfibloomination_scale`, halved and doubled by the downsample.
+const MASK_SCALE: f32 = 0.25;
 const DOWNSAMPLE: i32 = 4;
 const BLUR_PASSES: usize = 2;
 
@@ -29,8 +35,7 @@ uniform vec2 u_step;
 uniform float u_scale;
 void main() {
     if (u_mode == 0) {
-        vec4 color = texture(u_source, v_uv);
-        out_color = vec4(color.rgb * color.a, 1.0);
+        out_color = vec4(vec3(texture(u_source, v_uv).a * u_scale), 1.0);
     } else if (u_mode == 1) {
         vec4 sum = texture(u_source, v_uv) * 0.2270270;
         const vec2 taps[4] = vec2[4](
@@ -182,6 +187,7 @@ impl H2Bloom {
             };
 
             gl.viewport(0, 0, small[0], small[1]);
+            gl.uniform_1_f32(uniform("u_scale").as_ref(), MASK_SCALE);
             draw(first.framebuffer, scene_color, 0);
             // The nine taps reach four texels, as far as the game's blur.
             let reach = BLUR_RADIUS / 4.0;
@@ -195,7 +201,8 @@ impl H2Bloom {
             gl.viewport(0, 0, size[0], size[1]);
             gl.enable(glow::BLEND);
             gl.blend_equation(glow::FUNC_ADD);
-            gl.blend_func(glow::ONE, glow::ONE);
+            // `sub_9206D0(19, 10)`, `(20, 2)`: inverse destination color, one.
+            gl.blend_func(glow::ONE_MINUS_DST_COLOR, glow::ONE);
             gl.color_mask(true, true, true, false);
             gl.uniform_1_f32(uniform("u_scale").as_ref(), BRIGHTNESS);
             draw(scene_framebuffer, first.color, 2);

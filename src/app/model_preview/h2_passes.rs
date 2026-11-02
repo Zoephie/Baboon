@@ -64,6 +64,9 @@ pub(crate) enum H2Layer {
     ShieldDamaged,
     /// A model's `overshield shader`, over all of it.
     Overshield,
+    /// A model's `hologram shader`'s bloom passes, over all of it while its
+    /// `hologram control function` is above nothing.
+    HologramBloom,
     /// A mask written to the frame's alpha, for the glow drawn from it.
     Bloom,
     /// Not the game's: see `h2_shadow_passes`.
@@ -73,7 +76,7 @@ pub(crate) enum H2Layer {
     ShadowApply,
 }
 
-pub(crate) const H2_LAYER_COUNT: usize = 25;
+pub(crate) const H2_LAYER_COUNT: usize = 26;
 
 /// The sphere lights `render_lights` falls back on with nothing else lighting
 /// the scene: a warm key and a cool fill.
@@ -123,6 +126,7 @@ impl H2Layer {
         Self::Transparent,
         Self::ShieldDamaged,
         Self::Overshield,
+        Self::HologramBloom,
         Self::Bloom,
         Self::ShadowCaster,
         Self::ShadowMask,
@@ -149,7 +153,7 @@ impl H2Layer {
             Self::Hologram => "hologram",
             Self::ActiveCamo => "active camo",
             Self::Bloom => "bloom",
-            Self::GelMask | Self::ShadowCaster | Self::ShadowMask | Self::ShadowApply | Self::ShieldDamaged | Self::Overshield => "",
+            Self::GelMask | Self::ShadowCaster | Self::ShadowMask | Self::ShadowApply | Self::ShieldDamaged | Self::Overshield | Self::HologramBloom => "",
             Self::Transparent => TRANSPARENT_LAYER,
         }
     }
@@ -218,6 +222,7 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 4] {
         light_indirect: [0.0; 3],
         animated_constants: Vec::new(),
         animated_rows: Vec::new(),
+        animated_row_values: Vec::new(),
         animated_tint_facing: Vec::new(),
         animated_tint_glancing: Vec::new(),
         ce_animation: None,
@@ -1174,6 +1179,9 @@ pub(crate) struct H2DrawPass {
     /// Components of `constants` the shader animates: register, component.
     animated_constants: Vec<(u32, usize, Vec<H2Animation>)>,
     animated_rows: Vec<H2AnimatedRow>,
+    /// One component of a row a stage reads as a value, and the value
+    /// animations that replace it (`sub_6DE0F0`): row, component.
+    animated_row_values: Vec<(usize, usize, Vec<H2Animation>)>,
     animated_tint_facing: Vec<H2AnimatedTint>,
     animated_tint_glancing: Vec<H2AnimatedTint>,
     /// Halo CE reworks its rows and a constant by its own functions.
@@ -1205,6 +1213,7 @@ impl H2DrawPass {
             light_indirect: [0.0; 3],
             animated_constants: Vec::new(),
             animated_rows: Vec::new(),
+            animated_row_values: Vec::new(),
             animated_tint_facing: Vec::new(),
             animated_tint_glancing: Vec::new(),
             ce_animation: None,
@@ -1215,6 +1224,7 @@ impl H2DrawPass {
     pub(crate) fn moves(&self) -> bool {
         self.animated_constants.iter().flat_map(|(_, _, animations)| animations)
             .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
+            .chain(self.animated_row_values.iter().flat_map(|(_, _, animations)| animations))
             .chain(self.animated_tints())
             .any(H2Animation::moves)
             || self.ce_animation.as_ref().is_some_and(|animation| animation.moves())
@@ -1230,6 +1240,7 @@ impl H2DrawPass {
         let constants = self.animated_constants.iter().flat_map(|(_, _, animations)| animations);
         constants
             .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
+            .chain(self.animated_row_values.iter().flat_map(|(_, _, animations)| animations))
             .chain(self.animated_tints())
             .filter_map(|animation| animation.held_input.as_ref().map(|(name, _)| name.as_str()))
     }
@@ -1243,6 +1254,11 @@ impl H2DrawPass {
     pub(crate) fn texture_rows_at(&self, clock: H2Clock<'_>, outputs: &[f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
         let mut rows = self.texture_rows;
         self.animated_rows.iter().for_each(|row| row.apply(&mut rows, clock));
+        for (row, channel, animations) in &self.animated_row_values {
+            if let Some(vector) = animated_vector(animations, clock) {
+                rows[*row][*channel] = vector[*channel];
+            }
+        }
         if let Some(animation) = &self.ce_animation {
             animation.apply_rows(&mut rows, clock.time, outputs);
         }
@@ -1735,6 +1751,7 @@ pub(in crate::app) fn prepare_draw_pass(
     let (mut tint_facing, mut tint_glancing) = ([1.0; 4], [1.0; 4]);
     let (mut animated_tint_facing, mut animated_tint_glancing) = (Vec::new(), Vec::new());
     let mut animated_rows = Vec::new();
+    let mut animated_row_values = Vec::new();
     let [x, y, z, _] = DEFAULT_DIRECT_VECTOR;
     let mut light_direct = [x, y, z];
     let [x, y, z, _] = DEFAULT_INDIRECT_VECTOR;
@@ -1782,6 +1799,10 @@ pub(in crate::app) fn prepare_draw_pass(
                 let value = lookup(&constant.parameter)
                     .map_or(0.0, |value| parameter_vector(value, specular_brightness)[channel]);
                 row[channel] = value;
+                let animations = animations_of(&constant.parameter);
+                if animations.iter().any(|animation| !animation.is_transform()) {
+                    animated_row_values.push((constant.register.max(0) as usize, channel, animations));
+                }
                 continue;
             }
         }
@@ -1845,6 +1866,7 @@ pub(in crate::app) fn prepare_draw_pass(
         light_indirect,
         animated_constants,
         animated_rows,
+        animated_row_values,
         animated_tint_facing,
         animated_tint_glancing,
         ce_animation: None,

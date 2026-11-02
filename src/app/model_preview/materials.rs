@@ -267,9 +267,13 @@ pub(crate) fn resolve_model_textures(
         }
     }
     // So are its damage shaders, which take their turn over the object.
-    for layer in [H2Layer::ShieldDamaged, H2Layer::Overshield] {
+    // A hologram shader's bloom passes go to the frame's bloom with the rest.
+    let bloom = H2Layer::Bloom as usize;
+    for (layer, from) in
+        [(H2Layer::ShieldDamaged, transparent), (H2Layer::Overshield, transparent), (H2Layer::HologramBloom, bloom)]
+    {
         let owner = materials.iter().position(|material| material.shield == Some(layer));
-        let passes = owner.map(|owner| std::mem::take(&mut textures[owner].h2_layers[transparent]));
+        let passes = owner.map(|owner| std::mem::take(&mut textures[owner].h2_layers[from]));
         for texture in textures.iter_mut().filter(|_| passes.is_some()) {
             texture.h2_layers[layer as usize].clone_from(passes.as_ref().unwrap());
         }

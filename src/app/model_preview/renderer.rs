@@ -4067,6 +4067,13 @@ impl ModelGlRenderer {
             gl.clear(glow::COLOR_BUFFER_BIT);
             gl.color_mask(true, true, true, true);
             self.draw_h2_passes(gl, frame, slot, order, H2Layer::Bloom, None);
+            // `sub_6C18F0`: the hologram shader draws while its control is up.
+            let hologram = frame.preview.h2_hologram_control.as_deref().is_some_and(|name| {
+                frame.h2_values.as_ref().and_then(|values| values.get(name)).is_some_and(|value| *value > 0.0)
+            });
+            if hologram {
+                self.draw_h2_passes(gl, frame, slot, order, H2Layer::HologramBloom, None);
+            }
             if self.h2_bloom.is_none() {
                 self.h2_bloom = H2Bloom::new(gl, H2_GLSL_VERSION);
             }
@@ -4147,7 +4154,7 @@ impl ModelGlRenderer {
             }
             // A held weapon is an object of its own, with no such shader.
             let held = frame.preview.materials.get(material).is_some_and(|m| m.object != 0);
-            if held && matches!(layer, H2Layer::ShieldDamaged | H2Layer::Overshield) {
+            if held && matches!(layer, H2Layer::ShieldDamaged | H2Layer::Overshield | H2Layer::HologramBloom) {
                 continue;
             }
             let Some((byte_offset, index_count)) = model_draw_range(
