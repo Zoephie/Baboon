@@ -92,11 +92,15 @@ fn read_volume(source: &TagSource, volume: TagStruct<'_>, glow: Option<&Arc<H2Im
 }
 
 /// `globals`' `rasterizer data`, whose `glow` stands in for a volume's bitmap.
-fn read_glow(source: &TagSource) -> Option<Arc<H2Image>> {
+pub(super) fn read_glow(source: &TagSource) -> Option<Arc<H2Image>> {
     let globals = load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
     let data = elements(globals.root(), "rasterizer data");
     let path = data.first()?.read_tag_ref_path("glow").filter(|path| !path.is_empty())?;
     decode_h2_image(source, &path, SamplerKind::Texture2D, 0).map(Arc::new)
+}
+
+pub(super) fn read_h2_bitmap(source: &TagSource, path: &str) -> Option<Arc<H2Image>> {
+    decode_h2_image(source, path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
 /// `render_submit_object_attachments`: one at every marker of the name.

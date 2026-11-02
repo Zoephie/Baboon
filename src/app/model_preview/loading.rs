@@ -449,6 +449,8 @@ pub(super) fn load_model_preview(
                 };
                 (place, marker.node_index.max(0) as usize)
             };
+            let frame = &frame;
+            preview.h2_liquids = super::h2_liquid::read_h2_liquids(source, model_tag, 0, &markers, frame);
             super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, true);
             preview.markers = markers;
         }

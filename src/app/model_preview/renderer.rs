@@ -968,6 +968,7 @@ pub(super) fn object_moves(
         || !data.preview.h3_strips.is_empty()
         || !data.preview.h3_screen_effects.is_empty()
         || !data.preview.h3_cloth.is_empty()
+        || !data.preview.h2_liquids.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
@@ -1754,6 +1755,7 @@ struct ModelGpuSlot {
     /// Each of `h2_light_volumes`' bitmaps, by volume.
     h2_volume_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     h2_contrail_textures: Vec<Option<glow::NativeTexture>>,
+    h2_liquid_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     h2_contrails: h2_contrails::H2ContrailField,
     h3_particles: h3_particles::H3ParticleField,
     h3_strips: h3_strips::H3StripField,
@@ -1813,6 +1815,7 @@ impl ModelGpuSlot {
                 volume_textures: Vec::new(),
                 h2_volume_textures: Vec::new(),
                 h2_contrail_textures: Vec::new(),
+                h2_liquid_textures: Vec::new(),
                 h2_contrails: Default::default(),
                 h3_particles: Default::default(),
                 h3_strips: Default::default(),
@@ -3116,6 +3119,7 @@ impl ModelGlRenderer {
                 && preview.h3_light_volumes.is_empty()
                 && preview.h2_light_volumes.is_empty()
                 && preview.h2_contrails.is_empty()
+                && preview.h2_liquids.is_empty()
                 && preview.h3_particles.is_empty()
                 && preview.h3_strips.is_empty()
                 && preview.h3_leaves.is_empty())
@@ -3215,6 +3219,15 @@ impl ModelGlRenderer {
                         None => upload_h2_image(gl, &antenna.image),
                     }))
                     .collect();
+                for texture in uploaded.h2_liquid_textures.drain(..).flatten().flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.h2_liquid_textures = frame
+                    .preview
+                    .h2_liquids
+                    .iter()
+                    .map(|at| at.arcs().iter().map(|arc| arc.bitmap().and_then(|image| upload_h2_image(gl, image))).collect())
+                    .collect();
                 uploaded.h2_contrails = Default::default();
                 for texture in uploaded.h2_contrail_textures.drain(..).flatten() {
                     gl.delete_texture(texture);
@@ -3293,6 +3306,27 @@ impl ModelGlRenderer {
                         gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
                         h3_draw::h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
                         for quad in at.quads(volume, values, bones, &view) {
+                            let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                                let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                                [a, b, c, d, u, v]
+                            });
+                            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                            let [red, green, blue, alpha] = quad.color;
+                            gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
+                            gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                        }
+                    }
+                }
+                let liquids = frame.preview.h2_liquids.iter().zip(&uploaded.h2_liquid_textures);
+                for (at, textures) in liquids {
+                    let values = frame.h2_values_of_object(at.object);
+                    for (arc, texture) in at.arcs().iter().zip(textures) {
+                        let Some(texture) = texture else {
+                            continue;
+                        };
+                        gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                        h3_draw::h3_set_blend(gl, H3Blend::PreMultiplied);
+                        for quad in at.quads(arc, values, bones, &view, frame.time) {
                             let vertices = quad.corners.map(|[x, y, z, u, v]| {
                                 let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
                                 [a, b, c, d, u, v]
