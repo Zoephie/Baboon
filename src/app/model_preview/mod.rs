@@ -29,6 +29,7 @@ mod ce_functions;
 mod ce_lights;
 mod ce_contrails;
 mod ce_flags;
+mod ce_particle_systems;
 mod ce_particles;
 mod ce_passes;
 mod ce_widgets;
@@ -159,6 +160,7 @@ pub(crate) struct RenderModelPreview {
     pub ce_lightning: Vec<ce_widgets::CeLightning>,
     pub ce_glows: Vec<ce_widgets::CeGlow>,
     pub ce_flags: Vec<ce_flags::CeFlagAt>,
+    pub ce_particle_systems: Vec<ce_particle_systems::CeParticleSystemAt>,
 }
 
 #[derive(Debug, Clone, Default)]

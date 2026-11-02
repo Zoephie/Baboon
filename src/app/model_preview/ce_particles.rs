@@ -90,6 +90,20 @@ impl CePointPhysics {
         self.mass_over_radius_cubed * radius * radius * radius
     }
 
+    /// `point_physics_definition_interpolate`: the runtime values from one to
+    /// the other by `t`; the flags stay the first's.
+    pub(super) fn lerp(&self, other: &Self, t: f32) -> Self {
+        let mix = |a: f32, b: f32| a * (1.0 - t) + b * t;
+        Self {
+            mass_over_radius_cubed: mix(self.mass_over_radius_cubed, other.mass_over_radius_cubed),
+            air_buoyancy: mix(self.air_buoyancy, other.air_buoyancy),
+            air_friction: mix(self.air_friction, other.air_friction),
+            surface_friction: mix(self.surface_friction, other.surface_friction),
+            elasticity: mix(self.elasticity, other.elasticity),
+            collides_with_structure: self.collides_with_structure,
+        }
+    }
+
     /// The air friction tool leaves, scaled by 10000.
     pub(super) fn air_friction(&self) -> f32 {
         self.air_friction
@@ -169,6 +183,93 @@ struct CeSpriteFrame {
     image: usize,
 }
 
+/// A bitmap's sprites by sequence, each image's size, and the images any
+/// sprite is cut from, decoded.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CeSpriteSheet {
+    sizes: Vec<[f32; 2]>,
+    sequences: Vec<Vec<CeSpriteFrame>>,
+    pub(crate) images: Vec<Option<Arc<H2Image>>>,
+}
+
+pub(super) fn read_sprite_sheet(source: &TagSource, bitmap_path: &str) -> Option<CeSpriteSheet> {
+    let bitmap = load_referenced_tag_from_source(source, bitmap_path, "bitmap", b"bitm").ok()?;
+    let sizes: Vec<[f32; 2]> = elements(bitmap.root(), "bitmaps")
+        .iter()
+        .map(|image| {
+            let size = |name: &str| image.read_int_any(name).unwrap_or(1).max(1) as f32;
+            [size("width"), size("height")]
+        })
+        .collect();
+    let sequences: Vec<Vec<CeSpriteFrame>> = elements(bitmap.root(), "sequences")
+        .iter()
+        .map(|sequence| {
+            elements(*sequence, "sprites")
+                .iter()
+                .map(|sprite| {
+                    let read = |name: &str| sprite.read_real(name).unwrap_or(0.0);
+                    let registration = sprite.read_point2d("registration point");
+                    CeSpriteFrame {
+                        rect: [read("left"), read("right"), read("top"), read("bottom")],
+                        registration: [registration.x, registration.y],
+                        image: sprite.read_int_any("bitmap index").unwrap_or(0).max(0) as usize,
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let used: Vec<usize> = sequences.iter().flatten().map(|sprite| sprite.image).collect();
+    let images = (0..sizes.len())
+        .map(|index| {
+            used.contains(&index)
+                .then(|| decode_h2_image(source, bitmap_path, SamplerKind::Texture2D, index))
+                .flatten()
+                .map(Arc::new)
+        })
+        .collect();
+    Some(CeSpriteSheet { sizes, sequences, images })
+}
+
+impl CeSpriteSheet {
+    /// How many sprites a sequence has; none past the end.
+    pub(crate) fn count(&self, sequence: i32) -> usize {
+        usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).map_or(0, Vec::len)
+    }
+
+    /// `build_sprite` for one sprite, facing the view as mode 0 does: the
+    /// corners (place, then u and v) about `center`, `scale` world units to
+    /// a pixel of its image, turned by `rotation` and mirrored across.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn corners(
+        &self,
+        sequence: i32,
+        sprite: usize,
+        center: [f32; 3],
+        rotation: f32,
+        scale: f32,
+        mirror: bool,
+        view: &CeFlareView,
+    ) -> Option<(usize, [[f32; 5]; 4])> {
+        let frame = usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).and_then(|frames| frames.get(sprite))?;
+        let size = self.sizes.get(frame.image).map_or(1.0, |size| size[0]) * scale;
+        let [left, right, top, bottom] = frame.rect;
+        let center_uv = [left + frame.registration[0], top + frame.registration[1]];
+        let (sine, cosine) = rotation.sin_cos();
+        let corner = |u: f32, v: f32| {
+            let x0 = u - center_uv[0];
+            let y0 = center_uv[1] - v;
+            let mut x = x0 * cosine - y0 * sine;
+            let y = y0 * cosine + x0 * sine;
+            if mirror {
+                x = -x;
+            }
+            let place: [f32; 3] = std::array::from_fn(|axis| center[axis] + (view.right[axis] * x + view.up[axis] * y) * size);
+            [place[0], place[1], place[2], u, v]
+        };
+        Some((frame.image, [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)]))
+    }
+}
+
 /// A `particle` tag.
 #[derive(Debug, Clone)]
 pub(crate) struct CeParticleDef {
@@ -212,31 +313,7 @@ fn read_particle_def(source: &TagSource, path: &str) -> Option<CeParticleDef> {
     let root = tag.root();
     let flags = root.read_int_any("flags").unwrap_or(0);
     let bitmap_path = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
-    let sizes: Vec<[f32; 2]> = elements(bitmap.root(), "bitmaps")
-        .iter()
-        .map(|image| {
-            let size = |name: &str| image.read_int_any(name).unwrap_or(1).max(1) as f32;
-            [size("width"), size("height")]
-        })
-        .collect();
-    let sequences: Vec<Vec<CeSpriteFrame>> = elements(bitmap.root(), "sequences")
-        .iter()
-        .map(|sequence| {
-            elements(*sequence, "sprites")
-                .iter()
-                .map(|sprite| {
-                    let read = |name: &str| sprite.read_real(name).unwrap_or(0.0);
-                    let registration = sprite.read_point2d("registration point");
-                    CeSpriteFrame {
-                        rect: [read("left"), read("right"), read("top"), read("bottom")],
-                        registration: [registration.x, registration.y],
-                        image: sprite.read_int_any("bitmap index").unwrap_or(0).max(0) as usize,
-                    }
-                })
-                .collect()
-        })
-        .collect();
+    let CeSpriteSheet { sizes, sequences, images } = read_sprite_sheet(source, &bitmap_path)?;
     let short = |name: &str| root.read_int_any(name).unwrap_or(0) as i32;
     let first_sequence = short("first sequence index");
     let sequence_counts = [short("initial sequence count"), short("looping sequence count"), short("final sequence count")];
@@ -276,15 +353,6 @@ fn read_particle_def(source: &TagSource, path: &str) -> Option<CeParticleDef> {
         .filter(|path| !path.is_empty())
         .and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok())
         .map(|tag| CePointPhysics::read(&tag));
-    let used: Vec<usize> = sequences.iter().flatten().map(|sprite| sprite.image).collect();
-    let images = (0..sizes.len())
-        .map(|index| {
-            used.contains(&index)
-                .then(|| decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, index))
-                .flatten()
-                .map(Arc::new)
-        })
-        .collect();
     let shader_flags = root.read_int_any("shader flags").unwrap_or(0);
     Some(CeParticleDef {
         flags,
