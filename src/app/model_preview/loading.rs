@@ -3991,4 +3991,22 @@ mod kit_object_tests {
         let a_minute_in = super::super::ce_flags::CeFlagField::default().advance(flags, None, 0.0, 60.0);
         assert_eq!(at_open, a_minute_in);
     }
+
+    /// `object_set_initial_change_colors` colors every object from its own
+    /// tag: the scorpion's turret is not white, and not the hull's colors.
+    #[test]
+    fn a_halo_3_child_object_has_its_own_change_colors() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\scorpion\\scorpion", "vehicle", b"vehi");
+        let colored = data.h2_attached.iter().find(|attached| attached.change_colors != [[1.0; 3]; 4]);
+        let colored = colored.expect("a child with change colors");
+        let hull = super::super::h2_passes::h2_change_colors_for(&data.h2_change_colors, "default");
+        assert_ne!(colored.change_colors, hull);
+        let owned = data.preview.materials.iter().filter(|material| material.object == colored.owner);
+        assert!(owned.count() > 0, "its materials read them");
+    }
 }
+

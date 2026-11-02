@@ -12,6 +12,7 @@ use super::attachment::{MarkerFrame, WeaponOption, merge_attached};
 use super::ce_attachments::{attached_marker_frame, elements, loose_weapon_paths, weapon_ik};
 use super::loading::build_render_preview;
 use super::ce_attachments::CeWeaponIk;
+use super::h2_passes::{h2_change_colors_for, read_h2_change_colors};
 use super::*;
 use crate::core::source::TagSource;
 
@@ -561,16 +562,18 @@ pub(super) fn attach_h2_weapon(
             preview.weapon_ik.extend(points);
         }
     }
-    fold_attached(source, &weapon, &model, attached, parent, child, owner, tag_path::name(path), preview)
+    let variant = object_variant(&weapon, &model, "").map(|variant| variant.name).unwrap_or_default();
+    fold_attached(source, &weapon, &model, &variant, attached, parent, child, owner, tag_path::name(path), preview)
 }
 
 /// An attached object's lights and flares, then its geometry, into `preview`.
-/// `model` is the object's, built into `attached`.
+/// `model` is the object's, built into `attached`, made as `variant`.
 #[allow(clippy::too_many_arguments)]
 fn fold_attached(
     source: &TagSource,
     object: &TagFile,
     model: &TagFile,
+    variant: &str,
     attached: RenderModelPreview,
     parent: MarkerFrame,
     child: MarkerFrame,
@@ -617,7 +620,9 @@ fn fold_attached(
     }
     merge_attached(preview, attached, parent, child, owner, name);
     let functions = super::h2_functions::read_h2_object_functions(object, Some(model))?;
-    Some(H2AttachedObject { owner, functions })
+    // `object_set_initial_change_colors`: each object its own, from its own tag.
+    let change_colors = h2_change_colors_for(&read_h2_change_colors(object), variant);
+    Some(H2AttachedObject { owner, functions, change_colors })
 }
 
 /// What was read off an attached object, named after it when it has a name,
@@ -749,15 +754,21 @@ fn child_model(source: &TagSource, entry: &VariantObject) -> Option<(TagFile, Ta
     let object = load_referenced_tag_from_source(source, &entry.path, extension, &entry.group.to_be_bytes()).ok()?;
     let model = holder_of(object.root(), "model")?.read_tag_ref_path("model")?;
     let model = load_referenced_tag_from_source(source, &model, "model", b"hlmt").ok()?;
-    let variants = super::variants::read_model_variants(&model);
-    let wanted = match entry.child_variant.as_str() {
-        "" => object_default_variant(&object).unwrap_or_default(),
+    let chosen = object_variant(&object, &model, &entry.child_variant);
+    Some((object, model, chosen))
+}
+
+/// The variant of `model` an object is made as: `wanted`, or with none the
+/// object's default, falling back to `default` and then the first.
+fn object_variant(object: &TagFile, model: &TagFile, wanted: &str) -> Option<ModelVariantPreview> {
+    let variants = super::variants::read_model_variants(model);
+    let wanted = match wanted {
+        "" => object_default_variant(object).unwrap_or_default(),
         name => name.to_owned(),
     };
     let chosen = variants.iter().find(|variant| variant.name == wanted);
     let chosen = chosen.or(variants.iter().find(|variant| variant.name == "default")).or(variants.first());
-    let chosen = chosen.cloned();
-    Some((object, model, chosen))
+    chosen.cloned()
 }
 
 /// What a `.model`'s variants attach, such as the warthog's turret: every one
@@ -800,7 +811,9 @@ pub(super) fn attach_variant_objects(
                 (format!("{name}: {}", region.name), permutation.unwrap_or_default())
             })
             .collect();
-        let folded = fold_attached(source, &object, &child_tag, attached, parent, child, owner, &name, preview);
+        let variant = chosen.as_ref().map_or("", |variant| variant.name.as_str());
+        let folded =
+            fold_attached(source, &object, &child_tag, variant, attached, parent, child, owner, &name, preview);
         attached_objects.extend(folded);
         for (region, permutation) in choices {
             // With no variant chosen, no child shows.
@@ -821,6 +834,7 @@ pub(crate) struct H2AttachedObject {
     /// What its materials carry as `object`.
     pub(crate) owner: u8,
     pub(crate) functions: super::h2_functions::H2ObjectFunctions,
+    pub(crate) change_colors: [[f32; 3]; 4],
 }
 
 #[cfg(test)]

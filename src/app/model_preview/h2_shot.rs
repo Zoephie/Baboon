@@ -201,6 +201,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         },
         object_moves: object_functions(&data).any(|functions| functions.move_at_rest()),
         h2_attached_values: super::h2_attached_values(&data, time),
+        h2_attached_colors: super::h2_attached_colors(&data),
         h3_flares_shown: super::h3_flares_shown(&data.preview, &state),
         h3_lights_shown: super::h3_lights_shown(&data.preview, &state),
         h3_volumes_shown: super::h3_volumes_shown(&data.preview, &state),

@@ -139,6 +139,7 @@ pub(super) fn draw_model_viewport(
         object_moves: object_moves(data, &state.h2_function_inputs, time, h2_values.as_ref()),
         h2_values,
         h2_attached_values: h2_attached_values(data, time),
+        h2_attached_colors: h2_attached_colors(data),
         h3_flares_shown: h3_flares_shown(&data.preview, state),
         h3_lights_shown: h3_lights_shown(&data.preview, state),
         h3_volumes_shown: h3_volumes_shown(&data.preview, state),
@@ -874,6 +875,8 @@ struct ModelGpuFrame {
     h2_values: Option<h2_functions::H2FunctionValues>,
     /// What a held weapon's own functions read, by owner.
     h2_attached_values: Vec<(u8, h2_functions::H2FunctionValues)>,
+    /// Each attached Halo 2 or Halo 3 object's own change colors, by owner.
+    h2_attached_colors: Vec<(u8, [[f32; 3]; 4])>,
     h3_flares_shown: Vec<bool>,
     h3_lights_shown: Vec<bool>,
     h3_volumes_shown: Vec<bool>,
@@ -984,6 +987,10 @@ fn h2_attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, h2_functio
         (attached.owner, attached.functions.values(&rest, data.geometry_id, &inputs, time, attached.owner))
     });
     values.collect()
+}
+
+fn h2_attached_colors(data: &ModelPreviewData) -> Vec<(u8, [[f32; 3]; 4])> {
+    data.h2_attached.iter().map(|attached| (attached.owner, attached.change_colors)).collect()
 }
 
 fn h2_function_values_for(
@@ -1101,10 +1108,20 @@ impl ModelGpuFrame {
     /// The change colors of the object that owns `material`.
     fn change_colors_of(&self, material: usize) -> [[f32; 3]; 4] {
         let object = self.preview.materials.get(material).map_or(0, |material| material.object);
-        match object {
-            0 => self.change_colors,
-            _ => self.object_states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors),
+        self.change_colors_of_object(object)
+    }
+
+    /// The opened object's change colors by the selected variant; each
+    /// attached object has its own, as `object_set_initial_change_colors`
+    /// gives every object.
+    fn change_colors_of_object(&self, object: u8) -> [[f32; 3]; 4] {
+        if object == 0 {
+            return self.change_colors;
         }
+        if let Some((_, colors)) = self.h2_attached_colors.iter().find(|(owner, _)| *owner == object) {
+            return *colors;
+        }
+        self.object_states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors)
     }
 
     /// Transparent passes draw whether or not game shaders are on.
@@ -4077,7 +4094,7 @@ impl ModelGlRenderer {
                         };
                         gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
                         h3_draw::h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
-                        let colors = if at.object == 0 { frame.change_colors } else { [[1.0; 3]; 4] };
+                        let colors = frame.change_colors_of_object(at.object);
                         for quad in at.quads(volume, values, &colors, bones, &view) {
                             let vertices = quad.corners.map(|[x, y, z, u, v]| {
                                 let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
@@ -4445,7 +4462,7 @@ impl ModelGlRenderer {
                     }
                 };
                 let values = frame.h2_values_of_object(at.object);
-                let colors = if at.object == 0 { frame.change_colors } else { [[1.0; 3]; 4] };
+                let colors = frame.change_colors_of_object(at.object);
                 let onset = uploaded.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
                 let sprites = at.sprites(values, &colors, bones, &view, frame.time, onset, occlusion);
                 let Some(textures) = uploaded.flare_textures.get(first_h2 + index) else {

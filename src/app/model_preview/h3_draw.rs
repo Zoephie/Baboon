@@ -1157,7 +1157,7 @@ impl ModelGlRenderer {
                     continue;
                 }
                 let values = frame.h2_values_of_object(light.object);
-                let colors = if light.object == 0 { frame.change_colors } else { [[1.0; 3]; 4] };
+                let colors = frame.change_colors_of_object(light.object);
                 let onset = self.slots[slot].h3_onsets.of(light.object, light.scale_name(), values, frame.time);
                 let Some(lit) = light.lit(values, &colors, bones, frame.time, onset) else {
                     continue;
