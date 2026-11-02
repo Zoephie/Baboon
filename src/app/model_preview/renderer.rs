@@ -898,6 +898,8 @@ const H2_TIME_WRAP: f64 = 3600.0;
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct CeObjectState {
     outputs: [f32; 4],
+    /// Which outputs are on, as `object_get_function_value` answers.
+    active: [bool; 4],
     change_colors: [[f32; 3]; 4],
 }
 
@@ -1055,10 +1057,10 @@ fn object_states(
     time: f32,
 ) -> Vec<CeObjectState> {
     let state = |functions: Option<&ce_functions::CeObjectFunctions>, object, colors| {
-        let outputs = functions.map_or([0.0; 4], |functions| {
-            functions.outputs(&functions.inputs_for(set, (data.geometry_id, object)), time)
+        let (outputs, active) = functions.map_or(([0.0; 4], [false; 4]), |functions| {
+            functions.outputs_active(&functions.inputs_for(set, (data.geometry_id, object)), time)
         });
-        CeObjectState { outputs, change_colors: h2_passes::ce_change_colors(colors) }
+        CeObjectState { outputs, active, change_colors: h2_passes::ce_change_colors(colors) }
     };
     let mut states = vec![state(data.ce_object_functions.as_ref(), 0, &data.h2_change_colors)];
     for (index, object) in data.ce_attached.iter().enumerate() {
@@ -2449,6 +2451,7 @@ fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones:
     let inputs = |object: u8| {
         let state = states.get(object as usize);
         ce_particles::CeObjectInputs {
+                active: state.map_or([false; 4], |state| state.active),
             outputs: state.map_or([0.0; 4], |state| state.outputs),
             change_colors: state.map_or([[1.0; 3]; 4], |state| state.change_colors),
         }
@@ -2492,8 +2495,10 @@ unsafe fn draw_ce_particles(
             ((side[0] / side[3] - middle[0] / middle[3]).abs() * half_width * 2.0).max(0.0)
         };
         let contrails = &frame.preview.ce_contrails;
-        let outputs = |object: u8| states.get(object as usize).map_or([0.0; 4], |state| state.outputs);
-        uploaded.ce_contrails.advance(contrails, outputs, bones, ground, frame.time);
+        let switched = |object: u8| {
+            states.get(object as usize).map_or(([0.0; 4], [false; 4]), |state| (state.outputs, state.active))
+        };
+        uploaded.ce_contrails.advance(contrails, switched, bones, ground, frame.time);
         let change_colors = |object: u8| states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors);
         // What each sprite draws with: texture, blend, nonlinear tint, color, corners.
         type Sprite = (glow::NativeTexture, i32, bool, [f32; 4], [[f32; 5]; 4], Option<ce_particles::CeSecondaryDraw>);
@@ -2532,7 +2537,11 @@ unsafe fn draw_ce_particles(
         if !systems.is_empty() {
             let inputs = |object: u8| {
                 let state = states.get(usize::from(object));
-                (state.map_or([0.0; 4], |state| state.outputs), state.map_or([[1.0; 3]; 4], |state| state.change_colors))
+                (
+                    state.map_or([0.0; 4], |state| state.outputs),
+                    state.map_or([false; 4], |state| state.active),
+                    state.map_or([[1.0; 3]; 4], |state| state.change_colors),
+                )
             };
             uploaded.ce_pctl.advance(systems, inputs, bones, ground, frame.time);
             let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
@@ -2545,7 +2554,12 @@ unsafe fn draw_ce_particles(
         }
         // `glow_render`, through `global_shader_effect_additive`.
         let glows = &frame.preview.ce_glows;
-        uploaded.ce_glows.advance(glows, outputs, bones, frame.time);
+        // `glow_update` reads an output only while it is on, else nothing.
+        let read_if_on = |object: u8| {
+            let (outputs, active) = switched(object);
+            std::array::from_fn(|slot| if active[slot] { outputs[slot] } else { 0.0 })
+        };
+        uploaded.ce_glows.advance(glows, read_if_on, bones, frame.time);
         let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
         for (index, quad) in uploaded.ce_glows.quads(glows, view, pixel) {
             if let Some(texture) = uploaded.ce_glow_textures.get(index).copied().flatten() {
@@ -4060,12 +4074,14 @@ impl ModelGlRenderer {
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE);
                 let volumes = frame.preview.ce_light_volumes.iter().zip(&uploaded.ce_light_volume_textures);
                 for (volume, texture) in volumes {
-                    let outputs = frame.object_states.get(usize::from(volume.object)).map_or([0.0; 4], |state| state.outputs);
+                    let state = frame.object_states.get(usize::from(volume.object));
+                    let outputs = state.map_or([0.0; 4], |state| state.outputs);
+                    let active = state.map_or([false; 4], |state| state.active);
                     let Some(texture) = texture else {
                         continue;
                     };
                     gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                    for quad in volume.quads(&outputs, bones, &view) {
+                    for quad in volume.quads(&outputs, &active, bones, &view) {
                         let vertices = quad.corners.map(|[x, y, z, u, v]| {
                             let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
                             [a, b, c, d, u, v]

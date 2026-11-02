@@ -61,6 +61,10 @@ struct CeFunction {
     bounds: [f32; 2],
     scale_by: f32,
     usage: String,
+    /// `always active`: it stays on at its lower bound.
+    always_active: bool,
+    /// `turn off with`: the function whose being off turns this one off.
+    turn_off_with: Option<usize>,
 }
 
 fn inverse(value: f32) -> f32 {
@@ -91,6 +95,8 @@ impl CeFunction {
         Self {
             invert: flags.iter().any(|(_, name)| name == "invert"),
             additive: flags.iter().any(|(_, name)| name == "additive"),
+            always_active: flags.iter().any(|(_, name)| name.starts_with("always active")),
+            turn_off_with: usize::try_from(block.read_int_any("turn off with").unwrap_or(-1)).ok(),
             rate: Some(real("period")).filter(|period| *period > 0.0).map_or(1.0, |period| 1.0 / period),
             scale_period_by: source("scale period by"),
             function: option_index(block, "function", &super::ce_passes::PERIODIC_FUNCTIONS) as usize,
@@ -112,7 +118,15 @@ impl CeFunction {
         }
     }
 
+    #[cfg(test)]
     fn evaluate(&self, values: &[f32; 9], time: f32) -> f32 {
+        self.evaluate_active(values, time).0
+    }
+
+    /// `object_compute_function_values` for one function: its value, and
+    /// whether it is on, which it stops being at its lower bound unless
+    /// `always active`.
+    fn evaluate_active(&self, values: &[f32; 9], time: f32) -> (f32, bool) {
         let [lower, upper] = self.bounds;
         let mut rate = self.rate;
         if self.scale_period_by != 0 && values[self.scale_period_by] > 0.0 {
@@ -148,24 +162,30 @@ impl CeFunction {
         if self.scale_by > 0.0 {
             value *= self.scale_by;
         }
+        let mut active = true;
         if self.bounds_mode == 2 {
-            return (upper - lower) * value + lower;
+            let value = (upper - lower) * value + lower;
+            if value <= lower + ACTIVATING_ABOVE {
+                active = self.always_active;
+            }
+            return (value, active);
         }
         if value <= lower + ACTIVATING_ABOVE {
             value = lower;
+            active = self.always_active;
         }
         value = value.min(upper);
         if self.bounds_mode == 1 {
             value = (value - lower) * inverse(upper - lower);
         }
-        value
+        (value, active)
     }
 
     /// `evaluate`, and for an additive function what its ticks have added up
     /// to, taking the value as steady across them.
-    fn output(&self, values: &[f32; 9], time: f32) -> f32 {
-        let value = self.evaluate(values, time);
-        if self.additive { (value * time * TICKS_PER_SECOND).rem_euclid(1.0) } else { value }
+    fn output(&self, values: &[f32; 9], time: f32) -> (f32, bool) {
+        let (value, active) = self.evaluate_active(values, time);
+        (if self.additive { (value * time * TICKS_PER_SECOND).rem_euclid(1.0) } else { value }, active)
     }
 
     /// The values it reads, as `SOURCES` numbers them.
@@ -191,12 +211,30 @@ pub(crate) struct CeObjectFunctions {
 impl CeObjectFunctions {
     /// The object's `A out` to `D out`, its inputs at `inputs`.
     pub(crate) fn outputs(&self, inputs: &[f32; 4], time: f32) -> [f32; 4] {
+        self.outputs_active(inputs, time).0
+    }
+
+    /// The outputs, and which are on: the bit `object_get_function_value`
+    /// answers with. One a `turn off with` names that is off turns it off;
+    /// a later one is read as it stood the tick before, which a still preview
+    /// gets by working them out twice. A function the object lacks is off.
+    pub(crate) fn outputs_active(&self, inputs: &[f32; 4], time: f32) -> ([f32; 4], [bool; 4]) {
         let mut values = [0.0; 9];
         values[1..5].copy_from_slice(inputs);
-        for (index, function) in self.functions.iter().take(4).enumerate() {
-            values[5 + index] = function.output(&values, time);
+        let mut active = [false; 4];
+        for _ in 0..2 {
+            for (index, function) in self.functions.iter().take(4).enumerate() {
+                let (value, mut on) = function.output(&values, time);
+                if let Some(other) = function.turn_off_with
+                    && !active.get(other).copied().unwrap_or(false)
+                {
+                    on = false;
+                }
+                values[5 + index] = value;
+                active[index] = on;
+            }
         }
-        [values[5], values[6], values[7], values[8]]
+        ([values[5], values[6], values[7], values[8]], active)
     }
 
     pub(crate) fn move_at_rest(&self) -> bool {
@@ -397,6 +435,8 @@ mod tests {
             bounds: [0.0, 1.0],
             scale_by: 0.0,
             usage: String::new(),
+            always_active: false,
+            turn_off_with: None,
         }
     }
 
@@ -406,6 +446,18 @@ mod tests {
         let objects = CeObjectFunctions { functions: vec![glow], ..Default::default() };
         assert_eq!(objects.outputs(&[0.0; 4], 3.0)[0], 0.0);
         assert!((objects.outputs(&[0.5, 0.0, 0.0, 0.0], 3.0)[0] - 0.5f32.powf(0.25)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_function_goes_off_at_its_lower_bound_or_with_the_one_it_names() {
+        let input = CeFunction { scale_function_by: 1, ..function(0) };
+        let lasting = CeFunction { always_active: true, ..input.clone() };
+        let follower = CeFunction { turn_off_with: Some(0), ..function(0) };
+        let objects = CeObjectFunctions { functions: vec![input, lasting, follower], ..Default::default() };
+        let (_, rested) = objects.outputs_active(&[0.0; 4], 0.0);
+        assert_eq!(rested, [false, true, false, false]);
+        let (_, raised) = objects.outputs_active(&[0.5, 0.0, 0.0, 0.0], 0.0);
+        assert_eq!(raised, [true, true, true, false]);
     }
 
     #[test]
@@ -448,9 +500,9 @@ mod tests {
     fn an_additive_function_wraps_as_its_ticks_add_up() {
         let values = [0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let adding = CeFunction { additive: true, scale_function_by: 1, ..function(0) };
-        assert!((adding.output(&values, 1.0 / 30.0) - 0.25).abs() < 1e-4);
-        assert!((adding.output(&values, 3.0 / 30.0) - 0.75).abs() < 1e-4);
-        assert!(adding.output(&values, 5.0 / 30.0) < 0.26);
+        assert!((adding.output(&values, 1.0 / 30.0).0 - 0.25).abs() < 1e-4);
+        assert!((adding.output(&values, 3.0 / 30.0).0 - 0.75).abs() < 1e-4);
+        assert!(adding.output(&values, 5.0 / 30.0).0 < 0.26);
         assert!(CeFunction { additive: true, ..function(0) }.moves());
     }
 

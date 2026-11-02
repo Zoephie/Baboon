@@ -142,7 +142,7 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
 impl CeLightVolume {
     /// `light_volume_submit` and `light_volume_render`: sprites along the
     /// marker, brighter as it faces the camera the way the tag says.
-    pub(crate) fn quads(&self, outputs: &[f32; 4], bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> Vec<CeAntennaQuad> {
+    pub(crate) fn quads(&self, outputs: &[f32; 4], active: &[bool; 4], bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> Vec<CeAntennaQuad> {
         let (origin, forward) = posed_on(self.node, self.position, self.forward, bones);
         let length = dot(forward, forward).sqrt().max(0.0001);
         let forward = forward.map(|axis| axis / length);
@@ -162,7 +162,10 @@ impl CeLightVolume {
         let facing = dot(view.forward, forward).abs();
         let [perpendicular, parallel] = self.brightness;
         let mut brightness = (perpendicular * (1.0 - facing) + parallel * facing).clamp(0.0, 1.0) * fade;
-        if let Some(value) = value {
+        // `light_volume_render` scales by the output only while it is on.
+        if let (Some(value), Some(slot)) = (value, self.source)
+            && active[slot]
+        {
             brightness *= value;
         }
         let frame = &self.frame;

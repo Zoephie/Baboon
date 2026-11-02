@@ -360,7 +360,7 @@ impl CeContrailField {
     pub(crate) fn advance(
         &mut self,
         contrails: &[CeContrailAt],
-        outputs: impl Fn(u8) -> [f32; 4],
+        inputs: impl Fn(u8) -> ([f32; 4], [bool; 4]),
         bones: Option<&[[f32; 4]]>,
         ground: f32,
         time: f32,
@@ -394,7 +394,10 @@ impl CeContrailField {
                 let def = &contrail.def;
                 // `object_get_function_value`: none is on at one.
                 let (density, on) = match contrail.primary {
-                    Some(output) => (outputs(contrail.object)[output], outputs(contrail.object)[output] > 0.0),
+                    Some(output) => {
+                        let (outputs, active) = inputs(contrail.object);
+                        (outputs[output], active[output])
+                    }
                     None => (1.0, true),
                 };
                 // Turning on or off lets go one point of no density.

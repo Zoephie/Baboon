@@ -434,7 +434,7 @@ impl CeParticleSystemField {
     pub(crate) fn advance(
         &mut self,
         systems: &[CeParticleSystemAt],
-        inputs: impl Fn(u8) -> ([f32; 4], [[f32; 3]; 4]),
+        inputs: impl Fn(u8) -> ([f32; 4], [bool; 4], [[f32; 3]; 4]),
         bones: Option<&[[f32; 4]]>,
         ground: f32,
         time: f32,
@@ -452,9 +452,9 @@ impl CeParticleSystemField {
         while now + STEP <= time {
             now += STEP;
             for (system, running) in systems.iter().zip(&mut self.systems) {
-                let (outputs, change_colors) = inputs(system.object);
+                let (outputs, active, change_colors) = inputs(system.object);
                 let dt = if running.first { 0.001 } else { STEP };
-                update_system(system, running, &outputs, &change_colors, bones, ground, dt, &mut random);
+                update_system(system, running, &outputs, &active, &change_colors, bones, ground, dt, &mut random);
                 running.first = false;
             }
         }
@@ -741,6 +741,7 @@ fn update_system(
     system: &CeParticleSystemAt,
     running: &mut CeRunningSystem,
     outputs: &[f32; 4],
+    active: &[bool; 4],
     change_colors: &[[f32; 3]; 4],
     bones: Option<&[[f32; 4]]>,
     ground: f32,
@@ -749,7 +750,7 @@ fn update_system(
 ) {
     // `object_get_function_value`: none is on at one.
     (running.scale, running.on) = match system.primary {
-        Some(slot) => (outputs[slot], outputs[slot] > 0.0),
+        Some(slot) => (outputs[slot], active[slot]),
         None => (1.0, true),
     };
     running.color = match system.change_color {

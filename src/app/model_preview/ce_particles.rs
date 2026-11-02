@@ -945,6 +945,8 @@ pub(crate) struct CeParticleField {
 /// What an attached effect reads of its object.
 pub(crate) struct CeObjectInputs {
     pub(crate) outputs: [f32; 4],
+    /// Which outputs are on.
+    pub(crate) active: [bool; 4],
     pub(crate) change_colors: [[f32; 3]; 4],
 }
 
@@ -1540,7 +1542,7 @@ fn attached_inputs(running: &mut RunningEffect, effect: &CeEffectAt, inputs: &Ce
     let def = &effect.def;
     // `object_get_function_value`: none is on at one.
     let (scale_a, on) = match effect.primary {
-        Some(output) => (inputs.outputs[output], inputs.outputs[output] > 0.0),
+        Some(output) => (inputs.outputs[output], inputs.active[output]),
         None => (1.0, true),
     };
     running.scale_a = scale_a;
