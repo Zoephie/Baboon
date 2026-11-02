@@ -218,6 +218,66 @@ impl H3ParticleProperty {
         let t = self.scalar(state);
         std::array::from_fn(|axis| self.ends[0][axis] + (self.ends[1][axis] - self.ends[0][axis]) * t)
     }
+
+    /// `get_interpolated_value` for what a direction is: around, not across.
+    fn around(&self, state: &H3ParticleState) -> [f32; 3] {
+        slerped(self.ends, self.scalar(state))
+    }
+
+    /// `c_editable_property_base::get_max`, sampled.
+    fn most(&self) -> f32 {
+        let sample = |at: usize| {
+            let t = at as f32 / 16.0;
+            [self.function.evaluate(t, 0.0), self.function.evaluate(t, 1.0)]
+        };
+        (0..=16).flat_map(sample).fold(f32::MIN, f32::max)
+    }
+}
+
+/// Unnormalized, as the game's is, and with no special case but what keeps it
+/// from dividing by nothing.
+fn slerped([from, to]: [[f32; 3]; 2], t: f32) -> [f32; 3] {
+    let lengths = dot(from, from).sqrt() * dot(to, to).sqrt();
+    let lengths = if lengths == 0.0 { 1.0 } else { lengths };
+    let mut cos = dot(from, to) / lengths;
+    if cos >= 0.9999 {
+        cos *= 0.9999;
+    }
+    let sin = (1.0 - cos * cos).sqrt();
+    let angle = cos.acos();
+    let (near, far) = (((1.0 - t) * angle).sin() / sin, (angle * t).sin() / sin);
+    std::array::from_fn(|axis| from[axis] * near + to[axis] * far)
+}
+
+/// `c_particle_system_definition::postprocess`' LOD: in, out, feather in and
+/// feather out. Only what ignores the camera mode gets the near pair, and that
+/// from how fast it emits.
+fn baked_lod(raw: [f32; 4], any_camera: bool, rates: impl Iterator<Item = f32>) -> [f32; 4] {
+    let empty = |value: f32| value.abs() < 0.0001;
+    let [mut near, mut far, mut feather_in, mut feather_out] = raw;
+    if empty(far) {
+        far = 20.0;
+    }
+    if empty(feather_out) {
+        feather_out = 5.0;
+    }
+    if any_camera {
+        let busy = ((rates.map(|rate| rate / 30.0).sum::<f32>() - 2.0) / 3.0).clamp(0.0, 1.0);
+        if empty(near) {
+            near = busy * -0.1;
+        }
+        if empty(feather_in) {
+            feather_in = (1.0 - busy) + busy * 3.0;
+        }
+    }
+    // Its inverses, which a feather of nothing leaves at 1.
+    let feather = |value: f32| if empty(value) { 1.0 } else { value };
+    [near, far, feather(feather_in), feather(feather_out)]
+}
+
+/// `frame_advance`: what has landed stops once it is this slow.
+fn comes_to_rest(landed: bool, velocity: [f32; 3]) -> bool {
+    landed && dot(velocity, velocity) <= SPEED_AT_REST * SPEED_AT_REST
 }
 
 /// A point, a vector, or a radius and angles, whichever a property has.
@@ -239,6 +299,39 @@ pub(super) fn read_ends(property: TagStruct<'_>) -> [[f32; 3]; 2] {
         }
     };
     [end("Starting interpolant"), end("Ending interpolant")]
+}
+
+/// `frame_advance`: 0.0625 of speed squared stops what has landed.
+const SPEED_AT_REST: f32 = 0.25;
+
+/// A `particle_physics` entry, in the order `update_particles` runs them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum H3ParticleController {
+    Physics,
+    Collider,
+    Flock,
+}
+
+/// The emitter's own `movements`, or else its template's.
+fn read_controllers(source: &TagSource, emitter: TagStruct<'_>) -> Vec<H3ParticleController> {
+    let Some(movement) = emitter.descend("particle movement") else {
+        return Vec::new();
+    };
+    let template = movement
+        .read_tag_ref_path("template")
+        .filter(|path| !path.is_empty())
+        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+    let own = elements(movement, "movements");
+    let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
+    movements
+        .into_iter()
+        .filter_map(|entry| match entry.read_enum_name("type").as_deref() {
+            Some("physics") => Some(H3ParticleController::Physics),
+            Some("collider") => Some(H3ParticleController::Collider),
+            Some("swarm") => Some(H3ParticleController::Flock),
+            _ => None,
+        })
+        .collect()
 }
 
 /// `initialize_particle`'s nudge to a speed of none, which what faces its
@@ -326,6 +419,8 @@ impl H3ParticleAlbedo {
 /// A `.particle`.
 #[derive(Debug)]
 pub(crate) struct H3ParticleLook {
+    /// `dies at rest`.
+    dies_at_rest: bool,
     /// Whether a speed of none is nudged to a little.
     still_moves: bool,
     billboard: H3Billboard,
@@ -740,6 +835,11 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
             .unwrap_or_default()
             .iter()
             .any(|(_, name)| name.starts_with("dies on structure collision")),
+        dies_at_rest: root
+            .read_flag_names("main flags")
+            .unwrap_or_default()
+            .iter()
+            .any(|(_, name)| name.starts_with("dies at rest")),
         tint_from_lightmap: flagged("tint from lightmap"),
         double_sided: flagged("double-sided"),
         attachments: elements(root, "attachments")
@@ -965,6 +1065,62 @@ fn read_flock(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAlloca
     })
 }
 
+impl H3ParticleCollider {
+    /// `c_particle_controller::update_particles_collider`, on the preview's ground.
+    fn update(
+        &self,
+        particles: &mut [Particle],
+        state: H3ParticleState,
+        plane: ([f32; 3], f32),
+        dies: bool,
+        hits: &mut Vec<(u64, [f32; 3], [f32; 3])>,
+        dt: f32,
+    ) {
+        for particle in particles.iter_mut().filter(|particle| !particle.resting) {
+            let state = H3ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..state };
+            let (elasticity, friction) = (self.elasticity.scalar(&state), self.friction.scalar(&state));
+            match bounce(particle.position, particle.velocity, plane, dt, elasticity, friction) {
+                Some((place, velocity)) => {
+                    particle.position = place;
+                    particle.velocity = velocity;
+                    particle.rotation_rate *= 1.0 - friction;
+                    particle.landed = plane.0[2] > 0.8;
+                    if !particle.colliding {
+                        hits.push((particle.id, place, velocity));
+                        particle.colliding = true;
+                    }
+                    if dies {
+                        particle.age = 1.0;
+                    }
+                }
+                None => particle.colliding = false,
+            }
+        }
+    }
+}
+
+impl H3ParticlePhysics {
+    /// `c_particle_controller::update_particles_physics`.
+    fn update(&self, particles: &mut [Particle], state: H3ParticleState, dt: f32) {
+        for particle in particles.iter_mut().filter(|particle| !particle.resting) {
+            let state = H3ParticleState {
+                age: particle.age,
+                seeds: particle.seeds,
+                system_seeds: particle.system_seeds,
+                emission_time: particle.emission_time,
+                rotation: particle.rotation,
+                ..state
+            };
+            let read = |property: &Option<H3ParticleProperty>| property.as_ref().map(|property| property.scalar(&state));
+            particle.velocity[2] -= read(&self.gravity).unwrap_or(1.0) * GRAVITY * dt;
+            let air = (read(&self.air_friction).unwrap_or(1.0) * dt).clamp(0.0, 1.0);
+            particle.velocity = particle.velocity.map(|axis| axis - air * axis);
+            let spin = (read(&self.rotational_friction).unwrap_or(0.0) * dt).clamp(0.0, 1.0);
+            particle.rotation_rate -= spin * particle.rotation_rate;
+        }
+    }
+}
+
 impl H3ParticleFlock {
     /// `update_particles_flocking`. Avoidance is of a world the preview lacks.
     fn update(&self, particles: &mut [Particle], base: H3ParticleState, home: [f32; 3], dt: f32) {
@@ -1077,6 +1233,7 @@ impl H3ParticleAxis {
 
 #[derive(Debug)]
 struct H3Emitter {
+    controllers: Vec<H3ParticleController>,
     shape: H3EmissionShape,
     points: Vec<H3CustomPoint>,
     scroll: [f32; 2],
@@ -1156,6 +1313,7 @@ fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter>
         property("particle alpha black point")?,
     );
     let axis_angle = property("emission axis angle")?;
+    let controllers = read_controllers(source, emitter);
     let physics = read_physics(source, emitter, &mut seeds);
     let flock = read_flock(source, emitter, &mut seeds);
     let collider = read_collider(source, emitter, &mut seeds);
@@ -1169,6 +1327,7 @@ fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter>
         },
         axis_angle,
         scroll: [scroll.i, scroll.j],
+        controllers,
         points: read_custom_points(source, emitter),
         shape, offset, direction, radius, angle, starting, most, rate, lifespan, acceleration, speed,
         rotation, rotation_rate, size, scale, tint, alpha, black_point, physics, flock, collider,
@@ -1245,10 +1404,15 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
         hidden: flagged("don't render system"),
         die_with_effect: flagged("particles die when effect ends"),
         lod: {
-            let out = real("LOD out distance");
-            (!flagged("lod always 1.0") && !flagged("ignore lod") && out > 0.0).then(|| {
-                [real("LOD in distance"), out, real("LOD feather in delta"), real("LOD feather out delta")]
-            })
+            let raw = [
+                real("LOD in distance"),
+                real("LOD out distance"),
+                real("LOD feather in delta"),
+                real("LOD feather out delta"),
+            ];
+            let any_camera = system.read_int_any("camera mode") == Some(0);
+            let rates = emitters.iter().map(|emitter| emitter.rate.most());
+            (!flagged("lod always 1.0") && !flagged("ignore lod")).then(|| baked_lod(raw, any_camera, rates))
         },
         sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
         world: system.read_enum_name("coordinate system").as_deref() == Some("world"),
@@ -1492,6 +1656,10 @@ struct Particle {
     id: u64,
     /// In contact, so that a collision's attachments play once.
     colliding: bool,
+    /// Touched a surface it could stand on this step.
+    landed: bool,
+    /// Slow enough on one to have stopped for good.
+    resting: bool,
     axis: [f32; 3],
     age: f32,
     inverse_lifespan: f32,
@@ -1513,6 +1681,8 @@ struct RunningEmitter {
     made: u64,
     accumulator: f32,
     started: bool,
+    /// Where it was a step ago, for what it spawns on the way.
+    previous: Option<[f32; 3]>,
     random: Random,
 }
 
@@ -1559,6 +1729,7 @@ fn fresh_emitters(system: &H3ParticleSystem, seed: u32) -> Vec<RunningEmitter> {
             made: 0,
             accumulator: 0.0,
             started: false,
+            previous: None,
             random: Random(seed.wrapping_mul(977) ^ (index as u32).wrapping_mul(131)),
         })
         .collect()
@@ -1607,12 +1778,13 @@ fn step_location(
             });
             emitter.pulse(&system.look, state, running, STEP, frame, system.world, births, at);
             let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
-            emitter.step(state, &mut running.particles, STEP, home, deaths, ground);
+            emitter.step(state, &mut running.particles, STEP, home, deaths, ground, system.look.dies_at_rest);
         } else {
             // The next run of its event is a new location's, with its burst.
             running.started = false;
+            running.previous = None;
             let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
-            emitter.step(rest, &mut running.particles, STEP, home, deaths, ground);
+            emitter.step(rest, &mut running.particles, STEP, home, deaths, ground, system.look.dies_at_rest);
         }
         if !(system.attached.is_empty() && system.carried.is_empty()) {
             let (offset, turned) = frame;
@@ -1696,6 +1868,7 @@ impl H3Emitter {
         started: &mut Vec<(u64, [f32; 3], [f32; 3])>,
         at: usize,
     ) {
+        // `c_particle_emitter::pulse`: spread through the step, not bunched at its end.
         running.accumulator = running.accumulator.fract();
         if !running.started {
             running.started = true;
@@ -1704,12 +1877,17 @@ impl H3Emitter {
         running.accumulator += self.rate.scalar(&state) * dt;
         let most = self.most.scalar(&state);
         if most > 0.0 {
-            running.accumulator = running.accumulator.min(most - running.particles.len() as f32).max(0.0);
+            running.accumulator = running.accumulator.min(most - running.particles.len() as f32);
         }
-        for _ in 0..running.accumulator.floor() as usize {
+        let (offset, turned) = frame;
+        let previous = running.previous.unwrap_or(offset);
+        running.previous = Some(offset);
+        let between = if running.accumulator >= 1.0 { running.accumulator.recip() } else { 0.0 };
+        for birth in 0..running.accumulator.max(0.0).floor() as usize {
             if running.particles.len() >= MOST_PARTICLES {
                 break;
             }
+            let along = birth as f32 * between;
             let random = &mut running.random;
             let seeds: [f32; SEEDS] = std::array::from_fn(|_| random.next());
             let mut particle_state = H3ParticleState { seeds, emission_time: state.system_age, ..state };
@@ -1724,25 +1902,32 @@ impl H3Emitter {
             let speed = self.speed.scalar(&particle_state);
             let speed = if speed == 0.0 && look.still_moves { 0.001 } else { speed };
             velocity = velocity.map(|axis| axis / length * speed);
-            let (offset, turned) = frame;
             let to_world = |vector: [f32; 3]| -> [f32; 3] {
                 std::array::from_fn(|axis| (0..3).map(|at| turned[at][axis] * vector[at]).sum())
             };
             let placed = {
                 let moved = to_world(position);
-                std::array::from_fn(|axis| offset[axis] + moved[axis])
+                std::array::from_fn(|axis| previous[axis] + (offset[axis] - previous[axis]) * along + moved[axis])
             };
             running.made += 1;
             let id = running.made << 8 | at as u64;
             started.push((id, placed, to_world(velocity)));
-            let (position, velocity) = if world { (placed, to_world(velocity)) } else { (position, velocity) };
+            let ahead = (1.0 - along) * dt;
+            let (position, velocity) = if world {
+                (placed, to_world(velocity))
+            } else {
+                (std::array::from_fn(|axis| position[axis] + velocity[axis] * ahead), velocity)
+            };
+            let inverse_lifespan = 1.0 / self.lifespan.scalar(&particle_state).max(0.01);
             let axis = self.axis.pick(self.reference_axis, self.axis_angle.scalar(&particle_state), random);
             running.particles.push(Particle {
                 id,
                 colliding: false,
+                landed: false,
+                resting: false,
                 axis,
-                age: 0.0,
-                inverse_lifespan: 1.0 / self.lifespan.scalar(&particle_state).max(0.01),
+                age: along * dt * inverse_lifespan,
+                inverse_lifespan,
                 position,
                 velocity,
                 rotation: if look.random_rotation { random.next() } else { 0.0 },
@@ -1766,34 +1951,32 @@ impl H3Emitter {
         home: [f32; 3],
         ended: &mut Vec<(u64, [f32; 3], [f32; 3])>,
         ground: Option<(([f32; 3], f32), bool, &mut Vec<(u64, [f32; 3], [f32; 3])>)>,
+        dies_at_rest: bool,
     ) {
-        if let Some(flock) = &self.flock {
-            flock.update(particles, state, home, dt);
-        }
-        if let (Some(collider), Some((plane, dies, hits))) = (&self.collider, ground) {
-            for particle in particles.iter_mut() {
-                let state = H3ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..state };
-                let (elasticity, friction) = (collider.elasticity.scalar(&state), collider.friction.scalar(&state));
-                match bounce(particle.position, particle.velocity, plane, dt, elasticity, friction) {
-                    Some((place, velocity)) => {
-                        particle.position = place;
-                        particle.velocity = velocity;
-                        particle.rotation_rate *= 1.0 - friction;
-                        if !particle.colliding {
-                            hits.push((particle.id, place, velocity));
-                            particle.colliding = true;
-                        }
-                        if dies {
-                            particle.age = 1.0;
-                        }
+        let mut ground = ground;
+        for controller in &self.controllers {
+            match controller {
+                H3ParticleController::Flock => {
+                    if let Some(flock) = &self.flock {
+                        flock.update(particles, state, home, dt);
                     }
-                    None => particle.colliding = false,
+                }
+                H3ParticleController::Collider => {
+                    if let (Some(collider), Some((plane, dies, hits))) = (&self.collider, ground.as_mut()) {
+                        collider.update(particles, state, *plane, *dies, hits, dt);
+                    }
+                }
+                H3ParticleController::Physics => {
+                    if let Some(physics) = &self.physics {
+                        physics.update(particles, state, dt);
+                    }
                 }
             }
         }
+        // `c_particle_emitter::frame_advance`.
         particles.retain_mut(|particle| {
             particle.age += particle.inverse_lifespan * dt;
-            if particle.age >= 1.0 {
+            if particle.age > 1.0 || (particle.resting && dies_at_rest) {
                 ended.push((particle.id, particle.position, particle.velocity));
                 return false;
             }
@@ -1805,20 +1988,20 @@ impl H3Emitter {
                 rotation: particle.rotation,
                 ..state
             };
-            for axis in 0..3 {
-                particle.position[axis] += particle.velocity[axis] * dt;
-            }
-            let acceleration = self.acceleration.vector(&state);
+            let acceleration = self.acceleration.around(&state);
             for axis in 0..3 {
                 particle.velocity[axis] += acceleration[axis] * dt;
             }
-            if let Some(physics) = &self.physics {
-                let read = |property: &Option<H3ParticleProperty>| property.as_ref().map(|property| property.scalar(&state));
-                particle.velocity[2] -= read(&physics.gravity).unwrap_or(1.0) * GRAVITY * dt;
-                let air = (read(&physics.air_friction).unwrap_or(1.0) * dt).clamp(0.0, 1.0);
-                particle.velocity = particle.velocity.map(|axis| axis - air * axis);
-                let spin = (read(&physics.rotational_friction).unwrap_or(0.0) * dt).clamp(0.0, 1.0);
-                particle.rotation_rate -= spin * particle.rotation_rate;
+            if particle.resting {
+                return true;
+            }
+            if comes_to_rest(particle.landed, particle.velocity) {
+                particle.resting = true;
+                return true;
+            }
+            particle.landed = false;
+            for axis in 0..3 {
+                particle.position[axis] += particle.velocity[axis] * dt;
             }
             particle.rotation = (particle.rotation + particle.rotation_rate * dt).rem_euclid(1.0);
             particle.frame = (particle.frame + particle.frame_rate * dt).rem_euclid(1.0);
@@ -2338,7 +2521,7 @@ fn emitter_frame(
     axes: [[f32; 3]; 3],
     state: &H3ParticleState,
 ) -> ([f32; 3], [[f32; 3]; 3]) {
-    let direction = unit(emitter.direction.vector(state));
+    let direction = unit(emitter.direction.around(state));
     let yaw = direction[1].atan2(direction[0]);
     let pitch = direction[2].asin();
     let (sin_yaw, cos_yaw) = yaw.sin_cos();
@@ -2392,6 +2575,32 @@ mod tests {
         assert!(!still_particles_move(true, H3Billboard::ScreenFacing));
         assert!(still_particles_move(true, H3Billboard::ScreenParallel));
         assert!(still_particles_move(true, H3Billboard::VelocityHorizontal));
+    }
+
+    #[test]
+    fn a_lod_left_empty_takes_the_postprocess_defaults() {
+        assert_eq!(baked_lod([0.0; 4], true, [].into_iter()), [0.0, 20.0, 1.0, 5.0]);
+        assert_eq!(baked_lod([0.0; 4], true, [150.0].into_iter()), [-0.1, 20.0, 3.0, 5.0]);
+        assert_eq!(baked_lod([0.0; 4], false, [150.0].into_iter()), [0.0, 20.0, 1.0, 5.0], "not for one camera");
+        assert_eq!(baked_lod([1.0, 8.0, 2.0, 3.0], true, [150.0].into_iter()), [1.0, 8.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn a_direction_turns_around_rather_than_across() {
+        let ends = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let middle = slerped(ends, 0.5);
+        assert!((dot(middle, middle).sqrt() - 1.0).abs() < 1e-3, "{middle:?}");
+        assert!((slerped(ends, 0.0)[0] - 1.0).abs() < 1e-3);
+        assert!((slerped(ends, 1.0)[1] - 1.0).abs() < 1e-3);
+        let same = slerped([[0.0, 0.0, 2.0], [0.0, 0.0, 2.0]], 0.5);
+        assert!(same.iter().all(|axis| axis.is_finite()));
+    }
+
+    #[test]
+    fn only_what_landed_slowly_rests() {
+        assert!(comes_to_rest(true, [0.2, 0.0, 0.0]));
+        assert!(!comes_to_rest(true, [0.3, 0.0, 0.0]));
+        assert!(!comes_to_rest(false, [0.0; 3]));
     }
 
     #[test]
