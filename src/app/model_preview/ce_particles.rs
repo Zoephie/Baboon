@@ -62,7 +62,7 @@ const TINT_BIT: u32 = 11;
 
 /// A `point_physics`, as its postprocess leaves it.
 #[derive(Debug, Clone, Copy)]
-struct CePointPhysics {
+pub(crate) struct CePointPhysics {
     mass_over_radius_cubed: f32,
     air_buoyancy: f32,
     air_friction: f32,
@@ -72,7 +72,7 @@ struct CePointPhysics {
 }
 
 impl CePointPhysics {
-    fn read(tag: &TagFile) -> Self {
+    pub(super) fn read(tag: &TagFile) -> Self {
         let root = tag.root();
         let density = root.read_real("density").unwrap_or(0.0);
         let flags = root.read_int_any("flags").unwrap_or(0);
@@ -92,7 +92,7 @@ impl CePointPhysics {
 
     /// `point_physics_update` in still air over a flat floor at `ground`: true
     /// where it touched it, the only structure a preview has.
-    fn step(&self, place: &mut [f32; 3], velocity: &mut [f32; 3], radius: f32, ground: f32, dt: f32) -> bool {
+    pub(super) fn step(&self, place: &mut [f32; 3], velocity: &mut [f32; 3], radius: f32, ground: f32, dt: f32) -> bool {
         let bulk = (AIR_MASS_OVER_RADIUS_CUBED + self.mass_over_radius_cubed) * radius * radius * radius;
         let drag = self.air_friction * radius * radius;
         velocity[2] += GRAVITY * self.air_buoyancy * dt;

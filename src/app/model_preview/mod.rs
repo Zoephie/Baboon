@@ -27,6 +27,7 @@ mod attachment;
 mod ce_attachments;
 mod ce_functions;
 mod ce_lights;
+mod ce_contrails;
 mod ce_particles;
 mod ce_passes;
 mod h2_bloom;
@@ -151,6 +152,7 @@ pub(crate) struct RenderModelPreview {
     pub ce_antennas: Vec<ce_lights::CeAntenna>,
     /// Halo CE effects the object's attachments hang on it.
     pub ce_effects: Vec<ce_particles::CeEffectAt>,
+    pub ce_contrails: Vec<ce_contrails::CeContrailAt>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -1010,6 +1010,7 @@ pub(super) fn object_moves(
         || !data.preview.h2_liquids.is_empty()
         || !data.preview.h2_contrails.is_empty()
         || !data.preview.ce_effects.is_empty()
+        || !data.preview.ce_contrails.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
@@ -1139,6 +1140,7 @@ impl ModelGpuFrame {
             || !preview.h3_cloth.is_empty()
             || !preview.h2_contrails.is_empty()
             || !preview.ce_effects.is_empty()
+            || !preview.ce_contrails.is_empty()
             || !preview.h2_liquids.is_empty()
             || !preview.h2_light_volumes.is_empty()
             || !preview.h2_flares.is_empty()
@@ -1818,6 +1820,8 @@ struct ModelGpuSlot {
     /// Halo CE effect particles, and their images by effect, particle and image.
     ce_particles: ce_particles::CeParticleField,
     ce_particle_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
+    ce_contrails: ce_contrails::CeContrailField,
+    ce_contrail_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
@@ -1880,6 +1884,8 @@ impl ModelGpuSlot {
                 h3_particles: Default::default(),
                 ce_particles: Default::default(),
                 ce_particle_textures: Vec::new(),
+                ce_contrails: Default::default(),
+                ce_contrail_textures: Vec::new(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
                 h3_vision_clock: None,
@@ -2432,16 +2438,23 @@ unsafe fn draw_ce_particles(
             let side = ce_flare_clip(camera, std::array::from_fn(|axis| center[axis] + view.right[axis] * radius));
             ((side[0] / side[3] - middle[0] / middle[3]).abs() * half_width * 2.0).max(0.0)
         };
-        let quads = uploaded.ce_particles.quads(effects, bones, view, pixels);
-        gl.use_program(Some(effect_gl.program));
-        gl.bind_vertex_array(Some(effect_gl.vertex_array));
-        gl.bind_buffer(glow::ARRAY_BUFFER, Some(effect_gl.buffer));
-        gl.active_texture(glow::TEXTURE0);
-        gl.enable(glow::DEPTH_TEST);
-        gl.depth_func(glow::LEQUAL);
-        gl.depth_mask(false);
-        gl.enable(glow::BLEND);
-        for quad in quads {
+        let contrails = &frame.preview.ce_contrails;
+        let outputs = |object: u8| states.get(object as usize).map_or([0.0; 4], |state| state.outputs);
+        uploaded.ce_contrails.advance(contrails, outputs, bones, ground, frame.time);
+        let change_colors = |object: u8| states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors);
+        // What each sprite draws with: texture, blend, nonlinear tint, color, corners.
+        type Sprite = (glow::NativeTexture, i32, bool, [f32; 4], [[f32; 5]; 4]);
+        let mut sprites: Vec<Sprite> = Vec::new();
+        for quad in uploaded.ce_contrails.quads(contrails, change_colors, view) {
+            let Some(contrail) = contrails.get(quad.contrail) else {
+                continue;
+            };
+            let texture = uploaded.ce_contrail_textures.get(quad.contrail).and_then(|images| images.get(quad.image)).copied().flatten();
+            if let Some(texture) = texture {
+                sprites.push((texture, contrail.def.blend, contrail.def.nonlinear_tint, quad.color, quad.corners));
+            }
+        }
+        for quad in uploaded.ce_particles.quads(effects, bones, view, pixels) {
             let Some(def) = effects.get(quad.effect).and_then(|effect| effect.def.particles.get(quad.def)) else {
                 continue;
             };
@@ -2452,18 +2465,28 @@ unsafe fn draw_ce_particles(
                 .and_then(|images| images.get(quad.image))
                 .copied()
                 .flatten();
-            let Some(texture) = texture else {
-                continue;
-            };
+            if let Some(texture) = texture {
+                sprites.push((texture, def.blend, def.nonlinear_tint, quad.color, quad.corners));
+            }
+        }
+        gl.use_program(Some(effect_gl.program));
+        gl.bind_vertex_array(Some(effect_gl.vertex_array));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(effect_gl.buffer));
+        gl.active_texture(glow::TEXTURE0);
+        gl.enable(glow::DEPTH_TEST);
+        gl.depth_func(glow::LEQUAL);
+        gl.depth_mask(false);
+        gl.enable(glow::BLEND);
+        for (texture, function, nonlinear, color, corners) in sprites {
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            let blend = ce_passes::framebuffer_blend(def.blend);
+            let blend = ce_passes::framebuffer_blend(function);
             gl.blend_equation(gl_blend_equation(blend.equation));
             gl.blend_func(gl_blend_factor(blend.source), gl_blend_factor(blend.destination));
-            gl.uniform_1_i32(effect_gl.blend.as_ref(), def.blend);
-            gl.uniform_1_i32(effect_gl.nonlinear.as_ref(), i32::from(def.nonlinear_tint));
-            let [red, green, blue, alpha] = quad.color;
+            gl.uniform_1_i32(effect_gl.blend.as_ref(), function);
+            gl.uniform_1_i32(effect_gl.nonlinear.as_ref(), i32::from(nonlinear));
+            let [red, green, blue, alpha] = color;
             gl.uniform_4_f32(effect_gl.color.as_ref(), red, green, blue, alpha);
-            let vertices = quad.corners.map(|[x, y, z, u, v]| {
+            let vertices = corners.map(|[x, y, z, u, v]| {
                 let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
                 [a, b, c, d, u, v]
             });
@@ -3429,6 +3452,7 @@ impl ModelGlRenderer {
             && !(preview.ce_lights.is_empty()
                 && preview.ce_antennas.is_empty()
                 && preview.ce_effects.is_empty()
+                && preview.ce_contrails.is_empty()
                 && preview.h2_antennas.is_empty()
                 && preview.h2_flares.is_empty()
                 && preview.h3_flares.is_empty()
@@ -3539,6 +3563,18 @@ impl ModelGlRenderer {
                     gl.delete_texture(texture);
                 }
                 uploaded.ce_particles = Default::default();
+                for texture in uploaded.ce_contrail_textures.drain(..).flatten().flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.ce_contrails = Default::default();
+                uploaded.ce_contrail_textures = frame
+                    .preview
+                    .ce_contrails
+                    .iter()
+                    .map(|contrail| {
+                        contrail.def.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
+                    })
+                    .collect();
                 uploaded.ce_particle_textures = frame
                     .preview
                     .ce_effects
@@ -3725,7 +3761,7 @@ impl ModelGlRenderer {
                     gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                 }
             }
-            if antennas && !frame.preview.ce_effects.is_empty() {
+            if antennas && !(frame.preview.ce_effects.is_empty() && frame.preview.ce_contrails.is_empty()) {
                 draw_ce_particles(gl, &mut self.ce_effect_gl, self.program, uploaded, frame, bones, &view);
                 gl.use_program(Some(flares.program));
                 gl.bind_vertex_array(Some(flares.vertex_array));
