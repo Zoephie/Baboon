@@ -90,7 +90,7 @@ pub(in crate::app) fn draw_welcome_screen(
         validation,
     );
 
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(32.0);

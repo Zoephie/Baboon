@@ -542,7 +542,7 @@ impl Default for GuiPrefs {
             nested_default: NestedDefault::default(),
             show_browser_prefixes: false,
             folders_before_tags: false,
-            double_click_to_open_tags: false,
+            double_click_to_open_tags: true,
             reveal_active_tab_in_browser: false,
             show_block_sizes: false,
             string_list_checkboxes: false,

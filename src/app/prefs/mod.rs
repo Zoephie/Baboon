@@ -124,7 +124,7 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
         double_click_to_open_tags: value
             .get("double_click_to_open_tags")
             .and_then(Value::as_bool)
-            .unwrap_or(false),
+            .unwrap_or(true),
         reveal_active_tab_in_browser: value.get("reveal_active_tab_in_browser")
             .and_then(Value::as_bool).unwrap_or(false),
         session_restore: value

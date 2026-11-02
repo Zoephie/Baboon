@@ -231,6 +231,29 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
 
     let hierarchy = group_hierarchy(edit.definitions_root, edit.game);
     let accepted = tag_reference_accepted_groups(meta, &hierarchy);
+    let mut rejected = (draft.text.trim() != value.trim()).then(|| {
+        tag_reference_input_ops(path, &draft.text, accepted.as_deref(), edit.names, edit.game).err().map(|reason| {
+            let wrong_type = parse_tag_reference(&tag_reference_input_in_game(&draft.text, edit.game))
+                .ok().and_then(|reference| reference.group_tag_and_name)
+                .is_some_and(|(group, _)| hierarchy.name(group).is_some()
+                    || edit.names.and_then(|names| names.name_for(group)).is_some()
+                    || blam_tags::paths::group_tag_to_extension(group).is_some());
+            (if wrong_type { "wrong tag type" } else { "invalid reference" }, reason)
+        })
+    }).flatten();
+    if rejected.is_some() && ui.memory(|memory| memory.has_focus(id) || memory.had_focus_last_frame(id))
+        && ui.input(|input| input.key_pressed(egui::Key::Escape))
+    {
+        draft.set_clean(value);
+        rejected = None;
+    }
+    // An unfinished path is ordinary while typing. Report malformed text only
+    // after leaving/submitting the field; a recognizable wrong type is immediate.
+    if rejected.as_ref().is_some_and(|(label, _)| *label == "invalid reference")
+        && draft.changed && ui.memory(|memory| memory.has_focus(id))
+    {
+        rejected = None;
+    }
     let row_response = ui
         .horizontal(|ui| {
             ui.add_space(indent);
@@ -253,10 +276,14 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     id,
                     icon,
                     missing,
+                    rejected.as_ref().map(|(label, reason)| (*label, reason.as_str())),
                 );
+
+                if response.changed() { ui.ctx().request_repaint(); }
 
                 draft.note_response(&response);
                 if draft.should_commit(ui, &response) {
+                    ui.ctx().request_repaint();
                     let input = draft.text.trim().to_owned();
                     commit_tag_reference_input(
                         edit.pending,
@@ -524,17 +551,14 @@ pub(super) fn tag_reference_input_ops(
 ) -> Result<DeferredOps, String> {
     let input = tag_reference_input_in_game(input, game);
     let input = input.as_ref();
-    if let Some(accepted) = accepted {
-        match parse_tag_reference(input) {
-            Ok(parsed) if tag_reference_group_allowed(&parsed, accepted) => {}
-            Ok(_) => {
-                return Err(format!(
-                    "Reference must be a {} tag",
-                    accepted_groups_label(accepted, names)
-                ));
-            }
-            Err(error) => return Err(format!("Invalid tag reference: {error}")),
-        }
+    let parsed = parse_tag_reference(input).map_err(|error| format!("Invalid tag reference: {error}"))?;
+    if let Some(accepted) = accepted
+        && !tag_reference_group_allowed(&parsed, accepted)
+    {
+        return Err(format!(
+            "Reference must be a {} tag",
+            accepted_groups_label(accepted, names)
+        ));
     }
     Ok(field_edit_ops(path, input))
 }
@@ -909,6 +933,122 @@ pub(in crate::app) fn draw_foundation_flags_row(
 mod tests {
     use super::*;
     use crate::app::editor::{model_source_dir, sanitize_ref_path};
+
+    #[test]
+    fn rejected_reference_draft_is_marked_wrong_tag_type_in_its_field() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "tag");
+        edit.editable = true;
+        edit.game = Some(GameId::Halo3);
+        let mut meta = field_display_meta("bitmap");
+        meta.tag_reference_allowed = vec![u32::from_be_bytes(*b"bitm")];
+        let draft = edit.buffers.draft_mut("tag|bitmap", "NONE");
+        draft.text = "objects\\wrong.model".to_owned();
+        draft.changed = true;
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1100.0, 200.0))),
+            ..Default::default()
+        }, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                draw_foundation_tag_reference_row(ui, &meta, "NONE", None, None, 0, "bitmap", &mut edit, 320.0);
+            });
+        });
+        assert!(edit.pending.is_empty(), "a mismatched type must not enter the document");
+        let commits = edit.buffers.take_uncommitted(DraftFlush::All);
+        assert!(commits[0].1.as_ref().is_err_and(|message| message.contains("bitmap")));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "wrong tag type")),
+            "the rejected reference needs a persistent in-field warning");
+    }
+
+    #[test]
+    fn reference_warnings_wait_for_unfinished_typing_but_show_wrong_types_immediately() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "tag");
+        edit.editable = true;
+        edit.game = Some(GameId::Halo3);
+        let mut meta = field_display_meta("bitmap");
+        meta.tag_reference_allowed = vec![u32::from_be_bytes(*b"bitm")];
+        let key = "tag|bitmap".to_owned();
+        let id = edit.widget_id(("tag_ref", &key));
+        let frame = |edit: &mut FieldEditContext<'_>, events| {
+            crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1100.0, 200.0))),
+                events, ..Default::default()
+            }, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_foundation_tag_reference_row(ui, &meta, "NONE", None, None, 0, "bitmap", edit, 320.0);
+                });
+            })
+        };
+        let has_warning = |output: &egui::FullOutput, label| output.shapes.iter().any(|shape|
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label));
+        frame(&mut edit, Vec::new());
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        for (text, expected) in [
+            ("objects\\partial", None),
+            ("objects\\partial.bi", None),
+            ("objects\\wrong.model", Some("wrong tag type")),
+            ("objects\\correct.bitmap", None),
+            ("objects\\partial", None),
+        ] {
+            let draft = edit.buffers.draft_mut(&key, "NONE");
+            draft.text = text.to_owned();
+            draft.changed = true;
+            let output = frame(&mut edit, Vec::new());
+            assert_eq!(has_warning(&output, "wrong tag type"), expected == Some("wrong tag type"), "{text}");
+            assert!(!has_warning(&output, "invalid reference"), "unfinished typing must stay neutral: {text}");
+        }
+        ctx.memory_mut(|memory| memory.surrender_focus(id));
+        let output = frame(&mut edit, Vec::new());
+        assert!(has_warning(&output, "invalid reference"), "leaving invalid text must show a warning");
+        // A rejected submit remains marked on refocus until typing resumes.
+        edit.buffers.take_uncommitted(DraftFlush::All);
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        let output = frame(&mut edit, Vec::new());
+        assert!(has_warning(&output, "invalid reference"));
+        let output = frame(&mut edit, vec![egui::Event::Key {
+            key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(!has_warning(&output, "invalid reference"));
+        assert_eq!(edit.buffers.draft_mut(&key, "NONE").text, "NONE");
+    }
+
+    #[test]
+    fn rejected_reference_draft_keeps_the_previous_reference_when_other_edits_are_saved() {
+        use crate::app::loose_fixture::{LooseKit, edit_field, group_tag, real_of, reference_of, set_reference};
+        let fixture = LooseKit::new("rejected-reference-save", "halo3_mcc");
+        let render_model = group_tag("halo3_mcc", "render_model");
+        fixture.write_mcc("objects\\example", "model", |tag| {
+            set_reference(tag, "render model", render_model, "objects\\previous");
+        });
+        let mut app = Baboon::for_test();
+        fixture.install(&mut app);
+        let key = fixture.open(&mut app, "objects\\example.model");
+        let id = app.model.kits[0].id;
+        let draft_key = format!("{key}|render model");
+        let draft = app.views[id].edit_buffers.draft_mut(&draft_key, "objects\\previous.render_model");
+        draft.text = "objects\\wrong.bitmap".to_owned();
+        draft.changed = true;
+        draft.keep_commit(|| DraftCommit::new(&key, vec![draft_key.clone()], move |texts| {
+            tag_reference_input_ops("render model", texts[0], Some(&[render_model]), None, Some(GameId::Halo3))
+        }));
+        app.commit_drafts(DraftFlush::All);
+        assert!(!app.model.kits[0].parsed_tags[&key].dirty.is_set());
+        assert!(app.model.status.contains("render_model"));
+        edit_field(&mut app, &key, "disappear distance", "12.5");
+        app.save_tag_by_key(&key).expect("other valid changes still save");
+        let saved = blam_tags::TagFile::read(fixture.path("objects\\example.model")).unwrap();
+        assert_eq!(reference_of(&saved, "render model").as_deref(), Some("objects\\previous"));
+        assert_eq!(real_of(&saved, "disappear distance"), Some(12.5));
+        let draft = app.views[id].edit_buffers.draft_mut(&draft_key, "objects\\previous.render_model");
+        assert_eq!(draft.text, "objects\\wrong.bitmap", "the rejected draft stays visible until corrected or discarded");
+    }
 
     #[test]
     fn missing_reference_status_does_not_shift_row_actions() {

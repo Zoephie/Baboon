@@ -505,7 +505,7 @@ impl Baboon {
                             // Scrolled within its own pane: an editor row is
                             // wider than half a dialog, and without this the
                             // window grows to fit it every frame.
-                            egui::ScrollArea::horizontal()
+                            crate::app::ScrollArea::horizontal()
                                 .id_salt((title, &element))
                                 // Fill the pane's width, but only as tall as
                                 // what is in it.
@@ -748,7 +748,7 @@ impl Dialog for ModExportDialog {
                     160.0
                 };
                 let list_height = (ui.available_height() - reserve).max(120.0);
-                egui::ScrollArea::vertical()
+                crate::app::ScrollArea::vertical()
                     .max_height(list_height)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {

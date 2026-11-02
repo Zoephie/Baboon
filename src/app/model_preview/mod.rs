@@ -725,7 +725,7 @@ pub(super) fn draw_model_preview_panel(
                                     },
                                 );
                             } else {
-                                egui::ScrollArea::vertical()
+                                crate::app::ScrollArea::vertical()
                                     .auto_shrink([false, false])
                                     .max_height(setup_body_height)
                                     .show(ui, |ui| {

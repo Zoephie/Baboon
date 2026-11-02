@@ -601,7 +601,7 @@ fn preview_and_setup_cards_match_outer_height_at_both_header_breakpoints() {
                                     Some(setup_body_height),
                                     |ui, part| {
                                         if part == ModelPreviewSectionPart::Body {
-                                            egui::ScrollArea::vertical()
+                                            crate::app::ScrollArea::vertical()
                                                 .auto_shrink([false, false])
                                                 .max_height(setup_body_height)
                                                 .show(ui, |ui| {

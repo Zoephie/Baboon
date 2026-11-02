@@ -33,7 +33,7 @@ pub(super) fn draw_chimp_export_editor(
                 );
                 ui.separator();
                 let draft = chimp_property_draft(document, pane, decoded);
-                let changed = egui::ScrollArea::vertical()
+                let changed = crate::app::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let ExportBlock::Reflected(block) = &mut draft.decoded.block else {
@@ -139,7 +139,7 @@ fn draw_chimp_property_block(
                     style_list_menu(ui);
                     ui.set_max_height(360.0);
                     let mut added = false;
-                    egui::ScrollArea::vertical().show(ui, |ui| {
+                    crate::app::ScrollArea::vertical().show(ui, |ui| {
                         for &(name, array_index, ty) in &omitted {
                             let label = if array_index == 0 {
                                 name.to_owned()
@@ -2008,7 +2008,7 @@ mod tests {
             },
             |context| {
                 egui::CentralPanel::default().show(context, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
+                    crate::app::ScrollArea::vertical().show(ui, |ui| {
                         let row = ui.horizontal_top(|ui| {
                             ui.set_min_height(24.0);
                             ui.label("NumReplicatedProperties");

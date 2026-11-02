@@ -2,6 +2,7 @@
 //! artwork. It knows nothing about tags or features.
 
 use super::*;
+pub(in crate::app) mod scroll;
 
 pub(in crate::app) mod style;
 pub(in crate::app) use style::*;

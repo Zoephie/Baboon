@@ -256,7 +256,7 @@ fn draw_first_run_editing_kits(ui: &mut Ui, s: &mut FirstRunDraw) {
     ui.heading("Editing kits");
     ui.label("Detected paths fill only empty entries. Every editing-kit path is optional.");
     ui.add_space(8.0);
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .max_height(360.0)
         .show(ui, |ui| {
             for shortcut in EDITING_KIT_SHORTCUTS {

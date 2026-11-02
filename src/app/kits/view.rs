@@ -308,6 +308,7 @@ impl<'a> KitMut<'a> {
     /// every frame, so remapping only the list is overwritten immediately and
     /// the panes keep pointing at keys their source no longer has.
     pub(in crate::app) fn remap_tag_keys(&mut self, map: &HashMap<String, String>) {
+        self.view.browser.remap_tag_selection(|key| map.get(key).cloned());
         for (_, tile) in self.view.tag_tree.tiles.iter_mut() {
             if let egui_tiles::Tile::Pane(key) = tile
                 && let Some(new_key) = map.get(key)

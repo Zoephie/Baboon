@@ -84,7 +84,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
         .show(ui, |ui| {
             ui.label(RichText::new("Log").color(text_dark()).strong());
             ui.separator();
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt(("blam_log_scroll", kit_id.0))
                 .auto_shrink([false, false])
                 .stick_to_bottom(true)
@@ -119,7 +119,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
             bottom: 10,
         }))
         .show(ui, |ui| {
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt(("blam_pane", kit_id.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {

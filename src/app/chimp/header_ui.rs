@@ -156,7 +156,7 @@ fn draw_chimp_header_sections(
         .expect("refreshed by the caller");
     let header = &document.header;
 
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt(("chimp_header_view", document.package.clone()))
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -322,7 +322,7 @@ fn draw_chimp_header_sections(
                     let row_height = ui.spacing().interact_size.y;
                     // Virtualised: a large package's name map runs to thousands
                     // of entries, and this view is drawn every frame.
-                    egui::ScrollArea::vertical()
+                    crate::app::ScrollArea::vertical()
                         .id_salt("chimp_header_names")
                         .max_height(260.0)
                         .show_rows(ui, row_height, rows.len(), |ui, range| {
@@ -395,7 +395,7 @@ fn draw_chimp_header_sections(
                         // Virtualised like the name map: a level package imports
                         // thousands of slots, each resolved against the world.
                         let row_height = ui.spacing().interact_size.y;
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("chimp_header_import_rows")
                             .max_height(260.0)
                             .show_rows(ui, row_height, slots.len(), |ui, range| {
@@ -486,7 +486,7 @@ fn draw_chimp_header_sections(
                         pane.header_export_edit = Some(edit);
                     }
                     let row_height = ui.spacing().interact_size.y;
-                    egui::ScrollArea::vertical()
+                    crate::app::ScrollArea::vertical()
                         .id_salt("chimp_header_export_rows")
                         .max_height(260.0)
                         .show_rows(ui, row_height, header.export_map.len(), |ui, range| {
@@ -616,7 +616,7 @@ fn draw_chimp_header_sections(
                                 .small(),
                             );
                         }
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("chimp_header_referrers")
                             .max_height(180.0)
                             .show(ui, |ui| {
@@ -1009,7 +1009,7 @@ fn draw_chimp_import_editor(
                     }
                     Some(Ok(exports)) => {
                         let mut pick = None;
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("chimp_import_exports")
                             .max_height(140.0)
                             .show(ui, |ui| {

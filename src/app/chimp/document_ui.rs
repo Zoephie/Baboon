@@ -437,7 +437,7 @@ fn draw_chimp_document_pane(
                 // thousands of exports, and building every row each frame
                 // was several milliseconds of it.
                 let row_height = ui.spacing().interact_size.y;
-                egui::ScrollArea::vertical().show_rows(
+                crate::app::ScrollArea::vertical().show_rows(
                     ui,
                     row_height,
                     document.exports.len(),
@@ -854,7 +854,7 @@ fn draw_chimp_json_document(
     let number_color = ui.visuals().weak_text_color();
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-        egui::ScrollArea::both()
+        crate::app::ScrollArea::both()
             .id_salt(id)
             .auto_shrink([false, false])
             .show_rows(ui, row_height, lines.len(), |ui, rows| {

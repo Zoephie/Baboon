@@ -539,7 +539,7 @@ fn aligned_menu_custom_button<R>(
         });
     // As `egui::containers::menu::MenuButton` opens its menu, in the menu
     // bar's style, but placed by the shifted response.
-    let config = menu_config().style(egui::containers::menu::MenuConfig::find(ui).style);
+    let config = menu_config();
     let inner = egui::Popup::menu(&positioning_response)
         .close_behavior(config.close_behavior)
         .style(config.style.clone())
@@ -558,6 +558,12 @@ fn aligned_menu_custom_button<R>(
 pub(in crate::app) fn menu_config() -> egui::containers::menu::MenuConfig {
     egui::containers::menu::MenuConfig::new()
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .style(|style: &mut egui::Style| {
+            egui::containers::menu::menu_style(style);
+            let fill = context_menu_hover();
+            style.visuals.widgets.hovered.weak_bg_fill = fill;
+            style.visuals.widgets.open.weak_bg_fill = fill;
+        })
 }
 
 /// Close the menu `ui` is in, as egui 0.29's `Ui::close_menu` did; outside a
@@ -577,6 +583,7 @@ pub(in crate::app) fn context_menu(
 ) -> Option<egui::InnerResponse<()>> {
     egui::Popup::context_menu(response)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .style(menu_config().style)
         .show(add_contents)
 }
 

@@ -26,6 +26,7 @@ impl Baboon {
             self.apply_commands(ctx);
             return;
         }
+        self.handle_browser_selection_input(ctx);
         self.prepare_root_frame(ctx);
 
         let menu = self.menu_state(ctx);
@@ -375,7 +376,7 @@ pub(in crate::app) fn draw_terminal_output(
     want_scroll_bottom: bool,
 ) {
     let gap = ui.spacing().item_spacing.y;
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt("terminal_output")
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {

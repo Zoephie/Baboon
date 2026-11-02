@@ -722,7 +722,7 @@ impl Dialog for ChimpDiscardPrompt {
                     .color(text_dark()),
                 );
                 ui.add_space(6.0);
-                egui::ScrollArea::vertical()
+                crate::app::ScrollArea::vertical()
                     .max_height(180.0)
                     .show(ui, |ui| {
                         for package in packages {
@@ -826,7 +826,7 @@ impl Dialog for ChimpSaveDialog {
                     "{} modified Unreal package(s) will be saved together.",
                     dirty_packages.len()
                 ));
-                egui::ScrollArea::vertical()
+                crate::app::ScrollArea::vertical()
                     .max_height(150.0)
                     .show(ui, |ui| {
                         for package in &dirty_packages {

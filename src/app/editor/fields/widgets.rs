@@ -340,11 +340,13 @@ fn foundation_value_text_filled_with_placeholder(
     // keeps its red). It still takes focus, so its text can be copied.
     let read_only = !text.is_mutable();
     let invalid = fill == Some(invalid_value_fill());
+    let unapplied = fill == Some(unapplied_value_fill());
+    let status_color = if unapplied { unapplied_value_text() } else { invalid_value_text() };
     let fill = fill.unwrap_or(if read_only { foundation_input_read_only() } else { foundation_input() });
     let color = if read_only && color == text_dark() { subtle_dark() } else { color };
     ui.painter().rect_filled(rect, 0.0, fill);
     let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
-    let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), invalid_value_text()));
+    let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
     let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
     let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
         findable_galley(ui, text.as_str(), font_id.clone(), color, FindTargetKind::Value)
@@ -376,6 +378,8 @@ fn foundation_value_text_filled_with_placeholder(
     if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
     let stroke = if invalid {
         invalid_value_stroke()
+    } else if unapplied {
+        Stroke::new(1.0_f32, unapplied_value_text())
     } else if response.has_focus() {
         ui.visuals().selection.stroke
     } else {
@@ -385,7 +389,7 @@ fn foundation_value_text_filled_with_placeholder(
     if let Some(status) = status {
         ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
             egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
-            status, invalid_value_text());
+            status, status_color);
     }
     text_edit_cursor_to_start_on_tab_focus(ui, &response);
     response
@@ -451,6 +455,7 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
     id: egui::Id,
     icon: TagIcon,
     missing: bool,
+    rejected: Option<(&str, &str)>,
 ) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
     let response = foundation_value_text_filled(
@@ -458,13 +463,15 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
         rect,
         text,
         Some(id),
-        if missing { invalid_value_text() } else { text_dark() },
+        if missing && rejected.is_none() { invalid_value_text() } else { text_dark() },
         tag_reference_icon_footprint(),
-        missing.then(invalid_value_fill),
-        missing.then_some("missing"),
+        if rejected.is_some() { Some(unapplied_value_fill()) } else { missing.then(invalid_value_fill) },
+        if let Some((label, _)) = rejected { Some(label) } else { missing.then_some("missing") },
     );
     paint_tag_reference_icon(ui, rect, icon);
-    if missing {
+    if let Some((_, reason)) = rejected {
+        response.on_hover_text(format!("{reason}\nThis text was not applied. Saving keeps the last accepted reference.\nCorrect the value, or press Esc in this field to restore the accepted value."))
+    } else if missing {
         response.on_hover_text("Referenced tag not found on disk")
     } else {
         response
@@ -1111,6 +1118,7 @@ mod tests {
                             egui::Id::new("reference"),
                             icon,
                             false,
+                            None,
                         )
                         .rect;
                     });
@@ -1669,7 +1677,7 @@ mod tests {
                     // browser starts outside the editor.
                     let (_, source) = ui.allocate_exact_size(egui::vec2(100.0, 60.0), egui::Sense::drag());
                     source.dnd_set_drag_payload(7_u32);
-                    let output = egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    let output = crate::app::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         if take_wheel {
                             scroll_during_drag(ui);
                         }

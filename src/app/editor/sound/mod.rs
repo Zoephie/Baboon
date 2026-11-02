@@ -2378,7 +2378,7 @@ pub(in crate::app) fn draw_dialogue_summary(
         .id_salt("dialogue_vocalizations")
         .default_open(total <= 40)
         .show(ui, |ui| {
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt("dialogue_overview_scroll")
                 .max_height(280.0)
                 .show(ui, |ui| {
@@ -2665,7 +2665,7 @@ pub(in crate::app) fn draw_material_effects_summary(
             ui.label(RichText::new("(no material entries)").color(subtle_dark()));
             return;
         }
-        egui::ScrollArea::vertical()
+        crate::app::ScrollArea::vertical()
             .id_salt("material_effects_overview_scroll")
             .max_height(280.0)
             .show(ui, |ui| {

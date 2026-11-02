@@ -54,7 +54,7 @@ fn sidebar_shortcut_button(ui: &mut Ui, label: &str,
         let fill = if response.is_pointer_button_down_on() {
             ui.visuals().widgets.active.weak_bg_fill
         } else {
-            ui.visuals().widgets.hovered.weak_bg_fill
+            context_menu_hover()
         };
         ui.painter()
             .rect_filled(rect, ui.visuals().widgets.hovered.corner_radius, fill);
@@ -189,6 +189,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
         return;
     };
     let generation = cx.model.kits[kit_index].generation;
+    set_browser_selected_tag(ui, pane.selected_tag.clone());
+    begin_browser_navigation(ui, egui::Id::new(("folder_navigation", kit_id, pane_key)));
     let bitmap_hover_requests = begin_bitmap_hovers(ui, Arc::clone(&view.bitmap_browser.thumbnails));
 
     let is_loose = cx.model.kits[kit_index]
@@ -432,6 +434,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
             });
         });
 
+    finish_browser_navigation(ui);
+    pane.selected_tag = browser_selected_tag(ui);
     queue_bitmap_hover_thumbnails(cx, kit_index, &mut view.bitmap_browser, &bitmap_hover_requests);
     edit_browser_prefs(cx, show_browser_prefixes, folders_before_tags);
     if pane.search_scope != previous_search_scope {
@@ -704,6 +708,8 @@ fn draw_kit_browser_inner(
     // draw one after another, so what is in memory during this tree's draw
     // is this kit's own set.
     set_browser_modified_tags(ui, std::sync::Arc::clone(&view.browser.modified_tags));
+    set_browser_selected_tag(ui, view.browser.selected_tag.clone());
+    begin_browser_navigation(ui, egui::Id::new(("sidebar_navigation", kit_id)));
     set_browser_favorite_folders(
         ui,
         cx.model.kits[kit_index]
@@ -1137,6 +1143,8 @@ fn draw_kit_browser_inner(
         }
         None => {}
     }
+    finish_browser_navigation(ui);
+    view.browser.selected_tag = browser_selected_tag(ui);
     queue_bitmap_hover_thumbnails(cx, kit_index, &mut view.bitmap_browser, &bitmap_hover_requests);
 }
 

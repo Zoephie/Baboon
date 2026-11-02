@@ -250,7 +250,7 @@ fn draw_cache_import_body(
                         .small()
                         .color(subtle_dark()),
                     );
-                    egui::ScrollArea::vertical()
+                    crate::app::ScrollArea::vertical()
                         .id_salt("cache_import_conflicts")
                         .max_height(220.0)
                         .show(ui, |ui| {
@@ -405,7 +405,7 @@ fn draw_cache_import_body(
             // with it.
             let outside_tree = &dialog.outside_tree;
             let outside_picked = &mut dialog.outside_picked;
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt("cache_import_outside")
                 .max_height(260.0)
                 .show(ui, |ui| {
@@ -459,7 +459,7 @@ fn draw_cache_import_body(
                 .small()
                 .color(subtle_dark()),
             );
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt("cache_import_no_lighting")
                 .max_height(110.0)
                 .show(ui, |ui| {
@@ -500,7 +500,7 @@ fn draw_cache_import_body(
                 ))
                 .color(Color32::from_rgb(242, 196, 48)),
             );
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt("cache_import_held_back")
                 .max_height(140.0)
                 .show(ui, |ui| {

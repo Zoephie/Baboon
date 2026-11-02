@@ -233,6 +233,7 @@ fn move_key<V>(map: &mut HashMap<String, V>, old: &str, new: &str) {
 /// total: given any kit, its view and any two keys, it always leaves both
 /// consistent.
 pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, view: &mut KitView, old: &str, new: &str) {
+    view.browser.remap_tag_selection(|key| (key == old).then(|| new.to_owned()));
     if old == new {
         return;
     }
@@ -1091,6 +1092,8 @@ mod tests {
             pending_launch_tags: _,
         } = RestorePlan::default();
         let KitBrowser {
+            // Carried by `rekey_tag_in_kit`, including each folder browser.
+            selected_tag: _,
             // Dropped by `rekey_tag_in_kit`, deliberately.
             modified_signature: _,
             // Rebuilt from the generation the moment it moves.

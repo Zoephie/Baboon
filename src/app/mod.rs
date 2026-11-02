@@ -31,8 +31,9 @@ use blam_tags::{
 };
 use eframe::egui::{
     self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Frame, RichText,
-    ScrollArea, Sense, Stroke, TextStyle, Ui, Vec2,
+    Sense, Stroke, TextStyle, Ui, Vec2,
 };
+use ui_kit::scroll::KeyboardScrollArea as ScrollArea;
 use serde_json::{Value, json};
 
 use crate::core::bundled::{

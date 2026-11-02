@@ -604,7 +604,7 @@ pub(in crate::app) fn draw_foundation_explanation_row(
                                 text_dark(),
                                 FindTargetKind::Documentation,
                             );
-                            egui::ScrollArea::horizontal()
+                            crate::app::ScrollArea::horizontal()
                                 .id_salt(scroll_id)
                                 .auto_shrink([false, true])
                                 .show(ui, |ui| {
@@ -4158,7 +4158,7 @@ mod tests {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ui, |ui| {
-                        let output = egui::ScrollArea::vertical().animated(false).show(ui, |ui| {
+                        let output = crate::app::ScrollArea::vertical().animated(false).show(ui, |ui| {
                             ui.allocate_exact_size(
                                 egui::Vec2::new(400.0, 150.0),
                                 egui::Sense::hover(),
@@ -4505,7 +4505,7 @@ mod tests {
                         egui::CentralPanel::default().show(ui, |ui| {
                             // As the tag pane's: full width, so its floating scroll
                             // bar runs down the right edge.
-                            let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                            let mut area = crate::app::ScrollArea::vertical().auto_shrink([false, false]);
                             // Set only when a step moves it, as a user's scroll does.
                             if index == 0 || steps[index - 1].0 != *offset {
                                 area = area.vertical_scroll_offset(*offset);
@@ -4704,7 +4704,7 @@ mod tests {
                         ..Default::default()
                     }, |ui| {
                         egui::CentralPanel::default().show(ui, |ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
+                            crate::app::ScrollArea::vertical().show(ui, |ui| {
                                 draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
                             });
                         });

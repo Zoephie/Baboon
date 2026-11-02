@@ -299,14 +299,16 @@ impl Baboon {
             return true;
         }
         self.schedule_next_entry_index_refresh(kit_index, ctx);
+        let refresh_browser = std::mem::take(&mut self.model.kits[kit_index].index_jobs.refresh_browser);
         match result {
-            Ok(refresh) if refresh.changed => {
+            Ok(mut refresh) if refresh.changed || refresh_browser => {
                 // A definition or option written by anything but a Baboon
                 // save (a recompile, an import, a new file) reaches the
                 // shader grid here.
                 if refresh_touches_render_methods(&refresh) {
                     self.views[self.model.kits[kit_index].id].caches.forget_render_methods();
                 }
+                refresh.changed |= refresh_browser;
                 self.apply_entry_index_refresh(kit_index, refresh, ctx.clone())
             }
             Ok(_) => {}
@@ -984,9 +986,7 @@ impl Baboon {
         let TagSource::LooseFolder { root, .. } = &source.source else {
             return;
         };
-        let Some(game) = source.game.clone() else {
-            return;
-        };
+        let game = source.game.clone();
         let root = root.clone();
         let names = source.names.clone();
         let tag_source = source.source.clone();
@@ -997,9 +997,17 @@ impl Baboon {
             &ctx,
             move || WorkerMessage::EntryIndexRefreshed {
                 stamp,
-                result: crate::core::source::refresh_entry_index(game.as_str(), &root, &names)
-                    .map(|refresh| persist_entry_index_changes(game.as_str(), &root, &tag_source, refresh))
-                    .map_err(|e| e.to_string()),
+                result: if let Some(game) = game {
+                    crate::core::source::refresh_entry_index(game.as_str(), &root, &names)
+                        .map(|refresh| persist_entry_index_changes(game.as_str(), &root, &tag_source, refresh))
+                        .map_err(|e| e.to_string())
+                } else {
+                    crate::core::source::scan_folder_subtree_entries(&root, Path::new(""), &names)
+                        .map(|entries| EntryIndexRefresh {
+                            entries, changed: true, added: 0, updated: 0, removed: 0,
+                            touched: Vec::new(), removed_keys: Vec::new(), touched_dependencies: Vec::new(), errors: Vec::new(),
+                        }).map_err(|error| error.to_string())
+                },
             },
             move |error| WorkerMessage::EntryIndexRefreshed {
                 stamp,
@@ -1017,7 +1025,7 @@ impl Baboon {
         &mut self,
         kit_index: usize,
         refresh: EntryIndexRefresh,
-        _ctx: egui::Context,
+        ctx: egui::Context,
     ) {
         let EntryIndexRefresh {
             entries,
@@ -1034,7 +1042,23 @@ impl Baboon {
         let initialized = self.model.kits[kit_index].source.as_ref()
             .is_some_and(|source| source.complete_scan && source.all_entries.len() == n);
         let browser_refresh_error = if changed || !initialized {
-            self.install_complete_entry_set(kit_index, entries)
+            let error = self.install_complete_entry_set(kit_index, entries);
+            crate::app::browser::invalidate_browser_navigation(&ctx);
+            let kit = &self.model.kits[kit_index];
+            let browser = &self.views[kit.id].browser;
+            let valid_selection = |key: &String| {
+                if let Some(folder) = key.strip_prefix(crate::app::browser::FOLDER_PANE_PREFIX) {
+                    self.model.loaded_tags_root_for(kit_index)
+                        .is_some_and(|root| root.join(tag_path::to_relative(folder)).is_dir())
+                } else {
+                    kit.source.as_ref().is_some_and(|source| source.all_entries.iter().any(|entry| crate::core::tag_key::same_entry_key(&entry.key, key)))
+                }
+            };
+            if browser.selected_tag.as_ref().is_some_and(|key| !valid_selection(key))
+                || browser.folder_browsers.values().any(|pane| pane.selected_tag.as_ref().is_some_and(|key| !valid_selection(key))) {
+                self.clear_browser_selection(&ctx);
+            }
+            error
         } else {
             None
         };
@@ -1088,7 +1112,7 @@ impl Baboon {
             // with unloaded descendants clamps the scroll area back to the top.
             let rebuilt = (|| -> Result<_, String> {
                 let mut rebuild = MaterializedFolderRefresh::new(root, &source.all_entries);
-                let tree = rebuild.tree(Path::new(""), &source.tree, false)?;
+                let tree = rebuild.tree(Path::new(""), &source.tree, true)?;
                 let mut panes = Vec::new();
                 for (key, pane) in &browser.folder_browsers {
                     let tree = if root.join(&pane.rel_path).exists() {
@@ -1847,6 +1871,59 @@ mod tests {
             chosen_kit_layout: None,
         });
         (app, cleanup, tag)
+    }
+
+    #[test]
+    fn f5_refresh_keeps_the_loaded_view_and_selection_and_relists_empty_folders() {
+        let (mut app, cleanup, tag) = lazy_shader_kit(false);
+        let root = cleanup.0.clone();
+        let ctx = egui::Context::default();
+        let kit_id = app.model.kits[0].id;
+        {
+            let source = app.model.kits[0].source.as_mut().unwrap();
+            for path in ["objects", "objects/characters", "objects/characters/brute"] {
+                let node = find_tree_node_mut(&mut source.tree.children, &extraction_scope_key(Path::new(path))).unwrap();
+                crate::core::source::load_folder_node_entries(&root, node, &mut source.entries, &source.names).unwrap();
+            }
+        }
+        let selected = app.model.kits[0].source.as_ref().unwrap().entries[0].key.clone();
+        app.views[kit_id].browser.selected_tag = Some(selected.clone());
+        // F5 during an existing index job joins that job instead of clearing
+        // the browser or starting a second worker.
+        app.model.kits[0].index_jobs.refreshing = true;
+        let stamp = app.model.kit_stamp();
+        let before = app.model.kits[0].source.as_ref().unwrap().entries.len();
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::F5, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE,
+            }], ..Default::default()
+        }, |_| app.handle_browser_selection_input(&ctx));
+        assert_eq!(app.model.kits[0].source.as_ref().unwrap().entries.len(), before);
+        assert_eq!(app.views[kit_id].browser.selected_tag.as_deref(), Some(selected.as_str()));
+        assert!(app.model.kits[0].index_jobs.refresh_browser);
+        std::fs::create_dir_all(root.join("empty_new_folder")).unwrap();
+        let scan = || crate::core::source::scan_folder_subtree_entries(&root, Path::new(""), &TagNameIndex::default()).unwrap();
+        let refresh = |entries, changed| EntryIndexRefresh {
+            entries, changed, added: 0, updated: 0, removed: 0, touched: Vec::new(),
+            removed_keys: Vec::new(), touched_dependencies: Vec::new(), errors: Vec::new()
+        };
+        app.handle_entry_index_refreshed(stamp, Ok(refresh(scan(), false)), &ctx);
+        let source = app.model.kits[0].source.as_mut().unwrap();
+        assert!(source.tree.children.iter().any(|node| node.label == "empty_new_folder"));
+        let node = find_tree_node_mut(&mut source.tree.children, &extraction_scope_key(Path::new("objects/characters/brute"))).unwrap();
+        assert!(node.entries_loaded && node.children_loaded);
+        assert_eq!(app.views[kit_id].browser.selected_tag.as_deref(), Some(selected.as_str()));
+        std::fs::write(root.join("objects/characters/brute/external.shader"), tag.write_to_bytes().unwrap()).unwrap();
+        std::fs::write(root.join("external_root.shader"), tag.write_to_bytes().unwrap()).unwrap();
+        app.apply_entry_index_refresh(0, refresh(scan(), true), ctx.clone());
+        assert!(app.model.kits[0].source.as_ref().unwrap().entries.iter().any(|entry| entry.display_path.ends_with("external.shader")));
+        let source = app.model.kits[0].source.as_ref().unwrap();
+        assert!(source.tree.entries.iter().any(|&index| source.entries[index].display_path == "external_root.shader"));
+        let removed_path = app.model.kits[0].source.as_ref().unwrap().all_entries.iter().find(|entry| entry.key == selected).unwrap().location.clone();
+        let TagEntryLocation::LooseFile(path) = removed_path else { panic!("expected loose file") };
+        std::fs::remove_file(path).unwrap();
+        app.apply_entry_index_refresh(0, refresh(scan(), true), ctx.clone());
+        assert!(app.views[kit_id].browser.selected_tag.is_none());
     }
 
     #[test]

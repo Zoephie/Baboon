@@ -691,6 +691,23 @@ pub(in crate::app) fn invalid_value_stroke() -> Stroke {
     })
 }
 
+/// A rejected draft is visible for correction but is not part of the document.
+pub(in crate::app) fn unapplied_value_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(54, 43, 24)
+    } else {
+        Color32::from_rgb(255, 247, 220)
+    }
+}
+
+pub(in crate::app) fn unapplied_value_text() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(240, 190, 90)
+    } else {
+        Color32::from_rgb(122, 80, 0)
+    }
+}
+
 /// Formatting tags in string list text: `<color …>`, `<br/>`.
 pub(in crate::app) fn markup_tag_text() -> Color32 {
     if is_dark_mode() {
@@ -803,11 +820,7 @@ pub(in crate::app) fn browser_toolbar_active() -> Color32 {
 }
 
 pub(in crate::app) fn context_menu_hover() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(70, 70, 70)
-    } else {
-        Color32::from_rgb(220, 232, 238)
-    }
+    neutral_button_fill(is_dark_mode(), 26)
 }
 
 pub(in crate::app) fn disclosure_triangle_blue() -> Color32 {

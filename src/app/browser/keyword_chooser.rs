@@ -25,7 +25,7 @@ impl Dialog for KeywordChooser {
                             .color(subtle_dark()),
                     );
                 }
-                egui::ScrollArea::vertical()
+                crate::app::ScrollArea::vertical()
                     .max_height(420.0)
                     .show(ui, |ui| {
                         for (keyword, count) in &all {

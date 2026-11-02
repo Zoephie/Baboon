@@ -296,7 +296,7 @@ impl Dialog for TagImportDialog {
                             ))
                             .color(Color32::from_rgb(242, 196, 48)),
                         );
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("tag_import_losses")
                             .max_height(110.0)
                             .show(ui, |ui| {

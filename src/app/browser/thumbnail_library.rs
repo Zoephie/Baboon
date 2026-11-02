@@ -380,7 +380,7 @@ fn draw_thumbnail_grid<S: ThumbnailSource>(
     // lays out the thirty on screen and queues jobs for those alone.
     let mut action: Option<CellAction> = None;
     let mut wanted: Vec<String> = Vec::new();
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt((S::ID_SALT, kit_index))
         .auto_shrink([false, false])
         .show_rows(ui, row_height, rows, |ui, row_range| {
@@ -540,9 +540,19 @@ pub(in crate::app) fn draw_folder_asset_grid(
         cell,
     );
     let height = cell + CELL_CAPTION + CELL_GAP;
-    ScrollArea::vertical()
-        .id_salt(("folder_assets", pane_key))
-        .auto_shrink([false, false])
+    if browser_navigation_building(ui) {
+        browser_navigation_columns(ui, columns, height);
+        for entry in &visible {
+            register_browser_navigation(ui, &entry.key, browser_asset_navigation_id(ui, &entry.key));
+        }
+    }
+    let mut scroll = ScrollArea::vertical().id_salt(("folder_assets", pane_key)).auto_shrink([false, false]);
+    if let Some((key, _)) = browser_navigation_target(ui)
+        && let Some(index) = visible.iter().position(|entry| entry.key == key)
+    {
+        scroll = scroll.vertical_scroll_offset((index / columns) as f32 * height);
+    }
+    scroll
         .show_rows(ui, height, visible.len().div_ceil(columns), |ui, rows| {
             ui.spacing_mut().item_spacing = Vec2::new(CELL_GAP, 0.0);
             for row in rows {
@@ -638,7 +648,13 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
     // shader bitmap rows and Foundation reference cells already accept it,
     // and a shader slot already checks for the `bitm` group — so dragging a
     // thumbnail onto a reference needs nothing on the drop side.
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    let (rect, response) = if type_badge.is_some() {
+        let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+        (rect, ui.interact(rect, browser_asset_navigation_id(ui, &key), Sense::click_and_drag()))
+    } else {
+        ui.allocate_exact_size(size, Sense::click_and_drag())
+    };
+    let browser_selected = type_badge.is_some() && select_browser_tag(ui, &response, &key);
     response.dnd_set_drag_payload(DraggedTagRef {
         group_tag: entry.group_tag,
         input: entry_reference_input(entry),
@@ -730,6 +746,10 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
             .show(ui.ctx(), |ui| {
                 ui.label(RichText::new(&name).color(text_dark()));
             });
+    }
+
+    if browser_selected {
+        paint_browser_selection_border(ui, rect);
     }
 
     // Double-click, not click: a single click on a grid this dense is far
@@ -1118,6 +1138,7 @@ mod tests {
 
     fn folder_pane() -> FolderBrowserState {
         FolderBrowserState {
+            selected_tag: None,
             rel_path: tag_path::to_relative(r"objects\brute"),
             label: "brute".into(),
             filter: String::new(),

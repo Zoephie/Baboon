@@ -1003,7 +1003,7 @@ mod tests {
             let mut content_height = 0.0;
             let _ = crate::app::run_ui_test(&self.ctx, input, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let output = egui::ScrollArea::vertical()
+                    let output = crate::app::ScrollArea::vertical()
                         .vertical_scroll_offset(offset)
                         .show(ui, |ui| {
                             with_test_edit_context(|edit| {

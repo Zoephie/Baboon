@@ -216,7 +216,7 @@ impl Dialog for StringTransferWindow {
                         match paths {
                             Ok(paths) => {
                                 ui.collapsing("File locations", |ui| {
-                                    egui::ScrollArea::vertical().id_salt("string paths").max_height(100.0).show(ui, |ui| {
+                                    crate::app::ScrollArea::vertical().id_salt("string paths").max_height(100.0).show(ui, |ui| {
                                         for (_, path) in paths { ui.label(path.display().to_string()); }
                                     });
                                 });

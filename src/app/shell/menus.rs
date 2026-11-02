@@ -679,7 +679,7 @@ fn draw_tools_menu(cx: &Ctx, ui: &mut Ui) {
             can_refresh_browser
                 && !cx.model.kits[cx.model.active].scanning_entries
                 && !cx.model.kits[cx.model.active].index_jobs.refreshing,
-            egui::Button::new("Refresh Tag Browser"),
+            egui::Button::new("Refresh Tag Browser").shortcut_text("F5"),
         )
         .clicked()
     {

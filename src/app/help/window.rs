@@ -360,7 +360,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
                     .color(subtle_dark())
                     .small(),
             );
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt("tag_compat_group_list")
                 .show(ui, |ui| {
                     for row in &state.groups {
@@ -405,7 +405,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
             );
             return;
         }
-        egui::ScrollArea::both()
+        crate::app::ScrollArea::both()
             .id_salt("tag_compat_fields")
             .show(ui, |ui| {
                 egui::Grid::new("tag_compat_field_grid")

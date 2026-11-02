@@ -103,7 +103,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                 bottom: 8,
             })
             .show(ui, |ui| {
-                egui::ScrollArea::vertical()
+                crate::app::ScrollArea::vertical()
                     .id_salt(("tag_tile", tile_id.0))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {

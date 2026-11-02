@@ -87,7 +87,7 @@ impl Dialog for DeleteConfirm {
                         ))
                         .color(text_dark()),
                     );
-                    egui::ScrollArea::vertical()
+                    crate::app::ScrollArea::vertical()
                         .max_height(120.0)
                         .show(ui, |ui| {
                             for referrer in referrers.iter().take(100) {

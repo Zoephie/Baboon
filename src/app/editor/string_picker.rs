@@ -90,8 +90,8 @@ pub(super) fn search(
 }
 
 /// Follow visible content up to the screen-dependent scrolling limit.
-pub(super) fn scroll(ui: &Ui, id: egui::Id) -> egui::ScrollArea {
-    egui::ScrollArea::vertical()
+pub(super) fn scroll(ui: &Ui, id: egui::Id) -> crate::app::ScrollArea {
+    crate::app::ScrollArea::vertical()
         .id_salt(id)
         .min_scrolled_height(BUTTON_HEIGHT)
         .max_height((ui.ctx().content_rect().height() * 0.6).clamp(120.0, 360.0))

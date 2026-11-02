@@ -259,7 +259,7 @@ fn draw_chimp_browser(ui: &mut Ui, cx: &Ctx, view: &mut ChimpView, kit_index: us
     let mut extract_texture = None;
     let mut extract_mesh = None;
     let mut export_level = None;
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt(("chimp_packages", kit.0))
         .auto_shrink([false, false])
         .show_rows(ui, 22.0, indices.len(), |ui, range| {
@@ -338,7 +338,7 @@ fn draw_chimp_groups(ui: &mut Ui, cx: &Ctx, view: &ChimpView, world: &World, kit
         return;
     }
 
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt(("chimp_groups", kit.0))
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -395,7 +395,7 @@ fn draw_chimp_groups(ui: &mut Ui, cx: &Ctx, view: &ChimpView, world: &World, kit
 
 fn draw_chimp_archives(ui: &mut Ui, view: &mut ChimpView, world: &World, kit: KitId) {
     let selected = view.selected_archive;
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt(("chimp_archives", kit.0))
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -517,7 +517,7 @@ fn draw_chimp_folders(
     // Borrowed, like the tree beside it: this used to clone the type of
     // every mounted package (about 104k strings) every frame the default
     // Folders tab was drawn, only to satisfy the borrow checker.
-    let clicked = egui::ScrollArea::vertical()
+    let clicked = crate::app::ScrollArea::vertical()
         .id_salt(("chimp_folders", kit.0))
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -557,7 +557,7 @@ fn draw_chimp_folders(
 fn draw_chimp_pak_files(ui: &mut Ui, view: &mut ChimpView, world: &World, kit: KitId) {
     let indices = Arc::clone(&view.filtered_files);
     let selected = view.selected_file.clone();
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt(("chimp_pak_files", kit.0))
         .auto_shrink([false, false])
         .show_rows(ui, 22.0, indices.len(), |ui, range| {

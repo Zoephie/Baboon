@@ -39,7 +39,7 @@ pub(in crate::app) fn draw_folder_import_report(ui: &mut Ui, report: &FolderConv
             .small()
             .color(subtle_dark()),
     );
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt("tag_import_results")
         .max_height(320.0)
         .show(ui, |ui| {
@@ -157,7 +157,7 @@ pub(in crate::app) fn draw_conversion_report(ui: &mut Ui, report: &TagConversion
             .color(subtle_dark())
             .small(),
     );
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt(format!("{salt}_issues"))
         .max_height(230.0)
         .show(ui, |ui| {

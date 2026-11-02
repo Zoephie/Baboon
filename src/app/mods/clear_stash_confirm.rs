@@ -50,7 +50,7 @@ impl Dialog for ClearStashConfirm {
                         .color(text_dark()),
                     );
                     ui.add_space(4.0);
-                    egui::ScrollArea::vertical()
+                    crate::app::ScrollArea::vertical()
                         .max_height(160.0)
                         .show(ui, |ui| {
                             for path in stashed {

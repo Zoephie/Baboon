@@ -649,7 +649,7 @@ fn draw_foundation_data_row(
                 let text_color = if stored_bytes(&draft.text).is_err() {
                     invalid_value_text()
                 } else if editable { text_dark() } else { subtle_dark() };
-                let scroll = egui::ScrollArea::both()
+                let scroll = crate::app::ScrollArea::both()
                     .id_salt(id.with("scroll"))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {

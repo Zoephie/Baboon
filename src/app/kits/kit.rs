@@ -524,6 +524,8 @@ impl Kit {
 pub(in crate::app) struct IndexJobs {
     /// Checking the cached loose-folder index for file changes.
     pub(in crate::app) refreshing: bool,
+    /// A manual refresh must relist directories even if no tag files changed.
+    pub(in crate::app) refresh_browser: bool,
     /// When the next periodic refresh is due, in egui time.
     pub(in crate::app) next_refresh_at: f64,
     /// A reference-index build is running.
