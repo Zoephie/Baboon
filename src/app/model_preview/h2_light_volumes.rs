@@ -458,7 +458,10 @@ impl H2LightVolume {
                 };
                 Some(CeAntennaQuad {
                     corners: [corner(-1.0, 1.0, 0.0, 0.0), corner(1.0, 1.0, 1.0, 0.0), corner(-1.0, -1.0, 0.0, 1.0), corner(1.0, -1.0, 1.0, 1.0)],
-                    color: [tint[0], tint[1], tint[2], alpha],
+                    // `widget_light_volume`'s pixel shader: colour by its alpha by the
+                    // map's colour, and an alpha of 0, so under `ONE, INV_SRC_ALPHA`
+                    // it only adds light and never darkens what is behind.
+                    color: [tint[0], tint[1], tint[2], 0.0],
                 })
             })
             .collect()
