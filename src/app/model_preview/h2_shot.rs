@@ -8,7 +8,7 @@
 //! function inputs `H2_SHOT_INPUTS` can set, posed at `H2_SHOT_CLIP`,
 //! holding `H2_SHOT_WEAPON` and `H2_SHOT_SECONDARY`, with named Halo 2
 //! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`, leaving out the
-//! features `H2_SHOT_DROP` names.
+//! features `H2_SHOT_DROP` names, and exports forced by `H2_SHOT_FORCE`.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -207,7 +207,16 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                     set.insert((data.geometry_id, name.to_owned()), value.parse().unwrap());
                 }
             }
-            h2_function_values_for(&data, &set, time)
+            let mut values = h2_function_values_for(&data, &set, time);
+            // `H2_SHOT_FORCE=name=value,..` sets what a function exports, which
+            // its inputs cannot reach: a scripted value, say.
+            if let (Ok(pairs), Some(values)) = (std::env::var("H2_SHOT_FORCE"), values.as_mut()) {
+                for pair in pairs.split(',') {
+                    let (name, value) = pair.split_once('=').unwrap();
+                    values.insert(name.to_owned(), value.parse().unwrap());
+                }
+            }
+            values
         },
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(

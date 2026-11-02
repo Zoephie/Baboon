@@ -2427,6 +2427,7 @@ uniform vec3 u_add;
 uniform float u_fade;
 uniform vec4 u_depth;
 uniform sampler2D u_scene_depth;
+uniform vec4 u_screen;
 out vec4 out_color;
 float view_depth(float window) {
     float ndc = window * 2.0 - 1.0;
@@ -2465,6 +2466,21 @@ vec4 albedo(vec2 sprite, float external_alpha) {
     return tone;
 }
 void main() {
+    if (u_albedo == 11) {
+        // `effect_shader_alphablend_distortion_0.psh`, on the raw `v8u8` bytes
+        // the decode biased and swapped (U is its green, V its red): each byte
+        // read as unsigned, less its rounding, and the frame read that far off.
+        vec2 signed_byte = round(texture(u_base, v_sprite).gr * 127.0);
+        vec2 bump = mix((signed_byte + 1.0) / 255.0, signed_byte / 255.0, step(0.0, signed_byte));
+        vec2 screen = (gl_FragCoord.xy - u_screen.xy) / u_screen.zw;
+        // Its screen v runs down the frame, this one's up.
+        vec2 read = screen + u_modulation.x / 64.0 * vec2(bump.x, -bump.y);
+        if (v_color.a <= 0.0) {
+            discard;
+        }
+        out_color = vec4(texture(u_palette, read).rgb * v_color.rgb, v_color.a);
+        return;
+    }
     float depth_fade = 1.0;
     if (u_fade > 0.0) {
         float scene = texelFetch(u_scene_depth, ivec2(gl_FragCoord.xy), 0).r;
@@ -2584,6 +2600,7 @@ struct H3ParticleGl {
     unsigned: Option<glow::NativeUniformLocation>,
     fade: Option<glow::NativeUniformLocation>,
     depth: Option<glow::NativeUniformLocation>,
+    screen: Option<glow::NativeUniformLocation>,
 }
 
 impl H3ParticleGl {
@@ -2620,6 +2637,12 @@ impl H3ParticleGl {
                 camera.scale,
             );
             gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
+            if look.albedo == h3_particles::H3ParticleAlbedo::H2Distortion {
+                let mut viewport = [0; 4];
+                gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+                let [x, y, width, height] = viewport.map(|value| value as f32);
+                gl.uniform_4_f32(self.screen.as_ref(), x, y, width.max(1.0), height.max(1.0));
+            }
             let constants = look.constants;
             gl.uniform_3_f32_slice(self.tint.as_ref(), &constants.tint);
             gl.uniform_2_f32(self.modulation.as_ref(), constants.modulation, constants.alpha_modulation);
@@ -2650,6 +2673,53 @@ impl H3ParticleGl {
             gl.depth_mask(false);
             gl.color_mask(true, true, true, false);
         }
+    }
+}
+
+/// A copy of the viewport as drawn so far, and its size.
+struct FrameCopy {
+    texture: glow::NativeTexture,
+    framebuffer: glow::NativeFramebuffer,
+    size: [i32; 2],
+}
+
+/// The viewport of the framebuffer being drawn, copied into a texture of its
+/// size. A blit, as what is drawn to may be multisampled.
+unsafe fn copy_frame(gl: &glow::Context, copy: &mut Option<FrameCopy>) -> Option<glow::NativeTexture> {
+    unsafe {
+        let mut viewport = [0; 4];
+        gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+        let [x, y, width, height] = viewport;
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        if copy.as_ref().is_some_and(|copy| copy.size != [width, height]) {
+            if let Some(old) = copy.take() {
+                gl.delete_texture(old.texture);
+                gl.delete_framebuffer(old.framebuffer);
+            }
+        }
+        let drawn_to = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
+        if copy.is_none() {
+            let texture = gl.create_texture().ok()?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            let empty = glow::PixelUnpackData::Slice(None);
+            gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, width, height, 0, glow::RGBA, glow::UNSIGNED_BYTE, empty);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+            let framebuffer = gl.create_framebuffer().ok()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+            *copy = Some(FrameCopy { texture, framebuffer, size: [width, height] });
+        }
+        let made = copy.as_ref()?;
+        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, drawn_to);
+        gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(made.framebuffer));
+        gl.blit_framebuffer(x, y, x + width, y + height, 0, 0, width, height, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+        gl.bind_framebuffer(glow::FRAMEBUFFER, drawn_to);
+        Some(made.texture)
     }
 }
 
@@ -2693,6 +2763,7 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             unsigned: gl.get_uniform_location(program, "u_unsigned"),
             fade: gl.get_uniform_location(program, "u_fade"),
             depth: gl.get_uniform_location(program, "u_depth"),
+            screen: gl.get_uniform_location(program, "u_screen"),
         })
     }
 }
@@ -2707,6 +2778,8 @@ struct ModelGlRenderer {
     h3_distorted: bool,
     h3_distortion_program: Option<glow::NativeProgram>,
     h3_depth_copy: Option<glow::NativeTexture>,
+    /// Halo 2's `target_particle_distortion`, copied from the frame.
+    h2_distortion_copy: Option<FrameCopy>,
     /// Whether this context can draw Halo 2 passes; see `H2_GLSL_VERSION`.
     h2_supported: bool,
     /// Whether this context can draw Halo 3's: the translated shaders want GLSL 4.10.
@@ -2836,6 +2909,7 @@ impl ModelGlRenderer {
                 h3_distorted: false,
                 h3_distortion_program: None,
                 h3_depth_copy: None,
+                h2_distortion_copy: None,
                 h2_black_volume: upload_solid_volume(gl, [0, 0, 0, 255]),
                 h2_white_volume: upload_solid_volume(gl, [255; 4]),
                 h2_normalization_cube: upload_normalization_cube(gl),
@@ -3561,7 +3635,12 @@ impl ModelGlRenderer {
                             continue;
                         }
                         let vertices = particle_floats(camera, &drawn);
-                        let textures = uploaded.particle_textures.get(index).copied().unwrap_or_default();
+                        let mut textures = uploaded.particle_textures.get(index).copied().unwrap_or_default();
+                        if system.look.shader.albedo == h3_particles::H3ParticleAlbedo::H2Distortion {
+                            // `sub_915630`: before a pass that reads `GLOBAL particle
+                            // distortion`, the frame as it stands is copied there.
+                            textures[2] = copy_frame(gl, &mut self.h2_distortion_copy);
+                        }
                         particles.draw(gl, &system.look.shader, &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting);
                     }
                     Sprites::Leaves(index) => {

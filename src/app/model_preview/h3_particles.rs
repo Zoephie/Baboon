@@ -469,6 +469,9 @@ pub(crate) enum H3ParticleAlbedo {
     H2Tint = 9,
     /// Halo 2's `effect_shader_alpha_multiply_add`, whose colour and alpha part.
     H2MultiplyAdd = 10,
+    /// Halo 2's `effect_shader_alphablend_distortion`: the frame as it stands,
+    /// read where its `v8u8` bump map pushes, times the particle's colour.
+    H2Distortion = 11,
 }
 
 /// What ODST's three new albedo options read.
@@ -1022,15 +1025,17 @@ fn read_h2_frames(tag: &TagFile, first: usize) -> (Vec<[f32; 4]>, [f32; 4]) {
 }
 
 /// `effect_shader_*`'s pixel stage and blend, by the template that names the
-/// pass. None for what bends the scene, which the preview has no pass for.
+/// pass, by name alone: the distortion one lives under `particle\` too.
 fn h2_particle_pass(template: &str) -> Option<(H3ParticleAlbedo, H3Blend, bool)> {
-    use H3ParticleAlbedo::{Diffuse, H2MultiplyAdd, H2Tint};
+    use H3ParticleAlbedo::{Diffuse, H2Distortion, H2MultiplyAdd, H2Tint};
     Some(match template.rsplit(['\\', '/']).next().unwrap_or_default() {
         "particle_additive" => (Diffuse, H3Blend::AddSrcTimesSrcAlpha, false),
         "particle_additive_tint" => (H2Tint, H3Blend::AddSrcTimesSrcAlpha, false),
         "particle_alpha_blend" => (Diffuse, H3Blend::AlphaBlend, false),
         "particle_alpha_blend_tint" => (H2Tint, H3Blend::AlphaBlend, false),
         "particle_alpha_multiply_add" => (H2MultiplyAdd, H3Blend::PreMultiplied, false),
+        // Its alpha test passes anything above nothing, which the albedo does.
+        "particle_alpha_blend_distortion" => (H2Distortion, H3Blend::AlphaBlend, false),
         "particle_alpha_test_no_lighting_fixed_for_glass" => (Diffuse, H3Blend::AlphaBlend, true),
         _ => return None,
     })
@@ -1045,7 +1050,9 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
     let (albedo, blend, alpha_test) = h2_particle_pass(template.trim_end_matches(".shader_template"))?;
     let parameters = elements(root, "shader parameters");
     let parameter = |name: &str| parameters.iter().find(|entry| entry.read_string_id("name").as_deref() == Some(name));
-    let map = parameter("alpha_map_texture")?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
+    let distorts = albedo == H3ParticleAlbedo::H2Distortion;
+    let map_name = if distorts { "bump_map" } else { "alpha_map_texture" };
+    let map = parameter(map_name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
     let plate = load_referenced_tag_from_source(source, &map, "bitmap", b"bitm").ok()?;
     let flags = root.read_flag_names("flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
@@ -1059,7 +1066,13 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
     } else {
         Vec::new()
     };
-    let modulation = parameter("modulation_factor").and_then(|entry| entry.read_real("const value")).unwrap_or(0.0);
+    // The distortion's pixel shader reads `distortion_scale` where the others
+    // read `modulation_factor`; its template's default is 1.
+    let modulation = if distorts {
+        parameter("distortion_scale").and_then(|entry| entry.read_real("const value")).unwrap_or(1.0)
+    } else {
+        parameter("modulation_factor").and_then(|entry| entry.read_real("const value")).unwrap_or(0.0)
+    };
     let shader = H3SpriteShader {
         albedo,
         alpha_test,
@@ -3070,7 +3083,7 @@ mod tests {
         assert_eq!(pass("particle_additive"), Some((H3ParticleAlbedo::Diffuse, H3Blend::AddSrcTimesSrcAlpha, false)));
         assert_eq!(pass("particle_alpha_blend_tint"), Some((H3ParticleAlbedo::H2Tint, H3Blend::AlphaBlend, false)));
         assert_eq!(pass("particle_alpha_multiply_add"), Some((H3ParticleAlbedo::H2MultiplyAdd, H3Blend::PreMultiplied, false)));
-        assert_eq!(pass("particle_alpha_blend_distortion"), None);
+        assert_eq!(pass("particle_alpha_blend_distortion"), Some((H3ParticleAlbedo::H2Distortion, H3Blend::AlphaBlend, false)));
     }
 
     #[test]
