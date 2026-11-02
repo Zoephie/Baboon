@@ -425,6 +425,14 @@ pub(super) fn load_model_preview(
                 (place, marker.node_index.max(0) as usize)
             });
             preview.h3_particles = systems.into_iter().map(Arc::new).collect();
+            preview.h2_light_volumes = super::h2_light_volumes::read_h2_light_volumes(source, model_tag, 0, &markers, |marker| {
+                let place = super::attachment::MarkerFrame {
+                    axes: marker.axes,
+                    position: marker.position,
+                    node: marker.node_index,
+                };
+                (place, marker.node_index.max(0) as usize)
+            });
             preview.markers = markers;
         }
         let weapons_family = matches!(

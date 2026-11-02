@@ -1751,6 +1751,8 @@ struct ModelGpuSlot {
     flare_geometry: Option<u64>,
     antenna_textures: Vec<Option<glow::NativeTexture>>,
     volume_textures: Vec<Option<glow::NativeTexture>>,
+    /// Each of `h2_light_volumes`' bitmaps, by volume.
+    h2_volume_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     h3_particles: h3_particles::H3ParticleField,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
@@ -1807,6 +1809,7 @@ impl ModelGpuSlot {
                 flare_geometry: None,
                 antenna_textures: Vec::new(),
                 volume_textures: Vec::new(),
+                h2_volume_textures: Vec::new(),
                 h3_particles: Default::default(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
@@ -3104,6 +3107,7 @@ impl ModelGlRenderer {
                 && preview.h2_flares.is_empty()
                 && preview.h3_flares.is_empty()
                 && preview.h3_light_volumes.is_empty()
+                && preview.h2_light_volumes.is_empty()
                 && preview.h3_particles.is_empty()
                 && preview.h3_strips.is_empty()
                 && preview.h3_leaves.is_empty())
@@ -3203,6 +3207,18 @@ impl ModelGlRenderer {
                         None => upload_h2_image(gl, &antenna.image),
                     }))
                     .collect();
+                for texture in uploaded.h2_volume_textures.drain(..).flatten().flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.h2_volume_textures = frame
+                    .preview
+                    .h2_light_volumes
+                    .iter()
+                    .map(|at| {
+                        let bitmaps = at.volumes().iter().map(|volume| volume.bitmap());
+                        bitmaps.map(|bitmap| bitmap.and_then(|image| upload_h2_image(gl, image))).collect()
+                    })
+                    .collect();
                 for texture in uploaded.volume_textures.drain(..).flatten() {
                     gl.delete_texture(texture);
                 }
@@ -3248,6 +3264,31 @@ impl ModelGlRenderer {
             gl.uniform_1_f32(flares.highlight.as_ref(), -1.0);
             gl.uniform_2_f32(flares.tint.as_ref(), 0.0, 0.0);
             let antennas = matches!(stage, SpriteStage::Rest);
+            if antennas {
+                let volumes = frame.preview.h2_light_volumes.iter().zip(&uploaded.h2_volume_textures);
+                for (at, textures) in volumes {
+                    let values = frame.h2_values_of_object(at.object);
+                    for (volume, texture) in at.volumes().iter().zip(textures) {
+                        let Some(texture) = texture else {
+                            continue;
+                        };
+                        gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                        h3_draw::h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
+                        for quad in at.quads(volume, values, bones, &view) {
+                            let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                                let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                                [a, b, c, d, u, v]
+                            });
+                            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                            let [red, green, blue, alpha] = quad.color;
+                            gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
+                            gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                        }
+                    }
+                }
+                gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                gl.color_mask(true, true, true, h3);
+            }
             let quads = if antennas { preview_antennas(frame, &uploaded.antenna_textures, bones, &view) } else { Vec::new() };
             for (quads, texture) in quads {
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
