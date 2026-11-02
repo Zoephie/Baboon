@@ -547,10 +547,9 @@ impl H3ClothField {
             .iter()
             .zip(&self.running)
             .map(|(cloth, running)| {
-                let side = |facing: f32| {
-                    running.places.iter().zip(&running.normals).map(move |(place, normal)| (*place, normal.map(|axis| axis * facing)))
-                };
-                let written = side(1.0).chain(side(-1.0));
+                // Both sides keep the one normal: only the binormal turns over.
+                let side = || running.places.iter().zip(&running.normals).map(|(place, normal)| (*place, *normal));
+                let written = side().chain(side());
                 let vertices = written.map(|(position, normal)| RenderModelPreviewVertex { position, normal, ..Default::default() });
                 (cloth.first_vertex, vertices.collect())
             })
