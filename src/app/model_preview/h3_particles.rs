@@ -1439,7 +1439,7 @@ fn system_state(
     system: &H3ParticleSystem,
     values: Option<&H2FunctionValues>,
     time: f32,
-    onset: f32,
+    since: f32,
 ) -> Option<H3ParticleState> {
     let read = |name: &str| {
         if name.is_empty() { 1.0 } else { values.and_then(|values| values.get(name)).copied().unwrap_or(0.0) }
@@ -1449,7 +1449,7 @@ fn system_state(
         return None;
     }
     Some(H3ParticleState {
-        system_age: system.times.age(system.event, time - onset)?,
+        system_age: system.times.age(system.event, since)?,
         game_time: time.rem_euclid(1.0),
         effect_a,
         effect_b: read(&system.secondary_by),
@@ -1478,9 +1478,10 @@ fn system_state_stepped(
     time: f32,
     onset: f32,
 ) -> Option<H3ParticleState> {
-    system_state(system, values, time, onset).or_else(|| {
-        let begin = system.times.begins_within(system.event, time - onset - STEP, time - onset)?;
-        system_state(system, values, begin + onset, onset)
+    let since = time - onset;
+    system_state(system, values, time, since).or_else(|| {
+        let inside = system.times.begins_within(system.event, since - STEP, since)?;
+        system_state(system, values, time, inside)
     })
 }
 
@@ -1945,8 +1946,8 @@ impl H3ParticleSystem {
             let base = H3ParticleState {
                 system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
                 game_time: time.rem_euclid(1.0),
-                effect_a: system_state(system, values, time, onset).map_or(0.0, |state| state.effect_a),
-                effect_b: system_state(system, values, time, onset).map_or(1.0, |state| state.effect_b),
+                effect_a: system_state(system, values, time, time - onset).map_or(0.0, |state| state.effect_a),
+                effect_b: system_state(system, values, time, time - onset).map_or(1.0, |state| state.effect_b),
                 location_seed: system.location_seed,
                 lod: {
                     let away = minus(origin, view.eye);

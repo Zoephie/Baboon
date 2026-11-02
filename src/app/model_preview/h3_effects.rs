@@ -158,8 +158,9 @@ impl H3EffectTimes {
         if self.parallel { lengths.fold(0.0, f32::max) } else { lengths.sum() }
     }
 
-    /// When `index` first begins, if that lies after `from` and by `to`: a
-    /// step can be longer than a whole event, and must not pass over it.
+    /// A time inside `index`, if it first begins after `from` and by `to`: a
+    /// step can be longer than a whole event, and must not pass over it. Half a
+    /// tick in, as rounding can put its very start before it.
     pub(super) fn begins_within(&self, index: usize, from: f32, to: f32) -> Option<f32> {
         let event = *self.events.get(index)?;
         let before: f32 = if self.parallel {
@@ -168,7 +169,7 @@ impl H3EffectTimes {
             self.events.iter().take(index).map(|event| event.length()).sum()
         };
         let begin = before + event.delay;
-        (from < begin && begin <= to).then_some(begin)
+        (from < begin && begin <= to).then_some(begin + ONE_TICK * 0.5)
     }
 
     /// Seconds since `index` began, for what outlasts its normalized age. An
@@ -604,11 +605,21 @@ mod tests {
     }
 
     #[test]
+    fn a_delayed_tick_of_an_event_is_found_however_late_it_was_played() {
+        let delayed = H3EffectTimes { once: true, ..times(&[([0.1, 0.1], [0.0, 0.0])], 0, false) };
+        let inside = delayed.begins_within(0, 0.05, 0.11).unwrap();
+        assert!(delayed.age(0, inside).is_some());
+        // The sum this must not go through: late enough, it rounds down.
+        let late = (0..3000).map(|at| 100.0 + at as f32 * 0.1169).any(|onset: f32| (0.1 + onset) - onset < 0.1);
+        assert!(late);
+    }
+
+    #[test]
     fn a_step_longer_than_an_event_still_sees_it_begin() {
         let two = times(&[([0.0, 0.0], [0.0, 0.0]), ([0.0, 0.0], [0.0, 0.0])], 0, false);
-        assert_eq!(two.begins_within(1, 0.0, 0.05), Some(ONE_TICK));
+        assert_eq!(two.begins_within(1, 0.0, 0.05), Some(ONE_TICK * 1.5));
         assert_eq!(two.begins_within(1, 0.05, 0.1), None);
-        assert_eq!(two.begins_within(0, -0.01, 0.05), Some(0.0));
+        assert_eq!(two.begins_within(0, -0.01, 0.05), Some(ONE_TICK * 0.5));
         assert_eq!(two.begins_within(0, 0.0, 0.05), None, "already begun");
     }
 
