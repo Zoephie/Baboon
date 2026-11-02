@@ -20,6 +20,9 @@ const LUMINANCE: [f32; 3] = [0.212_656, 0.715_158, 0.072_185_6];
 /// `set_hue_saturaton_and_color_filters`' `scale`.
 const CONTRAST_SCALE: f32 = 10.0;
 
+/// What `evaluate_falloff` gives a function for its range.
+const FALLOFF_RANGE: f32 = 0.5;
+
 type Matrix = [[f32; 4]; 4];
 
 /// `s_screen_effect_settings`.
@@ -166,34 +169,69 @@ fn hue_matrix(hue: f32) -> Matrix {
 struct H3ScreenDefinition {
     settings: H3ScreenSettings,
     radius: f32,
+    /// ODST's. `postprocess` has it follow the last when they play in turn.
+    delay: f32,
     lifetime: f32,
     outside_radius: bool,
+    /// ODST's `disable camera falloffs`: neither distance nor angle counts.
+    no_camera_falloffs: bool,
     distance_falloff: Option<TagFunction>,
     time_falloff: Option<TagFunction>,
     angle_falloff: Option<TagFunction>,
+    object_falloff: Option<H3ObjectFalloff>,
+}
+
+/// ODST's `screen_effect_scalar_object_function_struct`.
+#[derive(Debug)]
+struct H3ObjectFalloff {
+    input: String,
+    range: String,
+    mapping: TagFunction,
 }
 
 impl H3ScreenDefinition {
+    /// `screen_effect_is_active`, for a viewer of what it hangs on.
+    fn active(&self, age: f32) -> bool {
+        self.lifetime <= 0.0 || ((self.delay == 0.0 || age > self.delay) && age <= self.delay + self.lifetime)
+    }
+
     /// `evaluate_falloff`.
-    fn falloff(&self, distance: f32, angle: f32, time: f32) -> f32 {
-        if !self.outside_radius && distance > self.radius {
+    fn falloff(&self, distance: f32, angle: f32, time: f32, values: Option<&H2FunctionValues>) -> f32 {
+        if !self.outside_radius && !self.no_camera_falloffs && distance > self.radius {
             return 0.0;
         }
         let at = |function: &Option<TagFunction>, input: f32| {
-            function.as_ref().map_or(1.0, |function| function.evaluate(input.clamp(0.0, 1.0), 0.0))
+            function.as_ref().map_or(1.0, |function| function.evaluate(input.clamp(0.0, 1.0), FALLOFF_RANGE))
         };
-        let time_input = if self.lifetime > f32::EPSILON { time / self.lifetime } else { time };
-        at(&self.distance_falloff, distance / self.radius.max(f32::EPSILON))
-            * at(&self.time_falloff, time_input)
-            * at(&self.angle_falloff, angle / std::f32::consts::PI)
+        let time_input = if self.lifetime > f32::EPSILON { (time - self.delay) / self.lifetime } else { time };
+        let camera = if self.no_camera_falloffs {
+            1.0
+        } else {
+            at(&self.distance_falloff, distance / self.radius.max(f32::EPSILON))
+                * at(&self.angle_falloff, angle / std::f32::consts::PI)
+        };
+        let object = self.object_falloff.as_ref().map_or(1.0, |falloff| {
+            let read = |name: &str| values.and_then(|values| values.get(name)).copied();
+            // With no input named, it reads how far through its life it is.
+            let input = read(&falloff.input).unwrap_or(time_input.clamp(0.0, 1.0));
+            falloff.mapping.evaluate(input.clamp(0.0, 1.0), read(&falloff.range).unwrap_or(FALLOFF_RANGE))
+        });
+        camera * at(&self.time_falloff, time_input) * object
     }
 }
 
-fn read_definition(element: TagStruct<'_>) -> Option<H3ScreenDefinition> {
+/// Whether an effect shows to a third person viewing what it hangs on: ODST's
+/// options say `first person` and `unattached` and carry the old name behind,
+/// and any of the three narrows it to those it names.
+fn shows_in_third_person(flagged: impl Fn(&str) -> bool) -> bool {
+    !(flagged("unattached") || flagged("first person") || flagged("third person")) || flagged("third person")
+}
+
+fn read_definition(element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinition> {
     let flags = element.read_flag_names("flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     // The preview's camera is a third person's, on nothing.
-    if flagged("first person only") {
+    if flagged("debug disable") || !shows_in_third_person(flagged) {
         return None;
     }
     let real = |name: &str| element.read_real(name).unwrap_or(0.0);
@@ -202,6 +240,13 @@ fn read_definition(element: TagStruct<'_>) -> Option<H3ScreenDefinition> {
         [color.red, color.green, color.blue]
     };
     let falloff = |name: &str| element.descend(name).and_then(|holder| tag_function_at(&holder, "Mapping"));
+    let object_falloff = element.descend("object falloff").and_then(|holder| {
+        Some(H3ObjectFalloff {
+            input: holder.read_string_id("Input Variable").unwrap_or_default(),
+            range: holder.read_string_id("Range Variable").unwrap_or_default(),
+            mapping: tag_function_at(&holder, "Mapping")?,
+        })
+    });
     Some(H3ScreenDefinition {
         settings: H3ScreenSettings {
             exposure_boost: real("exposure boost"),
@@ -216,12 +261,31 @@ fn read_definition(element: TagStruct<'_>) -> Option<H3ScreenDefinition> {
             color_floor: color("color floor"),
         },
         radius: real("maximum distance"),
+        delay,
         lifetime: real("lifetime"),
         outside_radius: flagged("allow effect outside radius"),
+        no_camera_falloffs: flagged("disable camera falloffs"),
         distance_falloff: falloff("distance falloff"),
         time_falloff: falloff("time falloff"),
         angle_falloff: falloff("angle falloff"),
+        object_falloff,
     })
+}
+
+/// `s_area_screen_effect_definition::postprocess`: played in turn, each starts
+/// as the last ends, whatever its own `delay` says.
+fn read_definitions(root: TagStruct<'_>) -> Vec<H3ScreenDefinition> {
+    let flags = root.read_flag_names("global flags").unwrap_or_default();
+    let in_turn = flags.iter().any(|(_, name)| name.starts_with("play sequentially"));
+    let mut start = 0.0;
+    let mut definitions = Vec::new();
+    for element in elements(root, "screen effects") {
+        let lifetime = element.read_real("lifetime").unwrap_or(0.0);
+        let delay = if in_turn { start } else { element.read_real("delay").unwrap_or(0.0) };
+        start += lifetime;
+        definitions.extend(read_definition(element, delay));
+    }
+    definitions
 }
 
 /// An `area_screen_effect` on an effect of an object.
@@ -258,8 +322,7 @@ pub(super) fn read_h3_screen_effects(
         let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "area_screen_effect", b"sefc") else {
             return;
         };
-        let read = elements(tag.root(), "screen effects").into_iter().filter_map(read_definition);
-        let definitions = Arc::new(read.collect::<Vec<_>>());
+        let definitions = Arc::new(read_definitions(tag.root()));
         if definitions.is_empty() {
             return;
         }
@@ -304,8 +367,8 @@ pub(crate) fn h3_screen_settings<'a>(
         let along = (0..3).map(|axis| to_effect[axis] * view.forward[axis]).sum::<f32>();
         let angle = (along / distance.max(f32::EPSILON)).clamp(-1.0, 1.0).acos();
         for definition in effect.definitions.iter() {
-            if definition.lifetime <= 0.0 || age <= definition.lifetime {
-                let falloff = definition.falloff(distance, angle, age);
+            if definition.active(age) {
+                let falloff = definition.falloff(distance, angle, age, scope);
                 if falloff > 0.0 {
                     settings.accumulate(&definition.settings, falloff);
                 }
@@ -326,6 +389,54 @@ mod tests {
 
     fn close(a: [f32; 3], b: [f32; 3]) -> bool {
         (0..3).all(|axis| (a[axis] - b[axis]).abs() < 1e-3)
+    }
+
+    fn timed(delay: f32, lifetime: f32) -> H3ScreenDefinition {
+        H3ScreenDefinition {
+            settings: H3ScreenSettings::default(),
+            radius: 1.0,
+            delay,
+            lifetime,
+            outside_radius: false,
+            no_camera_falloffs: false,
+            distance_falloff: None,
+            time_falloff: None,
+            angle_falloff: None,
+            object_falloff: None,
+        }
+    }
+
+    #[test]
+    fn a_delayed_effect_runs_for_its_lifetime_after_its_delay() {
+        let definition = timed(2.0, 1.0);
+        assert!(!definition.active(1.0));
+        assert!(!definition.active(2.0));
+        assert!(definition.active(2.5));
+        assert!(definition.active(3.0));
+        assert!(!definition.active(3.5));
+        assert!(timed(0.0, 1.0).active(0.0));
+        assert!(timed(5.0, 0.0).active(0.0), "with no lifetime it ignores its delay");
+    }
+
+    #[test]
+    fn camera_falloffs_can_be_turned_off() {
+        let mut definition = timed(0.0, 0.0);
+        assert_eq!(definition.falloff(2.0, 0.0, 0.0, None), 0.0);
+        definition.no_camera_falloffs = true;
+        assert_eq!(definition.falloff(2.0, 0.0, 0.0, None), 1.0);
+    }
+
+    #[test]
+    fn a_third_person_sees_what_names_no_person_or_names_them() {
+        let with = |names: &'static [&'static str]| shows_in_third_person(move |wanted| names.iter().any(|name| name.starts_with(wanted)));
+        assert!(with(&[]));
+        assert!(with(&["allow effect outside radius"]));
+        assert!(with(&["third person only"]));
+        assert!(with(&["third person{third person only}"]));
+        assert!(with(&["first person{first person only}", "third person{third person only}"]));
+        assert!(!with(&["first person only"]));
+        assert!(!with(&["first person{first person only}"]));
+        assert!(!with(&["unattached"]));
     }
 
     #[test]
@@ -375,17 +486,9 @@ mod tests {
 
     #[test]
     fn past_its_radius_an_effect_is_gone_unless_it_says_otherwise() {
-        let definition = H3ScreenDefinition {
-            settings: H3ScreenSettings::default(),
-            radius: 10.0,
-            lifetime: 0.0,
-            outside_radius: false,
-            distance_falloff: None,
-            time_falloff: None,
-            angle_falloff: None,
-        };
-        assert_eq!(definition.falloff(5.0, 0.0, 0.0), 1.0);
-        assert_eq!(definition.falloff(11.0, 0.0, 0.0), 0.0);
-        assert_eq!(H3ScreenDefinition { outside_radius: true, ..definition }.falloff(11.0, 0.0, 0.0), 1.0);
+        let definition = H3ScreenDefinition { radius: 10.0, ..timed(0.0, 0.0) };
+        assert_eq!(definition.falloff(5.0, 0.0, 0.0, None), 1.0);
+        assert_eq!(definition.falloff(11.0, 0.0, 0.0, None), 0.0);
+        assert_eq!(H3ScreenDefinition { outside_radius: true, ..definition }.falloff(11.0, 0.0, 0.0, None), 1.0);
     }
 }
