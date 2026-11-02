@@ -10,7 +10,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::ce_attachments::{elements, object_block};
-use super::ce_lights::{CeFlareView, posed_on};
+use super::ce_lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
 use super::ce_passes::argb;
 use super::h2_passes::{H2Image, ce_color_interpolate};
 use super::materials::decode_h2_image;
@@ -334,12 +334,26 @@ struct CeEffectParticle {
     scales_b: u32,
 }
 
+/// One of an event's `parts` that makes a light.
+#[derive(Debug, Clone)]
+struct CeLightPart {
+    location: usize,
+    /// `create in`: any environment, air only, water only, space only.
+    environment: i128,
+    /// `violence mode`: either, violent only, nonviolent only.
+    violence: i128,
+    light: usize,
+    scales_a: u32,
+    scales_b: u32,
+}
+
 #[derive(Debug, Clone)]
 struct CeEvent {
     skip: f32,
     delay: [f32; 2],
     duration: [f32; 2],
     particles: Vec<CeEffectParticle>,
+    lights: Vec<CeLightPart>,
 }
 
 /// An `effect` tag.
@@ -350,6 +364,7 @@ pub(crate) struct CeEffectDef {
     locations: Vec<String>,
     events: Vec<CeEvent>,
     pub(crate) particles: Vec<CeParticleDef>,
+    pub(crate) lights: Vec<CeEffectLightDef>,
 }
 
 fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
@@ -382,7 +397,39 @@ fn read_effect_def(source: &TagSource, path: &str) -> Option<CeEffectDef> {
     let mut particles: Vec<CeParticleDef> = Vec::new();
     let mut paths: Vec<String> = Vec::new();
     let mut events = Vec::new();
+    let mut lights: Vec<CeEffectLightDef> = Vec::new();
+    let mut light_paths: Vec<String> = Vec::new();
+    let light_group = u32::from_be_bytes(*b"ligh");
     for event in elements(root, "events") {
+        let mut light_parts = Vec::new();
+        for part in elements(event, "parts") {
+            let Some((group, path)) = part.read_tag_ref_with_group("type") else {
+                continue;
+            };
+            if group != light_group || path.is_empty() {
+                continue;
+            }
+            let light = match light_paths.iter().position(|known| *known == path) {
+                Some(at) => at,
+                None => {
+                    let Some(light) = read_effect_light(source, &path) else {
+                        continue;
+                    };
+                    lights.push(light);
+                    light_paths.push(path);
+                    lights.len() - 1
+                }
+            };
+            let flags = |name: &str| part.read_int_any(name).unwrap_or(0) as u32;
+            light_parts.push(CeLightPart {
+                location: part.read_int_any("location").unwrap_or(-1).max(0) as usize,
+                environment: part.read_int_any("create in").unwrap_or(0),
+                violence: part.read_int_any("violence mode").unwrap_or(0),
+                light,
+                scales_a: flags("A scales values"),
+                scales_b: flags("B scales values"),
+            });
+        }
         let mut entries = Vec::new();
         for entry in elements(event, "particles") {
             let Some(path) = entry.read_tag_ref_path("particle type").filter(|path| !path.is_empty()) else {
@@ -429,12 +476,20 @@ fn read_effect_def(source: &TagSource, path: &str) -> Option<CeEffectDef> {
             delay: bounds_of(event, "delay bounds"),
             duration: bounds_of(event, "duration bounds"),
             particles: entries,
+            lights: light_parts,
         });
     }
-    if events.is_empty() || particles.is_empty() {
+    if events.is_empty() || (particles.is_empty() && lights.is_empty()) {
         return None;
     }
-    Some(CeEffectDef { loop_start: index("loop start event"), loop_stop: index("loop stop event"), locations, events, particles })
+    Some(CeEffectDef {
+        loop_start: index("loop start event"),
+        loop_stop: index("loop stop event"),
+        locations,
+        events,
+        particles,
+        lights,
+    })
 }
 
 /// Where a location sits on the model: one per marker of its name.
@@ -616,12 +671,28 @@ pub(crate) struct CeParticleQuad {
     pub(crate) color: [f32; 4],
 }
 
+/// A light an effect's part made: `light_new_unattached` on its location.
+#[derive(Debug, Clone)]
+struct CeRunningLight {
+    effect: usize,
+    def: usize,
+    node: usize,
+    position: [f32; 3],
+    forward: [f32; 3],
+    /// The tick it was made.
+    born: u32,
+    scale: f32,
+}
+
 /// Every effect's particles, carried from frame to frame.
 #[derive(Default)]
 pub(crate) struct CeParticleField {
     time: Option<f32>,
     effects: Vec<RunningEffect>,
     particles: Vec<CeParticle>,
+    lights: Vec<CeRunningLight>,
+    /// `game_time_get`.
+    tick: u32,
     random: Option<Random>,
 }
 
@@ -707,6 +778,8 @@ impl CeParticleField {
                 })
                 .collect();
             self.particles.clear();
+            self.lights.clear();
+            self.tick = 0;
             self.random = Some(Random(0x1234_5678));
             let mut random = self.random.take().unwrap();
             for (running, effect) in self.effects.iter_mut().zip(effects) {
@@ -721,11 +794,18 @@ impl CeParticleField {
         let mut random = self.random.take().unwrap_or(Random(1));
         while now + STEP <= time {
             now += STEP;
+            self.tick += 1;
             for (index, effect) in effects.iter().enumerate() {
                 let state = inputs(effect.object);
                 let running = &mut self.effects[index];
-                update_effect(index, running, effect, &state, &mut self.particles, &mut random, bones, STEP);
+                let made = Made { particles: &mut self.particles, lights: &mut self.lights, tick: self.tick };
+                update_effect(index, running, effect, &state, made, &mut random, bones, STEP);
             }
+            // `lights_preprocess_scene` lets go of those past their duration.
+            let tick = self.tick;
+            self.lights.retain(|light| {
+                effects.get(light.effect).and_then(|effect| effect.def.lights.get(light.def)).is_some_and(|def| def.alive(tick - light.born))
+            });
             let defs: Vec<&Arc<CeEffectDef>> = effects.iter().map(|effect| &effect.def).collect();
             self.particles.retain_mut(|particle| {
                 let def = &defs[particle.effect].particles[particle.def];
@@ -734,6 +814,20 @@ impl CeParticleField {
         }
         self.time = Some(now);
         self.random = Some(random);
+    }
+
+    /// The lights effects' parts have made, as `lights_preprocess_scene`
+    /// has them now, with the effect and light each came from.
+    pub(crate) fn lights(&self, effects: &[CeEffectAt]) -> Vec<(usize, usize, CeLight)> {
+        self.lights
+            .iter()
+            .filter_map(|light| {
+                let effect = effects.get(light.effect)?;
+                let def = effect.def.lights.get(light.def)?;
+                let made = def.at(effect.object, light.node, light.position, light.forward, self.tick - light.born, light.scale)?;
+                Some((light.effect, light.def, made))
+            })
+            .collect()
     }
 
     /// `render_particles` and `build_sprite`: each particle's quad, with
@@ -833,6 +927,46 @@ impl CeParticleField {
     }
 }
 
+/// What an effect's update makes: particles and lights, and the tick.
+struct Made<'a> {
+    particles: &'a mut Vec<CeParticle>,
+    lights: &'a mut Vec<CeRunningLight>,
+    tick: u32,
+}
+
+/// `effect_generate_parts`, for the parts that make lights: one at every
+/// instance of the location. An effect `effect_new_looping` made leaves out
+/// what is for nonviolent mode only; the preview is never under water.
+fn generate_parts(index: usize, running: &RunningEffect, effect: &CeEffectAt, lights: &mut Vec<CeRunningLight>, tick: u32) {
+    for part in &effect.def.events[running.event].lights {
+        if part.violence == 2 || !matches!(part.environment, 0 | 1) {
+            continue;
+        }
+        let Some(instances) = effect.locations.get(part.location) else {
+            continue;
+        };
+        // The type-specific scale.
+        let mut scale = 1.0;
+        if part.scales_a & 0x20 != 0 {
+            scale = running.scale_a;
+        }
+        if part.scales_b & 0x20 != 0 {
+            scale *= running.scale_b;
+        }
+        for instance in instances {
+            lights.push(CeRunningLight {
+                effect: index,
+                def: part.light,
+                node: instance.node,
+                position: instance.position,
+                forward: instance.axes[0],
+                born: tick,
+                scale,
+            });
+        }
+    }
+}
+
 /// `effect_set_event`.
 fn set_event(running: &mut RunningEffect, def: &CeEffectDef, event: usize, random: &mut Random) {
     if let Some(found) = def.events.get(event) {
@@ -850,11 +984,12 @@ fn update_effect(
     running: &mut RunningEffect,
     effect: &CeEffectAt,
     inputs: &CeObjectInputs,
-    particles: &mut Vec<CeParticle>,
+    made: Made<'_>,
     random: &mut Random,
     bones: Option<&[[f32; 4]]>,
     dt: f32,
 ) {
+    let Made { particles, lights, tick } = made;
     let def = &effect.def;
     // `object_get_function_value`: none is on at one.
     let (scale_a, on) = match effect.primary {
@@ -925,6 +1060,7 @@ fn update_effect(
                     (lower + random.range(0.0, delta)).floor().clamp(0.0, 255.0)
                 })
                 .collect();
+            generate_parts(index, running, effect, lights, tick);
         }
     }
 }

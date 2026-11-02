@@ -234,6 +234,9 @@ pub(crate) struct CeLight {
     /// Cosines of its `falloff angle` and `cutoff angle`, or none in all ways.
     cone: Option<[f32; 2]>,
     pub(crate) flare: Option<Arc<CeFlare>>,
+    /// A light an effect made: the value its age gives it, in place of a
+    /// function's, and a color of the bounds alone.
+    fixed: Option<f32>,
 }
 
 /// One quad, ready to place.
@@ -320,7 +323,7 @@ fn light_color(flags: i128, lower: [f32; 4], upper: [f32; 4], change: [f32; 3], 
 impl CeLight {
     /// What `object_get_function_value` gives it.
     fn value(&self, outputs: &[f32; 4]) -> f32 {
-        self.primary.map_or(1.0, |index| outputs[index])
+        self.fixed.unwrap_or_else(|| self.primary.map_or(1.0, |index| outputs[index]))
     }
 
     /// The patch tested for how much of the flare the model hides, if it
@@ -357,6 +360,10 @@ impl CeLight {
     }
 
     fn color(&self, value: f32, change_colors: &[[f32; 3]; 4]) -> [f32; 3] {
+        // `rgb_colors_interpolate`, for a light `light_new_unattached` made.
+        if self.fixed.is_some() {
+            return ce_color_interpolate(self.interpolation, rgb_of(self.lower), rgb_of(self.upper), value);
+        }
         let change = self.change_color.map_or([1.0; 3], |index| change_colors[index]);
         light_color(self.interpolation, self.lower, self.upper, change, value)
     }
@@ -626,6 +633,115 @@ fn function_slot(value: Option<i128>) -> Option<usize> {
     usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
 }
 
+/// A `light` tag as tool's postprocess leaves it, placed nowhere yet.
+fn read_light_tag(source: &TagSource, path: &str) -> Option<CeLight> {
+    let light = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
+    let root = light.root();
+    let flare_path = root.read_tag_ref_path("lens flare").filter(|flare| !flare.is_empty());
+    let flare = flare_path.and_then(|flare| read_flare(source, &flare)).map(Arc::new);
+    let flags = root.read_int_any("flags").unwrap_or(0);
+    // Tags on disk lack what tool's postprocess gives them for the game.
+    let modifier = root.read_real_bounds("radius modifier");
+    let radius_bounds = if modifier.lower < UNSET && modifier.upper < UNSET {
+        [1.0, 1.0]
+    } else {
+        [modifier.lower, modifier.upper]
+    };
+    let radius = root.read_real("radius").filter(|radius| *radius != 0.0).unwrap_or(1.0);
+    let angle = |name: &str| root.read_real(name).unwrap_or(0.0);
+    let (lower, upper) = baked_colors(argb(root, "color lower bound"), argb(root, "color upper bound"));
+    Some(CeLight {
+        object: 0,
+        node: 0,
+        position: [0.0; 3],
+        forward: [1.0, 0.0, 0.0],
+        primary: None,
+        change_color: None,
+        lower,
+        upper,
+        interpolation: root.read_int_any("interpolation flags").unwrap_or(0),
+        dynamic: flags & LIGHT_DYNAMIC != 0,
+        spares_owner: flags & LIGHT_SPARES_OWNER != 0,
+        radius,
+        radius_bounds,
+        cone: baked_cone(angle("falloff angle"), angle("cutoff angle")),
+        flare,
+        fixed: None,
+    })
+}
+
+/// A light an effect's part makes with `light_new_unattached`: it lives for
+/// the tag's `duration`, fading by its `falloff function`.
+#[derive(Debug, Clone)]
+pub(crate) struct CeEffectLightDef {
+    pub(crate) light: CeLight,
+    /// In ticks, as tool's postprocess (`sub_49CF90`) leaves it.
+    duration: f32,
+    falloff: i32,
+}
+
+pub(super) fn read_effect_light(source: &TagSource, path: &str) -> Option<CeEffectLightDef> {
+    let mut light = read_light_tag(source, path)?;
+    let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
+    let root = tag.root();
+    // Its flags are made 3 whatever the tag's: it is always dynamic.
+    light.dynamic = true;
+    Some(CeEffectLightDef {
+        light,
+        duration: root.read_real("duration").unwrap_or(0.0) * 30.0,
+        falloff: root.read_int_any("falloff function").unwrap_or(0) as i32,
+    })
+}
+
+/// `transition_function_build_table`: a byte per step of 1023.
+fn transition_table(function: i32) -> [u8; 1024] {
+    std::array::from_fn(|at| {
+        let x = at as f32 * 0.000_977_517_1;
+        let y = match function {
+            1 => x.powf(0.5),
+            2 => x.powf(0.25),
+            3 => x.powi(2),
+            4 => x.powi(4),
+            _ => ((x * std::f32::consts::PI - std::f32::consts::FRAC_PI_2).sin() + 1.0) * 0.5,
+        };
+        ((y * 255.0) as i32).clamp(0, 255) as u8
+    })
+}
+
+/// `transition_function_evaluate`: linear as it is, the rest read from their
+/// tables between neighbours.
+pub(super) fn transition_evaluate(function: i32, value: f32) -> f32 {
+    // NaN goes to zero as the game's comparisons send it.
+    let value = if value >= 0.0 { value.min(1.0) } else { 0.0 };
+    if !(1..=5).contains(&function) {
+        return value;
+    }
+    static TABLES: std::sync::OnceLock<[[u8; 1024]; 6]> = std::sync::OnceLock::new();
+    let table = &TABLES.get_or_init(|| std::array::from_fn(|function| transition_table(function as i32)))[function as usize];
+    let scaled = value * 1023.0;
+    let index = (scaled - 0.5) as i32;
+    let fraction = scaled % 1.0;
+    let at = |index: i32| f32::from(table[index.clamp(0, 1023) as usize]) * 0.003_921_569;
+    if index == 1023 { at(1023) } else { at(index) * (1.0 - fraction) + at(index + 1) * fraction }
+}
+
+impl CeEffectLightDef {
+    /// `lights_preprocess_scene` for an unattached light `age` ticks old:
+    /// none once past its duration.
+    pub(crate) fn at(&self, object: u8, node: usize, position: [f32; 3], forward: [f32; 3], age: u32, scale: f32) -> Option<CeLight> {
+        let age = age as f32;
+        if age > self.duration {
+            return None;
+        }
+        let value = (1.0 - transition_evaluate(self.falloff, age / self.duration)) * scale;
+        Some(CeLight { object, node, position, forward, fixed: Some(value), ..self.light.clone() })
+    }
+
+    pub(crate) fn alive(&self, age: u32) -> bool {
+        age as f32 <= self.duration
+    }
+}
+
 /// The lights among `object`'s attachments, one per marker of the name.
 /// `frame` turns a marker to where the preview holds it, and its node.
 pub(super) fn read_ce_lights(
@@ -647,29 +763,13 @@ pub(super) fn read_ce_lights(
         if group != light_group || path.is_empty() {
             continue;
         }
-        let Ok(light) = load_referenced_tag_from_source(source, &path, "light", b"ligh") else {
+        let Some(template) = read_light_tag(source, &path) else {
             continue;
         };
-        let root = light.root();
-        let flare_path = root.read_tag_ref_path("lens flare").filter(|flare| !flare.is_empty());
-        let flare = flare_path.and_then(|flare| read_flare(source, &flare)).map(Arc::new);
-        let flags = root.read_int_any("flags").unwrap_or(0);
-        let dynamic = flags & LIGHT_DYNAMIC != 0;
         // `light_new`: it needs one or the other to exist.
-        if flare.is_none() && !dynamic {
+        if template.flare.is_none() && !template.dynamic {
             continue;
         }
-        // Tags on disk lack what tool's postprocess gives them for the game.
-        let modifier = root.read_real_bounds("radius modifier");
-        let radius_bounds = if modifier.lower < UNSET && modifier.upper < UNSET {
-            [1.0, 1.0]
-        } else {
-            [modifier.lower, modifier.upper]
-        };
-        let radius = root.read_real("radius").filter(|radius| *radius != 0.0).unwrap_or(1.0);
-        let angle = |name: &str| root.read_real(name).unwrap_or(0.0);
-        let (lower, upper) =
-            baked_colors(argb(root, "color lower bound"), argb(root, "color upper bound"));
         let name = attachment.read_string("marker").unwrap_or_default();
         for marker in markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name)) {
             let (place, node) = frame(marker);
@@ -680,15 +780,7 @@ pub(super) fn read_ce_lights(
                 forward: place.axes[0],
                 primary: function_slot(attachment.read_int_any("primary scale")),
                 change_color: function_slot(attachment.read_int_any("change color")),
-                lower,
-                upper,
-                interpolation: root.read_int_any("interpolation flags").unwrap_or(0),
-                dynamic,
-                spares_owner: flags & LIGHT_SPARES_OWNER != 0,
-                radius,
-                radius_bounds,
-                cone: baked_cone(angle("falloff angle"), angle("cutoff angle")),
-                flare: flare.clone(),
+                ..template.clone()
             });
         }
     }
@@ -755,6 +847,7 @@ mod tests {
             radius: 2.0,
             radius_bounds: [1.0, 1.0],
             cone: None,
+            fixed: None,
             flare: Some(Arc::new(CeFlare {
                 cones: [1.0, 1.0],
                 fade: [0.0, 0.0],
@@ -977,5 +1070,31 @@ mod tests {
         assert_eq!(light_color(0, [1.0; 4], [1.0; 4], [0.5; 3], 1.0), [1.0; 3]);
         let unset = [1.0, 1.0, 1.0, 0.0];
         assert_eq!(light_color(0, unset, unset, [0.5; 3], 1.0), [0.5; 3]);
+    }
+
+    #[test]
+    fn transitions_read_their_tables_and_linear_reads_none() {
+        assert_eq!(transition_evaluate(0, 0.3), 0.3);
+        assert_eq!(transition_evaluate(0, 1.7), 1.0);
+        assert_eq!(transition_evaluate(0, f32::NAN), 0.0);
+        // Squared, a byte to the step: near enough a quarter at a half.
+        assert!((transition_evaluate(3, 0.5) - 0.25).abs() < 0.01);
+        assert!((transition_evaluate(1, 0.25) - 0.5).abs() < 0.01);
+        assert_eq!(transition_evaluate(4, 0.0), 0.0);
+    }
+
+    #[test]
+    fn an_effects_light_fades_by_its_age_and_then_is_gone() {
+        let def = CeEffectLightDef { light: light(Vec::new()), duration: 30.0, falloff: 0 };
+        let made = |age| def.at(0, 0, [0.0; 3], [1.0, 0.0, 0.0], age, 0.5);
+        assert_eq!(made(0).and_then(|light| light.fixed), Some(0.5));
+        let half = made(15).and_then(|light| light.fixed).unwrap();
+        assert!((half - 0.25).abs() < 1e-6);
+        assert!(made(30).is_some());
+        assert!(made(31).is_none());
+        assert!(def.alive(30) && !def.alive(31));
+        // Its color is the bounds' alone, whatever the change colors say.
+        let light = made(0).unwrap();
+        assert_eq!(light.color(0.5, &[[0.0; 3]; 4]), [0.5, 0.25, 0.0]);
     }
 }
