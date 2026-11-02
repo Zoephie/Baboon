@@ -597,8 +597,8 @@ fn fold_attached(
         let (flares, lights, gels) =
             super::h2_lights::read_h2_flares(source, object, owner, &attached.markers, frame);
         preview.h2_flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
-        preview.h2_point_lights.extend(lights);
-        preview.h2_gel_lights.extend(gels);
+        preview.h2_point_lights.extend(lights.into_iter().map(|light| light.on_attached(name)));
+        preview.h2_gel_lights.extend(gels.into_iter().map(|light| light.on_attached(name)));
         let markers = &attached.markers;
         // Particle systems carry the held object's event effects (`firing
         // effect` and the rest), which its owner's panel plays by name.

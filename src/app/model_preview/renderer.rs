@@ -3021,7 +3021,9 @@ impl ModelGlRenderer {
                     let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                     for point in &frame.preview.h2_point_lights {
                         let values = frame.h2_values_of_object(point.object);
-                        let Some(light) = point.lit(values, bones, frame.time) else {
+                        let onsets = &mut self.slots[slot].h3_onsets;
+                        let onset = onsets.of(point.object, point.scale_name(), values, frame.time);
+                        let Some(light) = point.lit(values, bones, frame.time, onset) else {
                             continue;
                         };
                         let (light, draws) = h2_lights::overbrighten(&light);
@@ -3047,7 +3049,9 @@ impl ModelGlRenderer {
                     let mut masked = false;
                     for (index, gel) in frame.preview.h2_gel_lights.iter().enumerate() {
                         let values = frame.h2_values_of_object(gel.object);
-                        let Some((light, rows)) = gel.lit(values, bones, frame.time) else {
+                        let onsets = &mut self.slots[slot].h3_onsets;
+                        let onset = onsets.of(gel.object, gel.scale_name(), values, frame.time);
+                        let Some((light, rows)) = gel.lit(values, bones, frame.time, onset) else {
                             continue;
                         };
                         let specular = h2_lights::has_specular(&light);
@@ -3613,7 +3617,8 @@ impl ModelGlRenderer {
                 };
                 let values = frame.h2_values_of_object(at.object);
                 let colors = if at.object == 0 { frame.change_colors } else { [[1.0; 3]; 4] };
-                let sprites = at.sprites(values, &colors, bones, &view, frame.time, occlusion);
+                let onset = uploaded.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                let sprites = at.sprites(values, &colors, bones, &view, frame.time, onset, occlusion);
                 let textures = &uploaded.flare_textures[first_h2 + index];
                 draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
             }

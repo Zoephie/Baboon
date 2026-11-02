@@ -7,7 +7,8 @@
 //! bipeds with `H2_SHOT_BIPED`, or vehicles with `H2_SHOT_OBJECT=vehicle`, whose
 //! function inputs `H2_SHOT_INPUTS` can set, posed at `H2_SHOT_CLIP`,
 //! holding `H2_SHOT_WEAPON` and `H2_SHOT_SECONDARY`, with named Halo 2
-//! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`.
+//! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`, leaving out the
+//! features `H2_SHOT_DROP` names.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -107,6 +108,21 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         eprintln!("NOTE MAT {} h3 {} {:?}", material.shader_path, texture.h3.is_some(), texture.error);
     }
     data.textures = Some(Arc::new(textures));
+    // `H2_SHOT_DROP=a,b` leaves out whole features, to see one on its own.
+    if let Ok(dropped) = std::env::var("H2_SHOT_DROP") {
+        let preview = Arc::make_mut(&mut data.preview);
+        for feature in dropped.split(',') {
+            match feature {
+                "particles" => preview.h3_particles.clear(),
+                "flares" => preview.h2_flares.clear(),
+                "lights" => preview.h2_point_lights.clear(),
+                "gels" => preview.h2_gel_lights.clear(),
+                "volumes" => preview.h2_light_volumes.clear(),
+                "contrails" => preview.h2_contrails.clear(),
+                other => panic!("H2_SHOT_DROP: no feature {other}"),
+            }
+        }
+    }
     let mut state = ModelPreviewState::default();
     state.h2_light_follows_camera = std::env::var_os("H2_SHOT_FIXED_LIGHT").is_none();
     let variant = std::env::var("H2_SHOT_VARIANT").ok();

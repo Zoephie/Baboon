@@ -12,6 +12,8 @@ use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeAntennaQuad, CeFlareView, CeSprite, antenna_sprite, posed_on};
 use super::ce_passes::argb;
 use super::h2_functions::H2FunctionValues;
+use super::h3_effects::{H3EffectTimes, adopt_event_function, for_each_attached_part, part_markers};
+use blam_tags::tag_function::h2::transition_evaluate;
 use super::h2_passes::{
     H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
 };
@@ -113,9 +115,50 @@ struct H2Light {
     contrast: i128,
     radius: f32,
     specular_radius: f32,
+    /// `duration`: how long it lasts when an effect makes it, or 0 for ever.
+    effect_duration: f32,
+    /// The second `falloff function`: how it dims over that duration.
+    effect_falloff: u8,
 }
 
-/// One link of a Halo 2 antenna.
+/// A light an effect's event makes, `sub_8EBD10`: it stands from when its
+/// event begins. One with a `duration` dims by its falloff, `sub_8ED2A0`, and
+/// is deleted after it, `sub_8EE2E0`; without, nothing deletes it.
+#[derive(Debug, Clone)]
+pub(crate) struct H2EffectLight {
+    times: Arc<H3EffectTimes>,
+    event: usize,
+    /// `A scales values` takes the type-specific bit: `sub_515FC0` scales it
+    /// by the effect's A scale, which the attachment's function gives.
+    scaled: bool,
+}
+
+impl H2EffectLight {
+    pub(crate) fn new(times: Arc<H3EffectTimes>, event: usize, scaled: bool) -> Self {
+        Self { times, event, scaled }
+    }
+
+    /// The scale `sub_8ED2A0` reads, or none while the light does not exist.
+    /// Without a duration it takes the upper colors and brightness whatever
+    /// the scale, and only its size follows; that differs only when the effect
+    /// scales it below 1.
+    fn value(&self, light: &H2Light, on: f32, time: f32, onset: f32) -> Option<f32> {
+        if on <= 0.0 {
+            return None;
+        }
+        let since = self.times.since_begun(self.event, time - onset)?;
+        let scale = if self.scaled { on } else { 1.0 };
+        if light.effect_duration <= 0.0 {
+            return Some(scale);
+        }
+        if since > light.effect_duration {
+            return None;
+        }
+        let faded = transition_evaluate(light.effect_falloff, since / light.effect_duration);
+        Some(scale * (1.0 - faded))
+    }
+}
+
 #[derive(Debug, Clone)]
 struct H2AntennaVertex {
     /// `sub_A63CD0`: where the next vertex lies, with +Z the way this one points.
@@ -337,6 +380,7 @@ pub(crate) struct H2PointLight {
     /// `primary scale`, a name the object's functions answer to.
     scale_by: String,
     light: H2Light,
+    effect: Option<H2EffectLight>,
 }
 
 /// A frustum's shape.
@@ -364,6 +408,7 @@ pub(crate) struct H2GelLight {
     scale_by: String,
     light: H2Light,
     frustum: H2Frustum,
+    effect: Option<H2EffectLight>,
 }
 
 /// The vectors `lightaccum_frustum_no_specular_gel` reads as c33 to c36, in a
@@ -391,11 +436,35 @@ pub(crate) struct H2FlareAt {
     change_color: Option<usize>,
     /// The light it belongs to, if it is no attachment of its own.
     light: Option<H2Light>,
+    effect: Option<H2EffectLight>,
     pub(crate) flare: Arc<H2Flare>,
 }
 
 /// `object_attachment_scale`: no name is 1, and a name nothing answers to is 0,
 /// as `object_get_function_value` leaves it.
+/// The second of two fields that share a name, by its place in the struct.
+fn second_field_int(root: TagStruct<'_>, name: &str) -> Option<i128> {
+    let field = root.fields().filter(|field| field.name() == name).nth(1)?;
+    root.read_int_any(&format!("{name}#{}", field.ordinal()))
+}
+
+/// What a light's colors and size interpolate by: its attachment's function,
+/// or for an effect's light, its clock. None while that light does not exist.
+fn light_value(
+    light: &H2Light,
+    effect: Option<&H2EffectLight>,
+    scale_by: &str,
+    values: Option<&H2FunctionValues>,
+    time: f32,
+    onset: f32,
+) -> Option<f32> {
+    let on = attachment_value(scale_by, values);
+    match effect {
+        Some(effect) => effect.value(light, on, time, onset),
+        None => Some(on),
+    }
+}
+
 fn attachment_value(name: &str, values: Option<&H2FunctionValues>) -> f32 {
     if name.is_empty() {
         return 1.0;
@@ -523,6 +592,8 @@ fn read_h2_light(
         contrast: root.read_int_any("diffuse contrast").unwrap_or(0),
         radius,
         specular_radius: specular_radius.unwrap_or(radius),
+        effect_duration: root.read_real("duration").unwrap_or(0.0),
+        effect_falloff: second_field_int(root, "falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
     };
     let lit = flags & IGNORES_PARENTS != IGNORES_PARENTS;
     // Implementation 1 has no gel to read, so a sphere's own never shows.
@@ -561,8 +632,76 @@ fn read_h2_frustum(source: &TagSource, root: TagStruct<'_>) -> Option<H2Frustum>
     })
 }
 
+/// Where one light goes, and what drives it.
+struct H2LightPlace {
+    place: MarkerFrame,
+    node: usize,
+    marker_scale: f32,
+    only_under: Option<(String, String)>,
+    scale_by: String,
+    change_color: Option<usize>,
+    effect: Option<H2EffectLight>,
+}
+
+/// What a light puts on the object: a sphere's light, a frustum's gel pass,
+/// and the flare `light_submit_lens_flares` submits for it.
+fn place_h2_light(
+    source: &TagSource,
+    path: &str,
+    owner: u8,
+    at: H2LightPlace,
+    found: &mut (Vec<H2FlareAt>, Vec<H2PointLight>, Vec<H2GelLight>),
+) {
+    let Some((light, lights_model, frustum, flare)) = read_h2_light(source, path) else {
+        return;
+    };
+    let (place, node) = (at.place, at.node);
+    if let Some(frustum) = frustum {
+        found.2.push(H2GelLight {
+            object: owner,
+            node,
+            position: place.position,
+            forward: place.axes[0],
+            up: place.axes[2],
+            scale_by: at.scale_by.clone(),
+            light: light.clone(),
+            frustum,
+            effect: at.effect.clone(),
+        });
+    }
+    if lights_model {
+        found.1.push(H2PointLight {
+            object: owner,
+            node,
+            position: place.position,
+            scale_by: at.scale_by.clone(),
+            light: light.clone(),
+            effect: at.effect.clone(),
+        });
+    }
+    // A preview is a third person view.
+    let Some(flare) = flare.filter(|flare| flare.flags & ONLY_FIRST_PERSON == 0) else {
+        return;
+    };
+    found.0.push(H2FlareAt {
+        object: owner,
+        node,
+        position: place.position,
+        forward: place.axes[0],
+        marker_scale: at.marker_scale,
+        only_under: at.only_under,
+        scale_by: at.scale_by,
+        change_color: at.change_color,
+        light: Some(light),
+        effect: at.effect,
+        flare,
+    });
+}
+
 /// `render_submit_object_attachments`' `lens_flare`s, at every marker of their
-/// names, and `light_submit_lens_flares`' lights, which take the first.
+/// names, and `light_submit_lens_flares`' lights, which take the first. Then
+/// the lights its effects' events make, `effect_generate_part`'s only light:
+/// it returns at once for `lens_flare` and `light_volume` parts.
 pub(super) fn read_h2_flares(
     source: &TagSource,
     object: &TagFile,
@@ -570,79 +709,50 @@ pub(super) fn read_h2_flares(
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
 ) -> (Vec<H2FlareAt>, Vec<H2PointLight>, Vec<H2GelLight>) {
-    let mut flares = Vec::new();
-    let mut point_lights = Vec::new();
-    let mut gel_lights = Vec::new();
-    let Some(block) = object_block(object, "attachments") else {
-        return (flares, point_lights, gel_lights);
-    };
+    let mut found = (Vec::new(), Vec::new(), Vec::new());
     let lens_group = u32::from_be_bytes(*b"lens");
     let light_group = u32::from_be_bytes(*b"ligh");
-    for attachment in elements(block, "attachments") {
+    let attachments = object_block(object, "attachments").map(|block| elements(block, "attachments"));
+    for attachment in attachments.unwrap_or_default() {
         let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
             continue;
         };
         if path.is_empty() {
             continue;
         }
-        let (light, flare) = if group == lens_group {
-            let Some(flare) = read_h2_flare(source, &path).map(Arc::new) else {
+        let name = attachment.read_string_id("marker").unwrap_or_default();
+        let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
+        let change_color = usize::try_from(attachment.read_int_any("change color").unwrap_or(0) - 1).ok();
+        let mut named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
+        if group == light_group {
+            let Some(marker) = named.next() else {
                 continue;
             };
-            (None, flare)
-        } else if group == light_group {
-            let Some((light, lights_model, frustum, flare)) = read_h2_light(source, &path) else {
-                continue;
+            let (place, node) = frame(marker);
+            let at = H2LightPlace {
+                place,
+                node,
+                marker_scale: marker.scale,
+                only_under: marker.only_under.clone(),
+                scale_by,
+                change_color,
+                effect: None,
             };
-            if let Some(frustum) = frustum {
-                let name = attachment.read_string_id("marker").unwrap_or_default();
-                let named = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name));
-                if let Some(marker) = named {
-                    let (place, node) = frame(marker);
-                    gel_lights.push(H2GelLight {
-                        object: owner,
-                        node,
-                        position: place.position,
-                        forward: place.axes[0],
-                        up: place.axes[2],
-                        scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
-                        light: light.clone(),
-                        frustum,
-                    });
-                }
-            }
-            if lights_model {
-                let name = attachment.read_string_id("marker").unwrap_or_default();
-                let named = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name));
-                if let Some(marker) = named {
-                    let (place, node) = frame(marker);
-                    point_lights.push(H2PointLight {
-                        object: owner,
-                        node,
-                        position: place.position,
-                        scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
-                        light: light.clone(),
-                    });
-                }
-            }
-            let Some(flare) = flare else {
-                continue;
-            };
-            (Some(light), flare)
-        } else {
+            place_h2_light(source, &path, owner, at, &mut found);
+            continue;
+        }
+        if group != lens_group {
+            continue;
+        }
+        let Some(flare) = read_h2_flare(source, &path).map(Arc::new) else {
             continue;
         };
-        // A preview is a third person view.
         if flare.flags & ONLY_FIRST_PERSON != 0 {
             continue;
         }
-        let name = attachment.read_string_id("marker").unwrap_or_default();
-        let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
-        let change_color = usize::try_from(attachment.read_int_any("change color").unwrap_or(0) - 1);
-        let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
-        for marker in named.take(if light.is_some() { 1 } else { usize::MAX }) {
+        for marker in named {
             let (place, node) = frame(marker);
-            flares.push(H2FlareAt {
+            found.0.push(H2FlareAt {
                 object: owner,
                 node,
                 position: place.position,
@@ -650,13 +760,35 @@ pub(super) fn read_h2_flares(
                 marker_scale: marker.scale,
                 only_under: marker.only_under.clone(),
                 scale_by: scale_by.clone(),
-                change_color: change_color.ok(),
-                light: light.clone(),
+                change_color,
+                light: None,
+                effect: None,
                 flare: Arc::clone(&flare),
             });
         }
     }
-    (flares, point_lights, gel_lights)
+    for_each_attached_part(source, object, |part| {
+        if part.group != light_group {
+            return;
+        }
+        // `sub_8EBD10` takes the location's node, or none if not attached.
+        let Some(marker) = part_markers(markers, &part.marker, part.effect.once).into_iter().next() else {
+            return;
+        };
+        let (place, node) = frame(&marker);
+        let (place, node) = part.placed(place, node);
+        let at = H2LightPlace {
+            place,
+            node,
+            marker_scale: 1.0,
+            only_under: marker.only_under.clone(),
+            scale_by: part.effect.scale_by.clone(),
+            change_color: None,
+            effect: Some(H2EffectLight::new(Arc::clone(&part.times), part.event, part.scaled)),
+        };
+        place_h2_light(source, &part.path, owner, at, &mut found);
+    });
+    found
 }
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -746,6 +878,12 @@ impl H2Light {
 }
 
 impl H2PointLight {
+    /// An attached object's event light answers to its owner's panel.
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
+        self
+    }
+
     /// The layer its diffuse draws on.
     pub(crate) fn diffuse_layer(&self) -> H2Layer {
         H2Layer::diffuse_with_contrast(self.light.contrast)
@@ -762,13 +900,15 @@ impl H2PointLight {
     }
 
     /// What `sub_947870` hands the passes this frame, if the light is on.
+    /// `onset` is when its function last came on, for an effect's light.
     pub(crate) fn lit(
         &self,
         values: Option<&H2FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         time: f32,
+        onset: f32,
     ) -> Option<H2DefaultLight> {
-        let value = attachment_value(&self.scale_by, values);
+        let value = light_value(&self.light, self.effect.as_ref(), &self.scale_by, values, time, onset)?;
         let light = &self.light;
         let diffuse = light.diffuse_at(value, time)?;
         let specular =
@@ -822,6 +962,11 @@ impl H2Frustum {
 }
 
 impl H2GelLight {
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
+        self
+    }
+
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
@@ -840,8 +985,9 @@ impl H2GelLight {
         values: Option<&H2FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         time: f32,
+        onset: f32,
     ) -> Option<(H2DefaultLight, H2GelRows)> {
-        let value = attachment_value(&self.scale_by, values);
+        let value = light_value(&self.light, self.effect.as_ref(), &self.scale_by, values, time, onset)?;
         let light = &self.light;
         let diffuse = light.diffuse_at(value, time)?;
         let size = (1.0 - value) * light.size[0] + value * light.size[1];
@@ -887,6 +1033,7 @@ impl H2FlareAt {
 
     /// Follow the regions `merge_attached` renames for what `name` brings.
     pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
         if let Some((region, _)) = &mut self.only_under {
             *region = format!("{name}: {region}");
         }
@@ -914,8 +1061,11 @@ impl H2FlareAt {
         if by_marker { self.marker_scale } else { 1.0 }
     }
 
-    fn value(&self, values: Option<&H2FunctionValues>) -> f32 {
-        attachment_value(&self.scale_by, values)
+    fn value(&self, values: Option<&H2FunctionValues>, time: f32, onset: f32) -> Option<f32> {
+        match (&self.effect, &self.light) {
+            (Some(effect), Some(light)) => effect.value(light, attachment_value(&self.scale_by, values), time, onset),
+            _ => Some(attachment_value(&self.scale_by, values)),
+        }
     }
 
     /// The patches `lens_flare_occlusion_callback` tests: the outer, and an
@@ -961,6 +1111,7 @@ impl H2FlareAt {
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
+        onset: f32,
         occlusion: [f32; 2],
     ) -> Vec<CeSprite> {
         let flare = &*self.flare;
@@ -972,7 +1123,9 @@ impl H2FlareAt {
             return Vec::new();
         }
         let scaled_by_marker = flare.flags & SCALE_BY_MARKER != 0;
-        let value = self.value(values);
+        let Some(value) = self.value(values, time, onset) else {
+            return Vec::new();
+        };
         // A marker's scale takes the place of the attachment's, and of its color.
         let interpolation = if scaled_by_marker { 1.0 } else { value };
         let radius_scale = self.marker_scaled();
@@ -1117,6 +1270,7 @@ mod tests {
             scale_by: "power".to_owned(),
             change_color: None,
             light: None,
+            effect: None,
             flare: Arc::new(H2Flare {
                 flags,
                 cones: [1.0, 1.0],
@@ -1143,7 +1297,7 @@ mod tests {
     #[test]
     fn a_function_runs_a_reflection_between_its_bounds() {
         let at = flare(0, vec![reflection(0)]);
-        let sprites = at.sprites(Some(&values(0.5)), &[[1.0; 3]; 4], None, &view(), 0.0, [1.0, 1.0]);
+        let sprites = at.sprites(Some(&values(0.5)), &[[1.0; 3]; 4], None, &view(), 0.0, 0.0, [1.0, 1.0]);
         assert!((sprites[0].alpha - 0.75).abs() < 1e-5);
         assert!((sprites[0].extent[0] - 0.4).abs() < 1e-5, "0.2, then the corona's stretch");
         assert_eq!(sprites[0].highlight, Some(0.75));
@@ -1152,7 +1306,7 @@ mod tests {
     #[test]
     fn scale_by_marker_takes_the_upper_bounds_and_the_markers_scale() {
         let at = flare(SCALE_BY_MARKER, vec![reflection(0)]);
-        let sprites = at.sprites(Some(&values(0.0)), &[[1.0; 3]; 4], None, &view(), 0.0, [1.0, 1.0]);
+        let sprites = at.sprites(Some(&values(0.0)), &[[1.0; 3]; 4], None, &view(), 0.0, 0.0, [1.0, 1.0]);
         assert!((sprites[0].alpha - 1.0).abs() < 1e-5);
         assert!((sprites[0].extent[1] - 2.7).abs() < 1e-5);
     }
@@ -1164,9 +1318,9 @@ mod tests {
             vec![reflection(0), reflection(NOT_AFFECTED_BY_INNER_OCCLUSION)],
         );
         at.scale_by.clear();
-        let sprites = at.sprites(None, &[[1.0; 3]; 4], None, &view(), 0.0, [0.0, 0.5]);
+        let sprites = at.sprites(None, &[[1.0; 3]; 4], None, &view(), 0.0, 0.0, [0.0, 0.5]);
         assert_eq!(sprites.len(), 0, "with the chained test all hidden nothing draws");
-        let sprites = at.sprites(None, &[[1.0; 3]; 4], None, &view(), 0.0, [0.25, 0.5]);
+        let sprites = at.sprites(None, &[[1.0; 3]; 4], None, &view(), 0.0, 0.0, [0.25, 0.5]);
         assert!((sprites[0].alpha - 0.25).abs() < 1e-5);
         assert!((sprites[1].alpha - 0.5).abs() < 1e-5, "the outer test alone");
     }
@@ -1177,7 +1331,7 @@ mod tests {
         at.scale_by.clear();
         at.change_color = Some(1);
         let colors = [[1.0; 3], [0.5, 0.5, 0.5], [1.0; 3], [1.0; 3]];
-        let sprites = at.sprites(None, &colors, None, &view(), 0.0, [1.0, 1.0]);
+        let sprites = at.sprites(None, &colors, None, &view(), 0.0, 0.0, [1.0, 1.0]);
         assert_eq!(sprites[0].color, [0.5, 0.25, 0.125]);
         assert_eq!(sprites[1].color, [1.0, 0.5, 0.25]);
     }
@@ -1194,6 +1348,8 @@ mod tests {
             contrast: 0,
             radius: 2.0,
             specular_radius: 3.0,
+            effect_duration: 0.0,
+            effect_falloff: 0,
         }
     }
 
@@ -1201,10 +1357,10 @@ mod tests {
     fn a_name_nothing_answers_to_is_zero_and_no_name_is_one() {
         let mut at = flare(0, vec![reflection(0)]);
         at.scale_by = "no_such_function".to_owned();
-        assert_eq!(at.value(None), 0.0);
-        assert_eq!(at.value(Some(&values(0.5))), 0.0);
+        assert_eq!(at.value(None, 0.0, 0.0), Some(0.0));
+        assert_eq!(at.value(Some(&values(0.5)), 0.0, 0.0), Some(0.0));
         at.scale_by.clear();
-        assert_eq!(at.value(None), 1.0);
+        assert_eq!(at.value(None, 0.0, 0.0), Some(1.0));
     }
 
     #[test]
@@ -1213,7 +1369,7 @@ mod tests {
         at.light = Some(light());
         at.change_color = Some(0);
         let colors = [[0.0; 3]; 4];
-        let sprites = at.sprites(Some(&values(0.5)), &colors, None, &view(), 0.0, [1.0, 1.0]);
+        let sprites = at.sprites(Some(&values(0.5)), &colors, None, &view(), 0.0, 0.0, [1.0, 1.0]);
         assert_eq!(sprites[0].color, [0.5, 0.125, 0.03125]);
     }
 
@@ -1222,9 +1378,9 @@ mod tests {
         let mut at = flare(0, vec![reflection(0)]);
         at.light = Some(light());
         let none = [[1.0; 3]; 4];
-        assert!(at.sprites(Some(&values(0.0)), &none, None, &view(), 0.0, [1.0, 1.0]).is_empty());
+        assert!(at.sprites(Some(&values(0.0)), &none, None, &view(), 0.0, 0.0, [1.0, 1.0]).is_empty());
         at.light = Some(H2Light { size: [0.0, 0.0], ..light() });
-        assert!(at.sprites(Some(&values(1.0)), &none, None, &view(), 0.0, [1.0, 1.0]).is_empty());
+        assert!(at.sprites(Some(&values(1.0)), &none, None, &view(), 0.0, 0.0, [1.0, 1.0]).is_empty());
     }
 
     #[test]
@@ -1232,7 +1388,7 @@ mod tests {
         let mut at = flare(SCALE_BY_MARKER, vec![reflection(0)]);
         at.light = Some(light());
         let none = [[1.0; 3]; 4];
-        let sprites = at.sprites(Some(&values(0.5)), &none, None, &view(), 0.0, [1.0, 1.0]);
+        let sprites = at.sprites(Some(&values(0.5)), &none, None, &view(), 0.0, 0.0, [1.0, 1.0]);
         assert!((sprites[0].extent[1] - 0.9).abs() < 1e-5, "0.3 by the corona's 3");
     }
 
@@ -1243,12 +1399,29 @@ mod tests {
             position: [1.0, 2.0, 3.0],
             scale_by: "power".to_owned(),
             light,
+            effect: None,
         }
     }
 
     #[test]
+    fn an_effects_light_dims_over_its_duration_and_is_gone_after_it() {
+        let times = Arc::new(H3EffectTimes::read_nothing());
+        let effect = H2EffectLight::new(times, 0, false);
+        let lasting = H2Light { effect_duration: 0.5, ..light() };
+        assert_eq!(effect.value(&lasting, 1.0, 0.0, 0.0), Some(1.0));
+        let half = effect.value(&lasting, 1.0, 0.25, 0.0).unwrap();
+        assert!((half - 0.5).abs() < 0.01, "linear falloff halfway: {half}");
+        assert_eq!(effect.value(&lasting, 1.0, 0.6, 0.0), None);
+        assert_eq!(effect.value(&lasting, 1.0, 0.5, 0.5), Some(1.0), "runs from its onset");
+        assert_eq!(effect.value(&lasting, 0.0, 0.1, 0.0), None, "nothing while its function is off");
+        assert_eq!(effect.value(&light(), 1.0, 50.0, 0.0), Some(1.0), "no duration lasts");
+        let scaled = H2EffectLight::new(Arc::new(H3EffectTimes::read_nothing()), 0, true);
+        assert_eq!(scaled.value(&light(), 0.25, 1.0, 0.0), Some(0.25));
+    }
+
+    #[test]
     fn a_light_doubles_its_brightness_and_reaches_its_larger_radius() {
-        let lit = point(light()).lit(Some(&values(1.0)), None, 0.0).unwrap();
+        let lit = point(light()).lit(Some(&values(1.0)), None, 0.0, 0.0).unwrap();
         assert_eq!(lit.position, [1.0, 2.0, 3.0]);
         assert_eq!(lit.color, [2.0, 1.0, 0.5]);
         assert_eq!(lit.radius, 3.0);
@@ -1257,18 +1430,18 @@ mod tests {
     #[test]
     fn a_bright_light_stops_at_four() {
         let bright = H2Light { brightness: [3.0, 3.0], ..light() };
-        let lit = point(bright).lit(Some(&values(1.0)), None, 0.0).unwrap();
+        let lit = point(bright).lit(Some(&values(1.0)), None, 0.0, 0.0).unwrap();
         assert_eq!(lit.color, [4.0, 2.0, 1.0]);
     }
 
     #[test]
     fn a_light_with_no_function_value_is_out_and_no_name_is_on() {
-        assert!(point(light()).lit(None, None, 0.0).is_some(), "`power` rests at 1");
+        assert!(point(light()).lit(None, None, 0.0, 0.0).is_some(), "`power` rests at 1");
         let mut out = point(light());
         out.scale_by = "no_such_function".to_owned();
-        assert!(out.lit(None, None, 0.0).is_none());
+        assert!(out.lit(None, None, 0.0, 0.0).is_none());
         out.scale_by.clear();
-        assert!(out.lit(None, None, 0.0).is_some());
+        assert!(out.lit(None, None, 0.0, 0.0).is_some());
     }
 
     #[test]
