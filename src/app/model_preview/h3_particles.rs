@@ -307,10 +307,30 @@ fn baked_lod(raw: [f32; 4], any_camera: bool, rates: impl Iterator<Item = f32>) 
     [near, far, feather(feather_in), feather(feather_out)]
 }
 
-/// The defaults Halo 2's own fields give, and a feather of nothing as 1.
-fn h2_lod([near, far, feather_in, feather_out]: [f32; 4]) -> [f32; 4] {
-    let or = |value: f32, default: f32| if value.abs() < 0.0001 { default } else { value };
-    [near, or(far, 30.0), or(feather_in, 1.0), or(feather_out, 10.0)]
+/// Halo 2 tool's particle system postprocess (`sub_80D2A0`): out and its
+/// feather default to 30 and 10, and only a system shown in any camera mode
+/// gets the near pair, from how fast it emits. A feather left at nothing stays
+/// so: `calc_lod_amount` (tag_test `sub_5D7990`) tests `near + feather` with
+/// it, so there is no fade, and only multiplies by the inverse it bakes.
+fn h2_baked_lod(raw: [f32; 4], any_camera: bool, rates: impl Iterator<Item = f32>) -> [f32; 4] {
+    let empty = |value: f32| value.abs() < 0.0001;
+    let [mut near, mut far, mut feather_in, mut feather_out] = raw;
+    if empty(far) {
+        far = 30.0;
+    }
+    if empty(feather_out) {
+        feather_out = 10.0;
+    }
+    if any_camera {
+        let busy = ((rates.map(|rate| rate / 30.0).sum::<f32>() - 2.0) / 3.0).clamp(0.0, 1.0);
+        if empty(near) {
+            near = busy * -0.1;
+        }
+        if empty(feather_in) {
+            feather_in = (1.0 - busy) + busy * 3.0;
+        }
+    }
+    [near, far, feather_in, feather_out]
 }
 
 /// `frame_advance`: what has landed stops once it is this slow.
@@ -1676,7 +1696,7 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
             let any_camera = system.read_int_any("camera mode") == Some(0);
             let rates = emitters.iter().map(|emitter| emitter.rate.most());
             if h2 {
-                Some(h2_lod(raw))
+                Some(h2_baked_lod(raw, any_camera, rates))
             } else {
                 (!flagged("lod always 1.0") && !flagged("ignore lod")).then(|| baked_lod(raw, any_camera, rates))
             }
@@ -2932,9 +2952,16 @@ mod tests {
     }
 
     #[test]
-    fn a_halo_2_lod_of_nothing_is_its_fields_own_defaults() {
-        assert_eq!(h2_lod([0.0; 4]), [0.0, 30.0, 1.0, 10.0]);
-        assert_eq!(h2_lod([1.0, 5.0, 2.0, 3.0]), [1.0, 5.0, 2.0, 3.0]);
+    fn a_halo_2_lod_fades_in_near_the_camera_only_when_shown_in_any_camera_mode() {
+        assert_eq!(h2_baked_lod([0.0; 4], true, [].into_iter()), [0.0, 30.0, 1.0, 10.0]);
+        assert_eq!(h2_baked_lod([0.0; 4], true, [150.0].into_iter()), [-0.1, 30.0, 3.0, 10.0]);
+        assert_eq!(h2_baked_lod([0.0; 4], false, [150.0].into_iter()), [0.0, 30.0, 0.0, 10.0], "not for one camera");
+        assert_eq!(h2_baked_lod([1.0, 5.0, 2.0, 3.0], true, [150.0].into_iter()), [1.0, 5.0, 2.0, 3.0]);
+        // The SMG's muzzle burst, a hand's length from the eye.
+        let one_camera = Some(h2_baked_lod([0.0; 4], false, [30.0].into_iter()));
+        assert_eq!(lod_amount(one_camera, 0.8), 1.0);
+        let any_camera = Some(h2_baked_lod([0.0; 4], true, [30.0].into_iter()));
+        assert!((lod_amount(any_camera, 0.8) - 0.8).abs() < 1e-6);
     }
 
     #[test]

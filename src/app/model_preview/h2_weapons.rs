@@ -599,6 +599,16 @@ fn fold_attached(
         preview.h2_flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
         preview.h2_point_lights.extend(lights);
         preview.h2_gel_lights.extend(gels);
+        let markers = &attached.markers;
+        // Particle systems carry the held object's event effects (`firing
+        // effect` and the rest), which its owner's panel plays by name.
+        let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+        let particles: Vec<_> = particles.into_iter().map(|system| Arc::new(system.on_attached(name))).collect();
+        preview.h3_particles.extend(particles);
+        preview.h2_light_volumes.extend(super::h2_light_volumes::read_h2_light_volumes(source, object, owner, markers, frame));
+        preview.h2_contrails.extend(super::h2_contrails::read_h2_contrails(source, object, owner, markers, frame));
+        preview.h2_liquids.extend(super::h2_liquid::read_h2_liquids(source, object, owner, markers, frame));
+        super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, true);
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
     if let Some(prt) = preview.h2_prt.as_mut() {
