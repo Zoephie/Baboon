@@ -429,6 +429,7 @@ pub(super) fn load_model_preview(
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
             let markers = preview.markers.clone();
             super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, false);
+            super::h2_weapons::read_extension_weapons(source, model_tag, 0, &markers, &frame, preview, None);
             let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
             let leaves = super::h3_leaves::read_h3_leaves(source, model_tag, &markers, middle);
             // Framed by a null model alone, the eye sits among the leaves and
@@ -3897,14 +3898,14 @@ mod tests {
 }
 
 #[cfg(test)]
-mod change_color_tests {
+mod kit_object_tests {
     use super::*;
     use crate::core::format::TagNameIndex;
     use crate::core::game::GameId;
     use crate::core::source::TagEntryLocation;
 
-    /// Whether previewing the tag at `path` comes with any change colors.
-    fn has_colors(root: &str, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> bool {
+    /// The preview of the kit tag at `path`, as the panel loads it.
+    fn kit_preview(root: &str, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> ModelPreviewData {
         let source = TagSource::LooseFolder {
             root: root.into(),
             game: Some(game),
@@ -3921,8 +3922,12 @@ mod change_color_tests {
             group_name: Some(extension.to_owned()),
             location: TagEntryLocation::LooseFile(std::path::Path::new(root).join(key.replace('\\', "/"))),
         };
-        let settings = PreviewLoadSettings::default();
-        let data = load_model_preview(&tag, &entry, &names, Some(&source), &settings).unwrap();
+        load_model_preview(&tag, &entry, &names, Some(&source), &PreviewLoadSettings::default()).unwrap()
+    }
+
+    /// Whether previewing the tag at `path` comes with any change colors.
+    fn has_colors(root: &str, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> bool {
+        let data = kit_preview(root, game, path, extension, group);
         data.h2_change_colors.iter().any(|channel| !channel.is_empty())
     }
 
@@ -3949,5 +3954,22 @@ mod change_color_tests {
         let path = "objects\\characters\\brute\\brute";
         assert!(has_colors(&root, GameId::Halo2, path, "biped", b"bipd"));
         assert!(!has_colors(&root, GameId::Halo2, path, "model", b"hlmt"));
+    }
+
+    /// With `BLAM_TEST_H3EK`: a vehicle's built-in gun is an `extension of
+    /// parent`, so the game plays its attachments at the vehicle's markers;
+    /// the machine-gun turret's is its firing light.
+    #[test]
+    fn a_halo_3_vehicle_brings_in_its_extension_weapons_attachments() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let path = "objects\\weapons\\turret\\machinegun_turret\\machinegun_turret";
+        let data = kit_preview(&root, GameId::Halo3, path, "vehicle", b"vehi");
+        // The weapon's `firing` light, attached with the primary scale
+        // `illumination`; the vehicle has none of its own.
+        let firing = data.preview.h3_lights.iter().filter(|light| light.scale_name() == "illumination");
+        assert_eq!(firing.count(), 1, "the gun's firing light");
     }
 }

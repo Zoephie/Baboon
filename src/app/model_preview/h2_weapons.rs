@@ -575,24 +575,8 @@ fn fold_attached(
         (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
     };
     if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
-        let markers = &attached.markers;
-        let lights = super::h3_lights::read_h3_lights(source, object, owner, markers, frame);
-        let flares = super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
-        let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
-        preview.h3_light_volumes.extend(volumes.into_iter().map(|volume| volume.on_attached(name)));
-        let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
-        let particles: Vec<_> = particles.into_iter().map(|system| Arc::new(system.on_attached(name))).collect();
-        let carried = super::h3_particles::carried_strips(&particles);
-        preview.h3_particles.extend(particles);
-        preview.h3_strips.extend(carried);
-        let strips = super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
-        preview.h3_strips.extend(strips.into_iter().map(|strip| Arc::new(strip.on_attached(name))));
-        super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, false);
-        let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
-        preview.h3_screen_effects.extend(screens);
-        super::h3_screen_effects::add_screen_shader_materials(preview);
-        preview.h3_lights.extend(lights.into_iter().map(|light| light.on_attached(name)));
-        preview.h3_flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
+        read_h3_attached_features(source, object, owner, &attached.markers, &frame, Some(name), preview);
+        read_extension_weapons(source, object, owner, &attached.markers, &frame, preview, Some(name));
     } else {
         let (flares, lights, gels) =
             super::h2_lights::read_h2_flares(source, object, owner, &attached.markers, frame);
@@ -628,10 +612,53 @@ fn fold_attached(
     Some(H2AttachedObject { owner, functions: super::h2_functions::read_h2_object_functions(object)? })
 }
 
+/// What was read off an attached object, named after it when it has a name,
+/// so its owner's panel can tell its effects apart.
+macro_rules! named {
+    ($found:expr, $name:expr) => {
+        $found.into_iter().map(|at| match $name {
+            Some(name) => at.on_attached(name),
+            None => at,
+        })
+    };
+}
+
+/// What hangs on a Halo 3 or ODST object brought into the preview: its
+/// lights, flares, light volumes, particle systems and the strips they carry,
+/// strips, cloth and screen effects, at `markers` as `frame` places them.
+fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+    source: &TagSource,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+    frame: &F,
+    name: Option<&str>,
+    preview: &mut RenderModelPreview,
+) {
+    let lights = super::h3_lights::read_h3_lights(source, object, owner, markers, frame);
+    let flares = super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
+    let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    preview.h3_light_volumes.extend(named!(volumes, name));
+    let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
+    let carried = super::h3_particles::carried_strips(&particles);
+    preview.h3_particles.extend(particles);
+    preview.h3_strips.extend(carried);
+    let strips = super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
+    preview.h3_strips.extend(named!(strips, name).map(Arc::new));
+    super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, false);
+    let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
+    preview.h3_screen_effects.extend(screens);
+    super::h3_screen_effects::add_screen_shader_materials(preview);
+    preview.h3_lights.extend(named!(lights, name));
+    preview.h3_flares.extend(named!(flares, name));
+}
+
 /// A unit's own `weapons` that are an `extension of parent` (vehicle and
-/// turret guns): they have no model, and `sub_86F5B0` hands their marker
-/// lookups to the unit, so their effects play at the unit's markers. On a
-/// child object they take its name, as its own effects do.
+/// turret guns): they have no model, and the marker lookup (H2 `sub_86F5B0`,
+/// H3 `sub_180343CCC`, ODST `sub_140ABC7F0`) hands theirs to the unit, so
+/// their effects play at the unit's markers. On a child object they take its
+/// name, as its own effects do.
 pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
     object: &TagFile,
@@ -657,24 +684,20 @@ pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (Marker
         if !flags.iter().any(|(_, flag)| flag.starts_with("extension of parent")) {
             continue;
         }
-        macro_rules! named {
-            ($found:expr) => {
-                $found.into_iter().map(|at| match within {
-                    Some(name) => at.on_attached(name),
-                    None => at,
-                })
-            };
+        if blam_tags::game::Game::of(&weapon) == blam_tags::game::Game::Halo3 {
+            read_h3_attached_features(source, &weapon, owner, markers, frame, within, preview);
+            continue;
         }
         let particles = super::h3_particles::read_h3_particles(source, &weapon, owner, markers, frame);
-        preview.h3_particles.extend(named!(particles).map(Arc::new));
+        preview.h3_particles.extend(named!(particles, within).map(Arc::new));
         let (flares, lights, gels) = super::h2_lights::read_h2_flares(source, &weapon, owner, markers, frame);
-        preview.h2_flares.extend(named!(flares));
-        preview.h2_point_lights.extend(named!(lights));
-        preview.h2_gel_lights.extend(named!(gels));
+        preview.h2_flares.extend(named!(flares, within));
+        preview.h2_point_lights.extend(named!(lights, within));
+        preview.h2_gel_lights.extend(named!(gels, within));
         let volumes = super::h2_light_volumes::read_h2_light_volumes(source, &weapon, owner, markers, frame);
-        preview.h2_light_volumes.extend(named!(volumes));
+        preview.h2_light_volumes.extend(named!(volumes, within));
         let contrails = super::h2_contrails::read_h2_contrails(source, &weapon, owner, markers, frame);
-        preview.h2_contrails.extend(named!(contrails));
+        preview.h2_contrails.extend(named!(contrails, within));
     }
 }
 
