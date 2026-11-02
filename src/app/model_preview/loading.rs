@@ -4008,5 +4008,41 @@ mod kit_object_tests {
         let owned = data.preview.materials.iter().filter(|material| material.object == colored.owner);
         assert!(owned.count() > 0, "its materials read them");
     }
+
+    /// An attached object's values answer every name its own lights and
+    /// effects read: the warthog's chaingun lights by one the hull never reads.
+    #[test]
+    fn an_attached_object_answers_the_names_its_effects_read() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\warthog\\warthog", "vehicle", b"vehi");
+        let name = "warthog_chaingun_illumination";
+        assert!(!super::super::renderer::h2_shader_inputs(&data, 0).iter().any(|read| read == name));
+        let values = super::super::renderer::h2_attached_values(&data, 0.0);
+        for attached in &data.h2_attached {
+            let (_, own) = values.iter().find(|(owner, _)| *owner == attached.owner).unwrap();
+            for read in super::super::renderer::h2_shader_inputs(&data, attached.owner) {
+                assert!(own.contains_key(&read), "owner {} lacks {read}", attached.owner);
+            }
+        }
+        let chaingun = values.iter().filter(|(_, own)| own.contains_key(name));
+        assert_eq!(chaingun.count(), 1, "the chaingun answers {name}");
+    }
+
+    /// A Halo 3 light alone keeps the picture moving with its object, as
+    /// every other effect does: the outskirts hog light has nothing else.
+    #[test]
+    fn a_halo_3_light_alone_counts_as_an_effect() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let path = "objects\\levels\\solo\\030_outskirts\\hog_light\\hog_light";
+        let data = kit_preview(&root, GameId::Halo3, path, "scenery", b"scen");
+        assert_eq!(data.preview.h3_lights.len(), 1);
+        assert!(super::super::renderer::has_effects(&data.preview));
+    }
 }
 

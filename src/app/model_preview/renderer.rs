@@ -914,25 +914,33 @@ struct CeObjectState {
     change_colors: [[f32; 3]; 4],
 }
 
-/// The names a Halo 2 object's shaders read, besides what its functions import.
-pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
+/// The names the shaders, lights and effects of `object` read, besides what
+/// its functions import: 0 for the opened object, or an attached one's owner.
+pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let textures = data.textures.iter().flat_map(|textures| textures.iter());
-    let passes = textures.flat_map(|texture| texture.h2_layers.iter().flatten());
-    let flares = data.preview.h2_flares.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
-    let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == 0);
-    let h3_lights = data.preview.h3_lights.iter().filter(|light| light.object == 0);
-    let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == 0);
-    let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == 0);
-    let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == 0);
-    let h3_strips = data.preview.h3_strips.iter().filter(|at| at.object == 0);
-    let h3_screens = data.preview.h3_screen_effects.iter().filter(|at| at.object == 0);
-    let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == 0);
-    let h2_volumes = data.preview.h2_light_volumes.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
-    let h2_contrails = data.preview.h2_contrails.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
-    let h2_liquids = data.preview.h2_liquids.iter().filter(|at| at.object == 0).map(|at| at.scale_name());
-    let h3 = data.textures.iter().flat_map(|textures| textures.iter());
-    let h3 = h3.filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
+    let owned: Vec<&MaterialTextures> = data
+        .preview
+        .materials
+        .iter()
+        .zip(textures)
+        .filter(|(material, _)| material.object == object)
+        .map(|(_, texture)| texture)
+        .collect();
+    let passes = owned.iter().flat_map(|texture| texture.h2_layers.iter().flatten());
+    let flares = data.preview.h2_flares.iter().filter(|at| at.object == object).map(|at| at.scale_name());
+    let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == object);
+    let h3_lights = data.preview.h3_lights.iter().filter(|light| light.object == object);
+    let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == object);
+    let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == object);
+    let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == object);
+    let h3_strips = data.preview.h3_strips.iter().filter(|at| at.object == object);
+    let h3_screens = data.preview.h3_screen_effects.iter().filter(|at| at.object == object);
+    let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == object);
+    let h2_volumes = data.preview.h2_light_volumes.iter().filter(|at| at.object == object).map(|at| at.scale_name());
+    let h2_contrails = data.preview.h2_contrails.iter().filter(|at| at.object == object).map(|at| at.scale_name());
+    let h2_liquids = data.preview.h2_liquids.iter().filter(|at| at.object == object).map(|at| at.scale_name());
+    let h3 = owned.iter().filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
     let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
     let flares = flares
         .chain(h3)
@@ -950,9 +958,8 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
         .chain(h2_liquids)
         .filter(|name| !name.is_empty());
     // `sub_6C18F0` gates the shield overlay on this itself.
-    let textures = data.textures.iter().flat_map(|textures| textures.iter());
-    let h3_shield = textures.filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
-    let shield = data.preview.materials.iter().any(|m| m.shield == Some(H2Layer::ShieldDamaged));
+    let h3_shield = owned.iter().filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
+    let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(H2Layer::ShieldDamaged));
     let gate = (shield || h3_shield).then_some("current_shield_damage");
     let gate = gate.into_iter().chain(h3_shield.then_some(h3_draw::H3_OVERSHIELD));
     for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares).chain(gate) {
@@ -969,7 +976,7 @@ pub(super) fn h2_function_values(
     set: &h2_functions::H2FunctionInputs,
     time: f32,
 ) -> h2_functions::H2FunctionValues {
-    let inputs = h2_shader_inputs(data);
+    let inputs = h2_shader_inputs(data, 0);
     data.h2_object_functions.as_ref().map_or_else(Default::default, |functions| {
         functions.values(set, data.geometry_id, &inputs, time, 0)
     })
@@ -977,13 +984,13 @@ pub(super) fn h2_function_values(
 
 /// Weapons in hand run on their own functions, at rest: the sliders are the
 /// opened object's.
-fn h2_attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, h2_functions::H2FunctionValues)> {
+pub(super) fn h2_attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, h2_functions::H2FunctionValues)> {
     if data.h2_attached.is_empty() {
         return Vec::new();
     }
-    let inputs = h2_shader_inputs(data);
     let rest = h2_functions::H2FunctionInputs::default();
     let values = data.h2_attached.iter().map(|attached| {
+        let inputs = h2_shader_inputs(data, attached.owner);
         (attached.owner, attached.functions.values(&rest, data.geometry_id, &inputs, time, attached.owner))
     });
     values.collect()
@@ -1039,6 +1046,34 @@ pub(super) fn object_moves(
                     || (material.shield.is_some() && h3_draw::h3_shield_showing(h2_values))
             })
         })
+}
+
+/// Whether anything draws, lights or simulates outside the materials' passes.
+pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
+    !(preview.ce_lights.is_empty()
+        && preview.ce_antennas.is_empty()
+        && preview.ce_effects.is_empty()
+        && preview.ce_contrails.is_empty()
+        && preview.ce_light_volumes.is_empty()
+        && preview.ce_lightning.is_empty()
+        && preview.ce_glows.is_empty()
+        && preview.ce_particle_systems.is_empty()
+        && preview.ce_flags.is_empty()
+        && preview.h2_antennas.is_empty()
+        && preview.h2_flares.is_empty()
+        && preview.h2_point_lights.is_empty()
+        && preview.h2_gel_lights.is_empty()
+        && preview.h2_light_volumes.is_empty()
+        && preview.h2_contrails.is_empty()
+        && preview.h2_liquids.is_empty()
+        && preview.h3_lights.is_empty()
+        && preview.h3_flares.is_empty()
+        && preview.h3_light_volumes.is_empty()
+        && preview.h3_particles.is_empty()
+        && preview.h3_strips.is_empty()
+        && preview.h3_leaves.is_empty()
+        && preview.h3_cloth.is_empty()
+        && preview.h3_screen_effects.is_empty())
 }
 
 fn h2_functions_move(
@@ -1172,27 +1207,9 @@ impl ModelGpuFrame {
     }
 
     fn h2_moves(&self) -> bool {
-        if self.object_moves && !self.preview.ce_lights.is_empty() {
-            return true;
-        }
-        // What simulates or animates of itself runs whatever the passes do.
-        let preview = &self.preview;
-        let effects = !preview.h3_particles.is_empty()
-            || !preview.h3_strips.is_empty()
-            || !preview.h3_cloth.is_empty()
-            || !preview.h2_contrails.is_empty()
-            || !preview.ce_effects.is_empty()
-            || !preview.ce_contrails.is_empty()
-            || !preview.ce_lightning.is_empty()
-            || !preview.ce_glows.is_empty()
-            || !preview.ce_particle_systems.is_empty()
-            || !preview.ce_flags.is_empty()
-            || !preview.h2_liquids.is_empty()
-            || !preview.h2_light_volumes.is_empty()
-            || !preview.h2_flares.is_empty()
-            || !preview.h2_point_lights.is_empty()
-            || !preview.h2_gel_lights.is_empty();
-        if self.object_moves && effects {
+        // What draws, lights or simulates outside the passes runs whatever
+        // the passes do.
+        if self.object_moves && has_effects(&self.preview) {
             return true;
         }
         let Some(textures) = self.textures.as_ref() else {
@@ -4841,11 +4858,6 @@ impl ModelGlRenderer {
             if !self.h2_material_ready(frame, material, layer)
                 || (layer != H2Layer::Transparent && !self.h2_replaces_slots(frame, material))
             {
-                continue;
-            }
-            // A held weapon is an object of its own, with no such shader.
-            let held = frame.preview.materials.get(material).is_some_and(|m| m.object != 0);
-            if held && matches!(layer, H2Layer::ShieldDamaged | H2Layer::Overshield | H2Layer::HologramBloom) {
                 continue;
             }
             let Some((byte_offset, index_count)) = model_draw_range(

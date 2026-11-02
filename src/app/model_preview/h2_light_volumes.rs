@@ -423,8 +423,7 @@ impl H2LightVolume {
         let distance = dot(to_eye, to_eye).sqrt();
         let unit_eye = to_eye.map(|axis| axis / distance.max(f32::EPSILON));
         let fade = camera_fade(self.falloff, distance);
-        let scale_by = |name: &str| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
-        let brightness = fade * if self.scale_by.is_empty() { 1.0 } else { scale_by(&self.scale_by) };
+        let brightness = fade * super::h2_lights::attachment_value(&self.scale_by, values);
         if brightness <= 0.0 {
             return Vec::new();
         }

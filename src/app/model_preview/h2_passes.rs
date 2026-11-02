@@ -980,7 +980,8 @@ fn blend_factor(name: &str) -> Option<H2BlendFactor> {
 }
 
 /// The game draws a `logic-op` function, or `custom` with no state, unblended.
-/// The signed functions are its add and subtract.
+/// The signed functions are its add and subtract: MCC's shader compiler maps
+/// them so (`sub_6DB880`, table 0xE9DB6C), where the Xbox had signed ops.
 fn blend_equation(name: &str) -> Option<H2BlendEquation> {
     use H2BlendEquation::*;
     Some(match name {

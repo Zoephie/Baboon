@@ -252,32 +252,7 @@ pub(crate) fn resolve_model_textures(
             })
         })
         .collect();
-    // A model's hologram shader is on no batch: every material takes its passes.
-    let hologram = H2Layer::Hologram as usize;
-    let transparent = H2Layer::Transparent as usize;
-    for (material, texture) in materials.iter().zip(&mut textures) {
-        if material.overlay {
-            texture.h2_layers[hologram] = std::mem::take(&mut texture.h2_layers[transparent]);
-        }
-    }
-    let overlay = textures.iter().find(|texture| !texture.h2_layers[hologram].is_empty());
-    if let Some(passes) = overlay.map(|texture| texture.h2_layers[hologram].clone()) {
-        for texture in &mut textures {
-            texture.h2_layers[hologram].clone_from(&passes);
-        }
-    }
-    // So are its damage shaders, which take their turn over the object.
-    // A hologram shader's bloom passes go to the frame's bloom with the rest.
-    let bloom = H2Layer::Bloom as usize;
-    for (layer, from) in
-        [(H2Layer::ShieldDamaged, transparent), (H2Layer::Overshield, transparent), (H2Layer::HologramBloom, bloom)]
-    {
-        let owner = materials.iter().position(|material| material.shield == Some(layer));
-        let passes = owner.map(|owner| std::mem::take(&mut textures[owner].h2_layers[from]));
-        for texture in textures.iter_mut().filter(|_| passes.is_some()) {
-            texture.h2_layers[layer as usize].clone_from(passes.as_ref().unwrap());
-        }
-    }
+    share_object_layers(materials, &mut textures);
     for texture in &mut textures {
         // A pass with no object implementation still has the fallback's.
         if texture.h2_layers[H2Layer::ObjectLightmap as usize].is_empty() {
@@ -295,6 +270,42 @@ pub(crate) fn resolve_model_textures(
         }
     }
     textures
+}
+
+/// A model's hologram shader is on no batch: every material of its object
+/// takes its passes. So do its damage shaders, which take their turn over the
+/// object; a hologram shader's bloom passes go to the frame's bloom with the
+/// rest. A held weapon is an object of its own, without them.
+fn share_object_layers(materials: &[RenderModelPreviewMaterial], textures: &mut [MaterialTextures]) {
+    let transparent = H2Layer::Transparent as usize;
+    let bloom = H2Layer::Bloom as usize;
+    if let Some(overlay) = materials.iter().position(|material| material.overlay) {
+        let passes = std::mem::take(&mut textures[overlay].h2_layers[transparent]);
+        share_with_object(materials, textures, materials[overlay].object, H2Layer::Hologram as usize, &passes);
+    }
+    for (layer, from) in
+        [(H2Layer::ShieldDamaged, transparent), (H2Layer::Overshield, transparent), (H2Layer::HologramBloom, bloom)]
+    {
+        if let Some(owner) = materials.iter().position(|material| material.shield == Some(layer)) {
+            let passes = std::mem::take(&mut textures[owner].h2_layers[from]);
+            share_with_object(materials, textures, materials[owner].object, layer as usize, &passes);
+        }
+    }
+}
+
+/// Give every material of `object` a copy of `passes` as its `layer`.
+fn share_with_object(
+    materials: &[RenderModelPreviewMaterial],
+    textures: &mut [MaterialTextures],
+    object: u8,
+    layer: usize,
+    passes: &[H2DrawPass],
+) {
+    for (material, texture) in materials.iter().zip(textures) {
+        if material.object == object {
+            texture.h2_layers[layer] = passes.to_vec();
+        }
+    }
 }
 
 fn resolve_one_material(
@@ -1652,6 +1663,31 @@ mod tests {
     //! run against installed kits and self-skip without them.
 
     use super::*;
+
+    /// The model's hologram and damage passes go to its own materials, never
+    /// to a held weapon's.
+    #[test]
+    fn a_models_overlay_passes_stay_on_its_own_object() {
+        let material = |object, overlay, shield| {
+            RenderModelPreviewMaterial { object, overlay, shield, ..Default::default() }
+        };
+        let materials = [
+            material(0, false, None),
+            material(0, true, None),
+            material(0, false, Some(H2Layer::ShieldDamaged)),
+            material(1, false, None),
+        ];
+        let mut textures = vec![MaterialTextures::default(); materials.len()];
+        let [(_, pass), ..] = h2_shadow_passes();
+        textures[1].h2_layers[H2Layer::Transparent as usize] = vec![pass.clone()];
+        textures[2].h2_layers[H2Layer::Transparent as usize] = vec![pass];
+        share_object_layers(&materials, &mut textures);
+        let has = |index: usize, layer: H2Layer| !textures[index].h2_layers[layer as usize].is_empty();
+        for layer in [H2Layer::Hologram, H2Layer::ShieldDamaged] {
+            assert!(has(0, layer) && has(1, layer) && has(2, layer), "{layer:?} on the model");
+            assert!(!has(3, layer), "{layer:?} on the weapon");
+        }
+    }
 
     /// Kits to resolve against: env var first, then the usual Steam location.
     ///

@@ -495,7 +495,9 @@ fn light_value(
     }
 }
 
-fn attachment_value(name: &str, values: Option<&H2FunctionValues>) -> f32 {
+/// What an attachment's `scale by` reads: full with none named, and the
+/// idle object's input for a name nothing gave a value.
+pub(super) fn attachment_value(name: &str, values: Option<&H2FunctionValues>) -> f32 {
     if name.is_empty() {
         return 1.0;
     }

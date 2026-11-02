@@ -1186,7 +1186,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
             data.geometry_id,
             &mut state.h2_function_inputs,
             &values,
-            &renderer::h2_shader_inputs(data),
+            &renderer::h2_shader_inputs(data, 0),
         );
     }
     let read = |object: u8| {
