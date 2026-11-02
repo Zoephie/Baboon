@@ -59,9 +59,14 @@ impl H2ObjectFunction {
         &self,
         owner: &H2ObjectFunctions,
         inputs: &H2FunctionValues,
+        scripted: &H2FunctionValues,
         time: f32,
         depth: usize,
     ) -> (f32, bool) {
+        // A script's value for the import is the function's, unmapped.
+        if let Some(value) = scripted.get(&self.import) {
+            return (*value, true);
+        }
         let (input, mut active) = exported(&self.import, inputs);
         let mapping_controls = self.flags & MAPPING_CONTROLS_ACTIVE != 0;
         let mut value;
@@ -77,7 +82,7 @@ impl H2ObjectFunction {
             }
         }
         if !self.scale_by.is_empty() {
-            let (scale, scaled) = owner.value(&self.scale_by, inputs, time, depth + 1);
+            let (scale, scaled) = owner.value(&self.scale_by, inputs, scripted, time, depth + 1);
             value *= scale;
             active = active && scaled;
         }
@@ -95,16 +100,21 @@ impl H2ObjectFunction {
 }
 
 impl H2ObjectFunctions {
-    /// `sub_86F2F0`, `object_get_function_value`: nothing named reads full,
-    /// then what the object's type exports, then its functions, the last of
-    /// a name standing.
+    /// `sub_86F2F0`, `object_get_function_value`: a script's value first
+    /// (`object_set_function_variable`, read by `sub_8E7890`), then nothing
+    /// named reads full, then what the object's type exports, then its
+    /// functions, the last of a name standing.
     fn value(
         &self,
         name: &str,
         inputs: &H2FunctionValues,
+        scripted: &H2FunctionValues,
         time: f32,
         depth: usize,
     ) -> (f32, bool) {
+        if let Some(value) = scripted.get(name) {
+            return (*value, true);
+        }
         if name.is_empty() || name == "one" {
             return (1.0, true);
         }
@@ -113,7 +123,7 @@ impl H2ObjectFunctions {
         }
         let last = self.functions.iter().rev().find(|function| function.export == name);
         match last {
-            Some(function) => function.evaluate(self, inputs, time, depth),
+            Some(function) => function.evaluate(self, inputs, scripted, time, depth),
             None => exported(name, inputs),
         }
     }
@@ -175,9 +185,18 @@ impl H2ObjectFunctions {
                 .unwrap_or_else(|| object_input(&name));
             set.insert(name, value);
         }
+        // What the panel sets of a name a function makes is a script's value.
+        let scripted: H2FunctionValues = self
+            .functions
+            .iter()
+            .filter_map(|function| {
+                let value = inputs.get(&(geometry_id, function.export.clone()))?;
+                Some((function.export.clone(), *value))
+            })
+            .collect();
         let mut values = set.clone();
         for function in &self.functions {
-            let (value, _) = self.value(&function.export, &set, time, 0);
+            let (value, _) = self.value(&function.export, &set, &scripted, time, 0);
             values.insert(function.export.clone(), value);
         }
         values
@@ -263,6 +282,8 @@ pub(super) fn draw_h2_function_controls(
             set.retain(|(geometry, _), _| *geometry != key);
         }
     });
+    const SCRIPTED: &str = "Set it as a script would, with object_set_function_variable: \
+                            the game reads that before what the function makes.";
     const UNREAD: &str = "Nothing this preview draws reads this. It may drive something \
                           the preview does not have, such as an effect's particles.";
     let reached = functions.reaching(shader_inputs);
@@ -282,8 +303,31 @@ pub(super) fn draw_h2_function_controls(
             continue;
         }
         seen.push(export);
-        let text = format!("{export}: {:.2}", values.get(export).copied().unwrap_or(0.0));
-        ui.add_enabled(drawn(export), egui::Label::new(text)).on_disabled_hover_text(UNREAD);
+        let computed = values.get(export).copied().unwrap_or(0.0);
+        let held = (key, export.to_owned());
+        ui.add_enabled_ui(drawn(export), |ui| {
+            ui.horizontal(|ui| {
+                let mut scripted = set.contains_key(&held);
+                let toggle = ui.checkbox(&mut scripted, "").on_hover_text(SCRIPTED);
+                if toggle.changed() {
+                    if scripted {
+                        set.insert(held.clone(), computed);
+                    } else {
+                        set.remove(&held);
+                    }
+                }
+                match set.get_mut(&held) {
+                    Some(value) => {
+                        ui.add(egui::Slider::new(value, 0.0..=1.0).text(export));
+                    }
+                    None => {
+                        ui.label(format!("{export}: {computed:.2}"));
+                    }
+                }
+            });
+        })
+        .response
+        .on_disabled_hover_text(UNREAD);
     }
 }
 
@@ -338,7 +382,18 @@ mod tests {
 
     fn value(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> f32 {
         let inputs = inputs.iter().map(|(name, value)| ((*name).to_owned(), *value)).collect();
-        H2ObjectFunctions { functions }.value(name, &inputs, 0.0, 0).0
+        H2ObjectFunctions { functions }.value(name, &inputs, &H2FunctionValues::new(), 0.0, 0).0
+    }
+
+    #[test]
+    fn a_script_sets_what_a_function_makes_and_what_it_reads() {
+        let functions = H2ObjectFunctions { functions: vec![function("", "invincibility"), function("zero", "effects")] };
+        let none = H2FunctionValues::new();
+        let scripted: H2FunctionValues = [("invincibility".to_owned(), 1.0)].into_iter().collect();
+        assert_eq!(functions.value("invincibility", &none, &none, 0.0, 0).0, 0.0, "an empty import reads nothing");
+        assert_eq!(functions.value("invincibility", &none, &scripted, 0.0, 0).0, 1.0);
+        let by_import: H2FunctionValues = [("zero".to_owned(), 0.75)].into_iter().collect();
+        assert_eq!(functions.value("effects", &none, &by_import, 0.0, 0).0, 0.75, "the import's script value, unmapped");
     }
 
     #[test]
