@@ -76,17 +76,239 @@ struct H2ObjectFunction {
     scale_by: String,
 }
 
-/// An object's `functions` block.
+/// An object's `functions` block, and what its type exports to it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct H2ObjectFunctions {
     functions: Vec<H2ObjectFunction>,
+    /// None for an object whose exporters are not known (Halo 3 and ODST),
+    /// which reads [`object_input`] instead.
+    exports: Option<TypeExports>,
 }
 
-/// What `object_type_export_function_values` leaves in `inputs`: its value,
-/// and whether anything exports it.
-fn exported(name: &str, inputs: &H2FunctionValues) -> (f32, bool) {
-    let value = inputs.get(name).copied().unwrap_or_else(|| object_input(name));
-    (value, value > 0.0)
+/// One of Halo 2's function exporters: the names it claims, with what an idle
+/// object, just placed, gives each. MCC `halo2_tag_test`; the object one is
+/// `sub_86A360`, and every type asks it first.
+type ExportTable = &'static [(&'static str, f32)];
+
+/// Every object's exporter. `body_vitality`, `shield_vitality`,
+/// `shield_depleted` and `variant` depend on the model; see
+/// [`TypeExports::idle`]. `compass`, `random_constant`, the clock and the
+/// team, medic and holiday names depend on a game the preview has not got,
+/// and stay 0.
+const OBJECT_EXPORTS: ExportTable = &[
+    ("one", 1.0),
+    ("zero", 0.0),
+    ("morse_code", 1.0),
+    ("alive", 1.0),
+    ("body_vitality", 1.0),
+    ("shield_vitality", 1.0),
+    ("current_body_damage", 0.0),
+    ("current_shield_damage", 0.0),
+    ("object_overshield_amount", 0.0),
+    ("shield_depleted", 0.0),
+    ("electrical_power", 1.0),
+    ("variant", 0.0),
+    ("compass", 0.0),
+    ("random_constant", 0.0),
+    ("time_hours", 0.0),
+    ("time_minutes", 0.0),
+    ("time_seconds", 0.0),
+    ("holiday", 0.0),
+    ("all_quiet", 1.0),
+    ("flashlights_allowed", 0.0),
+    ("medic", 0.0),
+    ("team0", 0.0),
+    ("team1", 0.0),
+    ("team2", 0.0),
+    ("team3", 0.0),
+    ("team4", 0.0),
+    ("team5", 0.0),
+    ("team6", 0.0),
+    ("team7", 0.0),
+    ("scripted_object_function_a", 0.0),
+    ("scripted_object_function_b", 0.0),
+    ("scripted_object_function_c", 0.0),
+    ("scripted_object_function_d", 0.0),
+    ("emblem_active", 1.0),
+    ("emblem_foreground_index", 0.0),
+    ("emblem_background_index", 0.0),
+    ("emblem_toggle_foreground", 1.0),
+    ("emblem_foreground_map_scale_x", 0.0),
+    ("emblem_background_map_scale_x", 0.0),
+];
+
+/// A unit's, biped's and vehicle's, `sub_882EB0`. `barrel_spin` and
+/// `illumination` it passes to the weapon held, and claims only with one in
+/// hand; the held weapon's own functions answer for it here.
+const UNIT_EXPORTS: ExportTable = &[
+    ("driver_seat_occupied", 0.0),
+    ("gunner_seat_occupied", 0.0),
+    ("driver_seat_power", 0.0),
+    ("gunner_seat_power", 0.0),
+    ("active_camouflage", 0.0),
+    ("can_blink", 1.0),
+    ("crouch", 0.0),
+    ("mouth_aperture", 0.0),
+    ("vertical_thrust", 0.0),
+    ("integrated_light_power", 0.0),
+    ("aiming_change", 0.0),
+    ("horizontal_aiming_change", 0.0),
+    ("boost", 0.0),
+    ("unit_open", 1.0),
+    ("unit_closed", 0.0),
+];
+
+/// A biped's, `sub_8AE0E0`. `stunned` it claims only while stunned, and
+/// `flying_speed` only for a biped that flies.
+const BIPED_EXPORTS: ExportTable = &[("flight", 0.0)];
+
+/// A vehicle's, `sub_8D0B60`: all at rest.
+const VEHICLE_EXPORTS: ExportTable = &[
+    ("speed_absolute", 0.0),
+    ("speed_forward", 0.0),
+    ("speed_backward", 0.0),
+    ("speed_slide_maximum", 0.0),
+    ("slide_left", 0.0),
+    ("slide_right", 0.0),
+    ("slide_absolute", 0.0),
+    ("slide_back", 0.0),
+    ("turn_left", 0.0),
+    ("turn_right", 0.0),
+    ("turn_absolute", 0.0),
+    ("velocity_forward", 0.0),
+    ("velocity_left", 0.0),
+    ("velocity_up", 0.0),
+    ("velocity_air", 0.0),
+    ("velocity_ground", 0.0),
+    ("velocity_water", 0.0),
+    ("wingtip_contrail", 0.0),
+    ("wingtip_contrail_new", 0.0),
+    ("front_left_tire_position", 0.0),
+    ("front_left_tire_velocity", 0.0),
+    ("front_right_tire_position", 0.0),
+    ("front_right_tire_velocity", 0.0),
+    ("back_left_tire_position", 0.0),
+    ("back_left_tire_velocity", 0.0),
+    ("back_right_tire_position", 0.0),
+    ("back_right_tire_velocity", 0.0),
+    ("left_tread_position", 0.0),
+    ("left_tread_velocity", 0.0),
+    ("right_tread_position", 0.0),
+    ("right_tread_velocity", 0.0),
+    ("tread_grind", 0.0),
+    ("engine_rpm", 0.0),
+    ("engine_power", 0.0),
+    ("engine_hack", 0.0),
+    ("jump", 0.0),
+    ("emitting", 0.0),
+    ("hover", 0.0),
+    ("thrust", 0.0),
+    ("mean_antigrav", 0.0),
+];
+
+/// A weapon's, `sub_8A0000`: new, full and not yet in a hand, so turned on.
+/// The preview counts no rounds, so the ones and tens of the count stay 0.
+const WEAPON_EXPORTS: ExportTable = &[
+    ("age", 0.0),
+    ("heat", 0.0),
+    ("overheated", 0.0),
+    ("barrel_spin", 0.0),
+    ("power", 0.0),
+    ("ready", 0.0),
+    ("turned_on", 1.0),
+    ("primary_ammunition", 1.0),
+    ("secondary_ammunition", 1.0),
+    ("primary_ammunition_ones", 0.0),
+    ("primary_ammunition_tens", 0.0),
+    ("primary_trigger_down", 0.0),
+    ("secondary_trigger_down", 0.0),
+    ("primary_firing", 0.0),
+    ("secondary_firing", 0.0),
+    ("primary_charged", 0.0),
+    ("secondary_charged", 0.0),
+    ("primary_rate_of_fire", 0.0),
+    ("secondary_rate_of_fire", 0.0),
+    ("primary_ejection_port", 0.0),
+    ("secondary_ejection_port", 0.0),
+    ("illumination", 0.0),
+    ("warthog_chaingun_illumination", 0.0),
+    ("active_camouflage", 0.0),
+    ("bomb_arming_amount", 0.0),
+    ("bomb_is_armed", 0.0),
+    ("bomb_is_arming", 0.0),
+    ("bomb_is_unarmed", 0.0),
+];
+
+/// A projectile's, `sub_8F72F0`, as it is made.
+const PROJECTILE_EXPORTS: ExportTable = &[
+    ("tracer", 1.0),
+    ("projectile_attach", 0.0),
+    ("acceleration_range", 1.0),
+    ("range_remaining", 0.0),
+    ("time_remaining", 0.0),
+];
+
+/// A device's (machine, control, light fixture), `sub_8A83F0`, as one placed
+/// with neither `initially off` nor `initially open` would be.
+const DEVICE_EXPORTS: ExportTable = &[
+    ("power", 1.0),
+    ("position", 0.0),
+    ("change_in_power", 0.0),
+    ("change_in_position", 0.0),
+    ("loop", 1.0),
+    ("delay", 0.0),
+    ("locked", 0.0),
+];
+
+/// What a Halo 2 object's type exports to its functions: its exporters, in
+/// the order `sub_8D8EC0` asks them, and what of its model decides the
+/// vitality and variant names.
+#[derive(Debug, Clone, Copy)]
+struct TypeExports {
+    tables: &'static [ExportTable],
+    has_body: bool,
+    has_shield: bool,
+    variants: usize,
+}
+
+impl TypeExports {
+    /// For a Halo 2 `object` previewing `model`; none for another game.
+    fn of(object: &TagFile, model: Option<&TagFile>) -> Option<Self> {
+        if blam_tags::game::Game::of(object) != blam_tags::game::Game::Halo2 {
+            return None;
+        }
+        let tables: &'static [ExportTable] = match &object.header.group_tag.to_be_bytes() {
+            b"bipd" => &[OBJECT_EXPORTS, UNIT_EXPORTS, BIPED_EXPORTS],
+            b"vehi" => &[OBJECT_EXPORTS, UNIT_EXPORTS, VEHICLE_EXPORTS],
+            b"weap" => &[OBJECT_EXPORTS, WEAPON_EXPORTS],
+            b"proj" => &[OBJECT_EXPORTS, PROJECTILE_EXPORTS],
+            b"mach" | b"ctrl" | b"lifi" => &[OBJECT_EXPORTS, DEVICE_EXPORTS],
+            _ => &[OBJECT_EXPORTS],
+        };
+        let damage = model.and_then(|model| elements(model.root(), "new damage info").first().copied());
+        let vitality = |field: &str| damage.and_then(|damage| damage.read_real(field)).unwrap_or(0.0);
+        Some(Self {
+            tables,
+            has_body: vitality("maximum vitality") > 0.0,
+            has_shield: vitality("maximum shield vitality") > 0.0,
+            variants: model.map_or(0, |model| elements(model.root(), "variants").len()),
+        })
+    }
+
+    /// What an idle object of this type gives `name`, if an exporter claims it.
+    /// The vitalities are full where the model has them; the variant is its
+    /// first of `variants`, `(index + 1) / count`.
+    fn idle(&self, name: &str) -> Option<f32> {
+        let model_says = match name {
+            "body_vitality" => Some(f32::from(u8::from(self.has_body))),
+            "shield_vitality" => Some(f32::from(u8::from(self.has_shield))),
+            "shield_depleted" => Some(f32::from(u8::from(!self.has_shield))),
+            "variant" => Some(if self.variants > 0 { 1.0 / self.variants as f32 } else { 0.0 }),
+            _ => None,
+        };
+        let claimed = self.tables.iter().flat_map(|table| table.iter()).find(|(export, _)| *export == name);
+        claimed.map(|(_, idle)| model_says.unwrap_or(*idle))
+    }
 }
 
 impl H2ObjectFunction {
@@ -107,7 +329,7 @@ impl H2ObjectFunction {
         if let Some(value) = scripted.get(&self.import) {
             return (*value, true);
         }
-        let (input, mut active) = exported(&self.import, inputs);
+        let (input, mut active) = owner.exported(&self.import, inputs);
         let mapping_passes = self.flags.mapping_does_not_control_active;
         let mut value;
         if self.is_periodic() {
@@ -134,13 +356,41 @@ impl H2ObjectFunction {
             active = true;
         }
         if active && !self.turn_off_with.is_empty() {
-            active = exported(&self.turn_off_with, inputs).1;
+            active = owner.exported(&self.turn_off_with, inputs).1;
         }
         if !active { (0.0, false) } else { (value.clamp(0.0, 1.0), true) }
     }
 }
 
 impl H2ObjectFunctions {
+    /// What an idle object gives `name`: its type's exporter's value, or,
+    /// where those are not known, [`object_input`]'s.
+    fn idle(&self, name: &str) -> f32 {
+        match &self.exports {
+            Some(exports) => exports.idle(name).unwrap_or(0.0),
+            None => object_input(name),
+        }
+    }
+
+    /// Whether the object's type exports `name`, so its exporter answers for
+    /// it before any function of the same name.
+    fn type_exports(&self, name: &str) -> bool {
+        self.exports.as_ref().is_some_and(|exports| exports.idle(name).is_some())
+    }
+
+    /// What `object_type_export_function_values` leaves for `name`: the
+    /// panel's value, else the idle one, and whether that is on.
+    fn exported(&self, name: &str, inputs: &H2FunctionValues) -> (f32, bool) {
+        let value = inputs.get(name).copied().unwrap_or_else(|| self.idle(name));
+        (value, value > 0.0)
+    }
+
+    /// Whether a function here makes `name` for what reads it: one of that
+    /// name, and none of the type's exporters claiming it first.
+    fn makes(&self, name: &str) -> bool {
+        !self.type_exports(name) && self.functions.iter().any(|function| function.export == name)
+    }
+
     /// `sub_86F2F0`, `object_get_function_value`: a script's value first
     /// (`object_set_function_variable`, read by `sub_8E7890`), then nothing
     /// named reads full, then what the object's type exports, then its
@@ -162,10 +412,13 @@ impl H2ObjectFunctions {
         if name == "zero" || depth > DEEPEST_CHAIN {
             return (0.0, false);
         }
+        if self.type_exports(name) {
+            return self.exported(name, inputs);
+        }
         let last = self.functions.iter().rev().find(|function| function.export == name);
         match last {
             Some(function) => function.evaluate(self, inputs, scripted, clock, depth),
-            None => exported(name, inputs),
+            None => self.exported(name, inputs),
         }
     }
 
@@ -173,11 +426,10 @@ impl H2ObjectFunctions {
     /// turns it off, unless another function here makes that.
     fn imports(&self) -> Vec<&str> {
         let mut names: Vec<&str> = Vec::new();
-        let made_here = |name: &str| self.functions.iter().any(|function| function.export == name);
         for function in &self.functions {
             let read = [&function.import, &function.scale_by, &function.turn_off_with];
             for name in read.map(String::as_str) {
-                if !name.is_empty() && !made_here(name) && !names.contains(&name) {
+                if !name.is_empty() && !self.makes(name) && !names.contains(&name) {
                     names.push(name);
                 }
             }
@@ -205,7 +457,7 @@ impl H2ObjectFunctions {
     /// Whether anything here moves with no one touching it.
     pub(crate) fn move_at_rest(&self, inputs: &H2FunctionValues) -> bool {
         self.functions.iter().any(|function| {
-            function.is_periodic() && exported(&function.import, inputs).0 > 0.0
+            function.is_periodic() && self.exported(&function.import, inputs).0 > 0.0
         })
     }
 
@@ -223,10 +475,7 @@ impl H2ObjectFunctions {
         let mut set = H2FunctionValues::new();
         let names = self.imports().into_iter().map(str::to_owned).chain(extra.iter().cloned());
         for name in names {
-            let value = inputs
-                .get(&(geometry_id, name.clone()))
-                .copied()
-                .unwrap_or_else(|| object_input(&name));
+            let value = inputs.get(&(geometry_id, name.clone())).copied().unwrap_or_else(|| self.idle(&name));
             set.insert(name, value);
         }
         // What the panel sets of a name a function makes is a script's value.
@@ -248,8 +497,9 @@ impl H2ObjectFunctions {
 }
 
 /// An object's functions, or none on a tag with no such block. An empty block
-/// still counts: its shaders can read what the object's type exports.
-pub(crate) fn read_h2_object_functions(object: &TagFile) -> Option<H2ObjectFunctions> {
+/// still counts: its shaders can read what the object's type exports. `model`
+/// is the object's, whose damage info and variants some exports report.
+pub(crate) fn read_h2_object_functions(object: &TagFile, model: Option<&TagFile>) -> Option<H2ObjectFunctions> {
     let block = object_block(object, "functions")?;
     let name = |entry: TagStruct<'_>, field: &str| entry.read_string_id(field).unwrap_or_default();
     let functions: Vec<_> = elements(block, "functions")
@@ -267,7 +517,7 @@ pub(crate) fn read_h2_object_functions(object: &TagFile) -> Option<H2ObjectFunct
             })
         })
         .collect();
-    Some(H2ObjectFunctions { functions })
+    Some(H2ObjectFunctions { functions, exports: TypeExports::of(object, model) })
 }
 
 /// A button for each effect an event would play. An effect starts when its
@@ -305,10 +555,9 @@ pub(super) fn draw_h2_function_controls(
     values: &H2FunctionValues,
     shader_inputs: &[String],
 ) {
-    let exports = |name: &str| functions.functions.iter().any(|function| function.export == name);
     let mut names = functions.imports();
     for name in shader_inputs {
-        if !exports(name) && !names.contains(&name.as_str()) {
+        if !functions.makes(name) && !names.contains(&name.as_str()) {
             names.push(name);
         }
     }
@@ -333,7 +582,7 @@ pub(super) fn draw_h2_function_controls(
     let reached = functions.reaching(shader_inputs);
     let drawn = |name: &str| reached.iter().any(|known| known == name);
     for name in names {
-        let at_rest = object_input(name);
+        let at_rest = functions.idle(name);
         let mut value = set.get(&(key, name.to_owned())).copied().unwrap_or(at_rest);
         let slider = egui::Slider::new(&mut value, 0.0..=1.0).text(name);
         if ui.add_enabled(drawn(name), slider).on_disabled_hover_text(UNREAD).changed() {
@@ -343,7 +592,9 @@ pub(super) fn draw_h2_function_controls(
     let mut seen: Vec<&str> = Vec::new();
     for function in &functions.functions {
         let export = function.export.as_str();
-        if export.is_empty() || seen.contains(&export) {
+        // One the type exports never answers for its name; the slider above
+        // does.
+        if export.is_empty() || seen.contains(&export) || functions.type_exports(export) {
             continue;
         }
         seen.push(export);
@@ -402,7 +653,7 @@ mod tests {
         let mut down = function("shield_depleted", "shield_down");
         down.turn_off_with = "body_vitality".to_owned();
         let chained = function("shield_hit", "glow");
-        let functions = H2ObjectFunctions { functions: vec![shield, down, chained] };
+        let functions = H2ObjectFunctions { functions: vec![shield, down, chained], exports: None };
         let reached = functions.reaching(&["glow".to_owned()]);
         for name in ["glow", "shield_hit", "current_shield_damage", "scale"] {
             assert!(reached.iter().any(|known| known == name), "{name}");
@@ -426,12 +677,14 @@ mod tests {
 
     fn value(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> f32 {
         let inputs = inputs.iter().map(|(name, value)| ((*name).to_owned(), *value)).collect();
-        H2ObjectFunctions { functions }.value(name, &inputs, &H2FunctionValues::new(), Clock::default(), 0).0
+        let functions = H2ObjectFunctions { functions, exports: None };
+        functions.value(name, &inputs, &H2FunctionValues::new(), Clock::default(), 0).0
     }
 
     #[test]
     fn a_script_sets_what_a_function_makes_and_what_it_reads() {
-        let functions = H2ObjectFunctions { functions: vec![function("", "invincibility"), function("zero", "effects")] };
+        let functions = vec![function("", "invincibility"), function("zero", "effects")];
+        let functions = H2ObjectFunctions { functions, exports: None };
         let none = H2FunctionValues::new();
         let scripted: H2FunctionValues = [("invincibility".to_owned(), 1.0)].into_iter().collect();
         assert_eq!(functions.value("invincibility", &none, &none, Clock::default(), 0).0, 0.0, "an empty import reads nothing");
@@ -459,6 +712,44 @@ mod tests {
         assert_eq!(value(vec![inverted], "glow", &[("speed", 0.25)]), 0.75);
         let scaled = H2ObjectFunction { scale_by: "power".to_owned(), ..function("speed", "glow") };
         assert_eq!(value(vec![scaled], "glow", &[("speed", 0.5), ("power", 0.5)]), 0.25);
+    }
+
+    fn device(functions: Vec<H2ObjectFunction>) -> H2ObjectFunctions {
+        let tables = &[OBJECT_EXPORTS, DEVICE_EXPORTS];
+        let exports = TypeExports { tables, has_body: true, has_shield: false, variants: 4 };
+        H2ObjectFunctions { functions, exports: Some(exports) }
+    }
+
+    #[test]
+    fn what_the_type_exports_answers_before_a_function_of_its_name() {
+        // A control with its own `position` function, as several kit
+        // switches have: the device's exporter wins, idle at 0.
+        let functions = device(vec![function("one", "position")]);
+        let none = H2FunctionValues::new();
+        assert_eq!(functions.value("position", &none, &none, Clock::default(), 0), (0.0, false));
+        assert!(!functions.makes("position"), "it is an input, the panel's to set");
+        let set = H2FunctionValues::from([("position".to_owned(), 0.5)]);
+        assert_eq!(functions.value("position", &set, &none, Clock::default(), 0).0, 0.5);
+    }
+
+    #[test]
+    fn an_idle_object_reads_what_its_type_and_model_give() {
+        let functions = device(Vec::new());
+        assert_eq!(functions.idle("power"), 1.0, "a device starts powered");
+        assert_eq!(functions.idle("loop"), 1.0);
+        assert_eq!(functions.idle("body_vitality"), 1.0);
+        assert_eq!(functions.idle("shield_vitality"), 0.0, "this model has no shield");
+        assert_eq!(functions.idle("shield_depleted"), 1.0);
+        assert_eq!(functions.idle("variant"), 0.25, "the first of four");
+        assert_eq!(functions.idle("turned_on"), 0.0, "a weapon's, which a device does not export");
+    }
+
+    #[test]
+    fn without_known_exporters_the_functions_answer_first() {
+        // Halo 3 and ODST, whose exporters this does not have.
+        let functions = H2ObjectFunctions { functions: vec![function("one", "position")], exports: None };
+        let none = H2FunctionValues::new();
+        assert_eq!(functions.value("position", &none, &none, Clock::default(), 0), (1.0, true));
     }
 
     #[test]

@@ -557,13 +557,16 @@ pub(super) fn attach_h2_weapon(
             preview.weapon_ik.extend(points);
         }
     }
-    fold_attached(source, &weapon, attached, parent, child, owner, tag_path::name(path), preview)
+    fold_attached(source, &weapon, &model, attached, parent, child, owner, tag_path::name(path), preview)
 }
 
 /// An attached object's lights and flares, then its geometry, into `preview`.
+/// `model` is the object's, built into `attached`.
+#[allow(clippy::too_many_arguments)]
 fn fold_attached(
     source: &TagSource,
     object: &TagFile,
+    model: &TagFile,
     attached: RenderModelPreview,
     parent: MarkerFrame,
     child: MarkerFrame,
@@ -609,7 +612,8 @@ fn fold_attached(
         }
     }
     merge_attached(preview, attached, parent, child, owner, name);
-    Some(H2AttachedObject { owner, functions: super::h2_functions::read_h2_object_functions(object)? })
+    let functions = super::h2_functions::read_h2_object_functions(object, Some(model))?;
+    Some(H2AttachedObject { owner, functions })
 }
 
 /// What was read off an attached object, named after it when it has a name,
@@ -792,7 +796,8 @@ pub(super) fn attach_variant_objects(
                 (format!("{name}: {}", region.name), permutation.unwrap_or_default())
             })
             .collect();
-        attached_objects.extend(fold_attached(source, &object, attached, parent, child, owner, &name, preview));
+        let folded = fold_attached(source, &object, &child_tag, attached, parent, child, owner, &name, preview);
+        attached_objects.extend(folded);
         for (region, permutation) in choices {
             // With no variant chosen, no child shows.
             preview.instances.empty_regions.insert(region.clone());

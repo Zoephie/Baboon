@@ -392,7 +392,7 @@ pub(super) fn load_model_preview(
         data.default_variant = object_default_variant(model_tag);
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
             data.h2_change_colors = read_h2_change_colors(model_tag);
-            data.h2_object_functions = super::h2_functions::read_h2_object_functions(model_tag);
+            data.h2_object_functions = super::h2_functions::read_h2_object_functions(model_tag, Some(model));
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             let frame = |marker: &RenderModelPreviewMarker| {
                 let place = super::attachment::MarkerFrame {
@@ -441,7 +441,7 @@ pub(super) fn load_model_preview(
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = read_h2_change_colors(model_tag);
-            data.h2_object_functions = super::h2_functions::read_h2_object_functions(model_tag);
+            data.h2_object_functions = super::h2_functions::read_h2_object_functions(model_tag, Some(model));
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             let markers = std::mem::take(&mut preview.markers);
             let found = super::h2_lights::read_h2_flares(source, model_tag, 0, &markers, |marker| {

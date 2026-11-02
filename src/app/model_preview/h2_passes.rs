@@ -663,7 +663,9 @@ fn h2_laid_out_function(mapping: TagStruct<'_>) -> Option<TagFunction> {
 
 /// What a whole, idle object reads for an input: full for what measures its
 /// condition, and otherwise the zero the game falls back on when nothing
-/// exports the name, which leaves boosts, hits and open doors off.
+/// exports the name, which leaves boosts, hits and open doors off. A guess,
+/// for what has no object to ask: a Halo 2 object's functions answer from its
+/// type's exporters (`h2_functions`), which Halo 3 and ODST's are not yet.
 pub(super) fn object_input(name: &str) -> f32 {
     match name {
         "alive" | "body_vitality" | "device_power" | "electrical_power" | "health" | "one"
