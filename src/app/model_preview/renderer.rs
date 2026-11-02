@@ -844,6 +844,7 @@ const PREVIEW_RENDER_DISTANCE: f32 = 8.0;
 /// limits — the practical floor is 1024 vec4.
 pub(in crate::app) const MAX_PREVIEW_BONES: usize = 256;
 
+#[derive(Clone)]
 struct ModelGpuFrame {
     preview: Arc<RenderModelPreview>,
     geometry_id: u64,
@@ -2717,16 +2718,20 @@ unsafe fn draw_ce_particles(
         let zsprite_z = camera.scale * camera.depth_scale * camera.depth_map[0];
         let zsprite_w = camera.scale * camera.perspective;
         for (texture, function, nonlinear, colors, corners, secondary) in sprites {
-            match &secondary {
-                Some(draw) => {
-                    let key = Arc::as_ptr(&draw.map) as usize;
-                    if !uploaded.ce_secondary_textures.contains_key(&key)
-                        && let Some(made) = upload_h2_image(gl, &draw.map.image)
-                    {
-                        uploaded.ce_secondary_textures.insert(key, made);
-                    }
+            // A second map that would not upload draws as none, not as black.
+            let secondary = secondary.as_ref().and_then(|draw| {
+                let key = Arc::as_ptr(&draw.map) as usize;
+                if !uploaded.ce_secondary_textures.contains_key(&key)
+                    && let Some(made) = upload_h2_image(gl, &draw.map.image)
+                {
+                    uploaded.ce_secondary_textures.insert(key, made);
+                }
+                uploaded.ce_secondary_textures.get(&key).map(|map| (draw, *map))
+            });
+            match secondary {
+                Some((draw, map)) => {
                     gl.active_texture(glow::TEXTURE1);
-                    gl.bind_texture(glow::TEXTURE_2D, uploaded.ce_secondary_textures.get(&key).copied());
+                    gl.bind_texture(glow::TEXTURE_2D, Some(map));
                     gl.active_texture(glow::TEXTURE0);
                     gl.uniform_1_i32(effect_gl.mode.as_ref(), draw.mode);
                     gl.uniform_4_f32_slice(effect_gl.rows.as_ref(), draw.rows.as_flattened());
@@ -3314,6 +3319,8 @@ struct ModelGlRenderer {
     /// What Halo 3's composite reads with no bloom built.
     h3_no_bloom: Option<glow::NativeTexture>,
     h2_black_volume: Option<glow::NativeTexture>,
+    /// What an H3 array sampler reads with nothing of its own.
+    h3_black_array: Option<glow::NativeTexture>,
     h2_white_volume: Option<glow::NativeTexture>,
     h2_normalization_cube: Option<glow::NativeTexture>,
     h2_target: Option<H2Target>,
@@ -3451,8 +3458,9 @@ impl ModelGlRenderer {
                 h3_distortion_program: None,
                 h3_depth_copy: None,
                 h2_distortion_copy: None,
-                h2_black_volume: upload_solid_volume(gl, [0, 0, 0, 255]),
-                h2_white_volume: upload_solid_volume(gl, [255; 4]),
+                h2_black_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [0, 0, 0, 255]),
+                h3_black_array: upload_solid_volume(gl, glow::TEXTURE_2D_ARRAY, [0, 0, 0, 255]),
+                h2_white_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [255; 4]),
                 h2_normalization_cube: upload_normalization_cube(gl),
                 h2_target: None,
                 h2_scene: None,
@@ -3542,6 +3550,13 @@ impl ModelGlRenderer {
                 }
             }
             let scene = self.begin_h2_scene(gl, frame);
+            // The game's passes need the scene target's stencil and copies;
+            // without one, the frame draws as with them off.
+            if scene.is_none() && frame.game_shaders && self.h2_supported {
+                let plain = ModelGpuFrame { game_shaders: false, ..frame.clone() };
+                self.paint(gl, &plain);
+                return;
+            }
             let mut bloom_order: Option<Vec<usize>> = None;
 
             gl.use_program(Some(self.program));
@@ -5027,7 +5042,11 @@ impl ModelGlRenderer {
                 };
                 let matrix = h2_shadow_matrix(&frame.preview, toward);
                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
-                if let Some(Some((_, map))) = self.h2_shadow_map {
+                // A caster draws into the map: bound then, it would be read
+                // and written at once.
+                if pass.stage == H2VertexStage::ShadowMask
+                    && let Some(Some((_, map))) = self.h2_shadow_map
+                {
                     gl.active_texture(glow::TEXTURE0 + H2_SHADOW_MAP_UNIT);
                     gl.bind_texture(glow::TEXTURE_2D, Some(map));
                     let location = program.location(gl, "u_shadow_map");
@@ -7050,13 +7069,14 @@ unsafe fn upload_black_cube(gl: &glow::Context) -> Option<glow::NativeTexture> {
     }
 }
 
-/// A 1x1x1 volume of one color: a stand-in for a 3D map that is not read.
-unsafe fn upload_solid_volume(gl: &glow::Context, color: [u8; 4]) -> Option<glow::NativeTexture> {
+/// A 1x1x1 texture of one color for `target`, a volume or an array of 2D
+/// layers: a stand-in for a map that is not read.
+unsafe fn upload_solid_volume(gl: &glow::Context, target: u32, color: [u8; 4]) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
-        gl.bind_texture(glow::TEXTURE_3D, Some(texture));
+        gl.bind_texture(target, Some(texture));
         gl.tex_image_3d(
-            glow::TEXTURE_3D,
+            target,
             0,
             glow::RGBA8 as i32,
             1,
@@ -7071,9 +7091,9 @@ unsafe fn upload_solid_volume(gl: &glow::Context, color: [u8; 4]) -> Option<glow
             (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
             (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
         ] {
-            gl.tex_parameter_i32(glow::TEXTURE_3D, name, value as i32);
+            gl.tex_parameter_i32(target, name, value as i32);
         }
-        gl.bind_texture(glow::TEXTURE_3D, None);
+        gl.bind_texture(target, None);
         Some(texture)
     }
 }

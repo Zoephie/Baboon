@@ -160,7 +160,8 @@ void main() {
         vec4 place = screen_to_world * vec4(gl_FragCoord.xy / size * 2.0 - 1.0, raw * 2.0 - 1.0, 1.0);
         vec4 before = world_to_screen * vec4(place.xyz / place.w + moved, 1.0);
         vec2 delta = gl_FragCoord.xy - (before.xy / before.w * 0.5 + 0.5) * size;
-        float scale = clamp(most_pixels / length(delta), 0.0, 1.0);
+        // Still and with no blur allowed is 0 / 0, which would poison the steps.
+        float scale = clamp(most_pixels / max(length(delta), 1e-6), 0.0, 1.0);
         vec2 step_by = delta * blur_step * scale * weight;
         vec3 sum = center;
         for (int sample_at = 1; sample_at <= 6; sample_at++) {
@@ -974,7 +975,9 @@ impl ModelGlRenderer {
                     TextureKind::Flat => gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder)),
                     TextureKind::Cube => gl.bind_texture(glow::TEXTURE_CUBE_MAP, texture.or(self.h2_black_cube)),
                     TextureKind::Volume => gl.bind_texture(glow::TEXTURE_3D, texture.or(self.h2_black_volume)),
-                    TextureKind::FlatArray => {}
+                    // The kit's arrays (light probes, the dominant light's
+                    // intensity, water) are built by the game, never authored.
+                    TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, self.h3_black_array),
                 }
                 let location = program.location(gl, name);
                 gl.uniform_1_i32(location.as_ref(), unit as i32);
