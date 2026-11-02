@@ -1008,6 +1008,7 @@ pub(super) fn object_moves(
         || !data.preview.h3_screen_effects.is_empty()
         || !data.preview.h3_cloth.is_empty()
         || !data.preview.h2_liquids.is_empty()
+        || !data.preview.h2_contrails.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
@@ -1128,6 +1129,20 @@ impl ModelGpuFrame {
 
     fn h2_moves(&self) -> bool {
         if self.object_moves && !self.preview.ce_lights.is_empty() {
+            return true;
+        }
+        // What simulates or animates of itself runs whatever the passes do.
+        let preview = &self.preview;
+        let effects = !preview.h3_particles.is_empty()
+            || !preview.h3_strips.is_empty()
+            || !preview.h3_cloth.is_empty()
+            || !preview.h2_contrails.is_empty()
+            || !preview.h2_liquids.is_empty()
+            || !preview.h2_light_volumes.is_empty()
+            || !preview.h2_flares.is_empty()
+            || !preview.h2_point_lights.is_empty()
+            || !preview.h2_gel_lights.is_empty();
+        if self.object_moves && effects {
             return true;
         }
         let Some(textures) = self.textures.as_ref() else {
@@ -3433,6 +3448,13 @@ impl ModelGlRenderer {
             gl.uniform_2_f32(flares.tint.as_ref(), 0.0, 0.0);
             let antennas = matches!(stage, SpriteStage::Rest);
             if antennas {
+                // `rasterizer_light_volume_draw_sprites` sets its widget state
+                // with `sub_936910(0, 3, 2)`: depth tested, less or equal, not
+                // written. Liquids draw through it too, and contrails through
+                // a transparent pass, which tests the same way.
+                gl.enable(glow::DEPTH_TEST);
+                gl.depth_func(glow::LEQUAL);
+                gl.depth_mask(false);
                 let volumes = frame.preview.h2_light_volumes.iter().zip(&uploaded.h2_volume_textures);
                 for (index, (at, textures)) in volumes.enumerate() {
                     if !is_shown(&frame.h2_shown.volumes, index) {
@@ -3504,6 +3526,7 @@ impl ModelGlRenderer {
                         gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                     }
                 }
+                gl.disable(glow::DEPTH_TEST);
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
                 gl.color_mask(true, true, true, h3);
             }
