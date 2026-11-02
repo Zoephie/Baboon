@@ -1013,6 +1013,7 @@ pub(super) fn object_moves(
         || !data.preview.ce_contrails.is_empty()
         || !data.preview.ce_lightning.is_empty()
         || !data.preview.ce_glows.is_empty()
+        || !data.preview.ce_flags.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
@@ -1145,6 +1146,7 @@ impl ModelGpuFrame {
             || !preview.ce_contrails.is_empty()
             || !preview.ce_lightning.is_empty()
             || !preview.ce_glows.is_empty()
+            || !preview.ce_flags.is_empty()
             || !preview.h2_liquids.is_empty()
             || !preview.h2_light_volumes.is_empty()
             || !preview.h2_flares.is_empty()
@@ -1829,6 +1831,7 @@ struct ModelGpuSlot {
     ce_light_volume_textures: Vec<Option<glow::NativeTexture>>,
     ce_lightning_textures: Vec<Option<glow::NativeTexture>>,
     ce_glows: ce_widgets::CeGlowField,
+    ce_flags: ce_flags::CeFlagField,
     ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
@@ -1897,6 +1900,7 @@ impl ModelGpuSlot {
                 ce_light_volume_textures: Vec::new(),
                 ce_lightning_textures: Vec::new(),
                 ce_glows: Default::default(),
+                ce_flags: Default::default(),
                 ce_glow_textures: Vec::new(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
@@ -3093,6 +3097,27 @@ impl Default for MaterialGlTextures {
 }
 
 impl ModelGlRenderer {
+    /// `flag_render_proper` builds its mesh from where the sheet is now.
+    unsafe fn move_ce_flags(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        let uploaded = &mut self.slots[slot];
+        let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+        let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
+        let ground = lowest.fold(0.0, f32::min);
+        let written = uploaded.ce_flags.advance(&frame.preview.ce_flags, bones, ground, frame.time);
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(uploaded.vertex_buffer));
+            for (first, moved) in written {
+                let mut vertices = frame.preview.vertices[first..first + moved.len()].to_vec();
+                for (vertex, (position, normal)) in vertices.iter_mut().zip(&moved) {
+                    vertex.position = *position;
+                    vertex.normal = *normal;
+                }
+                let offset = first * size_of::<RenderModelPreviewVertex>();
+                gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, offset as i32, slice_bytes(&vertices));
+            }
+        }
+    }
+
     fn new(gl: &glow::Context) -> Result<Self, String> {
         let shader_version = eframe::egui_glow::ShaderVersion::get(gl);
         let modern = shader_version.is_new_shader_interface();
@@ -3209,6 +3234,9 @@ impl ModelGlRenderer {
             self.slots[slot].sync_textures(gl, frame);
             if frame.preview.h3_cloth.first().is_some_and(|cloth| cloth.halo2()) {
                 self.move_cloth(gl, frame, slot);
+            }
+            if !frame.preview.ce_flags.is_empty() {
+                self.move_ce_flags(gl, frame, slot);
             }
             let scene = self.begin_h2_scene(gl, frame);
             let mut bloom_order: Option<Vec<usize>> = None;
@@ -3620,6 +3648,7 @@ impl ModelGlRenderer {
                 }
                 uploaded.ce_glow_textures = frame.preview.ce_glows.iter().map(|glow| upload_h2_image(gl, &glow.image)).collect();
                 uploaded.ce_glows = Default::default();
+                uploaded.ce_flags = Default::default();
                 uploaded.ce_contrail_textures = frame
                     .preview
                     .ce_contrails

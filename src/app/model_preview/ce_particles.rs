@@ -90,6 +90,34 @@ impl CePointPhysics {
         self.mass_over_radius_cubed * radius * radius * radius
     }
 
+    /// The air friction tool leaves, scaled by 10000.
+    pub(super) fn air_friction(&self) -> f32 {
+        self.air_friction
+    }
+
+    /// `point_physics_update` with a force on the point, which first moves its
+    /// velocity by the force over the mass of it and the air it displaces.
+    pub(super) fn step_with_force(
+        &self,
+        place: &mut [f32; 3],
+        velocity: &mut [f32; 3],
+        force: [f32; 3],
+        radius: f32,
+        ground: f32,
+        dt: f32,
+    ) -> bool {
+        if dt == 0.0 {
+            return false;
+        }
+        let bulk = (AIR_MASS_OVER_RADIUS_CUBED + self.mass_over_radius_cubed) * radius * radius * radius;
+        if bulk != 0.0 {
+            for (velocity, force) in velocity.iter_mut().zip(force) {
+                *velocity += force * (dt / bulk);
+            }
+        }
+        self.step(place, velocity, radius, ground, dt)
+    }
+
     /// `point_physics_update` in still air over a flat floor at `ground`: true
     /// where it touched it, the only structure a preview has.
     pub(super) fn step(&self, place: &mut [f32; 3], velocity: &mut [f32; 3], radius: f32, ground: f32, dt: f32) -> bool {
