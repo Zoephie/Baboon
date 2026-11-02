@@ -436,8 +436,12 @@ fn string_id_in(tag: &TagFile, name: &str) -> String {
 
 /// Every node below `node`.
 fn descendants(preview: &RenderModelPreview, node: usize) -> Vec<usize> {
+    // No chain is longer than the node count; one that is loops back on itself.
     let below = |mut index: usize| {
-        while let Some(parent) = usize::try_from(preview.nodes[index].parent).ok() {
+        for _ in 0..preview.nodes.len() {
+            let Some(parent) = preview.nodes.get(index).and_then(|at| usize::try_from(at.parent).ok()) else {
+                return false;
+            };
             if parent == node {
                 return true;
             }
@@ -822,6 +826,16 @@ pub(crate) struct H2AttachedObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bad node data gives no descendants rather than a hang or a panic.
+    #[test]
+    fn descendants_survive_a_parent_cycle_and_a_parent_past_the_end() {
+        let node = |parent: i16| RenderModelPreviewNode { parent, ..Default::default() };
+        let mut preview = RenderModelPreview::default();
+        // 0 is the root; 1 and 2 are each other's parent; 3's is past the end.
+        preview.nodes = vec![node(-1), node(2), node(1), node(9), node(0)];
+        assert_eq!(descendants(&preview, 0), vec![4]);
+    }
 
     fn entry(mode: &str, class: &str, kind: &str, has_idle: bool) -> GraphEntry {
         GraphEntry { mode: mode.to_owned(), class: class.to_owned(), kind: kind.to_owned(), has_idle, slots: Vec::new() }

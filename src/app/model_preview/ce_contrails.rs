@@ -437,6 +437,11 @@ impl CeContrailField {
                             break;
                         }
                         next_frame(running, def);
+                        // A frame shorter than `left`'s precision would never
+                        // use it up.
+                        if left - span == left {
+                            break;
+                        }
                         left -= span;
                         if left <= 0.0 {
                             break;

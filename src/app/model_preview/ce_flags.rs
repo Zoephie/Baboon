@@ -377,7 +377,9 @@ impl CeFlagField {
                     running
                 })
                 .collect();
-            self.time = Some(0.0);
+            // Settled is where the game starts it, so there is nothing to
+            // simulate before now.
+            self.time = Some(time);
         }
         let mut now = self.time.unwrap_or(time);
         while now + TICK <= time {

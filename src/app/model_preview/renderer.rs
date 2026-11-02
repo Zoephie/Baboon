@@ -310,7 +310,9 @@ pub(super) fn visible_batch_indices(
                 return None;
             }
             if let Some(instance) = preview.instances.batches.get(&index) {
-                return (instances >> instance & 1 != 0).then_some(index);
+                // A mask holds 128 placements; one past them is never chosen.
+                let chosen = u32::try_from(*instance).ok().and_then(|shift| instances.checked_shr(shift));
+                return (chosen.unwrap_or(0) & 1 != 0).then_some(index);
             }
             let selection = state.region_selections.get(&batch.region_name)?;
             if !selection.enabled {
@@ -2039,21 +2041,48 @@ impl ModelGpuSlot {
                     gl.disable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
                 }
             }
-            if let Some(prt) = &frame.preview.h3_prt {
-                gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
-                gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&prt.vertices), glow::STATIC_DRAW);
-                let stride = std::mem::size_of::<[f32; h3_prt::COEFFICIENTS]>() as i32;
-                for (index, attribute) in h3_draw::PRT_ATTRIBUTES.into_iter().enumerate() {
-                    gl.enable_vertex_attrib_array(attribute);
-                    // The first holds a fourth for the linear shader, in the
-                    // second's first place.
-                    let size = if index == 0 { 4 } else { 3 };
-                    gl.vertex_attrib_pointer_f32(attribute, size, glow::FLOAT, false, stride, index as i32 * 12);
+            match &frame.preview.h3_prt {
+                Some(prt) => {
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
+                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&prt.vertices), glow::STATIC_DRAW);
+                    let stride = std::mem::size_of::<[f32; h3_prt::COEFFICIENTS]>() as i32;
+                    for (index, attribute) in h3_draw::PRT_ATTRIBUTES.into_iter().enumerate() {
+                        gl.enable_vertex_attrib_array(attribute);
+                        // The first holds a fourth for the linear shader, in the
+                        // second's first place.
+                        let size = if index == 0 { 4 } else { 3 };
+                        gl.vertex_attrib_pointer_f32(attribute, size, glow::FLOAT, false, stride, index as i32 * 12);
+                    }
+                }
+                None => {
+                    for attribute in h3_draw::PRT_ATTRIBUTES {
+                        gl.disable_vertex_attrib_array(attribute);
+                    }
                 }
             }
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
         }
         self.grid_built = false;
+    }
+
+    /// Start every simulation over, for a model new to this slot.
+    ///
+    /// The fields restart on their own only when their count changes or time
+    /// goes back, so a slot taken over by another model would step the last
+    /// model's particles, flags and cloth against the new model's definitions.
+    fn restart_simulations(&mut self) {
+        self.h2_contrails = Default::default();
+        self.h3_particles = Default::default();
+        self.h3_strips = Default::default();
+        self.h3_leaves = Default::default();
+        self.h3_cloth = Default::default();
+        self.h3_onsets = Default::default();
+        self.h3_vision_clock = None;
+        self.ce_particles = Default::default();
+        self.ce_contrails = Default::default();
+        self.ce_glows = Default::default();
+        self.ce_pctl = Default::default();
+        self.ce_flags = Default::default();
     }
 
     /// Build the ground grid for this slot's model, once.
@@ -2903,7 +2932,8 @@ vec4 albedo(vec2 sprite, float external_alpha) {
     vec4 base = texture(u_base, sprite);
     vec4 tone = base;
     float row = v_extra.y;
-    if (u_albedo >= 3) {
+    // The palette options; Halo 2's tints read the base map alone.
+    if (u_albedo >= 3 && u_albedo <= 5) {
         tone = texture(u_palette, vec2(base.r, row));
     }
     if (u_albedo == 1 || u_albedo == 4) {
@@ -3234,6 +3264,8 @@ struct ModelGlRenderer {
     h3_sprites_advanced: bool,
     h3_distorted: bool,
     h3_distortion_program: Option<glow::NativeProgram>,
+    /// This frame's copy of the H3 scene's depth, for soft particles; set
+    /// only while an H3 picture draws its sprites.
     h3_depth_copy: Option<glow::NativeTexture>,
     /// Halo 2's `target_particle_distortion`, copied from the frame.
     h2_distortion_copy: Option<FrameCopy>,
@@ -3256,8 +3288,9 @@ struct ModelGlRenderer {
     h3_targets: Option<h3_draw::H3Targets>,
     /// The light drawing now, and its gel.
     h3_light: Option<(h3_lights::H3LitLight, Option<glow::NativeTexture>)>,
-    /// Linked passes by their address; none for one that failed.
-    h3_programs: HashMap<usize, Option<h3_draw::H3Program>>,
+    /// Linked passes by their address, or the pass that failed to link: each
+    /// holds its pass, so no other pass can come to have its address.
+    h3_programs: HashMap<usize, Result<h3_draw::H3Program, Arc<h3_shaders::H3Pass>>>,
     h3_composite_program: Option<glow::NativeProgram>,
     h3_blur_program: Option<glow::NativeProgram>,
     h3_vision_program: Option<glow::NativeProgram>,
@@ -3447,6 +3480,9 @@ impl ModelGlRenderer {
                     }
                 }
             }
+            if upload {
+                self.slots[slot].restart_simulations();
+            }
             // Overlays merging in keep the slot, and its running effects,
             // and change only the buffers.
             if upload || self.slots[slot].mesh_id != Some(frame.mesh_id) {
@@ -3460,6 +3496,7 @@ impl ModelGlRenderer {
                 self.move_ce_flags(gl, frame, slot);
             }
             self.ce_points_now = None;
+            self.h3_depth_copy = None;
             if frame.preview.ce_effects.iter().any(|effect| !effect.def.lights.is_empty()) {
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let uploaded = &mut self.slots[slot];
@@ -3796,9 +3833,6 @@ impl ModelGlRenderer {
             let no_map = self.h3_no_bloom;
             let uploaded = &mut self.slots[slot];
             if uploaded.flare_geometry != Some(frame.geometry_id) {
-                uploaded.h3_particles = h3_particles::H3ParticleField::default();
-                uploaded.h3_strips = h3_strips::H3StripField::default();
-                uploaded.h3_leaves = h3_leaves::H3LeafField::default();
                 let drained = uploaded
                     .particle_textures
                     .drain(..)
@@ -3881,11 +3915,9 @@ impl ModelGlRenderer {
                 for texture in uploaded.ce_particle_textures.drain().flat_map(|(_, particles)| particles).flatten().flatten() {
                     gl.delete_texture(texture);
                 }
-                uploaded.ce_particles = Default::default();
                 for texture in uploaded.ce_contrail_textures.drain(..).flatten().flatten() {
                     gl.delete_texture(texture);
                 }
-                uploaded.ce_contrails = Default::default();
                 for texture in uploaded.ce_light_volume_textures.drain(..).flatten() {
                     gl.delete_texture(texture);
                 }
@@ -3900,8 +3932,6 @@ impl ModelGlRenderer {
                     gl.delete_texture(texture);
                 }
                 uploaded.ce_glow_textures = frame.preview.ce_glows.iter().map(|glow| upload_h2_image(gl, &glow.image)).collect();
-                uploaded.ce_glows = Default::default();
-                uploaded.ce_flags = Default::default();
                 for texture in uploaded.ce_pctl_textures.drain(..).flatten().flatten().flatten() {
                     gl.delete_texture(texture);
                 }
@@ -3915,7 +3945,6 @@ impl ModelGlRenderer {
                         }).collect()
                     })
                     .collect();
-                uploaded.ce_pctl = Default::default();
                 for (_, texture) in uploaded.ce_secondary_textures.drain() {
                     gl.delete_texture(texture);
                 }
@@ -3959,7 +3988,6 @@ impl ModelGlRenderer {
                     .iter()
                     .map(|at| at.arcs().iter().map(|arc| arc.bitmap().and_then(|image| upload_h2_image(gl, image))).collect())
                     .collect();
-                uploaded.h2_contrails = Default::default();
                 for texture in uploaded.h2_contrail_textures.drain(..).flatten() {
                     gl.delete_texture(texture);
                 }

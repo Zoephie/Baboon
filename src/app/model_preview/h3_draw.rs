@@ -724,8 +724,13 @@ impl ModelGlRenderer {
 
     unsafe fn h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<H3Program> {
         let key = Arc::as_ptr(pass) as usize;
-        if let Some(program) = self.h3_programs.remove(&key) {
-            return program;
+        match self.h3_programs.remove(&key) {
+            Some(Ok(program)) => return Some(program),
+            Some(Err(failed)) => {
+                self.h3_programs.insert(key, Err(failed));
+                return None;
+            }
+            None => {}
         }
         unsafe {
             let stages = [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)];
@@ -757,7 +762,7 @@ impl ModelGlRenderer {
             if !gl.get_program_link_status(program) {
                 eprintln!("h3 program failed: {}", gl.get_program_info_log(program));
                 gl.delete_program(program);
-                self.h3_programs.insert(key, None);
+                self.h3_programs.insert(key, Err(Arc::clone(pass)));
                 return None;
             }
             Some(H3Program { _pass: Arc::clone(pass), program, locations: HashMap::new() })
@@ -980,7 +985,7 @@ impl ModelGlRenderer {
                 }
                 _ => gl.draw_arrays(glow::TRIANGLES, 0, 3),
             }
-            self.h3_programs.insert(Arc::as_ptr(pass) as usize, Some(program));
+            self.h3_programs.insert(Arc::as_ptr(pass) as usize, Ok(program));
         }
     }
 

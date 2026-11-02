@@ -429,7 +429,9 @@ mod tests {
         assert_eq!(rest(&cyborg, 1.0)[1], 0.0);
         assert_eq!(cyborg.input_names[0].as_deref(), Some("recent shield damage"));
         assert_eq!(cyborg.functions[1].usage, "shield glow source");
-        assert_eq!(cyborg.outputs(&[1.0, 1.0, 0.0, 0.0], 1.0)[1], 1.0);
+        // `transition_function_evaluate` reads 1.0 from its table's entry
+        // 1022, a byte short of full.
+        assert!((cyborg.outputs(&[1.0, 1.0, 0.0, 0.0], 1.0)[1] - 254.0 / 255.0).abs() < 1e-6);
         assert_eq!(rest(&biped("characters\\elite\\elite"), 1.0)[0], 0.0);
         // The sentinel's last function runs off `alive`.
         assert_eq!(rest(&biped("characters\\sentinel\\sentinel"), 1.0)[3], 1.0);

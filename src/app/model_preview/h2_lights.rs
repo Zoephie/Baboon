@@ -1182,7 +1182,7 @@ impl H2FlareAt {
         let interpolation = if scaled_by_marker { 1.0 } else { value };
         let radius_scale = self.marker_scaled();
         let attached = match (scaled_by_marker, self.change_color) {
-            (false, Some(index)) => change_colors[index],
+            (false, Some(index)) => change_colors.get(index).copied().unwrap_or([1.0; 3]),
             _ => [1.0; 3],
         };
         let external = match &self.light {

@@ -386,8 +386,11 @@ pub(super) fn load_model_preview(
         let Some(source) = source else {
             return Err("Object preview requires a loaded source.".to_owned());
         };
-        let model = preview_model_tag(source, model_tag)?;
-        let model = model.as_ref().unwrap_or(model_tag);
+        // Previewing the object itself again would come straight back here.
+        let Some(model) = preview_model_tag(source, model_tag)? else {
+            return Err("This object has no model to preview.".to_owned());
+        };
+        let model = &model;
         let mut data = load_model_preview(model, entry, names, Some(source), settings)?;
         data.default_variant = object_default_variant(model_tag);
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
@@ -3971,5 +3974,21 @@ mod kit_object_tests {
         // `illumination`; the vehicle has none of its own.
         let firing = data.preview.h3_lights.iter().filter(|light| light.scale_name() == "illumination");
         assert_eq!(firing.count(), 1, "the gun's firing light");
+    }
+
+    /// A flag starts settled whenever it starts: one restarted a minute in
+    /// has nothing to catch up on, so it hangs as one started at the open.
+    #[test]
+    fn a_flag_restarted_late_starts_settled() {
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let data = kit_preview(&root, GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap");
+        let flags = &data.preview.ce_flags;
+        assert!(!flags.is_empty(), "the flag weapon's flag");
+        let at_open = super::super::ce_flags::CeFlagField::default().advance(flags, None, 0.0, 0.0);
+        let a_minute_in = super::super::ce_flags::CeFlagField::default().advance(flags, None, 0.0, 60.0);
+        assert_eq!(at_open, a_minute_in);
     }
 }
