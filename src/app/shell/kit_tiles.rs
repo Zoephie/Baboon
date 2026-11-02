@@ -3,7 +3,6 @@
 
 use super::recents::{RecentAction, draw_recent_folders_menu};
 use super::*;
-use crate::app::shell::frame::tint_toward;
 use crate::app::shell::frame::wheel_scroll_tab_bar;
 
 /// Which loader the "+" menu on the kit tab bar should start.
@@ -132,6 +131,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         // retargets as focus moves.
         egui::Panel::left(egui::Id::new(("kit_browser_panel", kit_id.0)))
             .resizable(true)
+            .show_separator_line(false)
             .default_size(330.0)
             .frame(Frame::NONE.fill(left_panel()).inner_margin(egui::Margin {
                 left: 8,
@@ -162,7 +162,9 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
                 );
             });
         egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(editor_bg()))
+            .frame(Frame::NONE.fill(left_panel()).inner_margin(egui::Margin {
+                left: 6, right: 6, top: 6, bottom: 6,
+            }))
             .show(ui, |ui| {
                 draw_tag_tiles(ui, cx, parts, self.inputs, kit_index);
             });
@@ -174,10 +176,57 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
             return RichText::new("(closed)").color(subtle_dark()).into();
         };
         let kit = &self.cx.model.kits[index];
-        let dirty = kit.has_unwritten_modifications();
         let label = kit_strip_label(kit);
-        let text = if dirty { format!("• {label}") } else { label };
-        RichText::new(text).color(text_dark()).strong().into()
+        RichText::new(label).color(text_dark()).strong().into()
+    }
+
+    fn tab_ui(
+        &mut self, tiles: &mut egui_tiles::Tiles<KitId>, ui: &mut Ui,
+        id: egui::Id, tile_id: egui_tiles::TileId, state: &egui_tiles::TabState,
+    ) -> egui::Response {
+        const CLOSE_GAP: f32 = 20.0;
+        let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit))
+            if self.cx.model.kit_index(*kit).is_some_and(|index| self.cx.model.kits[index].has_unwritten_modifications()));
+        let text = self.tab_title_for_tile(tiles, tile_id);
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font);
+        let margin = self.tab_title_spacing(ui.visuals());
+        let close_size = Vec2::splat(self.close_button_outer_size());
+        let width = galley.size().x + margin * 2.0
+            + f32::from(state.closable) * (CLOSE_GAP + close_size.x);
+        let (_, rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
+        let response = ui.interact(rect, id, Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button,
+            ui.is_enabled(), state.active, galley.text()));
+        if ui.is_rect_visible(rect) && !state.is_being_dragged {
+            let fill = if !state.active && response.hovered() { context_menu_hover() }
+                else { self.tab_bg_color(ui.visuals(), tiles, tile_id, state) };
+            crate::app::shell::frame::paint_connected_tab(ui, rect, fill, state.active);
+            let inner = rect.shrink(margin);
+            let text_pos = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), inner).min;
+            ui.painter().galley(text_pos, galley, text_dark());
+            if state.closable {
+                let close_rect = egui::Align2::RIGHT_CENTER.align_size_within_rect(close_size, inner);
+                if dirty {
+                    ui.painter().circle_filled(
+                        egui::pos2(close_rect.left() - CLOSE_GAP * 0.5, close_rect.center().y),
+                        2.0, text_dark(),
+                    );
+                }
+                let close = ui.interact(close_rect, id.with("close"), Sense::click_and_drag())
+                    .on_hover_cursor(egui::CursorIcon::Default);
+                close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
+                let visuals = ui.style().interact(&close);
+                let cross = close_rect.shrink(self.close_button_inner_margin()).expand(visuals.expansion);
+                ui.painter().line_segment([cross.left_top(), cross.right_bottom()], visuals.fg_stroke);
+                ui.painter().line_segment([cross.right_top(), cross.left_bottom()], visuals.fg_stroke);
+                if (close.clicked() || response.middle_clicked()) && self.on_tab_close(tiles, tile_id) {
+                    tiles.remove(tile_id);
+                }
+            }
+        }
+        self.on_tab_button(tiles, tile_id, response)
     }
 
     fn is_tab_closable(
@@ -228,6 +277,8 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         _tabs: &egui_tiles::Tabs,
         scroll_offset: &mut f32,
     ) {
+        let bar = ui.max_rect();
+        ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, grid_line()));
         wheel_scroll_tab_bar(ui, scroll_offset);
         let recents = &self.cx.model.prefs.recent_folders;
         let menu_margin = Frame::menu(ui.style()).total_margin();
@@ -289,23 +340,22 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
     fn tab_bg_color(
         &self,
         _visuals: &egui::Visuals,
-        tiles: &egui_tiles::Tiles<KitId>,
-        tile_id: egui_tiles::TileId,
+        _tiles: &egui_tiles::Tiles<KitId>,
+        _tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> Color32 {
-        let base = if state.active {
-            active_tab()
-        } else {
+        if state.active {
             left_panel()
-        };
-        let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit_id))
-            if self.cx.model.kit_index(*kit_id)
-                .is_some_and(|index| self.cx.model.kits[index].has_unwritten_modifications()));
-        if dirty {
-            tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
         } else {
-            base
+            Color32::TRANSPARENT
         }
+    }
+
+    fn tab_outline_stroke(
+        &self, _visuals: &egui::Visuals, _tiles: &egui_tiles::Tiles<KitId>,
+        _tile_id: egui_tiles::TileId, state: &egui_tiles::TabState,
+    ) -> Stroke {
+        if state.active { Stroke::new(1.0, grid_line()) } else { Stroke::NONE }
     }
 
     fn tab_text_color(

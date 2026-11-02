@@ -3,8 +3,18 @@
 
 use super::*;
 use crate::app::shell::frame::centered_empty_state;
-use crate::app::shell::frame::tint_toward;
 use crate::app::shell::frame::wheel_scroll_tab_bar;
+
+fn page_corners(page: egui::Rect, tab: Option<&egui::Rect>) -> egui::CornerRadius {
+    let mut corners = egui::CornerRadius::same(6);
+    // A tab at an outer edge shares that straight side with the page.
+    // Only exposed corners round off into the surrounding browser background.
+    if let Some(tab) = tab {
+        if tab.left() <= page.left() + 1.0 && tab.right() > page.left() { corners.nw = 0; }
+        if tab.right() >= page.right() - 1.0 && tab.left() < page.right() { corners.ne = 0; }
+    }
+    corners
+}
 
 /// Draws a kit's tag panes for `egui_tiles` while the kit's tree is moved out
 /// of its view.
@@ -25,6 +35,7 @@ struct TagPaneBehavior<'a, 'c, 'p> {
     /// two scans per tab, ~0.4 ms a frame across six tabs of a 12,291-tag
     /// Campaign Evolved source, and worse the more tabs are open.
     tab_labels: HashMap<String, (String, Option<u32>)>,
+    active_tab_rects: HashMap<egui_tiles::TileId, egui::Rect>,
     close_requests: Vec<String>,
     /// Deferred tab context-menu choices, applied after the tree is drawn for
     /// the same reason closes are: they mutate the layout or the open set.
@@ -48,6 +59,8 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         pane: &mut String,
     ) -> egui_tiles::UiResponse {
         let key = pane.clone();
+        ui.painter().rect_filled(ui.max_rect(), page_corners(ui.max_rect(), self.active_tab_rects.get(&tile_id)),
+            ui.visuals().panel_fill);
         // As with kits: pressing inside the pane selects it, hovering does
         // not. `selected_key` is what "Save Current Tag" acts on, so passing
         // the cursor over another pane must not change the target. Sent before
@@ -165,17 +178,12 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                 .unwrap_or_else(|| "Folder".to_owned());
             return RichText::new(label).color(text_dark()).into();
         }
-        let dirty = self.cx.model.kits[self.kit_index]
-            .parsed_tags
-            .get(pane)
-            .is_some_and(|document| document.dirty.is_set());
         let label = self
             .tab_labels
             .get(pane)
             .map(|(label, _)| label.clone())
             .unwrap_or_else(|| pane.clone());
-        let text = if dirty { format!("• {label}") } else { label };
-        RichText::new(text).color(text_dark()).into()
+        RichText::new(label).color(text_dark()).into()
     }
 
     fn is_tab_closable(
@@ -309,6 +317,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
     ) -> egui::Response {
         const ICON: f32 = 14.0;
         const ICON_GAP: f32 = 4.0;
+        // Keep room for a dirty dot even when clean, so both the close button
+        // and neighboring tabs stay put when the document changes.
+        const CLOSE_GAP: f32 = 20.0;
 
         let pane_key = match tiles.get(tile_id) {
             Some(egui_tiles::Tile::Pane(key)) => Some(key),
@@ -320,6 +331,8 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         };
         let folder_icon = pane_key.is_some_and(|key| is_folder_pane_key(key));
         let git_icon = pane_key.is_some_and(|key| key == GIT_REVIEW_KEY);
+        let dirty = pane_key.is_some_and(|key| self.cx.model.kits[self.kit_index]
+            .parsed_tags.get(key).is_some_and(|document| document.dirty.is_set()));
         let text = self.tab_title_for_tile(tiles, tile_id);
         let close_size = Vec2::splat(self.close_button_outer_size());
         let font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -333,22 +346,35 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         let width = galley.size().x
             + 2.0 * x_margin
             + icon_width
-            + f32::from(state.closable) * (4.0 + close_size.x);
+            + f32::from(state.closable) * (CLOSE_GAP + close_size.x);
         let (_, tab_rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
+        if state.active { self.active_tab_rects.insert(tile_id, tab_rect); }
         let response = ui
             .interact(tab_rect, id, Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
         if ui.is_rect_visible(tab_rect) && !state.is_being_dragged {
-            let bg = self.tab_bg_color(ui.visuals(), tiles, tile_id, state);
-            let stroke = self.tab_outline_stroke(ui.visuals(), tiles, tile_id, state);
-            ui.painter().rect(tab_rect.shrink(0.5), 0.0, bg, stroke, egui::StrokeKind::Middle);
-            if state.active {
-                ui.painter().hline(
-                    tab_rect.x_range(),
-                    tab_rect.bottom(),
-                    Stroke::new(stroke.width + 1.0, bg),
-                );
+            let bg = if !state.active && response.hovered() {
+                context_menu_hover()
+            } else {
+                self.tab_bg_color(ui.visuals(), tiles, tile_id, state)
+            };
+            // The selected tab is an extension of the page, like Find/Replace:
+            // rounded above, flush below, with no outline separating the two.
+            crate::app::shell::frame::paint_connected_tab(ui, tab_rect, bg, state.active);
+            if !state.active {
+                let next_inactive = tiles.parent_of(tile_id).and_then(|parent| tiles.get(parent))
+                    .and_then(|tile| match tile {
+                        egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs)) => {
+                            tabs.children.iter().skip_while(|&&id| id != tile_id).skip(1)
+                                .find(|&&id| tiles.is_visible(id)).map(|&id| !tabs.is_active(id))
+                        }
+                        _ => None,
+                    }).unwrap_or(false);
+                if next_inactive {
+                    ui.painter().vline(tab_rect.right(), (tab_rect.top() + 5.0)..=(tab_rect.bottom() - 5.0),
+                        Stroke::new(1.0, grid_line().gamma_multiply(0.5)));
+                }
             }
             let inner = tab_rect.shrink(x_margin);
             if group_tag.is_some() {
@@ -383,6 +409,12 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             if state.closable {
                 let close_rect =
                     egui::Align2::RIGHT_CENTER.align_size_within_rect(close_size, inner);
+                if dirty {
+                    ui.painter().circle_filled(
+                        egui::pos2(close_rect.left() - CLOSE_GAP * 0.5, close_rect.center().y),
+                        2.0, text_color,
+                    );
+                }
                 let close_id = ui.auto_id_with("tab_close_btn");
                 let close_response = ui
                     .interact(close_rect, close_id, Sense::click_and_drag())
@@ -415,31 +447,32 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
     }
 
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
-        row_type()
+        left_panel()
     }
 
     fn tab_bg_color(
         &self,
-        _visuals: &egui::Visuals,
-        tiles: &egui_tiles::Tiles<String>,
-        tile_id: egui_tiles::TileId,
+        visuals: &egui::Visuals,
+        _tiles: &egui_tiles::Tiles<String>,
+        _tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> Color32 {
-        let base = if state.active {
-            active_tab()
+        if state.active {
+            visuals.panel_fill
         } else {
-            row_type()
-        };
-        let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(key))
-            if self.cx.model.kits[self.kit_index]
-                .parsed_tags
-                .get(key)
-                .is_some_and(|document| document.dirty.is_set()));
-        if dirty {
-            tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
-        } else {
-            base
+            Color32::TRANSPARENT
         }
+    }
+
+    fn tab_outline_stroke(
+        &self, _visuals: &egui::Visuals, _tiles: &egui_tiles::Tiles<String>,
+        _tile_id: egui_tiles::TileId, _state: &egui_tiles::TabState,
+    ) -> Stroke {
+        Stroke::NONE
+    }
+
+    fn tab_bar_hline_stroke(&self, _visuals: &egui::Visuals) -> Stroke {
+        Stroke::NONE
     }
 
     fn tab_text_color(
@@ -641,6 +674,7 @@ pub(in crate::app) fn draw_tag_tiles(
         kit_index,
         kit,
         tab_labels,
+        active_tab_rects: HashMap::new(),
         close_requests: Vec::new(),
         reveal: None,
         reveal_in_explorer: None,
@@ -650,6 +684,23 @@ pub(in crate::app) fn draw_tag_tiles(
         close_all_but: None,
     };
     tree.ui(&mut behavior, ui);
+    // Only panes laid out this frame have rectangles. Paint each visible page
+    // separately, so split groups keep their own frame and active-tab opening.
+    for (id, tile) in tree.tiles.iter() {
+        if matches!(tile, egui_tiles::Tile::Pane(_)) && let Some(rect) = tree.tiles.rect(*id) {
+            let tab = behavior.active_tab_rects.get(id);
+            ui.painter().rect_stroke(rect, page_corners(rect, tab),
+                Stroke::new(1.0, grid_line()), egui::StrokeKind::Inside);
+            if let Some(tab) = tab {
+                let left = (tab.left() + 1.0).max(rect.left() + 1.0);
+                let right = (tab.right() - 1.0).min(rect.right() - 1.0);
+                if left < right {
+                    ui.painter().hline(left..=right, rect.top() + 0.5,
+                        Stroke::new(1.0, ui.visuals().panel_fill));
+                }
+            }
+        }
+    }
     let TagPaneBehavior {
         parts,
         close_requests,

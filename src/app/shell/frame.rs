@@ -147,6 +147,17 @@ pub(in crate::app) fn browser_favorites_divider(ui: &mut Ui, favorites_visible: 
     }
 }
 
+/// A tab connected to the surface below it: round above, open along the bottom.
+pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color32, active: bool) {
+    let corners = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
+    ui.painter().rect_filled(rect, corners, fill);
+    if active {
+        ui.painter().rect_stroke(rect, corners, Stroke::new(1.0, grid_line()), egui::StrokeKind::Inside);
+        ui.painter().hline((rect.left() + 1.0)..=(rect.right() - 1.0),
+            rect.bottom() - 0.5, Stroke::new(1.0, fill));
+    }
+}
+
 pub(in crate::app) fn pane_header_path_parts(display_path: &str) -> (Vec<(String, PathBuf)>, String) {
     let mut components: Vec<&str> = tag_path::segments(display_path).collect();
     let title = components.pop().unwrap_or_default().to_owned();
@@ -653,16 +664,6 @@ pub(in crate::app) fn recheck_cached<T: Clone + Send + Sync + 'static>(
 /// Whether `path` is a file, re-checked at most once a second.
 pub(in crate::app) fn is_file_cached(ctx: &egui::Context, path: &std::path::Path) -> bool {
     recheck_cached(ctx, ("is_file", path), || path.is_file())
-}
-
-/// Blend `base` toward `accent` by `t` (0..1). Used for the unsaved-tab tint.
-pub(in crate::app) fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
-    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
-    Color32::from_rgb(
-        lerp(base.r(), accent.r()),
-        lerp(base.g(), accent.g()),
-        lerp(base.b(), accent.b()),
-    )
 }
 
 /// Scenario-header launcher using Baboon's bundled application artwork rather
@@ -5541,10 +5542,27 @@ mod tests {
         );
     }
 
-    /// Clicking a tab makes its tag the one the file actions act on, as a
-    /// press inside its pane does. It used to only bring the tab forward, so
-    /// Save As on the tag in view offered another open tag's type and saved
-    /// that tag instead.
+    /// Dirty indicators must not resize tabs or shift their neighbors.
+    #[test]
+    fn tab_geometry_stays_fixed_when_a_document_becomes_dirty_and_clean_again() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[h.app.model.active].id;
+        let ids: Vec<_> = keys.iter().map(|key| h.app.views[kit].tag_tree.tiles.iter()
+            .find_map(|(id, tile)| matches!(tile, egui_tiles::Tile::Pane(open) if open == key)
+                .then(|| id.egui_id(crate::app::kits::tag_tree_id(kit)))).unwrap()).collect();
+        let rects = |h: &Harness| ids.iter().map(|id| h.ctx.read_response(*id).expect("tab response").rect).collect::<Vec<_>>();
+        let clean = rects(&h);
+        for key in &keys {
+            h.app.model.kits[h.app.model.active].parsed_tags.get_mut(key).unwrap().dirty.touch();
+            idle(&mut h);
+            assert_eq!(rects(&h), clean, "marking a tab dirty must not move its close button or neighboring tabs");
+            h.app.model.kits[h.app.model.active].parsed_tags.get_mut(key).unwrap().dirty.clear();
+            idle(&mut h);
+            assert_eq!(rects(&h), clean, "clearing the dirty state must not resize tabs");
+        }
+    }
+
+    /// Clicking a tab also selects its tag for file actions such as Save As.
     #[test]
     fn clicking_a_tab_focuses_its_tag() {
         let (mut h, keys) = three_tabs();
