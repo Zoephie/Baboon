@@ -3000,6 +3000,7 @@ impl ModelGlRenderer {
                 self.move_cloth(gl, frame, slot);
             }
             let scene = self.begin_h2_scene(gl, frame);
+            let mut bloom_order: Option<Vec<usize>> = None;
 
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -3227,10 +3228,10 @@ impl ModelGlRenderer {
                         self.draw_h2_passes(gl, frame, slot, &order, layer, None);
                     }
                 }
+                // `rasterizer_postprocess_scene` blooms the finished frame,
+                // after every transparent and effect.
                 if frame.game_shaders && frame.bloom && !self.h3_draws(frame) {
-                    self.draw_h2_bloom(gl, frame, slot, &order);
-                    gl.use_program(Some(self.program));
-                    gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                    bloom_order = Some(order.clone());
                 }
             }
             if frame.render_mode.draws_wireframe() {
@@ -3243,6 +3244,11 @@ impl ModelGlRenderer {
             if !self.h3_draws(frame) && self.draws_object_sprites(frame) {
                 self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                 self.draw_ce_flares(gl, frame, slot, SpriteStage::Rest);
+            }
+            if let Some(order) = bloom_order {
+                gl.use_program(Some(self.program));
+                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                self.draw_h2_bloom(gl, frame, slot, &order);
             }
 
             // Polygon mode is not reset by egui_glow's generic callback-state

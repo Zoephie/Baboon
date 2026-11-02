@@ -4,15 +4,20 @@
 //! `0.25 * mask` (`rasterizer_selfibloomination_scale` 0.25) and none of the
 //! colour under it (`..._to_bloom_amount` 0), blurs that, and its fourth adds
 //! twice the blurred mask back to every channel: a white glow. The same passes
-//! also bloom what is brighter than the level's threshold, scaled by its
-//! exposure; a lone model has neither, so that half is not drawn.
+//! bloom what is brighter than a threshold, `saturate(4 * (color - threshold))`,
+//! added back at twice a brightness. A level's sky or fog may override both
+//! (08b's control room: 0.3 and 0.2); a lone model takes what
+//! `rasterizer_postprocess_scene` uses with no override.
 
 use eframe::glow::{self, HasContext};
 
 /// The blur amount `rasterizer_postprocess_scene` passes, in downsampled texels.
 const BLUR_RADIUS: f32 = 3.992;
-/// `pPixelShader_6`'s doubling, times the self-bloom brightness, 1 unless overridden.
-const BRIGHTNESS: f32 = 2.0;
+/// `rasterizer_bloom_default_threshold`.
+const THRESHOLD: f32 = 0.9;
+/// `sub_90C570`'s default 0.5 for both, as `rasterizer_postprocess_scene`
+/// mixes them: (0.5 + 1) * 0.5 * 0.5.
+const BRIGHTNESS: f32 = 0.375;
 /// `rasterizer_selfibloomination_scale`, halved and doubled by the downsample.
 const MASK_SCALE: f32 = 0.25;
 const DOWNSAMPLE: i32 = 4;
@@ -33,9 +38,12 @@ uniform sampler2D u_source;
 uniform int u_mode;
 uniform vec2 u_step;
 uniform float u_scale;
+uniform float u_threshold;
+uniform float u_brightness;
 void main() {
     if (u_mode == 0) {
-        out_color = vec4(vec3(texture(u_source, v_uv).a * u_scale), 1.0);
+        vec4 color = texture(u_source, v_uv);
+        out_color = vec4(clamp(4.0 * (color.rgb - u_threshold), 0.0, 1.0), color.a * u_scale);
     } else if (u_mode == 1) {
         vec4 sum = texture(u_source, v_uv) * 0.2270270;
         const vec2 taps[4] = vec2[4](
@@ -47,7 +55,9 @@ void main() {
         }
         out_color = sum;
     } else {
-        out_color = texture(u_source, v_uv) * u_scale;
+        // `pPixelShader_6`: twice the bright part and the self-bloom.
+        vec4 bloom = texture(u_source, v_uv);
+        out_color = vec4(2.0 * (bloom.rgb * u_brightness + bloom.a), 1.0);
     }
 }
 ";
@@ -188,6 +198,8 @@ impl H2Bloom {
 
             gl.viewport(0, 0, small[0], small[1]);
             gl.uniform_1_f32(uniform("u_scale").as_ref(), MASK_SCALE);
+            gl.uniform_1_f32(uniform("u_threshold").as_ref(), THRESHOLD);
+            gl.uniform_1_f32(uniform("u_brightness").as_ref(), BRIGHTNESS);
             draw(first.framebuffer, scene_color, 0);
             // The nine taps reach four texels, as far as the game's blur.
             let reach = BLUR_RADIUS / 4.0;
@@ -204,7 +216,6 @@ impl H2Bloom {
             // `sub_9206D0(19, 10)`, `(20, 2)`: inverse destination color, one.
             gl.blend_func(glow::ONE_MINUS_DST_COLOR, glow::ONE);
             gl.color_mask(true, true, true, false);
-            gl.uniform_1_f32(uniform("u_scale").as_ref(), BRIGHTNESS);
             draw(scene_framebuffer, first.color, 2);
             gl.disable(glow::BLEND);
             gl.color_mask(true, true, true, true);
