@@ -2642,7 +2642,9 @@ impl H3ParticleGl {
                 gl.bind_texture(glow::TEXTURE_2D, texture.or(no_map));
             }
             gl.active_texture(glow::TEXTURE3);
-            gl.bind_texture(glow::TEXTURE_2D, depth);
+            // Halo 2 has no depth copy, and no fade to read one; an empty unit
+            // still makes Apple's driver complain.
+            gl.bind_texture(glow::TEXTURE_2D, depth.or(no_map));
             gl.active_texture(glow::TEXTURE0);
             let range = if depth.is_some() { look.depth_fade.unwrap_or(0.0) } else { 0.0 };
             gl.uniform_1_f32(self.fade.as_ref(), range);
@@ -3428,6 +3430,9 @@ impl ModelGlRenderer {
             gl.enable(glow::BLEND);
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, false);
+            // Effects test against the model's depth, as the transparent passes
+            // do. Bloom leaves the test off, so it's switched on here.
+            gl.enable(glow::DEPTH_TEST);
             gl.depth_mask(false);
             gl.depth_func(glow::LEQUAL);
             gl.disable(glow::CULL_FACE);
