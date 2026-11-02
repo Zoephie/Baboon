@@ -137,6 +137,16 @@ impl H3EffectTimes {
         (age >= 0.0).then_some(age)
     }
 
+    /// A run that never ends of itself, for what something else times.
+    pub(super) fn lasting() -> Self {
+        Self {
+            events: vec![H3EventTime { delay: 0.0, duration: f32::MAX }],
+            loop_start: 0,
+            parallel: false,
+            once: false,
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn read_nothing() -> Self {
         Self {

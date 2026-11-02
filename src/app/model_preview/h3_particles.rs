@@ -495,6 +495,10 @@ pub(crate) struct H3ParticleLook {
     backwards: bool,
     /// `attachments`: effects its particles start, by what starts them.
     attachments: Vec<(H3ParticleTrigger, String)>,
+    /// A Halo 2 particle with `attached particle systems`: its own tag.
+    carried_systems: Option<String>,
+    /// Halo 2: `sub_61AE40` scales a death effect by `speed - 0.5`.
+    death_scaled_by_speed: bool,
     /// `s_mesh_variant_list`: what `Model` draws in place of a quad.
     model: Option<Vec<Vec<blam_tags::ParticleVertex>>>,
     /// `bitmap authored vertically`: a quarter turn, for what is not a mesh.
@@ -946,6 +950,8 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
                 (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then_some((trigger, path))
             })
             .collect(),
+        carried_systems: None,
+        death_scaled_by_speed: false,
         edge_fade: flagged("fade when viewed edge-on").then(|| {
             let real = |name: &str| root.read_real(name).unwrap_or(0.0);
             let range = real("angle fade range");
@@ -1063,7 +1069,17 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
         // The doubled tint of what is lit comes from a level.
         tint_from_lightmap: false,
         double_sided: true,
-        attachments: Vec::new(),
+        // `sub_61AE40`: a death's `effect` is made where the particle died; a
+        // material effect only on collision, which needs a world, and a sound
+        // draws nothing.
+        attachments: root
+            .read_tag_ref_with_group("death effect")
+            .filter(|(group, path)| *group == u32::from_be_bytes(*b"effe") && !path.is_empty())
+            .map(|(_, path)| (H3ParticleTrigger::Death, path))
+            .into_iter()
+            .collect(),
+        carried_systems: (!elements(root, "attached particle systems").is_empty()).then(|| path.to_owned()),
+        death_scaled_by_speed: true,
         edge_fade: None,
         blur_aspect: None,
         curvature: 0.0,
@@ -1393,6 +1409,9 @@ enum H3ParticleTrigger {
     Birth,
     Death,
     Collision,
+    /// Halo 2's `attached particle systems`: made with the particle, they
+    /// follow it, and their age runs over its lifespan (`sub_5E0850`).
+    Carried,
 }
 
 /// `emission_axis_enum`, for what turns about an axis of its own.
@@ -1743,6 +1762,15 @@ fn read_attached_parts(
             }
         }
     }
+    let carried = look.carried_systems.as_ref();
+    if let Some(tag) = carried.and_then(|path| load_referenced_tag_from_source(source, path, "particle", b"prt3").ok()) {
+        let lasting = Arc::new(H3EffectTimes::lasting());
+        for system in elements(tag.root(), "attached particle systems") {
+            if let Some(read) = read_system_parts(source, system) {
+                parts.push((H3ParticleTrigger::Carried, read, Arc::clone(&lasting), 0));
+            }
+        }
+    }
     parts
 }
 
@@ -2018,6 +2046,11 @@ struct H3ChildInstance {
     axes: [[f32; 3]; 3],
     start: f32,
     running: Vec<RunningEmitter>,
+    /// The effect A scale it was made with.
+    effect_a: f32,
+    /// Halo 2's carried systems: the lifespan of the particle that made it,
+    /// over which its age runs to 1, and then it emits no more.
+    lifetime: Option<f32>,
 }
 
 /// `particle_block.h`'s limit on systems.
@@ -2506,13 +2539,22 @@ impl H3ParticleField {
                                 None => run.follows = None,
                             }
                         }
-                        if system.die_with_effect && age >= system.times.once() {
+                        // Its first step runs whatever its length: an event of a
+                        // tick is over before a step of the simulation ends.
+                        let first = age <= STEP * 1.5;
+                        let alive = first || run.lifetime.map_or(age < system.times.once(), |lifetime| age < lifetime);
+                        if system.die_with_effect && !alive {
                             run.running.iter_mut().for_each(|running| running.particles.clear());
                         }
-                        let state = (age < system.times.once()).then(|| system_state_stepped(system, None, now, run.start)).flatten();
+                        let state = alive.then(|| system_state_stepped(system, None, now, run.start)).flatten();
+                        let state = state.map(|state| H3ParticleState {
+                            effect_a: run.effect_a,
+                            system_age: run.lifetime.map_or(state.system_age, |lifetime| age / lifetime),
+                            ..state
+                        });
                         let state = with_lod(system, state, run.origin, eye);
                         step_location(system, &mut run.running, state, run.origin, run.axes, now, ground, &mut births, &mut deaths, &mut hits, &mut no_tracks);
-                        age < system.times.once() || run.running.iter().any(|running| !running.particles.is_empty())
+                        alive || run.running.iter().any(|running| !running.particles.is_empty())
                     });
                     self.instances[index] = runs;
                     continue;
@@ -2528,19 +2570,27 @@ impl H3ParticleField {
                 if system.die_with_effect && (off || system.times.is_over(now - onset)) {
                     self.running[index].iter_mut().for_each(|running| running.particles.clear());
                 }
+                let effect_a = state.map_or(1.0, |state| state.effect_a);
                 for (trigger, offset) in &system.attached {
                     let events = match trigger {
-                        H3ParticleTrigger::Birth => &births,
+                        H3ParticleTrigger::Birth | H3ParticleTrigger::Carried => &births,
                         H3ParticleTrigger::Death => &deaths,
                         H3ParticleTrigger::Collision => &hits,
                     };
-                    let follow = *trigger == H3ParticleTrigger::Birth;
+                    let follow = matches!(trigger, H3ParticleTrigger::Birth | H3ParticleTrigger::Carried);
                     spawned.extend(events.iter().map(|&(id, place, velocity)| {
-                        ((index + offset, index), follow.then_some(id), (place, velocity), system.world, origin, axes)
+                        let speed = dot(velocity, velocity).sqrt();
+                        let (effect_a, lifetime) = match trigger {
+                            // The game makes them under the same effect.
+                            H3ParticleTrigger::Carried => (effect_a, self.lifespan_of(index, id)),
+                            H3ParticleTrigger::Death if system.look.death_scaled_by_speed => ((speed - 0.5).clamp(0.0, 1.0), None),
+                            _ => (1.0, None),
+                        };
+                        ((index + offset, index), follow.then_some(id), (place, velocity), system.world, origin, axes, effect_a, lifetime)
                     }));
                 }
             }
-            for ((index, parent), follows, (place, velocity), world, origin, axes) in spawned {
+            for ((index, parent), follows, (place, velocity), world, origin, axes, effect_a, lifetime) in spawned {
                 let Some(system) = systems.get(index) else {
                     continue;
                 };
@@ -2565,10 +2615,18 @@ impl H3ParticleField {
                     axes: axes_along(velocity),
                     start: now,
                     running: fresh_emitters(system, seed),
+                    effect_a,
+                    lifetime,
                 });
             }
         }
         self.time = Some(now);
+    }
+
+    /// The lifespan of a live particle of system `index`, by its id.
+    fn lifespan_of(&self, index: usize, id: u64) -> Option<f32> {
+        let particles = self.running.get(index)?.iter().flat_map(|running| &running.particles);
+        particles.filter(|particle| particle.id == id).map(|particle| particle.inverse_lifespan.recip()).next()
     }
 
     /// The quads of a system, in a world-space triangle list.
