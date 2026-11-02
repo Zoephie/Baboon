@@ -392,6 +392,24 @@ fn read_controllers(source: &TagSource, emitter: TagStruct<'_>) -> Vec<H3Particl
         .collect()
 }
 
+/// A Halo 2 `particle_physics`' movements, its own or its template's.
+fn h2_controllers(source: &TagSource, movement: TagStruct<'_>) -> Vec<H3ParticleController> {
+    let template = movement
+        .read_tag_ref_path("template")
+        .filter(|path| !path.is_empty())
+        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+    let own = elements(movement, "movements");
+    let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
+    movements
+        .into_iter()
+        .filter_map(|entry| match entry.read_enum_name("type").as_deref() {
+            Some("physics") => Some(H3ParticleController::Physics),
+            Some("collider") => Some(H3ParticleController::Collider),
+            _ => None,
+        })
+        .collect()
+}
+
 /// `initialize_particle`'s nudge to a speed of none, which what faces its
 /// velocity needs one to have. Halo 3 gives it to everything, ODST only to those.
 fn still_particles_move(odst: bool, billboard: H3Billboard) -> bool {
@@ -1209,7 +1227,13 @@ struct H3ParticleCollider {
 }
 
 fn read_collider(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
-    let movement = emitter.descend("particle movement")?;
+    read_collider_of(source, emitter.descend("particle movement")?, seeds)
+}
+
+/// The `collider` movement of what holds `movements` and their `template`, if
+/// it collides with structure: friction is parameter 0 and elasticity 1, as
+/// Halo 2's `sub_53DF20` reads them too.
+fn read_collider_of(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
@@ -1604,13 +1628,24 @@ fn read_h2_emitter(
     let turn = emitter.read_euler2d("relative direction");
     let (sin_yaw, cos_yaw) = turn.yaw.sin_cos();
     let (sin_pitch, cos_pitch) = turn.pitch.sin_cos();
-    let physics = emitter
+    let movement = emitter
         .read_tag_ref_path("particle physics")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok())
-        .and_then(|tag| read_movement(source, tag.root(), &mut seeds));
+        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+    let physics = movement.as_ref().and_then(|tag| read_movement(source, tag.root(), &mut seeds));
+    let collider = movement.as_ref().and_then(|tag| read_collider_of(source, tag.root(), &mut seeds));
+    // In the order the tag lists them, as the game runs its movements.
+    let controllers = movement.as_ref().map_or_else(Vec::new, |tag| h2_controllers(source, tag.root()));
+    let controllers = controllers
+        .into_iter()
+        .filter(|controller| match controller {
+            H3ParticleController::Physics => physics.is_some(),
+            H3ParticleController::Collider => collider.is_some(),
+            H3ParticleController::Flock => false,
+        })
+        .collect();
     Some(H3Emitter {
-        controllers: physics.iter().map(|_| H3ParticleController::Physics).collect(),
+        controllers,
         shape,
         points: Vec::new(),
         scroll: [0.0; 2],
@@ -1636,7 +1671,7 @@ fn read_h2_emitter(
         black_point: H3ParticleProperty::fixed(0.0)?,
         physics,
         flock: None,
-        collider: None,
+        collider,
         one_at_a_time: flagged("looping particle"),
         persistent: flagged("persistent particle"),
         bunched: !flagged("spread between ticks"),
