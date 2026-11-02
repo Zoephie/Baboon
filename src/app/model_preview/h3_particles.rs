@@ -518,7 +518,7 @@ pub(crate) struct H3ParticleLook {
     attachments: Vec<(H3ParticleTrigger, String)>,
     /// A Halo 2 particle with `attached particle systems`: its own tag.
     carried_systems: Option<String>,
-    /// Halo 2: `sub_61AE40` scales a death effect by `speed - 0.5`.
+    /// Halo 2: `sub_61AE40` scales a death or collision effect by `speed - 0.5`.
     death_scaled_by_speed: bool,
     /// `s_mesh_variant_list`: what `Model` draws in place of a quad.
     model: Option<Vec<Vec<blam_tags::ParticleVertex>>>,
@@ -1100,14 +1100,16 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
         // The doubled tint of what is lit comes from a level.
         tint_from_lightmap: false,
         double_sided: true,
-        // `sub_61AE40`: a death's `effect` is made where the particle died; a
-        // material effect only on collision, which needs a world, and a sound
-        // draws nothing.
-        attachments: root
-            .read_tag_ref_with_group("death effect")
-            .filter(|(group, path)| *group == u32::from_be_bytes(*b"effe") && !path.is_empty())
-            .map(|(_, path)| (H3ParticleTrigger::Death, path))
+        // `sub_61AE40`: a death's `effect` is made where the particle died, and
+        // a collision's where it first struck (`sub_53DF20`). A material effect
+        // needs the surface's material, which the preview's ground has none
+        // of, and a sound draws nothing.
+        attachments: [("death effect", H3ParticleTrigger::Death), ("collision effect", H3ParticleTrigger::Collision)]
             .into_iter()
+            .filter_map(|(field, trigger)| {
+                let (group, path) = root.read_tag_ref_with_group(field)?;
+                (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then_some((trigger, path))
+            })
             .collect(),
         carried_systems: (!elements(root, "attached particle systems").is_empty()).then(|| path.to_owned()),
         death_scaled_by_speed: true,
@@ -1495,6 +1497,10 @@ impl H3ParticleAxis {
 
 #[derive(Debug)]
 struct H3Emitter {
+    /// What a pulse's count may fall short of a whole particle by and still
+    /// make one: Halo 2's `c_particle_emitter::pulse` (0x68d160) spawns while
+    /// `count + 0.0001 >= 1`; Halo 3's floors it.
+    spawn_slack: f32,
     controllers: Vec<H3ParticleController>,
     shape: H3EmissionShape,
     points: Vec<H3CustomPoint>,
@@ -1593,6 +1599,7 @@ fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter>
     let collider = read_collider(source, emitter, &mut seeds);
     let scroll = emitter.read_vec2("uv scrolling");
     Some(H3Emitter {
+        spawn_slack: 0.0,
         axis: H3ParticleAxis::named(&emitter.read_enum_name("particle axis (for models)").unwrap_or_default()),
         reference_axis: match emitter.read_enum_name("particle reference axis").as_deref() {
             Some("y") => 1,
@@ -1658,6 +1665,7 @@ fn read_h2_emitter(
         })
         .collect();
     Some(H3Emitter {
+        spawn_slack: 0.0001,
         controllers,
         shape,
         points: Vec::new(),
@@ -2267,8 +2275,12 @@ impl H3Emitter {
         let (offset, turned) = frame;
         let previous = running.previous.unwrap_or(offset);
         running.previous = Some(offset);
-        let between = if running.accumulator >= 1.0 { running.accumulator.recip() } else { 0.0 };
-        for birth in 0..running.accumulator.max(0.0).floor() as usize {
+        let count = (running.accumulator + self.spawn_slack).max(0.0).floor();
+        let between = if count >= 1.0 { running.accumulator.recip() } else { 0.0 };
+        // Each one spent comes off what is owed, which can leave it a hair
+        // under nothing for the next pulse.
+        running.accumulator -= count;
+        for birth in 0..count as usize {
             if running.particles.len() >= MOST_PARTICLES {
                 break;
             }
@@ -2631,7 +2643,10 @@ impl H3ParticleField {
                         let (effect_a, lifetime) = match trigger {
                             // The game makes them under the same effect.
                             H3ParticleTrigger::Carried => (effect_a, self.lifespan_of(index, id)),
-                            H3ParticleTrigger::Death if system.look.death_scaled_by_speed => ((speed - 0.5).clamp(0.0, 1.0), None),
+                            // A hit reports the velocity it bounced away with.
+                            H3ParticleTrigger::Death | H3ParticleTrigger::Collision if system.look.death_scaled_by_speed => {
+                                ((speed - 0.5).clamp(0.0, 1.0), None)
+                            }
                             _ => (1.0, None),
                         };
                         ((index + offset, index), follow.then_some(id), (place, velocity), system.world, origin, axes, effect_a, lifetime)
