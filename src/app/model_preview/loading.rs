@@ -383,6 +383,8 @@ pub(super) fn load_model_preview(
             preview.h3_screen_effects =
                 super::h3_screen_effects::read_h3_screen_effects(source, model_tag, 0, &preview.markers, frame);
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
+            let markers = preview.markers.clone();
+            super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview);
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = read_h2_change_colors(model_tag);

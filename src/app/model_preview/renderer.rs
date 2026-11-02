@@ -965,6 +965,7 @@ pub(super) fn object_moves(
         || !data.preview.h3_particles.is_empty()
         || !data.preview.h3_strips.is_empty()
         || !data.preview.h3_screen_effects.is_empty()
+        || !data.preview.h3_cloth.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
@@ -1750,6 +1751,7 @@ struct ModelGpuSlot {
     h3_particles: h3_particles::H3ParticleField,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
+    h3_cloth: h3_cloth::H3ClothField,
     strip_textures: Vec<[Option<glow::NativeTexture>; 3]>,
     particle_textures: Vec<[Option<glow::NativeTexture>; 3]>,
 }
@@ -1801,6 +1803,7 @@ impl ModelGpuSlot {
                 h3_particles: Default::default(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
+                h3_cloth: Default::default(),
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
             })
