@@ -988,6 +988,28 @@ impl ModelGlRenderer {
         }
     }
 
+    /// `cloth_render_opaque` builds its mesh from where the sheet is now.
+    pub(super) unsafe fn move_cloth(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        if frame.preview.h3_cloth.is_empty() {
+            return;
+        }
+        let uploaded = &mut self.slots[slot];
+        let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+        let written = uploaded.h3_cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(uploaded.vertex_buffer));
+            for (first, moved) in written {
+                let mut vertices = frame.preview.vertices[first..first + moved.len()].to_vec();
+                for (vertex, moved) in vertices.iter_mut().zip(&moved) {
+                    vertex.position = moved.position;
+                    vertex.normal = moved.normal;
+                }
+                let offset = first * size_of::<RenderModelPreviewVertex>();
+                gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, offset as i32, slice_bytes(&vertices));
+            }
+        }
+    }
+
     /// The object's passes, between the preview's own draw and the scene's end.
     pub(super) unsafe fn draw_h3(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, order: &[usize]) {
         // Direct3D 11 always filters across a cube's faces; OpenGL has to be asked.
@@ -1011,22 +1033,7 @@ impl ModelGlRenderer {
                 (targets.albedo_framebuffer, targets.accumulation_framebuffer);
             let accumulation = targets.accumulation;
             self.h3_upload(gl, frame, slot);
-            // `cloth_render_opaque` builds its mesh from where the sheet is now.
-            if !frame.preview.h3_cloth.is_empty() {
-                let uploaded = &mut self.slots[slot];
-                let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-                let written = uploaded.h3_cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
-                gl.bind_buffer(glow::ARRAY_BUFFER, Some(uploaded.vertex_buffer));
-                for (first, moved) in written {
-                    let mut vertices = frame.preview.vertices[first..first + moved.len()].to_vec();
-                    for (vertex, moved) in vertices.iter_mut().zip(&moved) {
-                        vertex.position = moved.position;
-                        vertex.normal = moved.normal;
-                    }
-                    let offset = first * size_of::<RenderModelPreviewVertex>();
-                    gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, offset as i32, slice_bytes(&vertices));
-                }
-            }
+            self.move_cloth(gl, frame, slot);
             if frame.active_camo {
                 // What the object hides, before anything of it lands. The copy
                 // is sRGB so that sampling it reads the linear light it was.

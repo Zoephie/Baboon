@@ -2860,6 +2860,9 @@ impl ModelGlRenderer {
                 self.slots[slot].upload_geometry(gl, frame);
             }
             self.slots[slot].sync_textures(gl, frame);
+            if frame.preview.h3_cloth.first().is_some_and(|cloth| cloth.halo2()) {
+                self.move_cloth(gl, frame, slot);
+            }
             let scene = self.begin_h2_scene(gl, frame);
 
             gl.use_program(Some(self.program));

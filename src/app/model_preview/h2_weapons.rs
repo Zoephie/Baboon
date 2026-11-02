@@ -587,7 +587,7 @@ fn fold_attached(
         preview.h3_strips.extend(carried);
         let strips = super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
         preview.h3_strips.extend(strips.into_iter().map(|strip| Arc::new(strip.on_attached(name))));
-        super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview);
+        super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, false);
         let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
         preview.h3_screen_effects.extend(screens);
         super::h3_screen_effects::add_screen_shader_materials(preview);

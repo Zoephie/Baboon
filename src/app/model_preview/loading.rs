@@ -391,7 +391,7 @@ pub(super) fn load_model_preview(
             }
             preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
             let markers = preview.markers.clone();
-            super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview);
+            super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, false);
             let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
             let leaves = super::h3_leaves::read_h3_leaves(source, model_tag, &markers, middle);
             // Framed by a null model alone, the eye sits among the leaves and
@@ -441,6 +441,15 @@ pub(super) fn load_model_preview(
                 };
                 (place, marker.node_index.max(0) as usize)
             });
+            let frame = |marker: &RenderModelPreviewMarker| {
+                let place = super::attachment::MarkerFrame {
+                    axes: marker.axes,
+                    position: marker.position,
+                    node: marker.node_index,
+                };
+                (place, marker.node_index.max(0) as usize)
+            };
+            super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, true);
             preview.markers = markers;
         }
         let weapons_family = matches!(
