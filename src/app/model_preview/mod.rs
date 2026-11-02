@@ -30,6 +30,7 @@ mod ce_lights;
 mod ce_passes;
 mod h2_bloom;
 pub(in crate::app) mod h2_functions;
+mod h2_contrails;
 mod h2_light_volumes;
 mod h2_lights;
 pub(in crate::app) mod h2_passes;
@@ -121,6 +122,7 @@ pub(crate) struct RenderModelPreview {
     pub h2_point_lights: Vec<h2_lights::H2PointLight>,
     pub h2_gel_lights: Vec<h2_lights::H2GelLight>,
     pub h2_light_volumes: Vec<h2_light_volumes::H2LightVolume>,
+    pub h2_contrails: Vec<h2_contrails::H2ContrailAt>,
     pub h3_prt: Option<h3_prt::H3Prt>,
     /// The model's own `shield impact parameter override`.
     pub h3_shield: Option<Arc<h3_shaders::H3ShieldSettings>>,

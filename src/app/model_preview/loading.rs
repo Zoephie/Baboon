@@ -433,6 +433,14 @@ pub(super) fn load_model_preview(
                 };
                 (place, marker.node_index.max(0) as usize)
             });
+            preview.h2_contrails = super::h2_contrails::read_h2_contrails(source, model_tag, 0, &markers, |marker| {
+                let place = super::attachment::MarkerFrame {
+                    axes: marker.axes,
+                    position: marker.position,
+                    node: marker.node_index,
+                };
+                (place, marker.node_index.max(0) as usize)
+            });
             preview.markers = markers;
         }
         let weapons_family = matches!(

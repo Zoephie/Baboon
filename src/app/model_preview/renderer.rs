@@ -1753,6 +1753,8 @@ struct ModelGpuSlot {
     volume_textures: Vec<Option<glow::NativeTexture>>,
     /// Each of `h2_light_volumes`' bitmaps, by volume.
     h2_volume_textures: Vec<Vec<Option<glow::NativeTexture>>>,
+    h2_contrail_textures: Vec<Option<glow::NativeTexture>>,
+    h2_contrails: h2_contrails::H2ContrailField,
     h3_particles: h3_particles::H3ParticleField,
     h3_strips: h3_strips::H3StripField,
     h3_onsets: h3_effects::H3EffectOnsets,
@@ -1810,6 +1812,8 @@ impl ModelGpuSlot {
                 antenna_textures: Vec::new(),
                 volume_textures: Vec::new(),
                 h2_volume_textures: Vec::new(),
+                h2_contrail_textures: Vec::new(),
+                h2_contrails: Default::default(),
                 h3_particles: Default::default(),
                 h3_strips: Default::default(),
                 h3_onsets: Default::default(),
@@ -3108,6 +3112,7 @@ impl ModelGlRenderer {
                 && preview.h3_flares.is_empty()
                 && preview.h3_light_volumes.is_empty()
                 && preview.h2_light_volumes.is_empty()
+                && preview.h2_contrails.is_empty()
                 && preview.h3_particles.is_empty()
                 && preview.h3_strips.is_empty()
                 && preview.h3_leaves.is_empty())
@@ -3207,6 +3212,16 @@ impl ModelGlRenderer {
                         None => upload_h2_image(gl, &antenna.image),
                     }))
                     .collect();
+                uploaded.h2_contrails = Default::default();
+                for texture in uploaded.h2_contrail_textures.drain(..).flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.h2_contrail_textures = frame
+                    .preview
+                    .h2_contrails
+                    .iter()
+                    .map(|at| at.bitmap().and_then(|image| upload_h2_image(gl, image)))
+                    .collect();
                 for texture in uploaded.h2_volume_textures.drain(..).flatten().flatten() {
                     gl.delete_texture(texture);
                 }
@@ -3284,6 +3299,26 @@ impl ModelGlRenderer {
                             gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
                             gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                         }
+                    }
+                }
+                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                uploaded.h2_contrails.advance(&frame.preview.h2_contrails, values, bones, frame.time);
+                let contrails = frame.preview.h2_contrails.iter().zip(&uploaded.h2_contrail_textures);
+                for (index, (at, texture)) in contrails.enumerate() {
+                    let Some(texture) = texture else {
+                        continue;
+                    };
+                    gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                    h3_draw::h3_set_blend(gl, at.blend());
+                    for quad in uploaded.h2_contrails.quads(index, at, &view) {
+                        let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                            let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                            [a, b, c, d, u, v]
+                        });
+                        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                        let [red, green, blue, alpha] = quad.color;
+                        gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
+                        gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                     }
                 }
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
