@@ -160,6 +160,20 @@ impl H3VolumeProperty {
         }
     }
 
+    /// `get_max` over the mean of `get_min` and it, sampled.
+    fn peak_over_mean(&self) -> f32 {
+        let sample = |at: usize| {
+            let t = at as f32 / 16.0;
+            [self.function.evaluate(t, 0.0), self.function.evaluate(t, 1.0)]
+        };
+        let (mut least, mut most) = (f32::MAX, f32::MIN);
+        for value in (0..=16).flat_map(sample) {
+            least = least.min(value);
+            most = most.max(value);
+        }
+        most / ((least + most) * 0.5)
+    }
+
     fn color(&self, state: &H3VolumeState) -> [f32; 3] {
         let color = self.function.evaluate_color(self.input.of(state), self.range.of(state));
         [color.red, color.green, color.blue]
@@ -248,6 +262,12 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         each("profile_alpha")?,
         each("profile_intensity")?,
     );
+    // `postprocess`: with none given, what the functions themselves make of it.
+    // A tag older than the field has none either.
+    let brightness_ratio = element
+        .read_real("brightness ratio")
+        .filter(|ratio| *ratio != 0.0)
+        .unwrap_or_else(|| alpha.peak_over_mean() * intensity.peak_over_mean());
     let mut next = first_free_seed(&[&length, &offset, &density, &profile_length, &thickness, &color, &alpha, &intensity]);
     for property in [&mut thickness, &mut color, &mut alpha, &mut intensity] {
         property.allocate_seeds(&mut next);
@@ -261,7 +281,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         color,
         alpha,
         intensity,
-        brightness_ratio: element.read_real("brightness ratio").unwrap_or(1.0),
+        brightness_ratio,
         blend: definition.blend(&options),
         sampler: baked.as_ref().map(|(_, sampler)| *sampler),
         bitmap: match baked {
@@ -506,6 +526,19 @@ mod tests {
         assert_eq!(overdraw(10.0, 0.5, 0.0), 10.0);
         assert_eq!(overdraw(10.0, 0.5, 0.1), 5.0);
         assert_eq!(overdraw(4.0, 0.5, 0.1), 4.0);
+    }
+
+    #[test]
+    fn a_ratio_nothing_gave_comes_from_how_far_a_function_peaks() {
+        use blam_tags::tag_function::{FunctionEncoding, FunctionType, H2Function};
+        let ranged = |low: f32, high: f32| {
+            let mut function = H2Function::new(FunctionType::Identity);
+            function.set_clamp_range(low, high).unwrap();
+            let function = TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes()).unwrap();
+            H3VolumeProperty { function: Arc::new(function), ..property(H3VolumeInput::Percentile, H3VolumeInput::Percentile) }
+        };
+        assert_eq!(ranged(0.5, 0.5).peak_over_mean(), 1.0);
+        assert_eq!(ranged(0.0, 1.0).peak_over_mean(), 2.0);
     }
 
     fn property(input: H3VolumeInput, range: H3VolumeInput) -> H3VolumeProperty {

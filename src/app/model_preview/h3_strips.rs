@@ -152,6 +152,22 @@ impl StripProperty {
         }
     }
 
+    /// `c_editable_property_base::set_to_default`, for what a tag older than
+    /// the property has none of.
+    fn fixed(value: f32) -> Option<Self> {
+        use blam_tags::tag_function::{FunctionEncoding, FunctionType, H2Function};
+        let mut function = H2Function::new(FunctionType::Identity);
+        function.set_clamp_range(value, value).ok()?;
+        Some(Self {
+            input: StripInput::Invalid,
+            range: StripInput::Invalid,
+            adds: None,
+            modifier: StripInput::Invalid,
+            function: TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes()).ok()?,
+            ends: [[0.0; 3]; 2],
+        })
+    }
+
     fn scalar(&self, state: &StripState) -> f32 {
         let value = self.function.evaluate(self.input.of(state), self.range.of(state));
         match self.adds {
@@ -327,7 +343,7 @@ fn read_contrail(element: TagStruct<'_>) -> Option<ContrailDefinition> {
         rotation: read("profile rotation")?,
         color: read("profile color")?,
         alpha: read("profile alpha")?,
-        secondary_alpha: read("profile secondary alpha")?,
+        secondary_alpha: read("profile secondary alpha").or_else(|| StripProperty::fixed(1.0))?,
         black_point: read("profile black point")?,
         palette: read("profile palette")?,
         intensity: read("profile intensity")?,
@@ -1079,22 +1095,8 @@ mod tests {
         assert_eq!(world_basis([1.0, 0.0, 0.0])[0], [0.0, -1.0, 0.0]);
     }
 
-    fn constant_function(value: f32) -> TagFunction {
-        let mut function = blam_tags::tag_function::H2Function::new(blam_tags::tag_function::FunctionType::Identity);
-        function.set_clamp_range(value, value).unwrap();
-        let encoding = blam_tags::tag_function::FunctionEncoding::H2;
-        TagFunction::parse_encoded(encoding, &function.to_bytes()).unwrap()
-    }
-
     fn constant(value: f32) -> StripProperty {
-        StripProperty {
-            input: StripInput::Invalid,
-            range: StripInput::Invalid,
-            adds: None,
-            modifier: StripInput::Invalid,
-            function: constant_function(value),
-            ends: [[0.0; 3]; 2],
-        }
+        StripProperty::fixed(value).unwrap()
     }
 
     fn contrail(rate: f32, lifespan: f32) -> ContrailDefinition {
@@ -1128,6 +1130,13 @@ mod tests {
             edge_fade: None,
             shader: Arc::new(H3SpriteShader::blank()),
         }
+    }
+
+    #[test]
+    fn a_property_a_tag_is_too_old_for_stays_at_its_default() {
+        let state = StripState { profile_age: 0.5, length: 3.0, ..Default::default() };
+        assert_eq!(StripProperty::fixed(1.0).unwrap().scalar(&state), 1.0);
+        assert_eq!(StripProperty::fixed(0.0).unwrap().scalar(&state), 0.0);
     }
 
     #[test]
