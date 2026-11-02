@@ -157,14 +157,14 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Compare => include_root_str!("assets/Button Icons/Compare.svg"),
         ButtonIcon::Swap => include_root_str!("assets/Button Icons/Swap.svg"),
         ButtonIcon::Container => include_root_str!("assets/Button Icons/Container.svg"),
-        ButtonIcon::DefaultTag => include_root_str!("assets/icons/default_tag.svg"),
+        ButtonIcon::DefaultTag => include_root_str!("assets/tag icons/default_tag.svg"),
         ButtonIcon::Doc => include_root_str!("assets/Button Icons/Doc.svg"),
-        ButtonIcon::UnicodeStringList => include_root_str!("assets/icons/unicode_string_list.svg"),
+        ButtonIcon::UnicodeStringList => include_root_str!("assets/tag icons/unicode_string_list.svg"),
         ButtonIcon::Localization => include_root_str!("assets/Button Icons/localization.svg"),
         ButtonIcon::Down => include_root_str!("assets/Button Icons/Down.svg"),
         ButtonIcon::Duplicate => include_root_str!("assets/Button Icons/Duplicate.svg"),
-        ButtonIcon::Errors => include_root_str!("assets/icons/errors.svg"),
-        ButtonIcon::Warning => include_root_str!("assets/icons/warning.svg"),
+        ButtonIcon::Errors => include_root_str!("assets/tag icons/errors.svg"),
+        ButtonIcon::Warning => include_root_str!("assets/tag icons/warning.svg"),
         ButtonIcon::Favourite => include_root_str!("assets/Button Icons/Favourite.svg"),
         ButtonIcon::FavouriteFilled => {
             include_root_str!("assets/Button Icons/Favourite Filled.svg")
@@ -185,7 +185,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::InsertRowBelow => include_root_str!("assets/Button Icons/Insert Row (below).svg"),
         ButtonIcon::Json => include_root_str!("assets/Button Icons/JSON.svg"),
         ButtonIcon::Loop => include_root_str!("assets/Button Icons/Loop.svg"),
-        ButtonIcon::Markers => include_root_str!("assets/icons/markers.svg"),
+        ButtonIcon::Markers => include_root_str!("assets/tag icons/markers.svg"),
         ButtonIcon::MarkersLookup => include_root_str!("assets/Button Icons/Markers.svg"),
         ButtonIcon::Model => include_root_str!("assets/Button Icons/Model.svg"),
         ButtonIcon::JumpTo => include_root_str!("assets/Button Icons/Jump To.svg"),
@@ -206,7 +206,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Play => include_root_str!("assets/Button Icons/Play.svg"),
         ButtonIcon::Remove => include_root_str!("assets/Button Icons/Remove.svg"),
         ButtonIcon::Refresh => include_root_str!("assets/Button Icons/Refresh.svg"),
-        ButtonIcon::RenderModel => include_root_str!("assets/icons/render_model.svg"),
+        ButtonIcon::RenderModel => include_root_str!("assets/tag icons/render_model.svg"),
         ButtonIcon::Rename => include_root_str!("assets/Button Icons/Rename.svg"),
         ButtonIcon::Right => include_root_str!("assets/Button Icons/Right.svg"),
         ButtonIcon::Save => include_root_str!("assets/Button Icons/Save.svg"),
@@ -219,9 +219,9 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::View => include_root_str!("assets/Button Icons/View.svg"),
         ButtonIcon::Bitmap => {
             if is_dark_mode() {
-                include_root_str!("assets/icons/bitmap.svg")
+                include_root_str!("assets/tag icons/bitmap.svg")
             } else {
-                include_root_str!("assets/icons/bitmap_lightmode.svg")
+                include_root_str!("assets/tag icons/bitmap_lightmode.svg")
             }
         }
         ButtonIcon::WindowMode => include_root_str!("assets/Button Icons/Window Mode.svg"),

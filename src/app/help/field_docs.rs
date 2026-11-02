@@ -278,8 +278,8 @@ pub(in crate::app) struct GroupHierarchy {
 }
 
 impl GroupHierarchy {
-    /// Read each group's `tag` and `parent_tag` from the game's definitions.
-    /// Both sit at the top of a definition file, so only its head is read.
+    /// Read group names from the index, then names and parents from schemas.
+    /// Schema names and parents sit at the top, so only each header is read.
     fn load(definitions_root: &Path, game: GameId) -> Self {
         use std::io::Read;
         let mut parents = HashMap::new();
@@ -289,6 +289,23 @@ impl GroupHierarchy {
         let Ok(dir) = std::fs::read_dir(definitions_root.join(game.as_str())) else {
             return Self::default();
         };
+        // Some genuine tag types (notably HaloScript source files) have
+        // names in the index but no standalone schema. Schema headers below
+        // remain authoritative when both sources describe the same group.
+        if let Some(meta) = std::fs::read(definitions_root.join(game.as_str()).join("_meta.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        {
+            if let Some(index) = meta.get("tag_index").and_then(serde_json::Value::as_object) {
+                for (tag, name) in index {
+                    let (Some(tag), Some(name)) = (blam_tags::parse_group_tag(tag), name.as_str()) else {
+                        continue;
+                    };
+                    names.insert(tag, name.to_owned());
+                    by_name.insert(name.to_owned(), tag);
+                }
+            }
+        }
         for entry in dir.flatten() {
             let path = entry.path();
             if path.extension().is_none_or(|ext| ext != "json")
