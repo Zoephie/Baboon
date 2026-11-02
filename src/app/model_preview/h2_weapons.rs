@@ -612,6 +612,7 @@ fn fold_attached(
         let liquids = super::h2_liquid::read_h2_liquids(source, object, owner, markers, frame);
         preview.h2_liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
         super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, true);
+        read_extension_weapons(source, object, owner, markers, &frame, preview, Some(name));
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
     if let Some(prt) = preview.h2_prt.as_mut() {
@@ -625,6 +626,56 @@ fn fold_attached(
     }
     merge_attached(preview, attached, parent, child, owner, name);
     Some(H2AttachedObject { owner, functions: super::h2_functions::read_h2_object_functions(object)? })
+}
+
+/// A unit's own `weapons` that are an `extension of parent` (vehicle and
+/// turret guns): they have no model, and `sub_86F5B0` hands their marker
+/// lookups to the unit, so their effects play at the unit's markers. On a
+/// child object they take its name, as its own effects do.
+pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+    source: &TagSource,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+    frame: &F,
+    preview: &mut RenderModelPreview,
+    within: Option<&str>,
+) {
+    let Some(holder) = super::ce_attachments::object_block(object, "weapons") else {
+        return;
+    };
+    for entry in elements(holder, "weapons") {
+        let Some(path) = entry.read_tag_ref_path("weapon").filter(|path| !path.is_empty()) else {
+            continue;
+        };
+        let Ok(weapon) = load_referenced_tag_from_source(source, &path, "weapon", b"weap") else {
+            continue;
+        };
+        let flags = super::ce_attachments::object_block(&weapon, "bounding radius")
+            .and_then(|object| object.read_flag_names("flags"))
+            .unwrap_or_default();
+        if !flags.iter().any(|(_, flag)| flag.starts_with("extension of parent")) {
+            continue;
+        }
+        macro_rules! named {
+            ($found:expr) => {
+                $found.into_iter().map(|at| match within {
+                    Some(name) => at.on_attached(name),
+                    None => at,
+                })
+            };
+        }
+        let particles = super::h3_particles::read_h3_particles(source, &weapon, owner, markers, frame);
+        preview.h3_particles.extend(named!(particles).map(Arc::new));
+        let (flares, lights, gels) = super::h2_lights::read_h2_flares(source, &weapon, owner, markers, frame);
+        preview.h2_flares.extend(named!(flares));
+        preview.h2_point_lights.extend(named!(lights));
+        preview.h2_gel_lights.extend(named!(gels));
+        let volumes = super::h2_light_volumes::read_h2_light_volumes(source, &weapon, owner, markers, frame);
+        preview.h2_light_volumes.extend(named!(volumes));
+        let contrails = super::h2_contrails::read_h2_contrails(source, &weapon, owner, markers, frame);
+        preview.h2_contrails.extend(named!(contrails));
+    }
 }
 
 /// The first owner a variant's child object takes, after the two hands.

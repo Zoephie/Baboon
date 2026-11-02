@@ -452,6 +452,7 @@ pub(super) fn load_model_preview(
             let frame = &frame;
             preview.h2_liquids = super::h2_liquid::read_h2_liquids(source, model_tag, 0, &markers, frame);
             super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, true);
+            super::h2_weapons::read_extension_weapons(source, model_tag, 0, &markers, frame, preview, None);
             preview.markers = markers;
         }
         let weapons_family = matches!(
