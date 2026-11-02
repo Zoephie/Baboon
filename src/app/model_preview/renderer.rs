@@ -3554,6 +3554,9 @@ impl ModelGlRenderer {
             gl.bind_vertex_array(Some(flares.vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
             gl.active_texture(glow::TEXTURE0);
+            // The occlusion tests draw with this program too, before any
+            // sprite binds a map; an unbound sampler makes drivers complain.
+            gl.bind_texture(glow::TEXTURE_2D, self.placeholder);
             gl.color_mask(true, true, true, false);
             gl.blend_equation(glow::FUNC_ADD);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE);
