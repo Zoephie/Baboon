@@ -4,6 +4,12 @@
 //! by `render_particles` through the `effect` shaders of the kit's `fx` folder.
 //! Everything read from the Xbox 360 build's symbols (HCEX_Release); what the
 //! tags on disk lack, tool's postprocess (`haloce_mcc_tool`) bakes as noted.
+//!
+//! One departure on purpose: the game makes no effect or particle system
+//! particle outside a level, since `particle_new` (0x8373e808) and
+//! `particle_system_new_particles` (0x83739cc0) need a leaf or cluster to put
+//! it in. The preview has no level, and simulates as though the object stood
+//! in one.
 
 use std::sync::Arc;
 
@@ -1739,13 +1745,20 @@ fn run_events(
                 .iter()
                 .map(|entry| {
                     let [lower, delta] = scaled(entry.count, running, COUNT_BITS, entry.scales_a, entry.scales_b);
-                    (lower + random.range(0.0, delta)).floor().clamp(0.0, 255.0)
+                    event_particle_count(lower + random.range(0.0, delta))
                 })
                 .collect();
             generate_parts(index, running, effect, lights, tick);
             generate_systems(index, running, effect, systems, random, system_random, system_room, bones, ground);
         }
     }
+}
+
+/// `effect_update` keeps an event's particle count in a byte, cast from the
+/// rolled count: truncated toward zero, then only its low eight bits, so 300
+/// makes 44 and a count past 255 can make none.
+fn event_particle_count(rolled: f32) -> f32 {
+    f32::from(rolled as i32 as u8)
 }
 
 /// `effect_generate_particles`.
@@ -2082,6 +2095,15 @@ fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `effect_update`'s byte: truncated, then its low eight bits.
+    #[test]
+    fn an_event_particle_count_wraps_as_the_byte_it_is_kept_in() {
+        assert_eq!(event_particle_count(12.9), 12.0);
+        assert_eq!(event_particle_count(255.5), 255.0);
+        assert_eq!(event_particle_count(256.0), 0.0, "past a byte it comes round");
+        assert_eq!(event_particle_count(300.0), 44.0);
+    }
 
     /// `effects_update` runs per 30 Hz tick however the frames fall: a 120
     /// fps frame owes a quarter of one, and the tick lands on the fourth.
