@@ -703,6 +703,9 @@ fn prepare_h3_material(
         H3Dialect::Reach => camo.and_then(|pass| super::reach_camo::camo_pass(&pass)).map(Arc::new),
         H3Dialect::Halo3 => camo,
     };
+    let shadow_generate = (dialect == H3Dialect::Reach && opaque && has("shadow_generate"))
+        .then(|| sources.pass(&definition, &options, "shadow_generate", false))
+        .transpose()?;
     let dynamic_light = (opaque && definition.entry_points.iter().any(|entry| entry == "dynamic_light"))
         .then(|| sources.pass(&definition, &options, "dynamic_light", false))
         .transpose()?;
@@ -732,6 +735,7 @@ fn prepare_h3_material(
         sort_layer: values.sort_layer,
         prt,
         camo,
+        shadow_generate,
         dynamic_light,
         blend,
         values: HashMap::new(),
@@ -747,6 +751,7 @@ fn prepare_h3_material(
         .albedo
         .iter()
         .chain(&material.camo)
+        .chain(&material.shadow_generate)
         .chain(&material.dynamic_light)
         .chain(material.prt.iter().flatten())
         .cloned()

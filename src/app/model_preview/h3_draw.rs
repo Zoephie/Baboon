@@ -235,7 +235,7 @@ const HALF_LENS: f32 = 30.0 * std::f32::consts::PI / 180.0;
 /// The targets a frame draws through.
 pub(super) struct H3Targets {
     pub(super) size: [i32; 2],
-    albedo_framebuffer: glow::NativeFramebuffer,
+    pub(super) albedo_framebuffer: glow::NativeFramebuffer,
     accumulation_framebuffer: glow::NativeFramebuffer,
     pub(super) albedo: glow::NativeTexture,
     pub(super) normal: glow::NativeTexture,
@@ -887,7 +887,7 @@ impl ModelGlRenderer {
     }
 
     #[allow(clippy::too_many_arguments)]
-    unsafe fn h3_draw_pass(
+    pub(super) unsafe fn h3_draw_pass(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -914,7 +914,8 @@ impl ModelGlRenderer {
                 }
                 match name.as_str() {
                     "View_Projection" => {
-                        gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &view_projection(&frame.camera));
+                        let matrix = self.reach_view_projection.unwrap_or_else(|| view_projection(&frame.camera));
+                        gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                         continue;
                     }
                     "View" => {
@@ -1011,6 +1012,7 @@ impl ModelGlRenderer {
                     "normal_texture" => targets.map(|targets| targets.normal),
                     "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
                     "depth_buffer" => self.h3_depth_copy,
+                    "shadow_mask_texture" => self.reach_shadow_mask,
                     other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
                         targets.map(|targets| targets.behind)
                     }
@@ -1177,6 +1179,10 @@ impl ModelGlRenderer {
             gl.color_mask(true, true, true, true);
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.disable(glow::BLEND);
+            // `render_fullscreen_shadow_buffer`: Reach's mask, between the
+            // albedo and the static lighting that reads it.
+            let reach_mask =
+                if reach && frame.self_shadow { self.draw_reach_shadow(gl, frame, slot, &batches) } else { None };
             // Generated from the light, for the apply pass below.
             let shadowed = self_shadow && {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
@@ -1201,10 +1207,16 @@ impl ModelGlRenderer {
                     .iter()
                     .filter(|(_, material)| !material.decal || material.after_lighting)
                     .partition(|(_, material)| material.blend == H3Blend::Opaque);
+            if let Some(mask) = reach_mask {
+                self.reach_shadow_mask = Some(mask);
+                self.reach_pass_values = Some([("shadow_mask_enabled", [1.0; 4])].into_iter().collect());
+            }
             for (batch, material) in opaque {
                 let pass = h3_lit_pass(frame, batch, material);
                 self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
             }
+            self.reach_shadow_mask = None;
+            self.reach_pass_values = None;
             if shadowed {
                 self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowApply, None);
                 gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1859,7 +1871,7 @@ fn batch_distance(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch) -> f32
 /// `c_object_renderer::render_albedo` and its like: `_cull_mode_cw` throughout.
 /// Tags lean on it, storing some faces twice with opposite winding, and with
 /// both drawn the back one takes the depth tie and its lighting with it.
-unsafe fn h3_set_cull(gl: &glow::Context, frame: &ModelGpuFrame) {
+pub(super) unsafe fn h3_set_cull(gl: &glow::Context, frame: &ModelGpuFrame) {
     unsafe {
         if frame.show_backfaces {
             gl.disable(glow::CULL_FACE);

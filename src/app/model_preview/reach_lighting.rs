@@ -97,6 +97,34 @@ pub(super) fn reach_object_lighting(angle: f32) -> ReachObjectLighting {
     ReachObjectLighting { dual_vmf: sample, direction, intensity }
 }
 
+/// `s_lightmap_sample::calculate_shadow_direction` of the default sample,
+/// turned about the vertical by `angle`: away from the brightness-weighted
+/// sum of the light and both lobes, taken before the light is folded in.
+fn reach_shadow_direction_at(angle: f32) -> [f32; 3] {
+    let brightness = |color: [f32; 3]| 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
+    let lobe = |row: usize| turned([DEFAULT_DUAL_VMF[row][0], DEFAULT_DUAL_VMF[row][1], DEFAULT_DUAL_VMF[row][2]], angle);
+    let color = |row: usize| [DEFAULT_DUAL_VMF[row][0], DEFAULT_DUAL_VMF[row][1], DEFAULT_DUAL_VMF[row][2]];
+    let light = turned(DEFAULT_LIGHT_DIRECTION, angle);
+    let (first, second) = (lobe(0), lobe(2));
+    let weights = [
+        DEFAULT_DUAL_VMF[0][3] * brightness(DEFAULT_LIGHT_COLOR),
+        brightness(color(1)),
+        brightness(color(3)),
+    ];
+    let sum: [f32; 3] =
+        std::array::from_fn(|axis| light[axis] * weights[0] + first[axis] * weights[1] + second[axis] * weights[2]);
+    normalized(sum).map(|value| -value)
+}
+
+/// The frame's shadow direction, from the light toward the object.
+pub(super) fn reach_shadow_direction(frame: &ModelGpuFrame) -> [f32; 3] {
+    if !frame.light_follows_camera {
+        return reach_shadow_direction_at(0.0);
+    }
+    let [x, y, _] = h2_camera_light(frame.camera.yaw, frame.camera.pitch);
+    reach_shadow_direction_at(y.atan2(x) - light_heading())
+}
+
 /// Which way, about the vertical, the default light comes from.
 fn light_heading() -> f32 {
     DEFAULT_LIGHT_DIRECTION[1].atan2(DEFAULT_LIGHT_DIRECTION[0])
@@ -196,6 +224,13 @@ mod tests {
         assert!(close(lighting.direction, [-0.104348, -0.590215, 0.800473]), "{:?}", lighting.direction);
         assert!(close(lighting.intensity, [3.696396, 3.145597, 3.052588]), "{:?}", lighting.intensity);
         assert!(!close(lighting.direction, DEFAULT_LIGHT_DIRECTION), "the lobes move it");
+    }
+
+    #[test]
+    fn the_default_shadow_falls_away_from_the_samples_light() {
+        let direction = reach_shadow_direction_at(0.0);
+        assert!(close(direction, [0.106611, 0.603164, -0.790460]), "{direction:?}");
+        assert!(!close(reach_shadow_direction_at(1.0), direction), "it turns with the light");
     }
 
     #[test]

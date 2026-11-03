@@ -1,0 +1,325 @@
+//! Reach's object self shadow on the GPU (`render_fullscreen_shadow_buffer`):
+//! the object's depth from the light through its materials' `shadow_generate`,
+//! then `shadow_apply` into the mask the static pass reads. See
+//! `docs/reach-preview-research/shadow.md`.
+
+use super::reach_shadow::{ReachShadowCamera, ReachShadowFilter, hull_planes};
+use super::*;
+use h3_shaders::H3Material;
+
+/// `shadow_apply.hlsl`'s `default_ps` with no level: `CHANNEL_TRANSFORM` is
+/// (1, 1, 0.2, 1), and the pixels it touches are those of the scene inside
+/// the hull, which the game finds with two stencil passes over its faces.
+pub(super) const APPLY_FRAGMENT: &str = "#version 410 core
+uniform sampler2D scene_depth;
+uniform sampler2D normals;
+uniform sampler2D shadow_map;
+uniform mat4 screen_to_world;
+uniform mat4 shadow_view_projection;
+uniform vec2 texel_offset;
+uniform vec3 hull_center;
+uniform vec3 hull_left;
+uniform vec3 hull_up;
+uniform vec3 shadow_direction;
+uniform vec2 hull_scale;
+uniform vec4 hull_planes[14];
+uniform int filter_mode;
+uniform float shadow_alpha;
+out vec4 color;
+
+float fetch(vec2 uv, vec2 offset, vec2 pixel) {
+    return texture(shadow_map, uv + offset * pixel).r;
+}
+
+// `sample_percentage_closer_PCF_3x3_block` with `BILINEAR_SHADOWS`.
+float bilinear(vec2 uv, float z, vec2 pixel) {
+    vec4 blend;
+    blend.xy = fract(uv / pixel);
+    blend.zw = 1.0 - blend.xy;
+    float sum =
+        blend.z * blend.w * step(z, fetch(uv, vec2(-1.0, -1.0), pixel)) +
+        blend.w * step(z, fetch(uv, vec2(0.0, -1.0), pixel)) +
+        blend.x * blend.w * step(z, fetch(uv, vec2(1.0, -1.0), pixel)) +
+        blend.z * step(z, fetch(uv, vec2(-1.0, 0.0), pixel)) +
+        step(z, fetch(uv, vec2(0.0, 0.0), pixel)) +
+        blend.x * step(z, fetch(uv, vec2(1.0, 0.0), pixel)) +
+        blend.z * blend.y * step(z, fetch(uv, vec2(-1.0, 1.0), pixel)) +
+        blend.y * step(z, fetch(uv, vec2(0.0, 1.0), pixel)) +
+        blend.x * blend.y * step(z, fetch(uv, vec2(1.0, 1.0), pixel));
+    return sum / 4.0;
+}
+
+// `sample_percentage_closer_PCF_5x5_block_predicated`: 4x4 points, a 3x3
+// bilinear.
+float fancy(vec2 uv, float z, vec2 pixel) {
+    vec4 blend;
+    blend.xy = fract(uv / pixel + 0.5);
+    blend.zw = 1.0 - blend.xy;
+    float offsets[4] = float[4](-1.5, -0.5, 0.5, 1.5);
+    float columns[4] = float[4](blend.z, 1.0, 1.0, blend.x);
+    float rows[4] = float[4](blend.w, 1.0, 1.0, blend.y);
+    float sum = 0.0;
+    for (int row = 0; row < 4; row++) {
+        for (int column = 0; column < 4; column++) {
+            sum += columns[column] * rows[row]
+                * step(z, fetch(uv, vec2(offsets[column], offsets[row]), pixel));
+        }
+    }
+    return sum / 9.0;
+}
+
+void main() {
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    float depth = texelFetch(scene_depth, at, 0).r;
+    if (depth >= 1.0) {
+        discard;
+    }
+    vec4 world = screen_to_world * vec4(gl_FragCoord.xy, depth, 1.0);
+    world /= world.w;
+    vec3 offset = world.xyz - hull_center;
+    vec3 hull = vec3(dot(offset, shadow_direction) / hull_scale.x, dot(offset, hull_left) / hull_scale.y,
+        dot(offset, hull_up) / hull_scale.y);
+    for (int face = 0; face < 14; face++) {
+        if (dot(hull_planes[face].xyz, hull) > hull_planes[face].w) {
+            discard;
+        }
+    }
+    vec4 clip = shadow_view_projection * vec4(world.xyz, 1.0);
+    // The map was drawn half a texel over; the apply reads it without.
+    vec2 uv = (clip.xy - texel_offset) * 0.5 + 0.5;
+    float z = clip.z * 0.5 + 0.5;
+    vec3 normal = texelFetch(normals, at, 0).xyz * 2.0 - 1.0;
+    float cosine = dot(normal, -shadow_direction);
+    float falloff = clamp(z * 2.0 - 1.0, 0.0, 1.0);
+    falloff *= falloff;
+    float darkness = shadow_alpha * (1.0 - falloff * falloff) * clamp(0.65 + cosine * 5.0, 0.0, 1.0);
+    float darken = 1.0;
+    if (darkness > 0.001) {
+        vec2 pixel = 1.0 / vec2(textureSize(shadow_map, 0));
+        float closer = filter_mode == 0 ? step(z, texture(shadow_map, uv).r)
+            : filter_mode == 1 ? bilinear(uv, z, pixel) : fancy(uv, z, pixel);
+        darken = clamp(1.01 - darkness + closer * darkness, 0.0, 1.0);
+        darken *= darken;
+    }
+    color = vec4(darken, 0.0, 0.0, darken) * vec4(1.0, 1.0, 1.0, 1.0) + vec4(0.2, 0.2, 0.2, 1.0);
+}
+";
+
+/// The map and the mask, kept between frames.
+pub(super) struct ReachShadowTargets {
+    map: glow::NativeTexture,
+    map_framebuffer: glow::NativeFramebuffer,
+    map_size: i32,
+    mask: glow::NativeTexture,
+    mask_framebuffer: glow::NativeFramebuffer,
+    mask_size: [i32; 2],
+}
+
+impl ReachShadowTargets {
+    unsafe fn new(gl: &glow::Context, map_size: i32, mask_size: [i32; 2]) -> Option<Self> {
+        unsafe {
+            let map = gl.create_texture().ok()?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(map));
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::DEPTH_COMPONENT24 as i32,
+                map_size,
+                map_size,
+                0,
+                glow::DEPTH_COMPONENT,
+                glow::UNSIGNED_INT,
+                glow::PixelUnpackData::Slice(None),
+            );
+            // `sub_140847650`: clamped, point.
+            for (name, value) in [
+                (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
+                (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
+                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+            ] {
+                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
+            }
+            let map_framebuffer = gl.create_framebuffer().ok()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(map_framebuffer));
+            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, Some(map), 0);
+            gl.draw_buffers(&[glow::NONE]);
+            gl.read_buffer(glow::NONE);
+            let mask = gl.create_texture().ok()?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(mask));
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA8 as i32,
+                mask_size[0],
+                mask_size[1],
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
+            );
+            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
+                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
+            }
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            let mask_framebuffer = gl.create_framebuffer().ok()?;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(mask_framebuffer));
+            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(mask), 0);
+            let complete = [map_framebuffer, mask_framebuffer].iter().all(|framebuffer| {
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(*framebuffer));
+                gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE
+            });
+            let targets = Self { map, map_framebuffer, map_size, mask, mask_framebuffer, mask_size };
+            if !complete {
+                targets.delete(gl);
+                return None;
+            }
+            Some(targets)
+        }
+    }
+
+    pub(super) unsafe fn delete(&self, gl: &glow::Context) {
+        unsafe {
+            gl.delete_framebuffer(self.map_framebuffer);
+            gl.delete_framebuffer(self.mask_framebuffer);
+            gl.delete_texture(self.map);
+            gl.delete_texture(self.mask);
+        }
+    }
+}
+
+impl ModelGlRenderer {
+    /// The camera the object's shadow is drawn from this frame.
+    fn reach_shadow_camera(frame: &ModelGpuFrame, viewport: [i32; 2]) -> ReachShadowCamera {
+        let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
+        let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
+        let radius = (0..3).map(|axis| (high[axis] - center[axis]).powi(2)).sum::<f32>().sqrt();
+        // `render_projection_sphere_diameter_in_pixels`: across the picture's
+        // height, as the projection scales it at the sphere's depth.
+        let camera = &frame.camera;
+        let forward = unrotate_view_vector(camera.yaw, camera.pitch, [0.0, 1.0, 0.0]);
+        let ahead = (0..3).map(|axis| (center[axis] - camera.center[axis]) * forward[axis]).sum::<f32>() * camera.scale;
+        let w = (1.0 + ahead * camera.perspective).max(0.1);
+        let diameter = 2.0 * radius * camera.scale * camera.clip_scale[1] * viewport[1] as f32 * 0.5 / w;
+        let direction = reach_lighting::reach_shadow_direction(frame);
+        ReachShadowCamera::new(direction, center, radius, diameter)
+    }
+
+    /// The object's shadow into its mask, if it casts one: the mask, or none.
+    /// Reads the depth and normals the albedo pass left.
+    pub(super) unsafe fn draw_reach_shadow(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        batches: &[(RenderModelPreviewBatch, Arc<H3Material>)],
+    ) -> Option<glow::NativeTexture> {
+        let caster = frame.preview.reach_shadow_caster?;
+        let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) = self
+            .h3_targets
+            .as_ref()
+            .map(|targets| (targets.size, targets.albedo_framebuffer, targets.normal, targets.depth_copy, targets.depth_copy_framebuffer))?;
+        let camera = Self::reach_shadow_camera(frame, size);
+        let casters: Vec<_> = batches
+            .iter()
+            .filter(|(_, material)| material.blend == h3_shaders::H3Blend::Opaque && !material.decal)
+            .filter_map(|(batch, material)| Some((batch, material, Arc::clone(material.shadow_generate.as_ref()?))))
+            .collect();
+        if casters.is_empty() {
+            return None;
+        }
+        unsafe {
+            let stale = self
+                .reach_shadow
+                .as_ref()
+                .is_some_and(|targets| targets.map_size != camera.pixels || targets.mask_size != size);
+            if stale && let Some(old) = self.reach_shadow.take() {
+                old.delete(gl);
+            }
+            if self.reach_shadow.is_none() {
+                self.reach_shadow = ReachShadowTargets::new(gl, camera.pixels, size);
+            }
+            let (map, map_framebuffer, mask, mask_framebuffer) =
+                self.reach_shadow.as_ref().map(|targets| (targets.map, targets.map_framebuffer, targets.mask, targets.mask_framebuffer))?;
+            // `render_shadow_generate`: depth only, biased, culled as ever.
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(map_framebuffer));
+            gl.viewport(0, 0, camera.pixels, camera.pixels);
+            gl.disable(glow::BLEND);
+            gl.enable(glow::DEPTH_TEST);
+            gl.depth_func(glow::LEQUAL);
+            gl.depth_mask(true);
+            gl.color_mask(false, false, false, false);
+            gl.clear_depth_f32(1.0);
+            gl.clear(glow::DEPTH_BUFFER_BIT);
+            gl.enable(glow::POLYGON_OFFSET_FILL);
+            gl.polygon_offset(caster.slope_bias, caster.depth_bias * (1 << 24) as f32);
+            h3_draw::h3_set_cull(gl, frame);
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            self.reach_view_projection = Some(camera.view_projection);
+            for (batch, material, pass) in &casters {
+                self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+            }
+            self.reach_view_projection = None;
+            gl.disable(glow::POLYGON_OFFSET_FILL);
+            gl.color_mask(true, true, true, true);
+            gl.viewport(0, 0, size[0], size[1]);
+            // The scene's depth, to find each pixel's place in the world.
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(albedo_framebuffer));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(depth_copy_framebuffer));
+            let bits = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
+            gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], bits, glow::NEAREST);
+            // `setup_targets_shadow_mask`'s clear, then the apply, kept to the
+            // red and alpha it writes and the least of each.
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(mask_framebuffer));
+            gl.clear_color(1.0, 0.5, 0.5, 1.0);
+            gl.clear(glow::COLOR_BUFFER_BIT);
+            if self.reach_shadow_program.is_none() {
+                self.reach_shadow_program = h3_draw::screen_program(gl, APPLY_FRAGMENT);
+            }
+            let program = self.reach_shadow_program?;
+            gl.use_program(Some(program));
+            let at = |name: &str| gl.get_uniform_location(program, name);
+            for (unit, (name, texture)) in [("scene_depth", depth_copy), ("normals", normal), ("shadow_map", map)].into_iter().enumerate() {
+                gl.active_texture(glow::TEXTURE0 + unit as u32);
+                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                gl.uniform_1_i32(at(name).as_ref(), unit as i32);
+            }
+            gl.active_texture(glow::TEXTURE0);
+            let screen_to_world =
+                reach_light_pass::screen_to_relative_world(&h3_draw::view_projection(&frame.camera), size, [0.0; 3])?;
+            gl.uniform_matrix_4_f32_slice(at("screen_to_world").as_ref(), true, screen_to_world.as_flattened());
+            gl.uniform_matrix_4_f32_slice(at("shadow_view_projection").as_ref(), false, &camera.view_projection);
+            let texel = 1.0 / camera.pixels as f32;
+            gl.uniform_2_f32(at("texel_offset").as_ref(), -texel, texel);
+            gl.uniform_3_f32_slice(at("hull_center").as_ref(), &camera.center);
+            gl.uniform_3_f32_slice(at("hull_left").as_ref(), &camera.left);
+            gl.uniform_3_f32_slice(at("hull_up").as_ref(), &camera.up);
+            gl.uniform_3_f32_slice(at("shadow_direction").as_ref(), &camera.direction);
+            gl.uniform_2_f32(at("hull_scale").as_ref(), camera.half_depth, camera.radius);
+            gl.uniform_4_f32_slice(at("hull_planes").as_ref(), hull_planes().as_flattened());
+            let filter = match camera.filter() {
+                ReachShadowFilter::Point => 0,
+                ReachShadowFilter::Bilinear => 1,
+                ReachShadowFilter::Fancy => 2,
+            };
+            gl.uniform_1_i32(at("filter_mode").as_ref(), filter);
+            // `compute_lod_and_alpha`'s fade: full short of the shadow's fade
+            // distance, which a preview's framing stays inside.
+            gl.uniform_1_f32(at("shadow_alpha").as_ref(), 1.0);
+            gl.disable(glow::DEPTH_TEST);
+            gl.disable(glow::CULL_FACE);
+            gl.enable(glow::BLEND);
+            gl.blend_equation(glow::MIN);
+            gl.blend_func(glow::ONE, glow::ONE);
+            gl.color_mask(true, false, false, true);
+            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            gl.blend_equation(glow::FUNC_ADD);
+            gl.color_mask(true, true, true, true);
+            gl.disable(glow::BLEND);
+            gl.enable(glow::DEPTH_TEST);
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            Some(mask)
+        }
+    }
+}

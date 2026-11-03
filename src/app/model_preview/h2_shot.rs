@@ -369,6 +369,17 @@ fn h2_shot() {
     }
 }
 
+/// Reach's `shadow_apply` links, and reads every input it is given.
+#[test]
+fn reach_shadow_apply_links() {
+    let gl = headless_gl();
+    let program = unsafe { super::h3_draw::screen_program(&gl, super::reach_shadow_pass::APPLY_FRAGMENT) }
+        .expect("the apply compiles and links");
+    for name in ["scene_depth", "normals", "shadow_map", "screen_to_world", "shadow_view_projection", "hull_planes"] {
+        assert!(unsafe { gl.get_uniform_location(program, name) }.is_some(), "{name} is read");
+    }
+}
+
 /// Reach's shield passes, 61 and 119, translate with the preview's depth
 /// read and the oscillation maps in their vertex stage, and link.
 /// `BLAM_TEST_HREK` to the tags folder.

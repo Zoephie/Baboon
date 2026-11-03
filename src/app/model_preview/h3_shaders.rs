@@ -754,6 +754,8 @@ pub(crate) struct H3Material {
     /// `static_prt_ambient`, `_linear` and `_quadratic`.
     pub(crate) prt: [Option<Arc<H3Pass>>; 3],
     pub(crate) camo: Option<Arc<H3Pass>>,
+    /// Reach's `shadow_generate`, for its own shadow map.
+    pub(crate) shadow_generate: Option<Arc<H3Pass>>,
     pub(crate) dynamic_light: Option<Arc<H3Pass>>,
     pub(crate) blend: H3Blend,
     pub(crate) values: HashMap<String, H3Value>,

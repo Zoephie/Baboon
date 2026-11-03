@@ -1443,6 +1443,8 @@ mod reach_lighting;
 pub(super) use reach_lighting::REACH_DARK_MULTIPLIER;
 #[path = "reach_bloom.rs"]
 mod reach_bloom;
+#[path = "reach_shadow_pass.rs"]
+mod reach_shadow_pass;
 #[path = "reach_light_pass.rs"]
 mod reach_light_pass;
 
@@ -3843,6 +3845,13 @@ struct ModelGlRenderer {
     h3_screen_alpha: Option<f32>,
     h3_bloom: Option<h3_bloom::H3Bloom>,
     reach_bloom: Option<reach_bloom::ReachBloom>,
+    /// Reach's self shadow: its map and mask, and the apply.
+    reach_shadow: Option<reach_shadow_pass::ReachShadowTargets>,
+    reach_shadow_program: Option<glow::NativeProgram>,
+    /// What a Reach pass draws through in place of the camera, and the mask
+    /// its static pass reads, while they are set.
+    reach_view_projection: Option<[f32; 16]>,
+    reach_shadow_mask: Option<glow::NativeTexture>,
     /// Reach's inline lights this frame, `simple_lights` rows.
     reach_inline: Vec<[[f32; 4]; 5]>,
     /// Constants a Reach pass of the frame sets over the material's: the shield's and the camo's.
@@ -3984,6 +3993,10 @@ impl ModelGlRenderer {
                 h3_screen_alpha: None,
                 h3_bloom: None,
                 reach_bloom: None,
+                reach_shadow: None,
+                reach_shadow_program: None,
+                reach_view_projection: None,
+                reach_shadow_mask: None,
                 reach_inline: Vec::new(),
                 reach_pass_values: None,
                 h3_empty_vertices: None,

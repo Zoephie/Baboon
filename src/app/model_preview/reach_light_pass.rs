@@ -45,7 +45,7 @@ fn inverse(matrix: &Matrix) -> Option<Matrix> {
 /// `origin`, as the game's pixel-to-world matrix times a translation. Built
 /// from the same projection the albedo pass wrote depth with; rows of the
 /// matrix that takes `(x, y, depth, 1)` to homogeneous world.
-fn screen_to_relative_world(view_projection: &[f32; 16], viewport: [i32; 2], origin: [f32; 3]) -> Option<Matrix> {
+pub(super) fn screen_to_relative_world(view_projection: &[f32; 16], viewport: [i32; 2], origin: [f32; 3]) -> Option<Matrix> {
     let clip: Matrix = std::array::from_fn(|row| std::array::from_fn(|column| view_projection[column * 4 + row]));
     let [width, height] = viewport.map(|side| side.max(1) as f32);
     let pixel_to_ndc: Matrix = [
