@@ -446,6 +446,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         }
     }
 
+    fn gap_width(&self, _style: &egui::Style) -> f32 { 5.0 }
+
+    fn resize_stroke(&self, _style: &egui::Style, state: egui_tiles::ResizeState) -> Stroke {
+        match state {
+            egui_tiles::ResizeState::Idle => Stroke::NONE,
+            egui_tiles::ResizeState::Hovering => Stroke::new(1.0, subtle_dark()),
+            egui_tiles::ResizeState::Dragging => Stroke::new(2.0, text_dark()),
+        }
+    }
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
         left_panel()
     }
@@ -689,16 +698,7 @@ pub(in crate::app) fn draw_tag_tiles(
     for (id, tile) in tree.tiles.iter() {
         if matches!(tile, egui_tiles::Tile::Pane(_)) && let Some(rect) = tree.tiles.rect(*id) {
             let tab = behavior.active_tab_rects.get(id);
-            ui.painter().rect_stroke(rect, page_corners(rect, tab),
-                Stroke::new(1.0, grid_line()), egui::StrokeKind::Inside);
-            if let Some(tab) = tab {
-                let left = (tab.left() + 1.0).max(rect.left() + 1.0);
-                let right = (tab.right() - 1.0).min(rect.right() - 1.0);
-                if left < right {
-                    ui.painter().hline(left..=right, rect.top() + 0.5,
-                        Stroke::new(1.0, ui.visuals().panel_fill));
-                }
-            }
+            crate::app::shell::frame::paint_page_outline(ui, rect, page_corners(rect, tab), tab);
         }
     }
     let TagPaneBehavior {

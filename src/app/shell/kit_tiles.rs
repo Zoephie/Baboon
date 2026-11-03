@@ -152,7 +152,8 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         // Each workspace carries its own browser, so two games side by side can
         // be browsed independently rather than sharing one panel that
         // retargets as focus moves.
-        egui::Panel::left(egui::Id::new(("kit_browser_panel", kit_id.0)))
+        let browser_id = egui::Id::new(("kit_browser_panel", kit_id.0));
+        let browser_panel = egui::Panel::left(browser_id)
             .resizable(true)
             .show_separator_line(false)
             .default_size(330.0)
@@ -191,6 +192,14 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
             .show(ui, |ui| {
                 draw_tag_tiles(ui, cx, parts, self.inputs, kit_index);
             });
+        // Paint after the editor so its background cannot cover the transient
+        // separator. The panel retains its native resize behavior and width.
+        if let Some(handle) = ui.ctx().read_response(browser_id.with("__resize"))
+            && (handle.hovered() || handle.dragged())
+        {
+            ui.painter().vline(browser_panel.response.rect.right(), browser_panel.response.rect.y_range(),
+                Stroke::new(if handle.dragged() { 2.0 } else { 1.0 }, subtle_dark()));
+        }
         egui_tiles::UiResponse::None
     }
 
@@ -364,6 +373,15 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         }
     }
 
+    fn gap_width(&self, _style: &egui::Style) -> f32 { 5.0 }
+
+    fn resize_stroke(&self, _style: &egui::Style, state: egui_tiles::ResizeState) -> Stroke {
+        match state {
+            egui_tiles::ResizeState::Idle => Stroke::new(2.0, grid_line()),
+            egui_tiles::ResizeState::Hovering => Stroke::new(2.0, subtle_dark()),
+            egui_tiles::ResizeState::Dragging => Stroke::new(2.0, text_dark()),
+        }
+    }
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
         row_type()
     }
@@ -426,7 +444,9 @@ pub(in crate::app) fn draw_kit_tiles(
         recent_action: None,
         tab_groups: HashMap::new(),
     };
+    ui.style_mut().interaction.resize_grab_radius_side = 7.0;
     kit_tree.ui(&mut behavior, ui);
+    crate::app::shell::frame::paint_kit_split_grips(ui, kit_tree);
     behavior.parts.shell.home_groups.retain(|id| matches!(kit_tree.tiles.get(*id),
         Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(_)))));
     let KitPaneBehavior {

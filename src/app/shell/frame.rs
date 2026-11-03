@@ -150,11 +150,67 @@ pub(in crate::app) fn browser_favorites_divider(ui: &mut Ui, favorites_visible: 
 /// A tab connected to the surface below it: round above, open along the bottom.
 pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color32, active: bool) {
     let corners = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
-    ui.painter().rect_filled(rect, corners, fill);
+    // Cover the bar's baseline with an opaque area, rather than an
+    // antialiased stroke laid over another stroke at a fractional pixel.
+    let filled = if active { rect.with_max_y(rect.bottom() + 1.0) } else { rect };
+    ui.painter().rect_filled(filled, corners, fill);
     if active {
-        ui.painter().rect_stroke(rect, corners, Stroke::new(1.0, grid_line()), egui::StrokeKind::Inside);
-        ui.painter().hline((rect.left() + 1.0)..=(rect.right() - 1.0),
-            rect.bottom() - 0.5, Stroke::new(1.0, fill));
+        // An open outline has no bottom edge to bleed through the page join.
+        let r = rect.shrink(0.5);
+        let radius = 3.5;
+        let mut points = vec![r.left_bottom(), egui::pos2(r.left(), r.top() + radius)];
+        for (center, start) in [
+            (egui::pos2(r.left() + radius, r.top() + radius), std::f32::consts::PI),
+            (egui::pos2(r.right() - radius, r.top() + radius), 1.5 * std::f32::consts::PI),
+        ] {
+            for step in 0..=6 {
+                let angle = start + step as f32 * std::f32::consts::FRAC_PI_2 / 6.0;
+                points.push(center + egui::vec2(angle.cos(), angle.sin()) * radius);
+            }
+        }
+        points.push(r.right_bottom());
+        ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, grid_line())));
+    }
+}
+
+/// Leave the active tab's opening out of the page outline entirely.
+pub(in crate::app) fn paint_page_outline(
+    ui: &Ui, rect: egui::Rect, corners: egui::CornerRadius, tab: Option<&egui::Rect>,
+) {
+    let stroke = Stroke::new(1.0, grid_line());
+    let Some(tab) = tab else {
+        ui.painter().rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
+        return;
+    };
+    let opening = egui::Rect::from_min_max(
+        egui::pos2((tab.left() + 1.0).max(rect.left()), rect.top() - 2.0),
+        egui::pos2((tab.right() - 1.0).min(rect.right()), rect.top() + 2.0),
+    );
+    for clip in [
+        rect.with_min_y(opening.bottom()),
+        rect.with_max_x(opening.left()),
+        rect.with_min_x(opening.right()),
+    ] {
+        ui.painter().with_clip_rect(ui.clip_rect().intersect(clip.expand(0.01)))
+            .rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
+    }
+}
+
+/// The tile library owns resizing; this grip only advertises the same handle.
+pub(in crate::app) fn paint_kit_split_grips(ui: &Ui, tree: &egui_tiles::Tree<KitId>) {
+    for (_, tile) in tree.tiles.iter() {
+        let egui_tiles::Tile::Container(egui_tiles::Container::Linear(linear)) = tile else { continue };
+        let rects = linear.children.iter().filter_map(|id| tree.tiles.rect(*id)).collect::<Vec<_>>();
+        for pair in rects.windows(2) {
+            let horizontal = linear.dir == egui_tiles::LinearDir::Horizontal;
+            let center = if horizontal {
+                egui::pos2((pair[0].right() + pair[1].left()) * 0.5, pair[0].center().y)
+            } else {
+                egui::pos2(pair[0].center().x, (pair[0].bottom() + pair[1].top()) * 0.5)
+            };
+            let size = if horizontal { egui::vec2(4.0, 32.0) } else { egui::vec2(32.0, 4.0) };
+            ui.painter().rect_filled(egui::Rect::from_center_size(center, size), 2.0, subtle_dark());
+        }
     }
 }
 
@@ -5568,6 +5624,49 @@ mod tests {
             idle(&mut h);
             assert_eq!(rects(&h), clean, "clearing the dirty state must not resize tabs");
         }
+    }
+
+    #[test]
+    fn split_page_gaps_and_browser_edges_remain_resizable() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        h.app.views[kit].tag_tree = egui_tiles::Tree::new_horizontal(
+            crate::app::kits::tag_tree_id(kit), keys[..2].to_vec());
+        idle(&mut h);
+        let page = |h: &Harness, key: &str| {
+            let tree = &h.app.views[kit].tag_tree;
+            tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(open) if open == key)
+                    .then(|| tree.tiles.rect(*id)).flatten()).unwrap()
+        };
+        let left = page(&h, &keys[0]);
+        let right = page(&h, &keys[1]);
+        assert!((right.left() - left.right() - 5.0).abs() < 0.1);
+        let drag = |h: &mut Harness, from: egui::Pos2, to: egui::Pos2| {
+            for _ in 0..3 { h.frame(vec![egui::Event::PointerMoved(from)]); }
+            h.frame(vec![egui::Event::PointerButton {
+                pos: from, button: egui::PointerButton::Primary, pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            for step in 1..=3 {
+                h.frame(vec![egui::Event::PointerMoved(from.lerp(to, step as f32 / 3.0))]);
+            }
+            h.frame(vec![egui::Event::PointerButton {
+                pos: to, button: egui::PointerButton::Primary, pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            idle(h);
+        };
+        let divider = egui::pos2((left.right() + right.left()) * 0.5, left.center().y);
+        drag(&mut h, divider, divider + egui::vec2(40.0, 0.0));
+        assert!(page(&h, &keys[0]).width() > left.width() + 25.0);
+
+        let browser_id = egui::Id::new(("kit_browser_panel", kit.0));
+        let before = egui::containers::panel::PanelState::load(&h.ctx, browser_id).unwrap().outer_rect;
+        let edge = egui::pos2(before.right(), before.center().y);
+        drag(&mut h, edge, edge + egui::vec2(40.0, 0.0));
+        let after = egui::containers::panel::PanelState::load(&h.ctx, browser_id).unwrap().outer_rect;
+        assert!(after.width() > before.width() + 25.0, "the browser edge resizes alongside its scroll area");
     }
 
     fn home_group(h: &Harness) -> egui_tiles::TileId {
