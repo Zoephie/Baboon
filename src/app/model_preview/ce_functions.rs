@@ -18,7 +18,7 @@ const SOURCES: [&str; 9] =
 const MAP_TO: [&str; 6] = ["linear", "early", "very early", "late", "very late", "cosine"];
 const BOUNDS_MODES: [&str; 3] = ["clip", "clip and normalize", "scale to fit"];
 const ACTIVATING_ABOVE: f32 = 0.0001;
-const TICKS_PER_SECOND: f32 = 30.0;
+pub(super) const TICKS_PER_SECOND: f32 = 30.0;
 const OUTPUTS: [&str; 4] = ["A out", "B out", "C out", "D out"];
 
 /// An input's value on an object at rest, as the `*_export_function_values`
@@ -274,6 +274,23 @@ impl CeObjectFunctions {
     pub(crate) fn inputs_for(&self, set: &CeFunctionInputs, key: CeObjectKey) -> [f32; 4] {
         set.get(&key).copied().unwrap_or(self.inputs)
     }
+
+    /// Which output a function whose `usage` is `name` makes.
+    #[cfg(test)]
+    pub(crate) fn output_named(&self, name: &str) -> Option<usize> {
+        self.functions.iter().take(OUTPUTS.len()).position(|function| function.usage == name)
+    }
+
+    /// `inputs`, each raised to what `fired` gives its name: what the
+    /// panel's shots export, over what is set by hand or at rest.
+    pub(crate) fn with_fired(&self, mut inputs: [f32; 4], fired: impl Fn(&str) -> Option<f32>) -> [f32; 4] {
+        for (value, name) in inputs.iter_mut().zip(&self.input_names) {
+            if let Some(shot) = name.as_deref().and_then(&fired) {
+                *value = value.max(shot);
+            }
+        }
+        inputs
+    }
 }
 
 /// A Halo CE feature that reads object outputs (`A out`..`D out`), so its
@@ -309,34 +326,53 @@ pub(crate) type CeEventCounts = std::collections::HashMap<(u64, usize), u32>;
 /// Reloading, readying, damage and the rest give 0 and 0.
 pub(crate) const CE_EVENT_SCALES: [f32; 2] = [1.0, 0.0];
 
-/// A Play button for each effect the objects name for their events, each
-/// under its object's name when it is not the opened one's, and the scales
-/// they are played at.
-pub(super) fn draw_ce_event_effects(
-    ui: &mut Ui,
-    effects: &[super::ce_particles::CeEffectAt],
-    object_name: impl Fn(u8) -> Option<String>,
-    geometry: u64,
-    counts: &mut CeEventCounts,
-    scales: &mut [f32; 2],
-) {
+/// What the Effects section plays and fires, and where it keeps track.
+pub(super) struct CeEffectControls<'a> {
+    pub(super) effects: &'a [super::ce_particles::CeEffectAt],
+    pub(super) firing: &'a [super::ce_firing::CeWeaponFiring],
+    pub(super) geometry: u64,
+    pub(super) counts: &'a mut CeEventCounts,
+    pub(super) shots: &'a mut super::ce_firing::CeShots,
+    pub(super) scales: &'a mut [f32; 2],
+    /// The preview's clock, which shots are fired at.
+    pub(super) time: f32,
+}
+
+/// A Fire button for each trigger of a weapon, and a Play button for each
+/// effect the objects name for their events, each under its object's name
+/// when it is not the opened one's, with the scales they go at.
+pub(super) fn draw_ce_event_effects(ui: &mut Ui, controls: CeEffectControls<'_>, object_name: impl Fn(u8) -> Option<String>) {
+    let CeEffectControls { effects, firing, geometry, counts, shots, scales, time } = controls;
+    let named = |object: u8, name: &str| object_name(object).map_or_else(|| name.to_owned(), |object| format!("{object}: {name}"));
     let events: Vec<(usize, String)> = effects
         .iter()
         .enumerate()
-        .filter_map(|(index, effect)| {
-            let name = effect.event.as_deref()?;
-            Some((index, object_name(effect.object).map_or_else(|| name.to_owned(), |object| format!("{object}: {name}"))))
-        })
+        .filter_map(|(index, effect)| Some((index, named(effect.object, &effect.event.as_ref()?.name))))
         .collect();
-    if events.is_empty() {
+    if events.is_empty() && firing.is_empty() {
         return;
     }
     ui.add_space(6.0);
     egui::CollapsingHeader::new("Effects").id_salt("ce_event_effects").show(ui, |ui| {
         const SCALES: &str = "What effect_new_from_object is given. A firing effect gets its trigger's \
                               rate and error; reloading, readying, damage and the rest get 0 and 0.";
+        const FIRE: &str = "Fire the trigger once, as weapon_trigger_fire does: it plays the next \
+                            of its firing effects and lights the weapon's inputs, at scale A's \
+                            rate of fire. The weapon is held as an actor holds one: it never \
+                            overheats.";
         for (scale, name) in scales.iter_mut().zip(["scale A", "scale B"]) {
             ui.add(egui::Slider::new(scale, 0.0..=1.0).text(name)).on_hover_text(SCALES);
+        }
+        for weapon in firing {
+            for (trigger, label) in (0..weapon.triggers.len()).zip(["primary trigger", "secondary trigger"]) {
+                if ui.small_button(format!("Fire {}", named(weapon.object, label))).on_hover_text(FIRE).clicked() {
+                    let fired = shots.entry((geometry, weapon.object)).or_default();
+                    if let Some(effect) = fired.fire(weapon, trigger, scales[0], time) {
+                        *counts.entry((geometry, effect)).or_default() += 1;
+                    }
+                    ui.ctx().request_repaint();
+                }
+            }
         }
         for (index, name) in events {
             if ui.small_button(format!("Play {name}")).clicked() {
@@ -350,6 +386,7 @@ pub(super) fn draw_ce_event_effects(
 /// Sliders for an opened object's inputs, and what its functions make of them.
 /// `read` is which outputs the model's shaders read, once they have resolved:
 /// the rest cannot change the picture, whatever the game uses them for.
+/// `fired` is what the panel's shots give the inputs, by name.
 pub(super) fn draw_ce_function_controls(
     ui: &mut Ui,
     functions: &CeObjectFunctions,
@@ -357,6 +394,7 @@ pub(super) fn draw_ce_function_controls(
     key: CeObjectKey,
     set: &mut CeFunctionInputs,
     read: Option<[bool; 4]>,
+    fired: impl Fn(&str) -> Option<f32>,
 ) {
     const UNREAD: &str = "No shader or light on this model reads this.";
     let reaching = read.map_or([true; 4], |read| functions.inputs_reaching(read));
@@ -384,7 +422,7 @@ pub(super) fn draw_ce_function_controls(
         set.insert(key, values);
     }
     let time = object_time(ui.input(|input| input.time) as f32, key.1);
-    let outputs = functions.outputs(&values, time);
+    let outputs = functions.outputs(&functions.with_fired(values, fired), time);
     for (index, function) in functions.functions.iter().take(OUTPUTS.len()).enumerate() {
         let text = format!("{}: {:.2}  {}", OUTPUTS[index], outputs[index], function.usage);
         ui.add_enabled(read[index], egui::Label::new(text)).on_disabled_hover_text(UNREAD);

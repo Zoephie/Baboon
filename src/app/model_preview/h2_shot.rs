@@ -10,7 +10,8 @@
 //! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`, leaving out the
 //! features `H2_SHOT_DROP` names, and exports forced by `H2_SHOT_FORCE`.
 //! `H2_SHOT_PLAY=<text>@<seconds>` plays each Halo CE event effect whose
-//! name holds the text, that long before the shot.
+//! name holds the text, that long before the shot, and
+//! `H2_SHOT_FIRE=<trigger>@<seconds>` fires the held weapon's trigger.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -199,7 +200,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 let values: Vec<f32> = values.split(',').map(|value| value.parse().unwrap()).collect();
                 set.insert((data.geometry_id, 0), std::array::from_fn(|index| values[index]));
             }
-            object_states(&data, &set, time)
+            object_states(&data, &set, &state.ce_shots, time)
         },
         object_moves: object_functions(&data).any(|functions| functions.move_at_rest()),
         h2_attached_values: super::h2_attached_values(&data, time),
@@ -274,14 +275,24 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
-        if let Ok(play) = std::env::var("H2_SHOT_PLAY") {
-            let (text, before) = play.split_once('@').expect("H2_SHOT_PLAY is <text>@<seconds>");
+        let play = std::env::var("H2_SHOT_PLAY").ok().map(|play| (play, false));
+        if let Some((play, fire)) = play.or_else(|| std::env::var("H2_SHOT_FIRE").ok().map(|fire| (fire, true))) {
+            let (text, before) = play.split_once('@').expect("H2_SHOT_PLAY or H2_SHOT_FIRE is <what>@<seconds>");
             let end = frame.time;
             frame.time = end - before.parse::<f32>().unwrap();
             renderer.paint(gl, &frame);
+            if fire {
+                let weapon = data.preview.ce_firing.last().expect("a weapon to fire");
+                let fired = state.ce_shots.entry((data.geometry_id, weapon.object)).or_default();
+                let effect = fired.fire(weapon, text.parse().unwrap(), state.ce_event_scales[0], frame.time);
+                eprintln!("NOTE fired, playing {:?}", effect.and_then(|at| data.preview.ce_effects[at].event.as_ref()));
+                if let Some(effect) = effect {
+                    frame.ce_plays.counts[effect] += 1;
+                }
+            }
             for (index, effect) in data.preview.ce_effects.iter().enumerate() {
-                if effect.event.as_deref().is_some_and(|name| name.contains(text)) {
-                    eprintln!("NOTE playing {}", effect.event.as_deref().unwrap_or_default());
+                if let Some(event) = effect.event.as_ref().filter(|event| !fire && event.name.contains(text)) {
+                    eprintln!("NOTE playing {}", event.name);
                     frame.ce_plays.counts[index] += 1;
                 }
             }
@@ -290,9 +301,12 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
             while at < end {
                 at = (at + 1.0 / 60.0).min(end);
                 frame.time = at;
+                frame.object_states = object_states(&data, &state.ce_function_inputs, &state.ce_shots, at);
+                frame.ce_points = frame.ce_point_lights();
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 renderer.paint(gl, &frame);
             }
+            eprintln!("NOTE states {:?}", frame.object_states.iter().map(|state| state.outputs).collect::<Vec<_>>());
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }

@@ -779,15 +779,23 @@ pub(crate) struct CeEffectAt {
     pub(crate) def: Arc<CeEffectDef>,
     /// What made it, if not an attachment: it then runs its events once.
     spawn: Option<CeSpawn>,
-    /// The name the panel plays it by, when it is one the object names for
-    /// an event (`firing effect`, `shield depleted effect`, ...). It never
-    /// runs itself: each play runs a copy, as each event makes a new one.
-    pub(crate) event: Option<String>,
+    /// When it is one the object names for an event (`firing effect`,
+    /// `shield depleted effect`, ...): it never runs itself, and each play
+    /// runs a copy, as each event makes a new one.
+    pub(crate) event: Option<CeEventEffect>,
     /// `A out`.. of `primary scale`, `secondary scale` and `change color`.
     primary: Option<usize>,
     secondary: Option<usize>,
     change_color: Option<usize>,
     locations: Vec<Vec<CeLocation>>,
+}
+
+/// An effect an object names for an event.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CeEventEffect {
+    /// What the panel plays it by: the field that names it, and its name.
+    pub(crate) name: String,
+    pub(crate) path: String,
 }
 
 impl super::ce_functions::ReadsOutputs for CeEffectAt {
@@ -898,7 +906,7 @@ pub(super) fn read_ce_event_effects(
             object: owner,
             def,
             spawn: None,
-            event: Some(super::h3_effects::event_function_name(&field, &path)),
+            event: Some(CeEventEffect { name: super::h3_effects::event_function_name(&field, &path), path: path.clone() }),
             primary: None,
             secondary: None,
             change_color: None,
@@ -940,7 +948,9 @@ fn integral(function: i32, fraction: f32) -> f32 {
     }
 }
 
-struct Random(u32);
+/// `seed_random` and the draws made from it.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Random(u32);
 
 impl Random {
     fn next(&mut self) -> f32 {
@@ -952,7 +962,8 @@ impl Random {
         low + (high - low) * self.next()
     }
 
-    fn bits(&mut self) -> u32 {
+    /// `seed_random`: the high half of the next seed.
+    pub(super) fn bits(&mut self) -> u32 {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         self.0 >> 16
     }

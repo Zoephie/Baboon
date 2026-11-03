@@ -28,6 +28,7 @@ mod ce_attachments;
 mod ce_functions;
 mod ce_lights;
 mod ce_contrails;
+mod ce_firing;
 mod ce_flags;
 mod ce_particle_systems;
 mod ce_particles;
@@ -153,8 +154,12 @@ pub(crate) struct RenderModelPreview {
     pub h2_antennas: Vec<h2_lights::H2Antenna>,
     /// Halo CE: the antennas among the object's widgets.
     pub ce_antennas: Vec<ce_lights::CeAntenna>,
-    /// Halo CE effects the object's attachments hang on it.
+    /// Halo CE effects the object's attachments hang on it, then those it
+    /// names for its events.
     pub ce_effects: Vec<ce_particles::CeEffectAt>,
+    /// Halo CE weapons whose triggers the panel fires: the opened one, or
+    /// the one the opened unit holds.
+    pub ce_firing: Vec<ce_firing::CeWeaponFiring>,
     pub ce_contrails: Vec<ce_contrails::CeContrailAt>,
     pub ce_light_volumes: Vec<ce_widgets::CeLightVolume>,
     pub ce_lightning: Vec<ce_widgets::CeLightning>,
@@ -1219,14 +1224,17 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
         let held = usize::from(object).checked_sub(1)?;
         data.ce_attached.get(held).map(|held| held.name.clone())
     };
-    ce_functions::draw_ce_event_effects(
-        ui,
-        &data.preview.ce_effects,
-        held_name,
-        data.geometry_id,
-        &mut state.ce_event_counts,
-        &mut state.ce_event_scales,
-    );
+    let time = renderer::preview_clock(ui);
+    let controls = ce_functions::CeEffectControls {
+        effects: &data.preview.ce_effects,
+        firing: &data.preview.ce_firing,
+        geometry: data.geometry_id,
+        counts: &mut state.ce_event_counts,
+        shots: &mut state.ce_shots,
+        scales: &mut state.ce_event_scales,
+        time,
+    };
+    ce_functions::draw_ce_event_effects(ui, controls, held_name);
     draw_h2_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.h2_object_functions {
         let time = ui.input(|input| input.time) as f32;
@@ -1276,6 +1284,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
             (data.geometry_id, object),
             &mut state.ce_function_inputs,
             read(object),
+            ce_firing::fired_input(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, object, time),
         );
     }
 }

@@ -107,7 +107,7 @@ pub(super) fn draw_model_viewport(
     let preview = Arc::clone(&data.preview);
     let visible_batches = visible_batch_indices(&preview, state);
     let skinning_rows = animation_skinning_rows(data, state);
-    let time = ui.input(|input| input.time % H2_TIME_WRAP) as f32;
+    let time = preview_clock(ui);
     let h2_values = h2_function_values_for(data, &state.h2_function_inputs, time);
     let frame = ModelGpuFrame {
         preview,
@@ -135,7 +135,7 @@ pub(super) fn draw_model_viewport(
         light_follows_camera: state.h2_light_follows_camera,
         time,
         h2_prt_clusters: None,
-        object_states: object_states(data, &state.ce_function_inputs, time),
+        object_states: object_states(data, &state.ce_function_inputs, &state.ce_shots, time),
         object_moves: object_moves(data, &state.h2_function_inputs, time, h2_values.as_ref()),
         h2_values,
         h2_attached_values: h2_attached_values(data, time),
@@ -160,7 +160,8 @@ pub(super) fn draw_model_viewport(
     let mut frame = frame;
     frame.h2_prt_clusters = frame.h2_object_prt_clusters();
     frame.ce_points = frame.ce_point_lights();
-    if frame.h2_moves() || ce_events_running(data.geometry_id) {
+    let firing = ce_firing::shots_moving(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, time);
+    if frame.h2_moves() || ce_events_running(data.geometry_id) || firing {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     }
     painter.add(egui::PaintCallback {
@@ -914,6 +915,11 @@ struct ModelGpuFrame {
 /// Wrapped to keep a frame time precise in the `f32` the shaders take.
 const H2_TIME_WRAP: f64 = 3600.0;
 
+/// The time the preview's simulations and functions run by.
+pub(super) fn preview_clock(ui: &Ui) -> f32 {
+    ui.input(|input| input.time % H2_TIME_WRAP) as f32
+}
+
 /// What the parts an object owns draw with.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct CeObjectState {
@@ -1114,12 +1120,14 @@ fn object_functions(
 fn object_states(
     data: &ModelPreviewData,
     set: &ce_functions::CeFunctionInputs,
+    shots: &ce_firing::CeShots,
     time: f32,
 ) -> Vec<CeObjectState> {
     let state = |functions: Option<&ce_functions::CeObjectFunctions>, object, colors| {
         let (outputs, active) = functions.map_or(([0.0; 4], [false; 4]), |functions| {
-            let time = ce_functions::object_time(time, object);
-            functions.outputs_active(&functions.inputs_for(set, (data.geometry_id, object)), time)
+            let fired = ce_firing::fired_input(&data.preview.ce_firing, shots, data.geometry_id, object, time);
+            let inputs = functions.with_fired(functions.inputs_for(set, (data.geometry_id, object)), fired);
+            functions.outputs_active(&inputs, ce_functions::object_time(time, object))
         });
         CeObjectState { outputs, active, change_colors: h2_passes::ce_change_colors(colors) }
     };

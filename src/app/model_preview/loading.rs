@@ -725,6 +725,9 @@ fn read_ce_object_features(
     if let Some((weapon, held)) = &held_tag {
         preview.ce_effects.extend(super::ce_particles::read_ce_event_effects(source, weapon, 1, &held.markers));
     }
+    let own = super::ce_firing::read_ce_weapon_firing(model_tag, 0, &preview.ce_effects);
+    let held = held_tag.as_ref().and_then(|(weapon, _)| super::ce_firing::read_ce_weapon_firing(weapon, 1, &preview.ce_effects));
+    preview.ce_firing = own.into_iter().chain(held).collect();
     let markers = preview.markers.clone();
     preview.ce_flags = super::ce_flags::read_ce_flags(source, model_tag, 0, &markers, preview);
     if let Some((weapon, held)) = &held_tag {
@@ -4510,7 +4513,7 @@ mod kit_object_tests {
         let effects = &data.preview.ce_effects;
         let fire = effects
             .iter()
-            .position(|effect| effect.object == 1 && effect.event.as_deref() == Some("firing effect: fire bullet"))
+            .position(|effect| effect.object == 1 && effect.event.as_ref().is_some_and(|event| event.name == "firing effect: fire bullet"))
             .expect("the held rifle's firing effect is listed on it");
         let inputs = |_| CeObjectInputs { outputs: [0.0; 4], active: [false; 4], change_colors: [[1.0; 3]; 4] };
         let mut plays = CeEventPlays { counts: vec![0; effects.len()], scales: [1.0, 0.0] };
@@ -4547,6 +4550,39 @@ mod kit_object_tests {
         assert!(!field.runs_played(effects.len()), "a play runs once and is let go");
     }
 
+    /// With `BLAM_TEST_HCEEK`: firing the held rifle's trigger plays its
+    /// `fire bullet` and lights the rifle's `muzzle flash` output from its
+    /// illumination, which goes dark again over the trigger's illumination
+    /// recovery time. Unfired, it is dark.
+    #[test]
+    fn firing_the_held_rifle_lights_its_muzzle_flash() {
+        use super::super::ce_firing::{CeWeaponShots, fired_input};
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let rifle = "weapons\\assault rifle\\assault rifle";
+        let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
+        let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
+        let preview = &data.preview;
+        let weapon = preview.ce_firing.iter().find(|weapon| weapon.object == 1).expect("the held rifle fires");
+        let functions = data.ce_attached[0].functions.as_ref().expect("the rifle's functions");
+        let flash = functions.output_named("muzzle flash").expect("the rifle's muzzle flash function");
+        let mut shots = super::super::ce_firing::CeShots::new();
+        let at = |shots: &super::super::ce_firing::CeShots, time: f32| {
+            let fired = fired_input(&preview.ce_firing, shots, data.geometry_id, 1, time);
+            let inputs = functions.with_fired(functions.inputs_for(&Default::default(), (data.geometry_id, 1)), fired);
+            functions.outputs(&inputs, time)[flash]
+        };
+        assert_eq!(at(&shots, 10.0), 0.0, "unfired, the muzzle is dark");
+        let fired: &mut CeWeaponShots = shots.entry((data.geometry_id, 1)).or_default();
+        let effect = fired.fire(weapon, 0, 1.0, 10.0).expect("the trigger has a firing effect");
+        let name = preview.ce_effects[effect].event.as_ref().map(|event| event.name.as_str());
+        assert_eq!(name, Some("firing effect: fire bullet"));
+        assert!(at(&shots, 10.01) > 0.0, "the shot lights the muzzle");
+        assert_eq!(at(&shots, 15.0), 0.0, "and it goes dark");
+    }
+
     /// With `BLAM_TEST_HCEEK`: the plasma rifle's `overheated` loops its one
     /// event, as an attachment would, but a play of it is not looping
     /// (`effect_update` loops back only for flag 2, `effect_new_looping`'s),
@@ -4564,7 +4600,7 @@ mod kit_object_tests {
         let effects = &data.preview.ce_effects;
         let overheated = effects
             .iter()
-            .position(|effect| effect.event.as_deref().is_some_and(|name| name.ends_with(": overheated")))
+            .position(|effect| effect.event.as_ref().is_some_and(|event| event.name.ends_with(": overheated")))
             .expect("the plasma rifle's overheated effect is listed");
         assert!(effects[overheated].def.loops(), "its tag loops its event");
         let inputs = |_| CeObjectInputs { outputs: [0.0; 4], active: [false; 4], change_colors: [[1.0; 3]; 4] };
