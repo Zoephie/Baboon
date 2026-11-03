@@ -978,6 +978,9 @@ impl ModelGlRenderer {
                     // The kit's arrays (light probes, the dominant light's
                     // intensity, water) are built by the game, never authored.
                     TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, self.h3_black_array),
+                    // Reach's per-vertex light probes, which only level
+                    // geometry's `static_per_vertex` reads.
+                    TextureKind::Bytes => gl.bind_texture(glow::TEXTURE_BUFFER, None),
                 }
                 let location = program.location(gl, name);
                 gl.uniform_1_i32(location.as_ref(), unit as i32);

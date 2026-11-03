@@ -43,7 +43,10 @@ const HELPERS: &str = "float hlsl_fmod(float a, float b) { return a - b * trunc(
 vec2 hlsl_fmod(vec2 a, vec2 b) { return a - b * trunc(a / b); }
 vec3 hlsl_fmod(vec3 a, vec3 b) { return a - b * trunc(a / b); }
 vec4 hlsl_fmod(vec4 a, vec4 b) { return a - b * trunc(a / b); }
-void hlsl_clip(float x) { if (x < 0.0) discard; }
+";
+
+/// Helpers that `discard`, which only a pixel stage may.
+const PIXEL_HELPERS: &str = "void hlsl_clip(float x) { if (x < 0.0) discard; }
 void hlsl_clip(vec2 x) { if (any(lessThan(x, vec2(0.0)))) discard; }
 void hlsl_clip(vec3 x) { if (any(lessThan(x, vec3(0.0)))) discard; }
 void hlsl_clip(vec4 x) { if (any(lessThan(x, vec4(0.0)))) discard; }
@@ -121,6 +124,7 @@ fn sampler_type(kind: TextureKind) -> &'static str {
         TextureKind::FlatArray => "sampler2DArray",
         TextureKind::Volume => "sampler3D",
         TextureKind::Cube => "samplerCube",
+        TextureKind::Bytes => "usamplerBuffer",
     }
 }
 
@@ -258,7 +262,10 @@ pub(crate) fn translate(program: &Program, entry: &str, stage: Stage) -> Result<
     emitter.global_lines.sort_by_key(|(at, _)| *at);
     emitter.global_inits.sort_by_key(|(at, _)| *at);
     let mut source = String::from("#version 410 core\n");
-    source.push_str(if stage == Stage::Pixel { HELPERS } else { "" });
+    source.push_str(HELPERS);
+    if stage == Stage::Pixel {
+        source.push_str(PIXEL_HELPERS);
+    }
     for text in &emitter.struct_text {
         source.push_str(text);
     }
@@ -325,6 +332,38 @@ impl Emitter<'_> {
             }
             _ => Err("not a constant".to_owned()),
         }
+    }
+
+    /// fxc's `float4(a, b) = value`: each part takes its share of the
+    /// value's components in order, as Reach's foliage writes.
+    fn assign_parts(&mut self, ty: &Type, parts: &[Expression], value: &Expression) -> Result<Code, String> {
+        let Type::Vector(scalar, size) = *ty else {
+            return Err(format!("assignment to a constructed {ty:?}"));
+        };
+        let value = self.convert_init(value, ty)?;
+        let temporary = self.temporary();
+        self.before.push(format!("{};\n", declaration(ty, &temporary)));
+        let mut writes = vec![format!("{temporary} = {}", value.text)];
+        let mut at = 0;
+        for part in parts {
+            let part = self.expression(part)?;
+            let width = match part.ty {
+                Type::Scalar(_) => 1,
+                Type::Vector(_, width) => width,
+                ref other => return Err(format!("assignment to a constructed part of {other:?}")),
+            };
+            let share = Code::new(format!("{temporary}.{}", &"xyzw"[at..at + width]), match width {
+                1 => Type::Scalar(scalar),
+                width => Type::Vector(scalar, width),
+            });
+            at += width;
+            let share = self.convert(share, &part.ty)?;
+            writes.push(format!("{} = {}", part.text, share.text));
+        }
+        if at != size {
+            return Err(format!("{at} components assigned to {size}"));
+        }
+        Ok(Code::new(format!("({})", writes.join(", ")), ty.clone()))
     }
 
     fn temporary(&mut self) -> String {
@@ -1003,6 +1042,11 @@ impl Emitter<'_> {
                 let (left, right) = (self.expression(left)?, self.expression(right)?);
                 self.binary(mark, left, right)
             }
+            Expression::Assign(mark, target, value)
+                if let (Expression::Construct(ty, parts), "=") = (&**target, &**mark) =>
+            {
+                self.assign_parts(ty, parts, value)
+            }
             Expression::Assign(mark, target, value) => {
                 let target = self.expression(target)?;
                 let mut value = self.convert_init(value, &target.ty)?;
@@ -1438,6 +1482,26 @@ impl Emitter<'_> {
         }
     }
 
+    /// A `ByteAddressBuffer`'s `Load` to `Load4`: that many words from a byte
+    /// address, which the buffer texture holds a word to a texel.
+    fn load_words(&mut self, buffer: &str, name: &str, values: Vec<Code>) -> Result<Code, String> {
+        let count = match name {
+            "Load" => 1,
+            "Load2" => 2,
+            "Load3" => 3,
+            "Load4" => 4,
+            other => return Err(format!("{other} of a ByteAddressBuffer")),
+        };
+        let [address] = <[Code; 1]>::try_from(values).map_err(|_| format!("{name} takes one address"))?;
+        let address = self.convert(address, &Type::Scalar(Scalar::Int))?;
+        let word = |index: usize| format!("texelFetch({buffer}, ({}) / 4 + {index}).r", address.text);
+        if count == 1 {
+            return Ok(Code::new(word(0), Type::Scalar(Scalar::Uint)));
+        }
+        let words: Vec<String> = (0..count).map(word).collect();
+        Ok(Code::new(format!("uvec{count}({})", words.join(", ")), Type::Vector(Scalar::Uint, count)))
+    }
+
     fn coordinate(&mut self, value: Code, kind: TextureKind) -> Result<Code, String> {
         let size = if kind == TextureKind::Flat { 2 } else { 3 };
         self.convert(value, &Type::Vector(Scalar::Float, size))
@@ -1454,6 +1518,9 @@ impl Emitter<'_> {
             values.remove(0);
         }
         let texture = object.text;
+        if kind == TextureKind::Bytes {
+            return self.load_words(&texture, name, values);
+        }
         let mut parts = values.into_iter();
         let mut next = |what: &str| parts.next().ok_or_else(|| format!("{name} needs {what}"));
         match name {
@@ -1798,6 +1865,23 @@ mod tests {
         let translated = glsl(source, "main_ps", Stage::Pixel);
         assert!(translated.source.contains("texture(l_s, l_uv)"), "{}", translated.source);
         assert_eq!(translated.textures, [("b".to_owned(), TextureKind::Flat)]);
+    }
+
+    #[test]
+    fn a_byte_address_buffer_loads_words_from_a_byte_address() {
+        let source = "ByteAddressBuffer b : register(t17);\nfloat4 main_ps(uint a : TEXCOORD0) : SV_Target { uint2 w = b.Load2(a * 4); uint x = b.Load(8); return float4(w, x, 0); }\n";
+        let translated = glsl(source, "main_ps", Stage::Pixel);
+        let text = &translated.source;
+        assert!(text.contains("uniform usamplerBuffer b;"), "{text}");
+        assert!(text.contains("texelFetch(b, (int((l_a * uint(4)))) / 4 + 0).r, texelFetch(b, (int((l_a * uint(4)))) / 4 + 1).r"), "{text}");
+        assert!(text.contains("texelFetch(b, (8) / 4 + 0).r"), "{text}");
+        assert_eq!(translated.textures, [("b".to_owned(), TextureKind::Bytes)]);
+    }
+
+    #[test]
+    fn assigning_to_a_constructor_shares_the_value_among_its_parts() {
+        let source = pixel("float4 main_ps(float4 v : TEXCOORD0) : SV_Target { float3 a; float b; float4(a, b) = v + 1; return float4(a, b); }");
+        assert!(source.contains("(hlsl_t1 = (l_v + 1.0), l_a = hlsl_t1.xyz, l_b = hlsl_t1.w)"), "{source}");
     }
 
     #[test]

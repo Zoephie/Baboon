@@ -18,6 +18,8 @@ pub(crate) enum TextureKind {
     FlatArray,
     Volume,
     Cube,
+    /// `ByteAddressBuffer`: words read by byte address.
+    Bytes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -171,6 +173,7 @@ fn texture_type(name: &str) -> Option<Type> {
         "texture2darray" => TextureKind::FlatArray,
         "texture3d" => TextureKind::Volume,
         "texturecube" => TextureKind::Cube,
+        "byteaddressbuffer" => TextureKind::Bytes,
         _ => return None,
     };
     Some(Type::Texture(kind))
