@@ -4277,6 +4277,25 @@ mod kit_object_tests {
         assert_eq!(firing.count(), 1, "the gun's firing light");
     }
 
+    /// With `BLAM_TEST_H2EK`: an effect's `lens_flare` and `light_volume`
+    /// parts draw at their location's markers while their event runs
+    /// (`sub_515280`), as the sword's and the flak bolt's do.
+    #[test]
+    fn halo_2_effects_bring_their_lens_flares_and_light_volumes() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            eprintln!("skipping: BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let path = "objects\\weapons\\melee\\energy_blade\\energy_blade";
+        let sword = kit_preview(&root, GameId::Halo2, path, "weapon", b"weap");
+        let flares = sword.preview.h2_flares.iter().filter(|flare| flare.effect_part().is_some());
+        assert!(flares.count() > 0, "the blade's effects' lens flares");
+        let path = "objects\\weapons\\support_high\\flak_cannon\\projectiles\\flak_bolt\\flak_bolt";
+        let bolt = kit_preview(&root, GameId::Halo2, path, "projectile", b"proj");
+        let volumes = bolt.preview.h2_light_volumes.iter().filter(|volume| volume.effect_part().is_some());
+        assert!(volumes.count() > 0, "the armed bolt's light volume");
+    }
+
     /// A flag starts settled whenever it starts: one restarted a minute in
     /// has nothing to catch up on, so it hangs as one started at the open.
     #[test]

@@ -101,6 +101,8 @@ pub(crate) struct H2Flare {
     /// The animation's `synchronized`: every instance runs on the same clock.
     /// Without it, `lens_flare_draw_callback` shifts each one's.
     synchronized: bool,
+    /// `falloff function`: how an effect's flare dims over its event.
+    falloff: u8,
     pub(crate) images: Vec<Arc<H2Image>>,
 }
 
@@ -160,6 +162,75 @@ impl H2EffectLight {
         let faded = transition_evaluate(light.effect_falloff, since / light.effect_duration);
         Some(scale * (1.0 - faded))
     }
+}
+
+/// An event's `lens_flare` or `light_volume` part on an attachment's effect,
+/// which `sub_515280` draws at each of its location's markers while its event
+/// runs (`render_submit_special_model_groups`), not `effect_generate_part`.
+#[derive(Debug, Clone)]
+pub(crate) struct H2EffectPart {
+    times: Arc<H3EffectTimes>,
+    event: usize,
+    /// `A scales values` and `B scales values` take the type-specific bit:
+    /// the effect's A and B scales brighten it.
+    scaled: [bool; 2],
+    /// The effect's B scale, a name the object's functions answer to.
+    secondary_by: String,
+}
+
+/// How `sub_515280` lights a part this frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct H2PartLight {
+    /// The A and B scales it takes.
+    pub(crate) brightness: f32,
+    /// `1 - age / duration`, for an event longer than a tick.
+    pub(crate) fade: f32,
+    /// Whether its event has a duration; one of none neither fades nor falls off.
+    pub(crate) lasts: bool,
+}
+
+/// `sub_515280` fades a part over an event longer than this, or at its end.
+const SHORTEST_FADING_EVENT: f32 = 0.033_433_337;
+
+impl H2EffectPart {
+    pub(super) fn new(part: &super::h3_effects::H3EffectPart<'_>) -> Self {
+        Self {
+            times: Arc::clone(&part.times),
+            event: part.event,
+            scaled: [part.scaled, part.b_scaled],
+            secondary_by: part.effect.secondary_by.clone(),
+        }
+    }
+
+    /// How it is lit at `time`, with its effect's A scale `primary` names; none
+    /// while the effect is off or another of its events runs.
+    pub(crate) fn light(
+        &self,
+        primary: &str,
+        values: Option<&H2FunctionValues>,
+        time: f32,
+        onset: f32,
+    ) -> Option<H2PartLight> {
+        let on = attachment_value(primary, values);
+        if on <= 0.0 {
+            return None;
+        }
+        let age = self.times.age(self.event, time - onset)?;
+        let duration = self.times.duration(self.event)?;
+        let secondary = attachment_value(&self.secondary_by, values);
+        let [a, b] = self.scaled;
+        let brightness = if a { on } else { 1.0 } * if b { secondary } else { 1.0 };
+        let fade = if duration > SHORTEST_FADING_EVENT { (1.0 - age).clamp(0.0, 1.0) } else { 1.0 };
+        Some(H2PartLight { brightness, fade, lasts: duration != 0.0 })
+    }
+}
+
+/// What makes a flare that is no attachment of its own: a light an effect
+/// makes, or an effect's `lens_flare` part.
+#[derive(Debug, Clone)]
+enum H2FlareEffect {
+    Light(H2EffectLight),
+    Part(H2EffectPart),
 }
 
 #[derive(Debug, Clone)]
@@ -443,7 +514,7 @@ pub(crate) struct H2FlareAt {
     change_color: Option<usize>,
     /// The light it belongs to, if it is no attachment of its own.
     light: Option<H2Light>,
-    effect: Option<H2EffectLight>,
+    effect: Option<H2FlareEffect>,
     pub(crate) flare: Arc<H2Flare>,
 }
 
@@ -561,6 +632,7 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
         color: scale_function(root, "color"),
         rotation: scale_function(root, "rotation"),
         synchronized: second_field_flags(root, "flags").iter().any(|name| name == "synchronized"),
+        falloff: root.read_int_any("falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
         images,
     })
 }
@@ -732,15 +804,17 @@ fn place_h2_light(
         scale_by: at.scale_by,
         change_color: at.change_color,
         light: Some(light),
-        effect: at.effect,
+        effect: at.effect.map(H2FlareEffect::Light),
         flare,
     });
 }
 
 /// `render_submit_object_attachments`' `lens_flare`s, at every marker of their
 /// names, and `light_submit_lens_flares`' lights, which take the first. Then
-/// the lights its effects' events make, `effect_generate_part`'s only light:
-/// it returns at once for `lens_flare` and `light_volume` parts.
+/// the lights its effects' events make, `effect_generate_part`'s only light,
+/// and their `lens_flare` parts, which `sub_515280` submits at every marker
+/// of their location: scale 1, tinted by the effect's color (its object's
+/// change color, or white).
 pub(super) fn read_h2_flares(
     source: &TagSource,
     object: &TagFile,
@@ -807,6 +881,32 @@ pub(super) fn read_h2_flares(
         }
     }
     for_each_attached_part(source, object, |part| {
+        if part.group == lens_group {
+            let third_person = |flare: &H2Flare| flare.flags & ONLY_FIRST_PERSON == 0;
+            let Some(flare) = read_h2_flare(source, &part.path).filter(third_person) else {
+                return;
+            };
+            let flare = Arc::new(flare);
+            let change_color = usize::try_from(part.effect.change_color - 1).ok();
+            for marker in part_markers(markers, &part.marker, part.effect.once) {
+                let (place, node) = frame(&marker);
+                let (place, node) = part.placed(place, node);
+                found.0.push(H2FlareAt {
+                    object: owner,
+                    node,
+                    position: place.position,
+                    forward: place.axes[0],
+                    marker_scale: 1.0,
+                    only_under: marker.only_under.clone(),
+                    scale_by: part.effect.scale_by.clone(),
+                    change_color,
+                    light: None,
+                    effect: Some(H2FlareEffect::Part(H2EffectPart::new(&part))),
+                    flare: Arc::clone(&flare),
+                });
+            }
+            return;
+        }
         if part.group != light_group {
             return;
         }
@@ -1081,6 +1181,14 @@ pub(crate) fn overbrighten(light: &H2DefaultLight) -> (H2DefaultLight, usize) {
 }
 
 impl H2FlareAt {
+    #[cfg(test)]
+    pub(crate) fn effect_part(&self) -> Option<&H2EffectPart> {
+        match &self.effect {
+            Some(H2FlareEffect::Part(part)) => Some(part),
+            _ => None,
+        }
+    }
+
     pub(crate) fn only_under(&self) -> Option<&(String, String)> {
         self.only_under.as_ref()
     }
@@ -1117,7 +1225,16 @@ impl H2FlareAt {
 
     fn value(&self, values: Option<&H2FunctionValues>, time: f32, onset: f32) -> Option<f32> {
         match (&self.effect, &self.light) {
-            (Some(effect), Some(light)) => effect.value(light, attachment_value(&self.scale_by, values), time, onset),
+            (Some(H2FlareEffect::Light(effect)), Some(light)) => {
+                effect.value(light, attachment_value(&self.scale_by, values), time, onset)
+            }
+            // `sub_515280`: dimmed by the flare's falloff over its event.
+            (Some(H2FlareEffect::Part(part)), _) => {
+                let lit = part.light(&self.scale_by, values, time, onset)?;
+                let dimmed = || 1.0 - transition_evaluate(self.flare.falloff, 1.0 - lit.fade);
+                let falloff = if lit.lasts { dimmed() } else { 1.0 };
+                Some(lit.brightness * falloff)
+            }
             _ => Some(attachment_value(&self.scale_by, values)),
         }
     }
@@ -1341,6 +1458,7 @@ mod tests {
                 color: None,
                 rotation: None,
                 synchronized: true,
+                falloff: 0,
                 images: Vec::new(),
             }),
         }
@@ -1614,5 +1732,24 @@ mod tests {
         // The near edge takes a surface past it and leaves one behind it.
         assert!(gel_at(&rows, ahead(behind + 0.1))[3] > 0.5);
         assert!(gel_at(&rows, ahead(behind - 0.1))[3] < 0.5);
+    }
+
+    /// `sub_515280`: a part fades out over its event, and takes the A and B
+    /// scales only where its flags ask; with its effect off it is not drawn.
+    #[test]
+    fn an_effect_part_fades_over_its_event_and_takes_the_scales_it_asks_for() {
+        let part = |scaled: [bool; 2]| H2EffectPart {
+            times: Arc::new(H3EffectTimes::read_nothing()),
+            event: 0,
+            scaled,
+            secondary_by: "power".to_owned(),
+        };
+        let values: H2FunctionValues = [("power".to_owned(), 0.5), ("on".to_owned(), 0.8)].into_iter().collect();
+        let lit = |scaled, time| part(scaled).light("on", Some(&values), time, 0.0);
+        assert_eq!(lit([false; 2], 0.0), Some(H2PartLight { brightness: 1.0, fade: 1.0, lasts: true }));
+        assert_eq!(lit([true, false], 50.0).map(|lit| (lit.brightness, lit.fade)), Some((0.8, 0.5)));
+        assert_eq!(lit([true, true], 0.0).map(|lit| lit.brightness), Some(0.4));
+        let off: H2FunctionValues = [("on".to_owned(), 0.0)].into_iter().collect();
+        assert_eq!(part([false; 2]).light("on", Some(&off), 0.0, 0.0), None, "its effect is off");
     }
 }

@@ -9,6 +9,8 @@ use super::attachment::MarkerFrame;
 use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
+use super::h2_lights::H2EffectPart;
+use super::h3_effects::{for_each_attached_part, part_markers};
 use super::h2_passes::{H2Image, tag_function_at};
 use super::h3_effects::marker_name;
 use super::materials::decode_h2_image;
@@ -50,6 +52,9 @@ pub(crate) struct H2Volume {
     fuzzy: bool,
     /// `scaled by marker`, read off the first volume for them all.
     scaled_by_marker: bool,
+    /// `not scaled by event duration`, likewise: an effect's volume keeps
+    /// its color over its event (`sub_515280`).
+    not_scaled_by_duration: bool,
     spacing: Spacing,
     offset: TagFunction,
     radius: TagFunction,
@@ -77,6 +82,8 @@ pub(crate) struct H2LightVolume {
     marker_scale: f32,
     change_color: Option<usize>,
     volumes: Arc<Vec<H2Volume>>,
+    /// The effect part that makes it, if it is no attachment of its own.
+    effect: Option<H2EffectPart>,
 }
 
 fn function_of(holder: TagStruct<'_>, name: &str) -> Option<TagFunction> {
@@ -124,6 +131,7 @@ fn read_volume(source: &TagSource, volume: TagStruct<'_>, glow: Option<&Arc<H2Im
         count,
         fuzzy: flagged("fuzzy"),
         scaled_by_marker: flagged("scaled by marker"),
+        not_scaled_by_duration: flagged("not scaled by event duration"),
         spacing: postprocessed_spacing(
             &radius,
             count,
@@ -155,7 +163,10 @@ pub(super) fn read_h2_bitmap(source: &TagSource, path: &str) -> Option<Arc<H2Ima
 /// `render_submit_object_attachments`: one at every marker of the name. Then
 /// each attached light's own `light volume`, which `light_submit_lens_flares`
 /// submits while the light is on, at the light: its first marker, scale 1,
-/// white, as bright as the light's scale (`sub_6BEDF0`).
+/// white, as bright as the light's scale (`sub_6BEDF0`). Then its effects'
+/// `light_volume` parts, which `sub_515280` submits at every marker of their
+/// location while their event runs: scale 1, white faded over the event, as
+/// bright as the part's A and B scales.
 pub(super) fn read_h2_light_volumes(
     source: &TagSource,
     object: &TagFile,
@@ -165,11 +176,9 @@ pub(super) fn read_h2_light_volumes(
 ) -> Vec<H2LightVolume> {
     let (volume_group, light_group) = (u32::from_be_bytes(*b"MGS2"), u32::from_be_bytes(*b"ligh"));
     let mut found = Vec::new();
-    let Some(block) = object_block(object, "attachments") else {
-        return found;
-    };
     let mut glow = None;
-    for attachment in elements(block, "attachments") {
+    let attachments = object_block(object, "attachments").map(|block| elements(block, "attachments"));
+    for attachment in attachments.unwrap_or_default() {
         let Some((kind, path)) = attachment.read_tag_ref_with_group("type").filter(|(_, path)| !path.is_empty()) else {
             continue;
         };
@@ -215,9 +224,42 @@ pub(super) fn read_h2_light_volumes(
                 marker_scale: if attached && scaled_by_marker { marker.scale } else { 1.0 },
                 change_color,
                 volumes: Arc::clone(&volumes),
+                effect: None,
             });
         }
     }
+    for_each_attached_part(source, object, |part| {
+        if part.group != volume_group {
+            return;
+        }
+        let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "light_volume", b"MGS2") else {
+            return;
+        };
+        let glow = glow.get_or_insert_with(|| read_glow(source));
+        let root = tag.root();
+        let real = |name: &str| root.read_real(name).unwrap_or(0.0);
+        let volumes = elements(root, "volumes");
+        let volumes: Vec<H2Volume> =
+            volumes.iter().filter_map(|volume| read_volume(source, *volume, glow.as_ref())).collect();
+        let volumes = Arc::new(volumes);
+        for marker in part_markers(markers, &part.marker, part.effect.once) {
+            let (place, node) = frame(&marker);
+            let (place, node) = part.placed(place, node);
+            found.push(H2LightVolume {
+                object: owner,
+                only_under: marker.only_under.clone(),
+                node,
+                position: place.position,
+                forward: place.axes[0],
+                falloff: [real("falloff distance from camera"), real("cutoff distance from camera")],
+                scale_by: part.effect.scale_by.clone(),
+                marker_scale: 1.0,
+                change_color: None,
+                volumes: Arc::clone(&volumes),
+                effect: Some(H2EffectPart::new(&part)),
+            });
+        }
+    });
     found
 }
 
@@ -388,6 +430,11 @@ impl H2Volume {
 }
 
 impl H2LightVolume {
+    #[cfg(test)]
+    pub(crate) fn effect_part(&self) -> Option<&H2EffectPart> {
+        self.effect.as_ref()
+    }
+
     pub(crate) fn only_under(&self) -> Option<&(String, String)> {
         self.only_under.as_ref()
     }
@@ -408,7 +455,29 @@ impl H2LightVolume {
         &self.scale_by
     }
 
+    /// The color and brightness it is submitted with: an attachment's change
+    /// color and function, or an effect part's white, faded over its event
+    /// unless its first volume asks otherwise, and A and B scales. None while
+    /// an effect's part is not drawn.
+    fn submitted(
+        &self,
+        values: Option<&H2FunctionValues>,
+        change_colors: &[[f32; 3]; 4],
+        time: f32,
+        onset: f32,
+    ) -> Option<([f32; 3], f32)> {
+        let Some(part) = &self.effect else {
+            let tint = self.change_color.and_then(|index| change_colors.get(index)).copied().unwrap_or([1.0; 3]);
+            return Some((tint, super::h2_lights::attachment_value(&self.scale_by, values)));
+        };
+        let lit = part.light(&self.scale_by, values, time, onset)?;
+        let kept = self.volumes.first().is_some_and(|volume| volume.not_scaled_by_duration);
+        let fade = if lit.lasts && !kept { lit.fade } else { 1.0 };
+        Some(([fade; 3], lit.brightness))
+    }
+
     /// `rasterizer_light_volume_render`, as a quad a sprite.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn quads(
         &self,
         volume: &H2Volume,
@@ -416,14 +485,18 @@ impl H2LightVolume {
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
+        time: f32,
+        onset: f32,
     ) -> Vec<CeAntennaQuad> {
-        let tint_by = self.change_color.and_then(|index| change_colors.get(index)).copied().unwrap_or([1.0; 3]);
+        let Some((tint_by, submitted)) = self.submitted(values, change_colors, time, onset) else {
+            return Vec::new();
+        };
         let (origin, forward) = posed_on(self.node, self.position, self.forward, bones);
         let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - origin[axis]);
         let distance = dot(to_eye, to_eye).sqrt();
         let unit_eye = to_eye.map(|axis| axis / distance.max(f32::EPSILON));
         let fade = camera_fade(self.falloff, distance);
-        let brightness = fade * super::h2_lights::attachment_value(&self.scale_by, values);
+        let brightness = fade * submitted;
         if brightness <= 0.0 {
             return Vec::new();
         }

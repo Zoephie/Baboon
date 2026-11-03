@@ -123,6 +123,13 @@ impl H3EffectTimes {
         None
     }
 
+    /// Event `index`'s duration in seconds, with the bake of one that can be 0
+    /// (a tick) given back as the 0 it stands for.
+    pub(super) fn duration(&self, index: usize) -> Option<f32> {
+        let event = self.events.get(index)?;
+        Some(if event.duration <= ONE_TICK { 0.0 } else { event.duration })
+    }
+
     /// Seconds since `index` began, ended or not, for what outlives its event.
     pub(super) fn since_begun(&self, index: usize, time: f32) -> Option<f32> {
         let event = *self.events.get(index)?;
@@ -249,6 +256,8 @@ pub(super) struct H3EffectPart<'a> {
     pub(super) unattached: bool,
     /// `A scales values` takes in the attachment's scale.
     pub(super) scaled: bool,
+    /// `B scales values` does, for the secondary scale.
+    pub(super) b_scaled: bool,
     pub(super) times: Arc<H3EffectTimes>,
     /// Which of the effect's events it belongs to.
     pub(super) event: usize,
@@ -301,6 +310,8 @@ pub(super) fn for_each_attached_part(
                 let unattached = flags.iter().any(|(_, name)| name.starts_with("never attached to object"));
                 let scales = part.read_flag_names("A scales values").unwrap_or_default();
                 let scaled = scales.iter().any(|(_, name)| name == PART_SCALE);
+                let b_scales = part.read_flag_names("B scales values").unwrap_or_default();
+                let b_scaled = b_scales.iter().any(|(_, name)| name == PART_SCALE);
                 let times = Arc::clone(&times);
                 visit(H3EffectPart {
                     effect: &object_effect,
@@ -312,6 +323,7 @@ pub(super) fn for_each_attached_part(
                     world_oriented,
                     unattached,
                     scaled,
+                    b_scaled,
                     times,
                     event: at,
                 });

@@ -4410,6 +4410,7 @@ impl ModelGlRenderer {
                         continue;
                     }
                     let values = frame.h2_values_of_object(at.object);
+                    let onset = uploaded.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
                     for (volume, texture) in at.volumes().iter().zip(textures) {
                         let Some(texture) = texture else {
                             continue;
@@ -4417,7 +4418,7 @@ impl ModelGlRenderer {
                         gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
                         h3_draw::h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
                         let colors = frame.change_colors_of_object(at.object);
-                        for quad in at.quads(volume, values, &colors, bones, &view) {
+                        for quad in at.quads(volume, values, &colors, bones, &view, frame.time, onset) {
                             let vertices = quad.corners.map(|[x, y, z, u, v]| {
                                 let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
                                 [a, b, c, d, u, v]
