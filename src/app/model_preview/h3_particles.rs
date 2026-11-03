@@ -52,8 +52,14 @@ enum H3ParticleInput {
     GameTime,
     EffectA,
     EffectB,
+    /// The particle's own rotation, as Halo 2 reads it. Halo 3 and ODST's
+    /// `update_states_internal` write 0 here instead (MCC halo3.dll
+    /// 0x180221B18, ODST 0x1406D46B0), which [`SeedAllocator::halo3`] keeps.
     Rotation,
     LocationSeed,
+    /// What reads 0: an unknown name, the invalid state, or one no game writes
+    /// (`distance from emitter`, 17: neither state list sets it, and the card's
+    /// upload mask 0xFE117B02 leaves it out).
     Other,
 }
 
@@ -146,16 +152,25 @@ struct H3ParticleProperty {
     scale: f32,
 }
 
-/// `allocate_random_seed`'s two counters, handing seeds out in property order.
+/// `allocate_random_seed`'s two counters, handing seeds out in property order,
+/// and what the game's state list leaves of the inputs it does not seed.
 #[derive(Default)]
 struct SeedAllocator {
     particle: usize,
     system: usize,
+    /// Halo 3 and ODST: `particle rotation` reads the 0 their state list writes.
+    rotation_unread: bool,
 }
 
 impl SeedAllocator {
+    /// For a Halo 3 or ODST tag's properties.
+    fn halo3() -> Self {
+        Self { rotation_unread: true, ..Self::default() }
+    }
+
     fn allocate(&mut self, input: &mut H3ParticleInput) {
         match *input {
+            H3ParticleInput::Rotation if self.rotation_unread => *input = H3ParticleInput::Other,
             H3ParticleInput::Random => {
                 *input = H3ParticleInput::Seed(self.particle % SEEDS);
                 self.particle += 1;
@@ -1000,7 +1015,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
     let one_shot = animated("frame animation one shot");
     let (frames, corner) = read_frames(source, shader, first, [offset.x, offset.y], start, one_shot);
-    let mut seeds = SeedAllocator::default();
+    let mut seeds = SeedAllocator::halo3();
     let billboard = H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default());
     Some(H3ParticleLook {
         billboard,
@@ -1673,7 +1688,7 @@ fn read_emitter(
     system_flagged: impl Fn(&str) -> bool,
     any_attachments: bool,
 ) -> Option<H3Emitter> {
-    let mut seeds = SeedAllocator::default();
+    let mut seeds = SeedAllocator::halo3();
     let shape = H3EmissionShape::named(&emitter.read_enum_name("emission shape").unwrap_or_default())?;
     let mut property = |name: &str| H3ParticleProperty::named(emitter, name, &mut seeds);
     let (offset, direction, radius, angle) = (
@@ -3632,5 +3647,20 @@ mod tests {
         emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, true);
         let moved: [f32; 3] = std::array::from_fn(|axis| rested.position[axis] + rested.velocity[axis] * dt);
         assert_eq!(particles[0].position, moved, "it drifts by what it kept");
+    }
+
+    /// Halo 3 and ODST's state list writes `particle rotation` as 0 and
+    /// never writes `distance from emitter`; Halo 2 reads the particle's own
+    /// rotation.
+    #[test]
+    fn only_halo_2_reads_a_particles_rotation() {
+        let resolved = |mut seeds: SeedAllocator, name: &str| {
+            let mut input = H3ParticleInput::named(name);
+            seeds.allocate(&mut input);
+            input.of(&H3ParticleState { rotation: 0.25, ..Default::default() })
+        };
+        assert_eq!(resolved(SeedAllocator::default(), "particle rotation"), 0.25, "Halo 2");
+        assert_eq!(resolved(SeedAllocator::halo3(), "particle rotation{physics rotation}"), 0.0);
+        assert_eq!(resolved(SeedAllocator::halo3(), "distance from emitter"), 0.0);
     }
 }
