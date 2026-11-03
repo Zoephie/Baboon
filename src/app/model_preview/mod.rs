@@ -59,6 +59,7 @@ pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod reach_ik;
 mod reach_lights;
+mod reach_blend_screens;
 mod reach_camo;
 mod reach_shadow;
 mod reach_shield;

@@ -1975,6 +1975,11 @@ fn decode_held_animation(
         }
         _ => clip.pose(&skeleton, Some(&defaults)),
     };
+    // Reach's data-driven board lays the state's blend screens over an
+    // action: at rest, aiming and looking ahead.
+    if !matches!(kind, JmaKind::Jmo | JmaKind::Jmr) {
+        super::reach_blend_screens::lay_blend_screens(jmad, animation, &skeleton, animation_index, &mut pose);
+    }
     if !layers.is_empty() {
         let left_arm = super::h2_weapons::left_arm_nodes(jmad);
         for layer in layers {
