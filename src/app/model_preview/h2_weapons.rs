@@ -103,9 +103,10 @@ struct GraphEntry {
     class: String,
     kind: String,
     has_idle: bool,
-    /// The clips its actions and overlays name, whatever those are called:
-    /// the assault rifle's `fire_1` is `combat:rifle:br:fire_1`.
-    slots: Vec<String>,
+    /// Its actions and overlays by label, with the clip each names, whatever
+    /// that is called (the assault rifle's `fire_1` is `combat:rifle:br:fire_1`),
+    /// or none for one in another graph.
+    slots: Vec<(String, Option<String>)>,
 }
 
 /// Which nodes an overlay channel reaches: the graph's `left arm member`
@@ -200,16 +201,27 @@ impl H2UnitWeapons {
             && !overlay
     }
 
-    /// `sub_616470`: a clip for this class and type, or the nearest `any`. A
-    /// name leaves `any` out.
-    fn find_clip(clips: &[&str], mode: &str, class: &str, kind: &str, last: &str) -> Option<String> {
-        let tried = [
-            format!("{mode}:{class}:{kind}:{last}"),
-            format!("{mode}:{class}:{last}"),
-            format!("{mode}:{kind}:{last}"),
-            format!("{mode}:{last}"),
-        ];
-        tried.into_iter().find(|name| clips.contains(&name.as_str()))
+    /// `sub_616470`'s search, `sub_54FDE0` over `animation_search_path_iterator`
+    /// (`sub_675570`): the first of the graph's `mode:class:type` entries with
+    /// a slot labelled `last`, trying `any` for the type, then the class, then
+    /// both, then the same under the `any` mode, and skipping a step that asks
+    /// for `any` again. Its clip, if the preview has it: one in another graph
+    /// still ends the search.
+    fn find_clip(&self, clips: &[&str], mode: &str, class: &str, kind: &str, last: &str) -> Option<String> {
+        for step in 0..8u8 {
+            let anything = |bit: u8, value: &str| step & bit != 0 && value == ANY;
+            if anything(4, mode) || anything(2, class) || anything(1, kind) {
+                continue;
+            }
+            let mode = if step & 4 != 0 { ANY } else { mode };
+            let class = if step & 2 != 0 { ANY } else { class };
+            let kind = if step & 1 != 0 { ANY } else { kind };
+            let entry = self.graph.iter().find(|entry| entry.mode == mode && entry.class == class && entry.kind == kind);
+            if let Some((_, clip)) = entry.and_then(|entry| entry.slots.iter().find(|(label, _)| label == last)) {
+                return clip.as_deref().filter(|clip| clips.contains(clip)).map(str::to_owned);
+            }
+        }
+        None
     }
 
     /// The overlays `unit_animation_cache_overlays` leaves running over `clip`.
@@ -226,7 +238,7 @@ impl H2UnitWeapons {
         let name = clip.split('%').next().unwrap_or(clip);
         let mode = name.split(':').next().unwrap_or(name);
         let layer = |class: &str, kind: &str, last: &str, arm| {
-            let clip = Self::find_clip(clips, mode, class, kind, last)?;
+            let clip = self.find_clip(clips, mode, class, kind, last)?;
             Some(H2PoseLayer { clip, arm })
         };
         match (self.find(primary), self.find(secondary)) {
@@ -284,7 +296,7 @@ impl H2UnitWeapons {
             .graph
             .iter()
             .filter(|entry| entry.class == class && kinds.iter().any(|held| *held == entry.kind))
-            .flat_map(|entry| entry.slots.iter().map(String::as_str))
+            .flat_map(|entry| entry.slots.iter().filter_map(|(_, clip)| clip.as_deref()))
             .collect();
         let mut hidden = BTreeSet::new();
         for (index, clip) in clips.iter().enumerate() {
@@ -345,7 +357,7 @@ fn graph_entries(graph: &TagFile) -> Vec<GraphEntry> {
                 let actions = elements(kind, "actions");
                 let overlays = elements(kind, "overlays");
                 entries.push(GraphEntry {
-                    slots: actions.iter().chain(&overlays).filter_map(clip_of).collect(),
+                    slots: actions.iter().chain(&overlays).map(|slot| (label(*slot), clip_of(slot))).collect(),
                     mode: label(mode),
                     class: label(class),
                     kind: label(kind),
@@ -863,6 +875,12 @@ mod tests {
         GraphEntry { mode: mode.to_owned(), class: class.to_owned(), kind: kind.to_owned(), has_idle, slots: Vec::new() }
     }
 
+    /// `entry`, with slots by label and the clip each names.
+    fn slotted(mode: &str, class: &str, kind: &str, slots: &[(&str, &str)]) -> GraphEntry {
+        let slots = slots.iter().map(|(label, clip)| ((*label).to_owned(), Some((*clip).to_owned()))).collect();
+        GraphEntry { slots, ..entry(mode, class, kind, false) }
+    }
+
     fn weapon(name: &str, class: &str, kind: &str, dual: bool, only_dual: bool) -> H2Equippable {
         H2Equippable {
             option: WeaponOption { path: name.to_owned(), name: name.to_owned(), class: class.to_owned() },
@@ -881,10 +899,17 @@ mod tests {
             ],
             graph: vec![
                 entry("combat", "pistol", "any", true),
-                entry("combat", "pistol", "hp", false),
+                slotted("combat", "pistol", "hp", &[("grip", "combat:pistol:hp:grip")]),
                 entry("combat", "pistol", "ne", false),
                 entry("combat", "rifle", "any", true),
-                entry("combat", "dual", "any", true),
+                GraphEntry {
+                    has_idle: true,
+                    ..slotted("combat", "dual", "any", &[
+                        ("arm_offsets", "combat:dual:arm_offsets"),
+                        ("grip", "combat:dual:grip"),
+                    ])
+                },
+                slotted("combat", "dual", "hp", &[("arm_offsets", "combat:dual:hp:arm_offsets")]),
                 entry("combat", "unarmed", "any", true),
                 entry("ghost_d", "any", "any", true),
             ],
@@ -944,6 +969,30 @@ mod tests {
         assert_eq!(layers("combat:pistol:idle"), grip(None));
         assert_eq!(layers("combat:pistol:reload_1"), grip(Some(H2Arm::NotLeft)));
         assert!(unit.pose_layers(&clips, "combat:pistol:idle", None, None).is_empty());
+    }
+
+    /// The search tries `any` for the type, then the class, before the mode:
+    /// the `combat` mode's `any` class wins over the `any` mode's own pistol.
+    /// A slot whose clip lies in another graph still ends it.
+    #[test]
+    fn a_clip_is_found_along_the_games_search_path() {
+        let unit = H2UnitWeapons {
+            graph: vec![
+                slotted("any", "pistol", "hp", &[("grip", "any:pistol:hp:grip")]),
+                slotted("combat", "any", "any", &[("grip", "combat:grip")]),
+                slotted("crouch", "pistol", "any", &[("grip", "crouch:pistol:grip")]),
+            ],
+            ..Default::default()
+        };
+        let clips = ["any:pistol:hp:grip", "combat:grip", "crouch:pistol:grip"];
+        let find = |mode| unit.find_clip(&clips, mode, "pistol", "hp", "grip");
+        assert_eq!(find("combat").as_deref(), Some("combat:grip"));
+        assert_eq!(find("crouch").as_deref(), Some("crouch:pistol:grip"));
+        assert_eq!(find("flying").as_deref(), Some("any:pistol:hp:grip"), "the any mode last");
+        let mut elsewhere = unit.clone();
+        elsewhere.graph[1].slots[0].1 = None;
+        let find = |mode| elsewhere.find_clip(&clips, mode, "pistol", "hp", "grip");
+        assert_eq!(find("combat"), None, "found in another graph, so not the any mode's");
     }
 
     #[test]
@@ -1038,7 +1087,7 @@ mod tests {
             ("combat", "rifle", "br", true),
             ("combat", "rifle", "sr", true),
         ]);
-        weapons.graph[0].slots = vec!["combat:rifle:br:fire_1".to_owned()];
+        weapons.graph[0].slots = vec![("fire_1".to_owned(), Some("combat:rifle:br:fire_1".to_owned()))];
         let clips = ["combat:rifle:ar:grip", "combat:rifle:br:fire_1", "combat:rifle:br:grip", "combat:rifle:sr:fire_1"];
         let hidden = weapons.hidden(&clips, "rifle", &["ar".to_owned()]);
         assert_eq!(hidden.iter().copied().collect::<Vec<_>>(), [2, 3], "only the BR's own stay hidden");
