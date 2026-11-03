@@ -18,7 +18,6 @@ use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
-const STEP: f32 = 1.0 / 30.0;
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
 const MOST_POINTS: usize = 256;
@@ -391,9 +390,9 @@ impl CeContrailField {
                 .collect();
             self.time = Some(time - PRE_ROLL);
         }
-        let mut now = resume_point(self.time.unwrap_or(time), time, PRE_ROLL);
-        while now + STEP <= time {
-            now += STEP;
+        // `game_frame` runs `contrails_update` each frame, by the frame's time.
+        let now = resume_point(self.time.unwrap_or(time), time, PRE_ROLL);
+        for step in frame_steps(now, time) {
             for (contrail, running) in contrails.iter().zip(&mut self.running) {
                 let def = &contrail.def;
                 // `object_get_function_value`: none is on at one.
@@ -416,7 +415,7 @@ impl CeContrailField {
                     // `contrail_compute_new_point_count`.
                     let rate = def.rate * if def.scale_flags & SCALED_RATE != 0 { density } else { 1.0 };
                     let period = if rate != 0.0 { 1.0 / rate } else { f32::MAX };
-                    let mut left = STEP;
+                    let mut left = step;
                     while running.until_next <= left {
                         left -= running.until_next;
                         running.until_next = period;
@@ -432,7 +431,7 @@ impl CeContrailField {
                 }
                 let rate = def.animation_rate * if def.scale_flags & SCALED_ANIMATION_RATE != 0 { density } else { 1.0 };
                 if rate > 0.0 {
-                    let mut left = STEP;
+                    let mut left = step;
                     loop {
                         let span = 1.0 / rate - running.frame_time;
                         if span > left {
@@ -452,12 +451,12 @@ impl CeContrailField {
                     }
                 }
                 let scroll = |speed: f32, flag: i128| speed * if def.scale_flags & flag != 0 { density } else { 1.0 };
-                running.scroll[0] -= scroll(def.scroll[0], SCALED_SCROLL_U) * STEP;
-                running.scroll[1] += scroll(def.scroll[1], SCALED_SCROLL_V) * STEP;
+                running.scroll[0] -= scroll(def.scroll[0], SCALED_SCROLL_U) * step;
+                running.scroll[1] += scroll(def.scroll[1], SCALED_SCROLL_V) * step;
                 let RunningContrail { points, random, .. } = running;
                 for line in points.iter_mut() {
                     for point in line.iter_mut() {
-                        step_point(point, &def.states, ground, STEP, random);
+                        step_point(point, &def.states, ground, step, random);
                     }
                     // `contrail_update_points` drops the last point only once the
                     // one before it is done too, so a done point anchors the tail.
@@ -470,7 +469,7 @@ impl CeContrailField {
                 }
             }
         }
-        self.time = Some(now);
+        self.time = Some(time);
     }
 
     /// `render_contrail`, a quad between each two points of each marker's line.
@@ -576,7 +575,7 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
     for (line, (node, position, forward)) in running.points.iter_mut().zip(&contrail.markers) {
         let (origin, forward) = posed_on(*node, *position, *forward, bones);
         let forward = unit(forward);
-        // `contrail_add_points` spreads what one tick adds along the way
+        // `contrail_add_points` spreads what one frame adds along the way
         // from the last head point to the marker; the last lands on it.
         let head = line.first().map(|point| (point.place, point.velocity, point.density));
         for added in 1..=count {

@@ -18,7 +18,6 @@ use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
-const STEP: f32 = 1.0 / 30.0;
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
 const MOST_POINTS: usize = 256;
@@ -350,9 +349,9 @@ impl H2ContrailField {
                 .collect();
             self.time = Some(time - PRE_ROLL);
         }
-        let mut now = resume_point(self.time.unwrap_or(time), time, PRE_ROLL);
-        while now + STEP <= time {
-            now += STEP;
+        // `game_frame` runs `contrails_update` each frame, by the frame's time.
+        let now = resume_point(self.time.unwrap_or(time), time, PRE_ROLL);
+        for step in frame_steps(now, time) {
             for (contrail, running) in contrails.iter().zip(&mut self.running) {
                 let scale = if contrail.scale_by.is_empty() {
                     1.0
@@ -360,7 +359,7 @@ impl H2ContrailField {
                     values(contrail.object).and_then(|values| values.get(&contrail.scale_by).copied()).unwrap_or(0.0)
                 };
                 if scale > 0.0 {
-                    running.owed += contrail.rate * STEP;
+                    running.owed += contrail.rate * step;
                 }
                 let (origin, forward) = posed_on(contrail.node, contrail.position, contrail.forward, bones);
                 while running.owed >= 1.0 {
@@ -383,14 +382,14 @@ impl H2ContrailField {
                 }
                 let RunningContrail { points, random, .. } = running;
                 for point in points {
-                    step_point(point, &contrail.states, STEP, random);
+                    step_point(point, &contrail.states, step, random);
                 }
                 while running.points.last().is_some_and(|point| point.done) {
                     running.points.pop();
                 }
             }
         }
-        self.time = Some(now);
+        self.time = Some(time);
     }
 
     /// `contrail_vertex_builder`, a quad between each two points.
@@ -500,7 +499,7 @@ mod tests {
         let rise = |physics: PointPhysics| {
             let (mut place, mut velocity) = ([0.0; 3], [0.0; 3]);
             for _ in 0..30 {
-                physics.step(&mut place, &mut velocity, 0.05, STEP);
+                physics.step(&mut place, &mut velocity, 0.05, 1.0 / 30.0);
             }
             place[2]
         };
@@ -512,11 +511,11 @@ mod tests {
     #[test]
     fn friction_takes_up_what_a_point_was_thrown_with() {
         let (mut place, mut velocity) = ([0.0; 3], [1.0, 0.0, 0.0]);
-        SMOKE.step(&mut place, &mut velocity, 0.05, STEP);
+        SMOKE.step(&mut place, &mut velocity, 0.05, 1.0 / 30.0);
         assert!(velocity[0] < 1.0 && velocity[0] > 0.0);
         let free = PointPhysics { air_friction: 0.0, ..SMOKE };
         let mut velocity = [1.0, 0.0, 0.0];
-        free.step(&mut place, &mut velocity, 0.05, STEP);
+        free.step(&mut place, &mut velocity, 0.05, 1.0 / 30.0);
         assert_eq!(velocity[0], 1.0);
     }
 

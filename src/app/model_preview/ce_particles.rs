@@ -25,6 +25,8 @@ use crate::core::source::TagSource;
 /// A game tick, which is what `effects_update` steps by.
 const STEP: f32 = 1.0 / 30.0;
 const PRE_ROLL: f32 = 4.0;
+/// How far short of a tick the frames' time can fall by rounding alone.
+const TICK_ROUNDING: f32 = 1e-5;
 /// `effect_update` runs at most this many events in a tick.
 const MOST_EVENTS_A_TICK: usize = 8;
 /// The game's pool is shared by the whole level.
@@ -966,6 +968,8 @@ pub(crate) struct CeParticleField {
     spawned: Vec<CeEffectAt>,
     /// `game_time_get`.
     tick: u32,
+    /// The frames' time not yet run as ticks, as `game_time_update` keeps it.
+    owed: f32,
     random: Option<Random>,
     system_random: Option<SystemRandom>,
 }
@@ -1027,14 +1031,16 @@ fn turn_by_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
 }
 
 impl CeParticleField {
-    /// Step every effect and particle to `time`, by ticks.
     /// How many particles the systems its effects made hold.
     pub(crate) fn system_particle_count(&self) -> usize {
         self.systems.iter().map(|(_, _, running)| running.particle_count()).sum()
     }
 
-    /// Step every effect to `time`, by ticks; `others` particles of the
-    /// systems' shared array are in the object's attached systems.
+    /// Step every effect and particle to `time`, a frame at a time: each
+    /// frame first runs the ticks it owes, `effects_update` being in
+    /// `game_tick`, then moves particles and systems by its own time, as
+    /// `game_frame` does. `others` particles of the systems' shared array are
+    /// in the object's attached systems.
     pub(crate) fn advance(
         &mut self,
         effects: &[CeEffectAt],
@@ -1053,6 +1059,7 @@ impl CeParticleField {
             self.spawned.clear();
             self.system_random = Some(SystemRandom::seeded(0x5eed_4321));
             self.tick = 0;
+            self.owed = 0.0;
             self.random = Some(Random(0x1234_5678));
             let mut random = self.random.take().unwrap();
             for (running, effect) in self.effects.iter_mut().zip(effects) {
@@ -1064,71 +1071,96 @@ impl CeParticleField {
         let Some(now) = self.time else {
             return;
         };
-        let mut now = resume_point(now, time, PRE_ROLL);
+        let now = resume_point(now, time, PRE_ROLL);
         let mut random = self.random.take().unwrap_or(Random(1));
-        while now + STEP <= time {
-            now += STEP;
-            self.tick += 1;
+        for dt in frame_steps(now, time) {
             let effects: Vec<CeEffectAt> = effects.iter().chain(&self.spawned).cloned().collect();
-            let effects = effects.as_slice();
-            let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
-            for (index, effect) in effects.iter().enumerate() {
-                let state = inputs(effect.object);
-                let running = &mut self.effects[index];
-                let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
-                let made = Made {
-                    particles: &mut self.particles,
-                    lights: &mut self.lights,
-                    systems: &mut self.systems,
-                    system_random,
-                    system_room: &mut system_room,
-                    ground,
-                    tick: self.tick,
-                };
-                update_effect(index, running, effect, &state, made, &mut random, bones, STEP);
+            self.owed += dt;
+            // A frame of two half ticks owes a whole one, whatever the rounding.
+            while self.owed >= STEP - TICK_ROUNDING {
+                self.owed -= STEP;
+                self.tick_effects(&effects, &inputs, bones, ground, others, &mut random);
             }
-            // `particle_systems_update`; those with no type in a state go.
-            let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
-            self.systems.retain_mut(|(effect, def, running)| {
-                effects
-                    .get(*effect)
-                    .and_then(|effect| effect.def.systems.get(*def))
-                    .is_some_and(|def| update_unattached(def, running, ground, STEP, system_random, &mut system_room))
-            });
-            // `lights_preprocess_scene` lets go of those past their duration.
-            let tick = self.tick;
-            self.lights.retain(|light| {
-                effects.get(light.effect).and_then(|effect| effect.def.lights.get(light.def)).is_some_and(|def| def.alive(tick - light.born))
-            });
-            let mut made: Vec<CeEffectAt> = Vec::new();
-            self.particles.retain_mut(|particle| {
-                if particle.undrawn > MOST_UNDRAWN_FRAMES {
-                    return false;
-                }
-                let def = &effects[particle.effect].def.particles[particle.def];
-                let (fate, collided) = update_particle(particle, def, &mut random, ground, STEP);
-                // `particle_effect_new` for what it hit, then what it died of.
-                if let (Some(scale), Some(effect)) = (collided, &def.collision_effect) {
-                    made.extend(spawn_effect(effect, particle, scale));
-                }
-                if let (Fate::Died, Some(effect)) = (fate, &def.death_effect) {
-                    made.extend(spawn_effect(effect, particle, 0.0));
-                }
-                fate == Fate::Alive
-            });
-            for effect in made {
-                if self.spawned.len() >= MOST_SPAWNED {
-                    break;
-                }
-                let mut running = new_running();
-                set_event(&mut running, &effect.def, 0, &mut random);
-                self.effects.push(running);
-                self.spawned.push(effect);
-            }
+            self.frame_parts(&effects, ground, dt, others, &mut random);
             self.forget_spawned(own);
         }
-        self.time = Some(now);
+        self.time = Some(time);
         self.random = Some(random);
+    }
+
+    /// One `game_tick` of `effects_update`: every effect's events, and the
+    /// lights past their duration let go.
+    fn tick_effects(
+        &mut self,
+        effects: &[CeEffectAt],
+        inputs: &impl Fn(u8) -> CeObjectInputs,
+        bones: Option<&[[f32; 4]]>,
+        ground: f32,
+        others: usize,
+        random: &mut Random,
+    ) {
+        self.tick += 1;
+        let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
+        for (index, effect) in effects.iter().enumerate() {
+            let state = inputs(effect.object);
+            let running = &mut self.effects[index];
+            let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
+            let made = Made {
+                particles: &mut self.particles,
+                lights: &mut self.lights,
+                systems: &mut self.systems,
+                system_random,
+                system_room: &mut system_room,
+                ground,
+                tick: self.tick,
+            };
+            update_effect(index, running, effect, &state, made, random, bones, STEP);
+        }
+        // `lights_preprocess_scene` lets go of those past their duration.
+        let tick = self.tick;
+        self.lights.retain(|light| {
+            let def = effects.get(light.effect).and_then(|effect| effect.def.lights.get(light.def));
+            def.is_some_and(|def| def.alive(tick - light.born))
+        });
+    }
+
+    /// One `game_frame`, `dt` long: `particle_systems_update`, then
+    /// `particles_update` with the effects what they hit and died of make.
+    fn frame_parts(&mut self, effects: &[CeEffectAt], ground: f32, dt: f32, others: usize, random: &mut Random) {
+        let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
+        // Those with no type in a state go.
+        let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
+        self.systems.retain_mut(|(effect, def, running)| {
+            effects
+                .get(*effect)
+                .and_then(|effect| effect.def.systems.get(*def))
+                .is_some_and(|def| update_unattached(def, running, ground, dt, system_random, &mut system_room))
+        });
+        let mut made: Vec<CeEffectAt> = Vec::new();
+        self.particles.retain_mut(|particle| {
+            if particle.undrawn > MOST_UNDRAWN_FRAMES {
+                return false;
+            }
+            let def = &effects[particle.effect].def.particles[particle.def];
+            let (fate, collided) = update_particle(particle, def, random, ground, dt);
+            // `particle_effect_new` for what it hit, then what it died of.
+            if let (Some(scale), Some(effect)) = (collided, &def.collision_effect) {
+                made.extend(spawn_effect(effect, particle, scale));
+            }
+            if let (Fate::Died, Some(effect)) = (fate, &def.death_effect) {
+                made.extend(spawn_effect(effect, particle, 0.0));
+            }
+            fate == Fate::Alive
+        });
+        for effect in made {
+            if self.spawned.len() >= MOST_SPAWNED {
+                break;
+            }
+            let mut running = new_running();
+            set_event(&mut running, &effect.def, 0, random);
+            self.effects.push(running);
+            self.spawned.push(effect);
+        }
     }
 
     /// Lets go of the effects particles made that have run their events and
@@ -2050,6 +2082,22 @@ fn update_particle(particle: &mut CeParticle, def: &CeParticleDef, random: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `effects_update` runs per 30 Hz tick however the frames fall: a 120
+    /// fps frame owes a quarter of one, and the tick lands on the fourth.
+    #[test]
+    fn effects_tick_at_30_whatever_the_frame_rate() {
+        let inputs = |_| CeObjectInputs { outputs: [0.0; 4], active: [false; 4], change_colors: [[0.0; 3]; 4] };
+        let mut field = CeParticleField::default();
+        field.advance(&[], inputs, None, 0.0, 10.0, 0);
+        let settled = field.tick;
+        let mut ticks = Vec::new();
+        for frame in 1..=8 {
+            field.advance(&[], inputs, None, 0.0, 10.0 + frame as f32 / 120.0, 0);
+            ticks.push(field.tick - settled);
+        }
+        assert_eq!(ticks, [0, 0, 0, 1, 1, 1, 1, 2]);
+    }
 
     #[test]
     fn a_sprite_turns_as_build_sprite_compute_basis_turns_it() {

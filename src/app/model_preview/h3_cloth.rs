@@ -28,10 +28,17 @@ const MOST_HELD_LINKS: usize = 1210;
 /// The shortest a link is measured at, and how near a sphere's centre a point
 /// has no way out but `global_left3d`.
 const NEARLY_ZERO: f32 = 0.0001;
-/// What a game tick is, which everything here counts in.
-const TICK: f32 = 1.0 / 30.0;
-/// `cloth_update_positions_verlet`'s gravity, with its tick rate.
-const GRAVITY: f32 = -9.78 * 0.328_084 / 30.0 / 32.0;
+/// The game's ticks a second: `cloth_update` runs each cloth at most once a
+/// tick (`last_update_tick`), whatever the frame's time. Halo 2 ticks at 30;
+/// Halo 3 and ODST at their native rate, the 60 of `get_vblank_rate`.
+fn tick_rate(halo2: bool) -> f32 {
+    if halo2 { 30.0 } else { 60.0 }
+}
+
+/// `cloth_update_positions_verlet`'s gravity for one tick at `rate`.
+fn gravity_per_tick(rate: f32) -> f32 {
+    -9.78 * 0.328_084 / rate / 32.0
+}
 
 /// `cloth_update_wind` in Halo 2: its limit from straight up, and the ticks per
 /// second that its clock counts in.
@@ -101,7 +108,8 @@ impl H3Wind {
         [flat * cos, flat * sin, z]
     }
 
-    /// What the wind accelerates by this tick, `tick` counting from the start.
+    /// What the wind accelerates by this tick, `tick` counting from the start
+    /// in the 30-a-second ticks `cloth_update_wind` measures its clock in.
     pub(crate) fn step(&mut self, tick: f32) -> [f32; 3] {
         let t = tick * 0.3;
         if self.direction == [0.0; 3] {
@@ -443,7 +451,7 @@ fn read_cloth(
         pins,
         spheres,
         iterations: properties.read_int_any("Number iterations").unwrap_or(1).clamp(1, 8) as i32,
-        gravity: real("weight", -10.0, 10.0) * GRAVITY,
+        gravity: real("weight", -10.0, 10.0) * gravity_per_tick(tick_rate(halo2)),
         drag: real("drag", 0.0, 0.5),
         wind_scale: real("wind_scale", 0.0, 3.0),
         flappiness: properties.read_real("wind_flappiness_scale").unwrap_or(0.0),
@@ -736,11 +744,13 @@ impl H3ClothField {
             self.time = Some(time - SETTLE);
         }
         let mut now = resume_point(self.time.unwrap_or(time), time, SETTLE);
-        while now + TICK <= time {
-            now += TICK;
+        let halo2 = cloths.first().is_some_and(|cloth| cloth.halo2);
+        let tick = 1.0 / tick_rate(halo2);
+        while now + tick <= time {
+            now += tick;
             self.ticks += 1.0;
-            let halo2 = cloths.first().is_some_and(|cloth| cloth.halo2);
-            let wind = if halo2 { self.h2_wind.step(self.ticks) } else { self.wind.step(self.ticks) };
+            // Halo 3's wind clock counts the ticks the wind was authored at, 30 a second.
+            let wind = if halo2 { self.h2_wind.step(self.ticks) } else { self.wind.step(self.ticks * 30.0 * tick) };
             for (cloth, running) in cloths.iter().zip(&mut self.running) {
                 let pins = pins_of(cloth);
                 let spheres: Vec<([f32; 3], f32)> = cloth
@@ -841,7 +851,7 @@ mod tests {
             pins,
             spheres: Vec::new(),
             iterations: 5,
-            gravity: 0.5 * GRAVITY,
+            gravity: 0.5 * gravity_per_tick(tick_rate(false)),
             drag: 0.01,
             wind_scale: 0.15,
             flappiness: 0.25,
@@ -851,6 +861,24 @@ mod tests {
         let targets: Vec<[f32; 3]> = cloth.pins.iter().map(|pin| pin.position).collect();
         let running = RunningCloth::at_rest(&cloth, &targets);
         (cloth, running, targets)
+    }
+
+    /// `cloth_update` runs a cloth at most once a tick, so a faster frame
+    /// rate adds no steps, and Halo 3 ticks twice as often as Halo 2.
+    #[test]
+    fn cloth_steps_by_its_games_ticks_whatever_the_frame_rate() {
+        let ticks_over_a_second = |halo2: bool, frames: usize| {
+            let (cloth, _, _) = hung();
+            let cloths = [H3ClothAt { halo2, ..cloth }];
+            let mut field = H3ClothField::default();
+            field.advance(&cloths, None, 10.0);
+            let settled = field.ticks;
+            (1..=frames).for_each(|frame| _ = field.advance(&cloths, None, 10.0 + frame as f32 / frames as f32));
+            field.ticks - settled
+        };
+        assert_eq!(ticks_over_a_second(false, 60), 60.0);
+        assert_eq!(ticks_over_a_second(false, 240), 60.0, "frames between ticks add none");
+        assert_eq!(ticks_over_a_second(true, 60), 30.0, "Halo 2 ticks at 30");
     }
 
     #[test]
@@ -908,7 +936,7 @@ mod tests {
             }
             running.places[15]
         };
-        let (weightless, weighted) = (settled(0.0), settled(0.5 * GRAVITY));
+        let (weightless, weighted) = (settled(0.0), settled(gravity_per_tick(tick_rate(false))));
         assert!(weighted[2] < weightless[2] - 1e-4, "{weighted:?} against {weightless:?}");
         assert!(weighted[1].abs() < 1e-3, "nothing pushes it out of its plane");
         let (cloth, mut blown, pins) = hung();

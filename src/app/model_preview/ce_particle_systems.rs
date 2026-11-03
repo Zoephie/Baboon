@@ -20,8 +20,6 @@ use super::ce_particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpr
 use super::*;
 use crate::core::source::TagSource;
 
-/// A tick of the preview's stepping.
-const STEP: f32 = 1.0 / 30.0;
 /// How long a system runs before the preview first shows it.
 const PRE_ROLL: f32 = 4.0;
 /// `particle_system_new_particles` makes at most this many a call.
@@ -473,8 +471,9 @@ impl CeParticleSystemField {
         self.systems.iter().map(CeRunningSystem::particle_count).sum()
     }
 
-    /// Step every system to `time`, by ticks; `others` particles of the
-    /// shared array are in effects' systems.
+    /// Step every system to `time`, a frame at a time as `game_frame` runs
+    /// `particle_systems_update`; `others` particles of the shared array are
+    /// in effects' systems.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn advance(
         &mut self,
@@ -494,20 +493,19 @@ impl CeParticleSystemField {
         let Some(now) = self.time else {
             return;
         };
-        let mut now = resume_point(now, time, PRE_ROLL);
+        let now = resume_point(now, time, PRE_ROLL);
         let mut random = self.random.take().unwrap_or(Random(1));
-        while now + STEP <= time {
-            now += STEP;
+        for step in frame_steps(now, time) {
             let mut room = MOST_SYSTEM_PARTICLES.saturating_sub(self.particle_count() + others);
             for (system, running) in systems.iter().zip(&mut self.systems) {
                 let (outputs, active, change_colors) = inputs(system.object);
-                let dt = if running.first { 0.001 } else { STEP };
+                let dt = if running.first { 0.001 } else { step };
                 let inputs = (&outputs, &active, &change_colors);
                 update_system(system, running, inputs, bones, ground, dt, &mut random, &mut room);
                 running.first = false;
             }
         }
-        self.time = Some(now);
+        self.time = Some(time);
         self.random = Some(random);
     }
 

@@ -25,8 +25,6 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::game::GameId;
 use crate::core::source::TagSource;
 
-/// The game's tick, which everything here steps by.
-const STEP: f32 = 1.0 / 30.0;
 /// Seconds run before the first frame, so a held pose has its particles.
 const PRE_ROLL: f32 = 6.0;
 /// `s_sprite_frame_list`'s room.
@@ -2140,19 +2138,21 @@ fn axes_along(forward: [f32; 3]) -> [[f32; 3]; 3] {
     [forward, left, cross(forward, left)]
 }
 
-/// One step of one location, returning what its particles started and ended.
+/// A particle's birth, death or hit: its id, place and velocity.
+type ParticleEvent = (u64, [f32; 3], [f32; 3]);
+
+/// One step of one location, `dt` long, returning what its particles started
+/// and ended.
 #[allow(clippy::too_many_arguments)]
 fn step_location(
     system: &H3ParticleSystem,
     emitters: &mut [RunningEmitter],
     state: Option<H3ParticleState>,
-    origin: [f32; 3],
-    axes: [[f32; 3]; 3],
+    (origin, axes): ([f32; 3], [[f32; 3]; 3]),
     now: f32,
+    dt: f32,
     ground: f32,
-    births: &mut Vec<(u64, [f32; 3], [f32; 3])>,
-    deaths: &mut Vec<(u64, [f32; 3], [f32; 3])>,
-    hits: &mut Vec<(u64, [f32; 3], [f32; 3])>,
+    (births, deaths, hits): (&mut Vec<ParticleEvent>, &mut Vec<ParticleEvent>, &mut Vec<ParticleEvent>),
     tracks: &mut Vec<H3ParticleTrack>,
 ) {
     tracks.clear();
@@ -2169,15 +2169,15 @@ fn step_location(
         };
         if let Some(mut state) = state {
             state.system_seeds = running.system_seeds;
-            emitter.pulse(&system.look, state, running, STEP, frame, system.world, births, at);
+            emitter.pulse(&system.look, state, running, dt, frame, system.world, births, at);
             let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
-            emitter.step(state, &mut running.particles, STEP, home, deaths, ground, system.look.dies_at_rest);
+            emitter.step(state, &mut running.particles, dt, home, deaths, ground, system.look.dies_at_rest);
         } else {
             // The next run of its event is a new location's, with its burst.
             running.started = false;
             running.previous = None;
             let ground = Some((plane, system.look.dies_on_ground, &mut *hits));
-            emitter.step(rest, &mut running.particles, STEP, home, deaths, ground, system.look.dies_at_rest);
+            emitter.step(rest, &mut running.particles, dt, home, deaths, ground, system.look.dies_at_rest);
         }
         if !(system.attached.is_empty() && system.carried.is_empty()) {
             let (offset, turned) = frame;
@@ -2233,17 +2233,19 @@ fn with_lod(
     state.filter(|_| lod > 0.0).map(|state| H3ParticleState { lod, ..state })
 }
 
-/// `system_state` for a step ending at `time`, and for an event that came and
-/// went within it: the game's tick is half a step, and its one-tick events are many.
+/// `system_state` for a step `dt` long ending at `time`, and for an event that
+/// came and went within it: a frame can hold more than one of the game's
+/// ticks, and its one-tick events are many.
 fn system_state_stepped(
     system: &H3ParticleSystem,
     values: Option<&H2FunctionValues>,
     time: f32,
+    dt: f32,
     onset: f32,
 ) -> Option<H3ParticleState> {
     let since = time - onset;
     system_state(system, values, time, since).or_else(|| {
-        let inside = system.times.begins_within(system.event, since - STEP, since)?;
+        let inside = system.times.begins_within(system.event, since - dt, since)?;
         system_state(system, values, time, inside)
     })
 }
@@ -2550,7 +2552,8 @@ fn sprite_uv(frame: [f32; 4], uv: [f32; 2], scroll: [f32; 2], scale: f32) -> [f3
 }
 
 impl H3ParticleField {
-    /// Run everything up to `time`. A new field starts a pre-roll short, so a
+    /// Run everything up to `time`, a frame at a time as `effects_frame_advance`
+    /// runs the particle systems. A new field starts a pre-roll short, so a
     /// held pose has particles in flight from its first frame.
     pub(crate) fn advance(
         &mut self,
@@ -2581,8 +2584,8 @@ impl H3ParticleField {
                 onsets.of(system.object, &system.scale_by, scope.as_ref(), time)
             })
             .collect();
-        while now + STEP <= time {
-            now += STEP;
+        for dt in frame_steps(now, time) {
+            now += dt;
             let mut spawned = Vec::new();
             for (index, system) in systems.iter().enumerate() {
                 let (mut births, mut deaths, mut hits) = (Vec::new(), Vec::new(), Vec::new());
@@ -2603,20 +2606,21 @@ impl H3ParticleField {
                             }
                         }
                         // Its first step runs whatever its length: an event of a
-                        // tick is over before a step of the simulation ends.
-                        let first = age <= STEP * 1.5;
+                        // tick can be over before a frame ends.
+                        let first = age <= dt * 1.5;
                         let alive = first || run.lifetime.map_or(age < system.times.once(), |lifetime| age < lifetime);
                         if system.die_with_effect && !alive {
                             run.running.iter_mut().for_each(|running| running.particles.clear());
                         }
-                        let state = alive.then(|| system_state_stepped(system, None, now, run.start)).flatten();
+                        let state = alive.then(|| system_state_stepped(system, None, now, dt, run.start)).flatten();
                         let state = state.map(|state| H3ParticleState {
                             effect_a: run.effect_a,
                             system_age: run.lifetime.map_or(state.system_age, |lifetime| age / lifetime),
                             ..state
                         });
                         let state = with_lod(system, state, run.origin, eye);
-                        step_location(system, &mut run.running, state, run.origin, run.axes, now, ground, &mut births, &mut deaths, &mut hits, &mut no_tracks);
+                        let (place, events) = ((run.origin, run.axes), (&mut births, &mut deaths, &mut hits));
+                        step_location(system, &mut run.running, state, place, now, dt, ground, events, &mut no_tracks);
                         alive || run.running.iter().any(|running| !running.particles.is_empty())
                     });
                     self.instances[index] = runs;
@@ -2624,10 +2628,12 @@ impl H3ParticleField {
                 }
                 let scope = values(system.object);
                 let onset = onset_of[index];
-                let state = system_state_stepped(system, scope.as_ref(), now, onset);
+                let state = system_state_stepped(system, scope.as_ref(), now, dt, onset);
                 let (origin, axes) = location(system, bones);
                 let state = with_lod(system, state, origin, eye);
-                step_location(system, &mut self.running[index], state, origin, axes, now, ground, &mut births, &mut deaths, &mut hits, &mut self.tracks[index]);
+                let (running, tracks) = (&mut self.running[index], &mut self.tracks[index]);
+                let events = (&mut births, &mut deaths, &mut hits);
+                step_location(system, running, state, (origin, axes), now, dt, ground, events, tracks);
                 let off = !system.scale_by.is_empty()
                     && !scope.as_ref().and_then(|values| values.get(&system.scale_by)).is_some_and(|value| *value > 0.0);
                 if system.die_with_effect && (off || system.times.is_over(now - onset)) {
@@ -2686,7 +2692,7 @@ impl H3ParticleField {
                 });
             }
         }
-        self.time = Some(now);
+        self.time = Some(time);
     }
 
     /// The lifespan of a live particle of system `index`, by its id.

@@ -50,6 +50,21 @@ fn a_stalled_simulation_skips_rather_than_replays() {
     assert!((603.0..610.0).contains(&resumed), "ten minutes behind: {resumed}");
 }
 
+/// A frame is one step of its own length, up to Halo 3's cap of two ticks; a
+/// longer gap runs as 60 Hz frames that add up to it, and no gap runs none.
+#[test]
+fn a_frame_is_one_step_and_a_longer_gap_is_many() {
+    let steps = |last: f32, time: f32| frame_steps(last, time).collect::<Vec<_>>();
+    assert_eq!(steps(10.0, 10.0), [] as [f32; 0], "no time");
+    assert_eq!(steps(10.0, 9.0), [] as [f32; 0], "time going back");
+    assert_eq!(steps(0.0, 0.25 / 30.0), [0.25 / 30.0], "a 120 fps frame");
+    assert_eq!(steps(0.0, 1.0 / 30.0), [1.0 / 30.0], "the longest one step");
+    let gap = steps(0.0, 1.0);
+    assert_eq!(gap.len(), 60, "a second's gap");
+    assert!((gap.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+    assert!(gap.iter().all(|step| (step - 1.0 / 60.0).abs() < 1e-6));
+}
+
 #[test]
 fn bitmap_header_moves_actions_to_a_second_row_below_its_wrap_width() {
     let (wide_left, wide_right) = bitmap_header_control_rows(640.0, 400.0);

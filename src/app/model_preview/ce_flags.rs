@@ -13,8 +13,6 @@ use super::ce_particles::CePointPhysics;
 use super::*;
 use crate::core::source::TagSource;
 
-/// A tick of `flags_update`.
-const TICK: f32 = 1.0 / 30.0;
 /// The time `flag_render` gives the update that settles a flag first.
 const SETTLE: f32 = 5.0;
 /// The radius `flag_update` gives each point.
@@ -352,7 +350,8 @@ impl RunningFlag {
 
 impl CeFlagField {
     /// The flags brought up to `time`: settled once, as `flag_render` does on
-    /// the first frame, then a `flags_update` each tick. Returns each flag's
+    /// the first frame, then a `flags_update` each frame, as `widgets_update`
+    /// runs it from `game_frame`. Returns each flag's
     /// first vertex and its vertices as they now stand.
     pub(crate) fn advance(
         &mut self,
@@ -382,14 +381,13 @@ impl CeFlagField {
             // simulate before now.
             self.time = Some(time);
         }
-        let mut now = resume_point(self.time.unwrap_or(time), time, 0.0);
-        while now + TICK <= time {
-            now += TICK;
+        let now = resume_point(self.time.unwrap_or(time), time, 0.0);
+        for dt in frame_steps(now, time) {
             for (flag, running) in flags.iter().zip(&mut self.running) {
-                running.update(flag, &attached_of(flag), ground, TICK);
+                running.update(flag, &attached_of(flag), ground, dt);
             }
         }
-        self.time = Some(now);
+        self.time = Some(time);
         flags.iter().zip(&self.running).map(|(flag, running)| (flag.first_vertex, mesh(flag, running))).collect()
     }
 }

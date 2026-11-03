@@ -284,6 +284,32 @@ pub(super) fn resume_point(now: f32, time: f32, rollback: f32) -> f32 {
     now.max(time - rollback - MOST_FRAME_GAP)
 }
 
+/// The longest frame a frame-advanced simulation takes in one step: Halo 3
+/// and ODST's two 60 Hz ticks (`game_time_update` caps a frame's `game_dt` at
+/// them), the shortest cap of the games.
+const MOST_FRAME_STEP: f32 = 1.0 / 30.0;
+
+/// How long each frame of a longer gap is: a reset's pre-roll, which no game
+/// has, or a stall `resume_point` let through.
+const PRE_ROLL_FRAME: f32 = 1.0 / 60.0;
+
+/// The steps a frame-advanced simulation takes from `last` to `time`. Every
+/// game advances its particles, contrails and most widgets once per rendered frame,
+/// by that frame's time (`game_frame`, `effects_frame_advance`): a preview
+/// frame is one step of its own length, and a longer gap runs as
+/// [`PRE_ROLL_FRAME`]s.
+pub(super) fn frame_steps(last: f32, time: f32) -> impl Iterator<Item = f32> {
+    let gap = time - last;
+    let count = if gap <= 0.0 {
+        0
+    } else if gap <= MOST_FRAME_STEP {
+        1
+    } else {
+        (gap / PRE_ROLL_FRAME).ceil() as usize
+    };
+    std::iter::repeat_n(gap / count.max(1) as f32, count)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ModelErrorPrimitive {
     pub label: String,

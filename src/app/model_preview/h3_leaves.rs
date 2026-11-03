@@ -18,7 +18,10 @@ use crate::core::source::TagSource;
 
 /// `k_maximum_leaves_per_system`.
 const MOST_LEAVES: usize = 64;
-const TICK: f32 = 1.0 / 30.0;
+/// `game_tick_rate()`, the native 60 of Halo 3 and ODST.
+const TICK_RATE: f32 = 60.0;
+/// `game_tick_length()`, the most of a frame `leaf_system_update` steps by.
+const TICK: f32 = 1.0 / TICK_RATE;
 /// `leaf_system_update_physics`' constants.
 const MOST_WIND: f32 = 0.0087;
 const WIND_EXCLUSION: f32 = 150.0 * std::f32::consts::PI / 180.0;
@@ -381,8 +384,8 @@ impl RunningLeaves {
     }
 
     /// `leaf_system_update_physics`.
-    fn update(&mut self, system: &H3LeavesAt, wind: [f32; 3], tick: f32) {
-        let dt = tick * system.time_scale * tick * 30.0;
+    fn update(&mut self, system: &H3LeavesAt, wind: [f32; 3], frame: f32) {
+        let dt = frame * system.time_scale * frame * TICK_RATE;
         self.alive += dt;
         if dt <= 0.0 {
             return;
@@ -491,7 +494,8 @@ impl RunningLeaves {
 pub(crate) struct H3LeafField {
     wind: H3Wind,
     time: Option<f32>,
-    ticks: f32,
+    /// The game's time, in seconds, that the wind's clock reads.
+    seconds: f32,
     running: Vec<RunningLeaves>,
 }
 
@@ -508,18 +512,20 @@ impl H3LeafField {
             let settle = systems.iter().map(|system| system.lifetime).fold(0.0, f32::max).min(MOST_SETTLE);
             self.time = Some(time - settle);
         }
-        let mut now = resume_point(self.time.unwrap_or(time), time, MOST_SETTLE);
-        while now + TICK <= time {
-            now += TICK;
-            self.ticks += 1.0;
-            let wind = self.wind.step(self.ticks);
+        // `widgets_update` runs `leaf_system_update` each frame, by the frame's time.
+        let now = resume_point(self.time.unwrap_or(time), time, MOST_SETTLE);
+        for step in frame_steps(now, time) {
+            let dt = step.clamp(0.0001, TICK);
+            self.seconds += step;
+            // `cloth_update_wind`'s clock counts the 30-a-second ticks it was authored at.
+            let wind = self.wind.step(self.seconds * 30.0);
             for (system, running) in systems.iter().zip(&mut self.running) {
-                running.emit(system, TICK);
-                running.update(system, wind, TICK);
-                running.clean_up(system, TICK);
+                running.emit(system, dt);
+                running.update(system, wind, dt);
+                running.clean_up(system, dt);
             }
         }
-        self.time = Some(now);
+        self.time = Some(time);
     }
 
     /// `leaf_system_render_opaque`'s triangles.
