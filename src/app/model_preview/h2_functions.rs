@@ -30,6 +30,11 @@ struct FunctionFlags {
     /// `random time offset`: a periodic function runs ahead by a fraction of
     /// a second that differs per object.
     random_time_offset: bool,
+    /// `always exports value`: off, it still exports its value.
+    always_exports_value: bool,
+    /// `turn off with uses magnitude`: the `turn off with` function must also
+    /// be above 0.
+    turn_off_with_uses_magnitude: bool,
 }
 
 impl FunctionFlags {
@@ -42,6 +47,8 @@ impl FunctionFlags {
             mapping_does_not_control_active: set("mapping does not controls active"),
             always_active: set("always active"),
             random_time_offset: set("random time offset"),
+            always_exports_value: set("always exports value"),
+            turn_off_with_uses_magnitude: set("turn off with uses magnitude"),
         }
     }
 }
@@ -71,15 +78,34 @@ struct H2ObjectFunction {
     import: String,
     export: String,
     turn_off_with: String,
+    /// Reach's `ranged interpolation name`: what feeds the curve's range.
+    range: String,
     min_value: f32,
     function: Arc<TagFunction>,
     scale_by: String,
+}
+
+/// Whose `object_get_function_value` an object answers by. They agree but for
+/// which function of a name answers and how `turn off with` is read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum FunctionRules {
+    /// Halo 2's `sub_86F2F0` and `sub_86ECD0`: the last function of a name
+    /// stands, and `turn off with` reads what the type exports.
+    #[default]
+    Halo2,
+    /// Halo 3 (`halo3.dll` `sub_1803463B0`, `sub_180346118`) and Reach (the
+    /// 360's `object_get_function_value` 0x82b4b2c0 and
+    /// `object_function_get_function_value` 0x82b4b908): the first function
+    /// of a name answers, and `turn off with` is looked up in full. ODST's
+    /// are not read; it sits between two that agree.
+    Gen3,
 }
 
 /// An object's `functions` block, and what its type exports to it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct H2ObjectFunctions {
     functions: Vec<H2ObjectFunction>,
+    rules: FunctionRules,
     /// None for an object whose exporters are not known (Halo 3 and ODST),
     /// which reads [`object_input`] instead.
     exports: Option<TypeExports>,
@@ -330,16 +356,18 @@ impl H2ObjectFunction {
             return (*value, true);
         }
         let (input, mut active) = owner.exported(&self.import, inputs);
+        // No name reads full, which is what an object with no such field gets.
+        let range = if self.range.is_empty() { 1.0 } else { owner.value(&self.range, inputs, scripted, clock, depth + 1).0 };
         let mapping_passes = self.flags.mapping_does_not_control_active;
         let mut value;
         if self.is_periodic() {
             let time = if self.flags.random_time_offset { clock.time + clock.offset } else { clock.time };
-            value = self.function.evaluate(time, 1.0) * input;
+            value = self.function.evaluate(time, range) * input;
         } else if !active && mapping_passes {
             value = input;
         } else {
             let inverted = if self.flags.invert { 1.0 - input } else { input };
-            value = self.function.evaluate(inverted, 1.0);
+            value = self.function.evaluate(inverted, range);
             if !mapping_passes {
                 active = value > 0.0;
             }
@@ -356,9 +384,19 @@ impl H2ObjectFunction {
             active = true;
         }
         if active && !self.turn_off_with.is_empty() {
-            active = owner.exported(&self.turn_off_with, inputs).1;
+            active = match owner.rules {
+                FunctionRules::Halo2 => owner.exported(&self.turn_off_with, inputs).1,
+                FunctionRules::Gen3 => {
+                    let (magnitude, on) = owner.value(&self.turn_off_with, inputs, scripted, clock, depth + 1);
+                    on && (!self.flags.turn_off_with_uses_magnitude || magnitude != 0.0)
+                }
+            };
         }
-        if !active { (0.0, false) } else { (value.clamp(0.0, 1.0), true) }
+        match (active, self.flags.always_exports_value) {
+            (true, _) => (value.clamp(0.0, 1.0), true),
+            (false, true) => (value.clamp(0.0, 1.0), false),
+            (false, false) => (0.0, false),
+        }
     }
 }
 
@@ -391,10 +429,10 @@ impl H2ObjectFunctions {
         !self.type_exports(name) && self.functions.iter().any(|function| function.export == name)
     }
 
-    /// `sub_86F2F0`, `object_get_function_value`: a script's value first
-    /// (`object_set_function_variable`, read by `sub_8E7890`), then nothing
-    /// named reads full, then what the object's type exports, then its
-    /// functions, the last of a name standing.
+    /// `object_get_function_value`: a script's value first
+    /// (`object_set_function_variable`, read by Halo 2's `sub_8E7890`), then
+    /// nothing named reads full, then what the object's type exports, then
+    /// its functions: by [`FunctionRules`], the last or the first of a name.
     fn value(
         &self,
         name: &str,
@@ -415,8 +453,12 @@ impl H2ObjectFunctions {
         if self.type_exports(name) {
             return self.exported(name, inputs);
         }
-        let last = self.functions.iter().rev().find(|function| function.export == name);
-        match last {
+        let named = |function: &&H2ObjectFunction| function.export == name;
+        let answers = match self.rules {
+            FunctionRules::Halo2 => self.functions.iter().rev().find(named),
+            FunctionRules::Gen3 => self.functions.iter().find(named),
+        };
+        match answers {
             Some(function) => function.evaluate(self, inputs, scripted, clock, depth),
             None => self.exported(name, inputs),
         }
@@ -511,13 +553,18 @@ pub(crate) fn read_h2_object_functions(object: &TagFile, model: Option<&TagFile>
                 import: name(entry, "import name"),
                 export: name(entry, "export name"),
                 turn_off_with: name(entry, "turn off with"),
+                range: name(entry, "ranged interpolation name"),
                 min_value: entry.read_real("min value").unwrap_or(0.0),
                 function: Arc::new(tag_function_at(&entry, "default function")?),
                 scale_by: name(entry, "scale by"),
             })
         })
         .collect();
-    Some(H2ObjectFunctions { functions, exports: TypeExports::of(object, model) })
+    let rules = match blam_tags::game::Game::of(object) {
+        blam_tags::game::Game::Halo2 => FunctionRules::Halo2,
+        _ => FunctionRules::Gen3,
+    };
+    Some(H2ObjectFunctions { functions, rules, exports: TypeExports::of(object, model) })
 }
 
 /// A button for each effect an event would play. An effect starts when its
@@ -653,7 +700,7 @@ mod tests {
         let mut down = function("shield_depleted", "shield_down");
         down.turn_off_with = "body_vitality".to_owned();
         let chained = function("shield_hit", "glow");
-        let functions = H2ObjectFunctions { functions: vec![shield, down, chained], exports: None };
+        let functions = H2ObjectFunctions { functions: vec![shield, down, chained], ..Default::default() };
         let reached = functions.reaching(&["glow".to_owned()]);
         for name in ["glow", "shield_hit", "current_shield_damage", "scale"] {
             assert!(reached.iter().any(|known| known == name), "{name}");
@@ -669,6 +716,7 @@ mod tests {
             import: import.to_owned(),
             export: export.to_owned(),
             turn_off_with: String::new(),
+            range: String::new(),
             min_value: 0.0,
             function: identity(),
             scale_by: String::new(),
@@ -677,14 +725,14 @@ mod tests {
 
     fn value(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> f32 {
         let inputs = inputs.iter().map(|(name, value)| ((*name).to_owned(), *value)).collect();
-        let functions = H2ObjectFunctions { functions, exports: None };
+        let functions = H2ObjectFunctions { functions, ..Default::default() };
         functions.value(name, &inputs, &H2FunctionValues::new(), Clock::default(), 0).0
     }
 
     #[test]
     fn a_script_sets_what_a_function_makes_and_what_it_reads() {
         let functions = vec![function("", "invincibility"), function("zero", "effects")];
-        let functions = H2ObjectFunctions { functions, exports: None };
+        let functions = H2ObjectFunctions { functions, ..Default::default() };
         let none = H2FunctionValues::new();
         let scripted: H2FunctionValues = [("invincibility".to_owned(), 1.0)].into_iter().collect();
         assert_eq!(functions.value("invincibility", &none, &none, Clock::default(), 0).0, 0.0, "an empty import reads nothing");
@@ -717,7 +765,7 @@ mod tests {
     fn device(functions: Vec<H2ObjectFunction>) -> H2ObjectFunctions {
         let tables = &[OBJECT_EXPORTS, DEVICE_EXPORTS];
         let exports = TypeExports { tables, has_body: true, has_shield: false, variants: 4 };
-        H2ObjectFunctions { functions, exports: Some(exports) }
+        H2ObjectFunctions { functions, exports: Some(exports), ..Default::default() }
     }
 
     #[test]
@@ -747,7 +795,7 @@ mod tests {
     #[test]
     fn without_known_exporters_the_functions_answer_first() {
         // Halo 3 and ODST, whose exporters this does not have.
-        let functions = H2ObjectFunctions { functions: vec![function("one", "position")], exports: None };
+        let functions = H2ObjectFunctions { functions: vec![function("one", "position")], ..Default::default() };
         let none = H2FunctionValues::new();
         assert_eq!(functions.value("position", &none, &none, Clock::default(), 0), (1.0, true));
     }
@@ -764,6 +812,65 @@ mod tests {
         let tied = H2ObjectFunction { turn_off_with: "alive".to_owned(), ..function("speed", "glow") };
         assert_eq!(value(vec![tied.clone()], "glow", &[("speed", 1.0), ("alive", 0.0)]), 0.0);
         assert_eq!(value(vec![tied], "glow", &[("speed", 1.0), ("alive", 1.0)]), 1.0);
+    }
+
+    fn gen3(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> (f32, bool) {
+        let inputs = inputs.iter().map(|(name, value)| ((*name).to_owned(), *value)).collect();
+        let functions = H2ObjectFunctions { functions, rules: FunctionRules::Gen3, exports: None };
+        functions.value(name, &inputs, &H2FunctionValues::new(), Clock::default(), 0)
+    }
+
+    #[test]
+    fn halo_3_and_reach_take_the_first_function_of_a_name() {
+        let list = vec![function("speed", "glow"), function("power", "glow")];
+        assert_eq!(gen3(list.clone(), "glow", &[("speed", 0.25), ("power", 0.75)]).0, 0.25);
+        assert_eq!(value(list, "glow", &[("speed", 0.25), ("power", 0.75)]), 0.75, "Halo 2 the last");
+    }
+
+    #[test]
+    fn halo_3_and_reach_look_turn_off_with_up_in_full_and_can_ask_its_magnitude() {
+        // `alive` is made by a function here, which Halo 2's exported read misses.
+        let made = function("power", "alive");
+        let tied = H2ObjectFunction { turn_off_with: "alive".to_owned(), ..function("speed", "glow") };
+        let inputs = [("speed", 1.0), ("power", 0.0)];
+        assert_eq!(gen3(vec![tied.clone(), made.clone()], "glow", &inputs), (0.0, false));
+        assert_eq!(value(vec![tied.clone(), made.clone()], "glow", &inputs), 1.0, "Halo 2 reads the idle export");
+        let inputs = [("speed", 1.0), ("power", 0.5)];
+        assert_eq!(gen3(vec![tied.clone(), made.clone()], "glow", &inputs), (1.0, true));
+        // On, but by magnitude: a mapping that holds it active at 0.
+        let held = H2ObjectFunction { flags: FunctionFlags { always_active: true, ..Default::default() }, ..made };
+        let magnitude = H2ObjectFunction {
+            flags: FunctionFlags { turn_off_with_uses_magnitude: true, ..Default::default() },
+            ..tied.clone()
+        };
+        let inputs = [("speed", 1.0), ("power", 0.0)];
+        assert_eq!(gen3(vec![tied, held.clone()], "glow", &inputs), (1.0, true), "on is enough");
+        assert_eq!(gen3(vec![magnitude, held], "glow", &inputs), (0.0, false), "0 turns it off");
+    }
+
+    #[test]
+    fn always_exports_value_keeps_its_value_while_off() {
+        let held = H2ObjectFunction { min_value: 0.5, ..function("speed", "glow") };
+        let exporting = H2ObjectFunction {
+            flags: FunctionFlags { always_exports_value: true, ..Default::default() },
+            ..held.clone()
+        };
+        assert_eq!(gen3(vec![held], "glow", &[("speed", 0.25)]), (0.0, false));
+        assert_eq!(gen3(vec![exporting], "glow", &[("speed", 0.25)]), (0.25, false));
+    }
+
+    #[test]
+    fn a_range_name_feeds_the_curves_range() {
+        // A curve whose output is its range: a constant of 0 below, 1 above.
+        let mut ranged = blam_tags::tag_function::H2Function::new(FunctionType::Constant);
+        ranged.set_clamp_range(0.0, 1.0).unwrap();
+        let encoding = blam_tags::tag_function::FunctionEncoding::H2;
+        let curve = TagFunction::parse_encoded(encoding, &ranged.to_bytes()).unwrap();
+        let low = curve.evaluate(0.5, 0.0);
+        let high = curve.evaluate(0.5, 1.0);
+        let function = H2ObjectFunction { range: "heat".to_owned(), function: Arc::new(curve), ..function("speed", "glow") };
+        assert_eq!(gen3(vec![function.clone()], "glow", &[("speed", 0.5), ("heat", 0.0)]).0, low.clamp(0.0, 1.0));
+        assert_eq!(gen3(vec![function], "glow", &[("speed", 0.5), ("heat", 1.0)]).0, high.clamp(0.0, 1.0));
     }
 
     #[test]
