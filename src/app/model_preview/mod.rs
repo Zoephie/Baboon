@@ -1123,9 +1123,7 @@ fn weapon_dropdown(
 
 /// Note what should outlive the reload a weapon change makes.
 fn carry_through_weapon_change(data: &ModelPreviewData, state: &mut ModelPreviewState) {
-    let animations = data.animations.as_deref().map_or(&[][..], Vec::as_slice);
-    state.ce_clip_after_load =
-        state.animation.selected.and_then(|index| Some(animations.get(index)?.name.clone()));
+    state.remember_selection();
     state.ce_weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
 }
 

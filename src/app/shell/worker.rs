@@ -178,6 +178,8 @@ pub(in crate::app) enum WorkerMessage {
     ModelAnimationsListed {
         stamp: KitStamp,
         key: String,
+        /// The geometry it was listed for; a reload since makes it stale.
+        geometry_id: u64,
         result: Result<Vec<PreviewAnimationEntry>, String>,
     },
     /// One animation decoded into per-frame node transforms, off the UI
@@ -186,6 +188,8 @@ pub(in crate::app) enum WorkerMessage {
     ModelAnimationDecoded {
         stamp: KitStamp,
         key: String,
+        /// As `ModelAnimationsListed`.
+        geometry_id: u64,
         animation_index: usize,
         result: Result<DecodedAnimationPose, String>,
     },

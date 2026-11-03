@@ -723,10 +723,9 @@ pub(super) fn draw_variant_header_actions(
             .on_hover_text("Create a .model variant using the visible region selections.")
             .clicked()
         {
-            edit.model_variant_ops.push(ModelVariantOp::Create {
-                name: create_name.expect("button enabled only when name is valid"),
-                regions: chosen_regions.clone(),
-            });
+            let name = create_name.expect("button enabled only when name is valid");
+            state.variant_after_load = Some(name.clone());
+            edit.model_variant_ops.push(ModelVariantOp::Create { name, regions: chosen_regions.clone() });
             state.new_variant_name.clear();
             mutation_requested = true;
             close_menu(ui);

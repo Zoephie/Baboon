@@ -1337,6 +1337,11 @@ mod tests {
     }
 }
 
+/// Whether the preview loaded now is the geometry `geometry_id`.
+fn is_current_geometry(state: &ModelPreviewState, geometry_id: u64) -> bool {
+    matches!(&state.data, Some(Ok(data)) if data.geometry_id == geometry_id)
+}
+
 impl Baboon {
     /// Start listing the animations in a loaded `.model` preview's linked
     /// graph, once per load, on a worker. Rides the same per-frame hook as
@@ -1381,6 +1386,7 @@ impl Baboon {
             kit: kit.id,
             generation: kit.generation,
         };
+        let geometry_id = data.geometry_id;
         if let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(key) {
             state.animation.requested_list = true;
         }
@@ -1392,11 +1398,13 @@ impl Baboon {
             move || WorkerMessage::ModelAnimationsListed {
                 stamp,
                 key,
+                geometry_id,
                 result: list_model_animations(&source, &entry),
             },
             move |_| WorkerMessage::ModelAnimationsListed {
                 stamp,
                 key: panic_key,
+                geometry_id,
                 result: Err("the animation graph crashed the reader".to_owned()),
             },
         );
@@ -1449,6 +1457,7 @@ impl Baboon {
             kit: kit.id,
             generation: kit.generation,
         };
+        let geometry_id = data.geometry_id;
         let mut layers = Vec::new();
         if let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(key) {
             state.animation.decoding = Some(selected);
@@ -1467,12 +1476,14 @@ impl Baboon {
             move || WorkerMessage::ModelAnimationDecoded {
                 stamp,
                 key,
+                geometry_id,
                 animation_index: selected,
                 result: decode_held_animation(&source, &entry, selected, &layers),
             },
             move |_| WorkerMessage::ModelAnimationDecoded {
                 stamp,
                 key: panic_key,
+                geometry_id,
                 animation_index: selected,
                 result: Err("this animation crashed the decoder".to_owned()),
             },
@@ -1484,6 +1495,7 @@ impl Baboon {
         &mut self,
         stamp: KitStamp,
         key: String,
+        geometry_id: u64,
         result: Result<Vec<PreviewAnimationEntry>, String>,
     ) -> bool {
         let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
@@ -1493,6 +1505,10 @@ impl Baboon {
         let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
             return true;
         };
+        // Listed for geometry a reload has since replaced, which lists its own.
+        if !is_current_geometry(state, geometry_id) {
+            return true;
+        }
         if stale {
             // Asked for once per preview, so a list dropped as stale has to be
             // asked for again, or it never arrives.
@@ -1503,7 +1519,8 @@ impl Baboon {
             Ok(entries) => {
                 if let Some(Ok(data)) = state.data.as_mut() {
                     // Taken only by the game it is for: H2 reads it below.
-                    let ce_clip = data.ce_weapons.as_ref().and_then(|weapons| Some((state.ce_clip_after_load.take()?, weapons)));
+                    let ce_clip =
+                        data.ce_weapons.as_ref().and_then(|weapons| Some((state.clip_after_load.take()?, weapons)));
                     if let Some((clip, weapons)) = ce_clip {
                         let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
                         let class = held.map_or("unarmed", |weapon| weapon.class.as_str());
@@ -1519,7 +1536,7 @@ impl Baboon {
                             .held(state.weapon.as_deref(), state.secondary_weapon.as_deref());
                         let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();
                         weapons.hidden_clips = weapons.hidden(&names, &class, &kinds);
-                        if let Some(clip) = state.ce_clip_after_load.take() {
+                        if let Some(clip) = state.clip_after_load.take() {
                             let hidden = &weapons.hidden_clips;
                             let shown = |name: &str| {
                                 (0..entries.len()).find(|index| {
@@ -1531,6 +1548,10 @@ impl Baboon {
                             state.animation.selected = shown(clip.split('%').next().unwrap_or_default())
                                 .or_else(|| shown(&format!("{mode}:{class}:idle")));
                         }
+                    }
+                    // Any other reload: the same clip, if the geometry still has it.
+                    if let Some(clip) = state.clip_after_load.take() {
+                        state.animation.selected = entries.iter().position(|entry| entry.name == clip);
                     }
                     data.animations = Some(std::sync::Arc::new(entries));
                 }
@@ -1544,6 +1565,7 @@ impl Baboon {
         &mut self,
         stamp: KitStamp,
         key: String,
+        geometry_id: u64,
         animation_index: usize,
         result: Result<DecodedAnimationPose, String>,
     ) -> bool {
@@ -1554,6 +1576,12 @@ impl Baboon {
         let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
             return true;
         };
+        // Decoded for geometry a reload has since replaced: what it holds,
+        // and its index, belong to the old clip list, and the reload's own
+        // decode may be running for the same index.
+        if !is_current_geometry(state, geometry_id) {
+            return true;
+        }
         // Cleared before the staleness check, so a decode dropped for a
         // generation bump does not leave the clip "decoding" for good.
         if state.animation.decoding == Some(animation_index) {

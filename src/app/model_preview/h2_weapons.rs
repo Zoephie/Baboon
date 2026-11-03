@@ -787,6 +787,7 @@ pub(super) fn attach_variant_objects(
         }
     }
     let mut attached_objects = Vec::new();
+    let mut names: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (index, entry) in objects.iter().enumerate() {
         let Ok(owner) = u8::try_from(index + usize::from(FIRST_CHILD_OWNER)) else {
             break;
@@ -801,7 +802,12 @@ pub(super) fn attach_variant_objects(
         };
         let parent = MarkerFrame::find(preview, &entry.parent_marker);
         let child = MarkerFrame::find(&attached, &entry.child_marker);
-        let name = tag_path::name(&entry.path).to_owned();
+        // Two children of one name (a tag on two markers, or two tags in
+        // different folders) keep their regions and effects apart.
+        let base = tag_path::name(&entry.path);
+        let seen = names.entry(base.to_owned()).or_insert(0);
+        *seen += 1;
+        let name = if *seen == 1 { base.to_owned() } else { format!("{base} {seen}") };
         let choices: Vec<(String, String)> = attached
             .regions
             .iter()

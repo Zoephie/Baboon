@@ -223,8 +223,11 @@ pub(in crate::app) struct ModelPreviewState {
     /// What outlives the reload a weapon change makes: the old geometry's id,
     /// for its function inputs, and the region selections.
     pub(in crate::app) ce_weapon_carry: Option<(u64, HashMap<String, ModelRegionSelection>)>,
-    /// The clip playing when the weapon changed, picked again once listed.
-    pub(in crate::app) ce_clip_after_load: Option<String>,
+    /// The clip selected before a reload, picked again by name once listed.
+    pub(in crate::app) clip_after_load: Option<String>,
+    /// The variant selected before a reload, or one just created, chosen
+    /// again by name once loaded.
+    pub(in crate::app) variant_after_load: Option<String>,
     /// `.model` tags only: draw the collision overlay. A draw-time filter,
     /// not a rebuild — the overlay geometry is built once on a worker when
     /// the preview loads, so toggling is instant in both directions.
@@ -309,7 +312,8 @@ impl Default for ModelPreviewState {
             secondary_weapon: None,
             loaded_secondary_weapon: None,
             ce_weapon_carry: None,
-            ce_clip_after_load: None,
+            clip_after_load: None,
+            variant_after_load: None,
             show_collision: false,
             show_physics: false,
             overlays_pending: false,
@@ -345,9 +349,28 @@ impl ModelPreviewState {
     /// rebuilds from the document as it is now. Dropping the pending load
     /// matters after an edit: its worker is parsing the bytes from before it.
     pub(in crate::app) fn invalidate_load(&mut self) {
+        self.remember_selection();
         self.loaded_key = None;
         self.data = None;
         self.preview_load_id = None;
+    }
+
+    /// Note the clip and variant selected, by name, for the reload to choose
+    /// again; what is noted already (a weapon change's clip, a variant just
+    /// created) stays.
+    pub(in crate::app) fn remember_selection(&mut self) {
+        let Some(Ok(data)) = &self.data else {
+            return;
+        };
+        let animations = data.animations.as_deref().map_or(&[][..], Vec::as_slice);
+        let clip = self.animation.selected.and_then(|index| Some(animations.get(index)?.name.clone()));
+        let variant = self.selected_variant.and_then(|index| Some(data.variants.get(index)?.name.clone()));
+        if self.clip_after_load.is_none() {
+            self.clip_after_load = clip;
+        }
+        if self.variant_after_load.is_none() {
+            self.variant_after_load = variant;
+        }
     }
 
     /// Whether the cached preview no longer matches what the panel should

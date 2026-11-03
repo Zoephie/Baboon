@@ -115,6 +115,7 @@ impl Baboon {
         state.loaded_weapon = settings.weapon.clone();
         state.loaded_secondary_weapon = settings.secondary_weapon.clone();
         state.preview_load_id = Some(request_id);
+        state.remember_selection();
         state.data = None;
         state.render_model_path = None;
         // A fresh base load orphans any overlay, material, or animation work
@@ -123,7 +124,19 @@ impl Baboon {
         state.overlays_pending = false;
         state.overlays_loaded = false;
         state.textures_pending = false;
-        state.animation = PreviewAnimationPlayback::default();
+        // How the clip plays outlives the reload; the clip itself is picked
+        // again by name once the new geometry lists its own.
+        let kept = std::mem::take(&mut state.animation);
+        state.animation = PreviewAnimationPlayback {
+            playing: kept.playing,
+            stopped: kept.stopped,
+            looped: kept.looped,
+            interpolate: kept.interpolate,
+            speed: kept.speed,
+            time: kept.time,
+            filter: kept.filter,
+            ..PreviewAnimationPlayback::default()
+        };
 
         let (worker_key, panic_key) = (key.to_owned(), key.to_owned());
         let load = move || -> Result<_, String> {
@@ -176,10 +189,13 @@ impl Baboon {
         }
         if let Ok(data) = &result {
             state.render_model_path = Some(data.render_model_path.clone());
-            // Auto-select the canonical variant (named `default`, else the
-            // first) so both cards arrive in one consistent state.
-            let default_variant = default_variant_index(data);
-            reset_model_preview_selection(state, data, default_variant);
+            // The variant chosen before the reload, by name, else the canonical
+            // one (named `default`, else the first), so both cards arrive in
+            // one consistent state.
+            let remembered = state.variant_after_load.take();
+            let remembered = remembered.and_then(|name| data.variants.iter().position(|variant| variant.name == name));
+            let variant = remembered.or_else(|| default_variant_index(data));
+            reset_model_preview_selection(state, data, variant);
             // A weapon change only swaps what the unit holds.
             if let Some((geometry_id, regions)) = state.ce_weapon_carry.take() {
                 for (region, selection) in regions {
@@ -703,12 +719,19 @@ pub(super) fn load_model_preview(
     // `maybe_request_model_overlays` builds them once on a worker after this
     // load lands, and the toggles are draw-time filters from then on.
     preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names);
-    Ok(model_preview_data(
-        render_entry.key,
-        normalized,
-        preview,
-        read_model_variants(model_tag),
-    ))
+    let mut data = model_preview_data(render_entry.key, normalized, preview, read_model_variants(model_tag));
+    // The `.model` opened itself lists what its variants attach. An object
+    // reaches here for its `.model` and attaches them once it has read its own.
+    let opened = entry.group_tag == u32::from_be_bytes(*b"hlmt");
+    let source = source.filter(|source| {
+        matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst), .. })
+    });
+    if let Some(source) = source.filter(|_| opened) {
+        let preview = std::sync::Arc::make_mut(&mut data.preview);
+        let attached = super::h2_weapons::attach_variant_objects(source, model_tag, &mut data.variants, preview);
+        data.h2_attached.extend(attached);
+    }
+    Ok(data)
 }
 
 /// The `.model` an object stands for. `None` for any other tag, which is its
@@ -1311,8 +1334,9 @@ struct CeMeshSyncIndex {
 }
 
 /// Cache of the mesh-sync index, keyed by the mounted container set's identity
-/// (its `.utoc` paths). Building it scans every package header once (~5s), so we
-/// keep it for the life of the mount rather than rebuilding per preview.
+/// ([`ce_container_set_key`]). Building it scans every package header once
+/// (~5s), so we keep it for the life of the mount rather than rebuilding per
+/// preview.
 static CE_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CeMeshSyncIndex>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -1330,11 +1354,26 @@ struct CePathIndex {
 static CE_PATH_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CePathIndex>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// A container set's identity: its `.utoc` paths.
+/// A container set's identity: its `.utoc` paths, with each one's size and
+/// modified time, so a game update that rewrites them makes a new set rather
+/// than reusing indices of the old.
 fn ce_container_set_key(containers: &[MountedContainer]) -> String {
-    containers
-        .iter()
-        .map(|c| c.utoc_path.display().to_string())
+    files_key(containers.iter().map(|c| c.utoc_path.as_path()))
+}
+
+/// Files by path, size and modified time.
+fn files_key<'a>(paths: impl Iterator<Item = &'a std::path::Path>) -> String {
+    let stamp = |path: &std::path::Path| {
+        let metadata = std::fs::metadata(path).ok();
+        let modified = metadata.as_ref().and_then(|metadata| metadata.modified().ok());
+        let since = modified.and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok());
+        (metadata.map_or(0, |metadata| metadata.len()), since.map_or(0, |since| since.as_nanos()))
+    };
+    paths
+        .map(|path| {
+            let (len, modified) = stamp(path);
+            format!("{}@{len}@{modified}", path.display())
+        })
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -1575,12 +1614,8 @@ static CE_MH_CACHE: LazyLock<Mutex<HashMap<String, Arc<CeMetaHumanTables>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn ce_metahuman_tables(containers: &[MountedContainer]) -> Arc<CeMetaHumanTables> {
-    let key = containers
-        .iter()
-        .map(|c| c.utoc_path.display().to_string())
-        .collect::<Vec<_>>()
-        .join("|");
-    let mut cache = CE_MH_CACHE.lock().unwrap();
+    let key = ce_container_set_key(containers);
+    let mut cache = CE_MH_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(t) = cache.get(&key) {
         return t.clone();
     }
@@ -3425,6 +3460,114 @@ mod tests {
         assert!(!fixture.state().loaded_high_detail);
     }
 
+    /// Refresh, an edit or a saved variant reloads the preview: the variant
+    /// stays chosen by name, and the animation plays on as it was set.
+    #[test]
+    fn a_reload_keeps_the_variant_and_how_the_animation_plays() {
+        let tags = crate::core::test_kits::h3ek_tags();
+        let rel = "objects/vehicles/warthog/warthog.model";
+        let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
+            return;
+        };
+        fixture.frames_until_loaded();
+        let variants: Vec<String> = match &fixture.state().data {
+            Some(Ok(data)) => data.variants.iter().map(|variant| variant.name.clone()).collect(),
+            _ => panic!("the warthog loads"),
+        };
+        let chosen = variants.iter().position(|name| name != "default").expect("a variant past default");
+        let state = fixture.state_mut();
+        state.selected_variant = Some(chosen);
+        state.animation.speed = 0.5;
+        state.animation.looped = false;
+        state.invalidate_load();
+        fixture.frames_until_loaded();
+        let state = fixture.state();
+        assert_eq!(state.selected_variant.map(|index| variants[index].as_str()), Some(variants[chosen].as_str()));
+        assert_eq!((state.animation.speed, state.animation.looped), (0.5, false));
+    }
+
+    /// The overlays landing seed their collision-only regions as the chosen
+    /// variant does, so the variant still reads as chosen, not "(custom)".
+    #[test]
+    fn overlays_landing_keep_the_variant_chosen() {
+        let tags = crate::core::test_kits::h3ek_tags();
+        let rel = "objects/vehicles/warthog/warthog.model";
+        let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
+            return;
+        };
+        fixture.frames_until_loaded();
+        let kit = &fixture.app.model.kits[0];
+        let stamp = KitStamp { kit: kit.id, generation: kit.generation };
+        let (geometry_id, chosen) = match &fixture.state().data {
+            Some(Ok(data)) => (data.geometry_id, data.variants.iter().position(|variant| variant.name != "default")),
+            _ => panic!("the warthog loads"),
+        };
+        fixture.state_mut().selected_variant = chosen;
+        let state = fixture.state_mut();
+        if let Some(Ok(data)) = &state.data {
+            state.region_selections = super::super::variants::compute_variant_selection(data, chosen);
+        }
+        // Its first permutation is not the one a variant gives it.
+        let mut collision = RenderModelPreview::default();
+        collision.regions = vec![RenderModelPreviewRegion {
+            name: "collision only".to_owned(),
+            permutations: vec!["~broken".to_owned(), "whole".to_owned()],
+        }];
+        let key = fixture.key.clone();
+        fixture.app.handle_model_overlays_built(stamp, key, geometry_id, Some(collision), None);
+        let state = fixture.state();
+        let Some(Ok(data)) = &state.data else { panic!("still loaded") };
+        assert_eq!(super::super::variants::detect_active_variant(data, state), Some(chosen));
+    }
+
+    /// A rewritten container (a game update) keys a new set, so its indices
+    /// are built afresh rather than reused.
+    #[test]
+    fn a_rewritten_container_keys_a_new_set() {
+        let path = std::env::temp_dir().join(format!("baboon-utoc-key-{}", std::process::id()));
+        std::fs::write(&path, b"before").unwrap();
+        let before = files_key(std::iter::once(path.as_path()));
+        assert_eq!(before, files_key(std::iter::once(path.as_path())), "an unchanged file keys the same");
+        std::fs::write(&path, b"after the update").unwrap();
+        let after = files_key(std::iter::once(path.as_path()));
+        std::fs::remove_file(&path).ok();
+        assert_ne!(before, after);
+    }
+
+    /// A clip list made for geometry a reload has replaced is dropped; one made
+    /// for the geometry loaded now lands.
+    #[test]
+    fn a_clip_list_for_replaced_geometry_is_dropped() {
+        let tags = crate::core::test_kits::h3ek_tags();
+        let rel = "objects/vehicles/warthog/warthog.model";
+        let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
+            return;
+        };
+        fixture.frames_until_loaded();
+        let kit = &fixture.app.model.kits[0];
+        let stamp = KitStamp { kit: kit.id, generation: kit.generation };
+        let current = match &fixture.state().data {
+            Some(Ok(data)) => data.geometry_id,
+            _ => panic!("the warthog loads"),
+        };
+        let listed = |geometry_id| crate::app::WorkerMessage::ModelAnimationsListed {
+            stamp,
+            key: fixture.key.clone(),
+            geometry_id,
+            result: Ok(Vec::new()),
+        };
+        let animations = |fixture: &Fixture| match &fixture.state().data {
+            Some(Ok(data)) => data.animations.is_some(),
+            _ => false,
+        };
+        fixture.app.tx.send(listed(current + 1)).unwrap();
+        fixture.app.process_worker_messages(&fixture.ctx);
+        assert!(!animations(&fixture), "the old geometry's list landed");
+        fixture.app.tx.send(listed(current)).unwrap();
+        fixture.app.process_worker_messages(&fixture.ctx);
+        assert!(animations(&fixture), "the current geometry's list was dropped");
+    }
+
     /// An edit invalidates the preview while a load is in flight: the worker is
     /// parsing the bytes from before the edit, so its result must not land.
     #[test]
@@ -4035,6 +4178,41 @@ mod kit_object_tests {
         }
         let chaingun = values.iter().filter(|(_, own)| own.contains_key(name));
         assert_eq!(chaingun.count(), 1, "the chaingun answers {name}");
+    }
+
+    /// A `.model` opened on its own shows what its variants attach, as its
+    /// object does: the warthog's turret and the rest.
+    #[test]
+    fn a_halo_3_model_opened_alone_brings_its_variants_children() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let path = "objects\\vehicles\\warthog\\warthog";
+        let model = kit_preview(&root, GameId::Halo3, path, "model", b"hlmt");
+        let vehicle = kit_preview(&root, GameId::Halo3, path, "vehicle", b"vehi");
+        assert!(!model.h2_attached.is_empty(), "the model's children");
+        let owners = |data: &ModelPreviewData| {
+            data.h2_attached.iter().map(|attached| attached.owner).collect::<Vec<_>>()
+        };
+        assert_eq!(owners(&model), owners(&vehicle), "the same children, once each");
+    }
+
+    /// The phantom carries two plasma cannons of one tag: each has regions of
+    /// its own, rather than both answering to one selection.
+    #[test]
+    fn children_of_one_name_keep_their_regions_apart() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\phantom\\phantom", "vehicle", b"vehi");
+        let mut names: Vec<&str> = data.preview.regions.iter().map(|region| region.name.as_str()).collect();
+        let count = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), count, "a region name repeats");
+        assert!(names.contains(&"plasma_cannon 2: barrel"));
     }
 
     /// A Halo 3 light alone keeps the picture moving with its object, as

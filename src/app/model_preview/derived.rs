@@ -1478,18 +1478,11 @@ pub(super) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderMod
             sort_position: batch.sort_position,
         });
     }
+    // A region `dst` has keeps its own permutations: an overlay's names would
+    // show as choices that hide the render geometry, and its batches fall back
+    // to their first permutation when the chosen one is not theirs.
     for region in &src.regions {
-        if let Some(existing) = dst
-            .regions
-            .iter_mut()
-            .find(|existing| existing.name == region.name)
-        {
-            for permutation in &region.permutations {
-                if !existing.permutations.contains(permutation) {
-                    existing.permutations.push(permutation.clone());
-                }
-            }
-        } else {
+        if !dst.regions.iter().any(|existing| existing.name == region.name) {
             dst.regions.push(region.clone());
         }
     }
@@ -1696,26 +1689,12 @@ impl Baboon {
             data.mesh_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);
         }
         // The layer filter also consults region selection, so collision-only
-        // regions need entries. Shared names retain the render model's active
-        // permutation and therefore follow the same variant selection.
-        let regions = state
-            .data
-            .as_ref()
-            .and_then(|data| data.as_ref().ok())
-            .map(|data| data.preview.regions.clone())
-            .unwrap_or_default();
-        for region in regions {
-            state
-                .region_selections
-                .entry(region.name)
-                .or_insert(ModelRegionSelection {
-                    enabled: true,
-                    permutation: region
-                        .permutations
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "default".to_owned()),
-                });
+        // regions need entries: what the selected variant gives them, so the
+        // variant still reads as chosen. Shared names keep the render model's.
+        if let Some(Ok(data)) = &state.data {
+            for (region, selection) in compute_variant_selection(data, state.selected_variant) {
+                state.region_selections.entry(region).or_insert(selection);
+            }
         }
         // Textures are keyed by `textures_id`, which the merge leaves alone:
         // a resolve in flight still lands, and resolved ones stay uploaded.
@@ -2319,6 +2298,17 @@ mod tests {
             2,
             "the overlay's region joins the region list as its toggle"
         );
+
+        // A region both have keeps the render model's permutations: the
+        // overlay's would be choices that show nothing of the render model.
+        dst.regions[0].permutations = vec!["default".to_owned()];
+        let mut overlay = empty_preview();
+        overlay.regions = vec![RenderModelPreviewRegion {
+            name: dst.regions[0].name.clone(),
+            permutations: vec!["damaged".to_owned()],
+        }];
+        merge_preview_append(&mut dst, &overlay);
+        assert_eq!(dst.regions[0].permutations, ["default"]);
         assert!(dst.bounds_max[2] >= 2.0 - 1e-4, "bounds must expand");
     }
 
