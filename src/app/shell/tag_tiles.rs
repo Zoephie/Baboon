@@ -322,6 +322,8 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
     /// group icon, as the hand-rolled tab rack did. Everything else — the
     /// close button, the drag sense, the active-tab hairline — mirrors the
     /// default; only the icon and the width it needs are new.
+    fn close_button_outer_size(&self) -> f32 { 20.0 }
+
     fn tab_ui(
         &mut self,
         tiles: &mut egui_tiles::Tiles<String>,
@@ -428,15 +430,8 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                 let close_response = ui
                     .interact(close_rect, close_id, Sense::click_and_drag())
                     .on_hover_cursor(egui::CursorIcon::Default);
-                let visuals = ui.style().interact(&close_response);
-                let rect = close_rect
-                    .shrink(self.close_button_inner_margin())
-                    .expand(visuals.expansion);
-                let stroke = visuals.fg_stroke;
-                ui.painter()
-                    .line_segment([rect.left_top(), rect.right_bottom()], stroke);
-                ui.painter()
-                    .line_segment([rect.right_top(), rect.left_bottom()], stroke);
+                close_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Close"));
+                paint_close_control(ui, &close_response);
                 if close_response.clicked() && self.on_tab_close(tiles, tile_id) {
                     tiles.remove(tile_id);
                 }

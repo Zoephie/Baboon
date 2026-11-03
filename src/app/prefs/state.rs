@@ -226,6 +226,15 @@ pub(in crate::app) enum CustomEditingKitIconDraft {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) enum CustomEditingKitInput {
+    Name,
+    Root,
+    Tags,
+    Data,
+    Icon,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct CustomEditingKitDraft {
     pub(in crate::app) read_only: bool,
     pub(in crate::app) git_tracked: bool,
@@ -243,6 +252,7 @@ pub(in crate::app) struct CustomEditingKitDraft {
     pub(in crate::app) data_folder_auto: bool,
     pub(in crate::app) icon: CustomEditingKitIconDraft,
     pub(in crate::app) error: Option<String>,
+    pub(in crate::app) error_input: Option<CustomEditingKitInput>,
     pub(in crate::app) icon_warning: Option<String>,
 }
 
@@ -272,6 +282,7 @@ impl CustomEditingKitDraft {
             data_folder_auto: true,
             icon: CustomEditingKitIconDraft::Default,
             error: None,
+            error_input: None,
             icon_warning: None,
         }
     }
@@ -294,6 +305,7 @@ impl CustomEditingKitDraft {
                 .map(CustomEditingKitIconDraft::Existing)
                 .unwrap_or(CustomEditingKitIconDraft::Default),
             error: None,
+            error_input: None,
             icon_warning: None,
         }
     }

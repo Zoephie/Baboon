@@ -144,7 +144,7 @@ impl Dialog for StringTransferWindow {
                             browse = icon_text_button(ui, ButtonIcon::Browse, "Browse…", true).clicked();
                             let mut path = self.path.as_ref().map_or_else(String::new, |path| path.display().to_string());
                             let response = ui.add_sized(Vec2::new(ui.available_width(), BUTTON_HEIGHT),
-                                egui::TextEdit::singleline(&mut path).vertical_align(egui::Align::Center).hint_text("Select or enter a path…"));
+                                crate::app::ui_kit::singleline_text_edit(&mut path).hint_text("Select or enter a path…"));
                             if response.changed() {
                                 self.path = (!path.is_empty()).then(|| PathBuf::from(path));
                                 changed = true;

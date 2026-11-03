@@ -4750,12 +4750,13 @@ mod tests {
                         egui::Shape::Text(text) if clipped.clip_rect.contains(text.pos) => Some((text.galley.text().to_owned(), text.pos.y)),
                         _ => None,
                     });
-                    // The box is the rectangle painted in the text-edit fill;
-                    // the text editor inside it is as tall as all its text.
-                    let box_fill = ctx.global_style().visuals.text_edit_bg_color();
+                    // Every input shares this fill. The multiline box is
+                    // taller than this fixture's single-line fields.
+                    let box_fill = foundation_input();
                     fn filled(shape: &egui::Shape, fill: egui::Color32) -> Option<egui::Rect> {
                         match shape {
-                            egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                            egui::Shape::Rect(rect) if rect.fill == fill
+                                && rect.rect.height() > BUTTON_HEIGHT => Some(rect.rect),
                             egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| filled(shape, fill)),
                             _ => None,
                         }

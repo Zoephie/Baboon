@@ -65,33 +65,6 @@ pub(in crate::app) fn paint_frame_band(
     });
 }
 
-/// Baboon's default for a single-row text field: keep text vertically centered.
-pub(in crate::app) fn singleline_text_edit(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
-    egui::TextEdit::singleline(text).vertical_align(egui::Align::Center)
-}
-
-/// The standard input with the shared error palette. A custom frame keeps
-/// the error border visible through hover and focus, with the usual padding.
-pub(in crate::app) fn singleline_text_edit_with_error<'a>(
-    ui: &Ui,
-    text: &'a mut dyn egui::TextBuffer,
-    invalid: bool,
-) -> egui::TextEdit<'a> {
-    let edit = singleline_text_edit(text);
-    if invalid {
-        edit.text_color(invalid_value_text()).frame(
-            egui::Frame::new()
-                .fill(invalid_value_fill())
-                .stroke(invalid_value_stroke())
-                .corner_radius(ui.visuals().widgets.inactive.corner_radius)
-                // The one-pixel stroke completes the usual 4-by-2 margin.
-                .inner_margin(egui::Margin::symmetric(3, 1)),
-        )
-    } else {
-        edit
-    }
-}
-
 pub(in crate::app) fn paint_alpha_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
     let tile = ALPHA_CHECKER_TILE_SIZE as f32;
     painter.rect_filled(rect, 0.0, editor_bg());

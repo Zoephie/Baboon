@@ -2330,7 +2330,7 @@ fn draw_completion_list(
                 let mut filter_changed = false;
                 if total > COMPLETION_ROWS {
                     let search = ui.push_id(filter_id, |ui| {
-                        let edit = egui::TextEdit::singleline(&mut completion.filter)
+                        let edit = crate::app::ui_kit::singleline_text_edit(&mut completion.filter)
                             .id(filter_id)
                             .hint_text(placeholder_text("Filter…"))
                             .desired_width(ui.available_width());

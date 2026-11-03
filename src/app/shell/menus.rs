@@ -124,8 +124,8 @@ impl Baboon {
 /// The top menu bar: the File, Edit, Tools, View, Help and Editing Kits
 /// menus, then the tool launcher buttons.
 pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuState, view: &mut KitView) {
-    egui::Panel::top("menu")
-        .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
+    let bar = egui::Panel::top("menu")
+        .frame(Frame::NONE.fill(row_type()).inner_margin(egui::Margin {
             left: 6,
             right: 6,
             top: 2,
@@ -152,6 +152,8 @@ pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuStat
                 ui.add_enabled_ui(!menu.home, |ui| draw_tool_launcher_buttons(cx, ui));
             });
         });
+    ui.painter().hline(bar.response.rect.x_range(), bar.response.rect.bottom() - 0.5,
+        Stroke::new(1.0, grid_line()));
 }
 
 #[cfg(test)]

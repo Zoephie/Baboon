@@ -32,6 +32,7 @@ pub(in crate::app) fn paint_disclosure_chevron(
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(in crate::app) enum ButtonIcon {
     Add,
+    AddWorkspace,
     About,
     AssetBrowser,
     Browse,
@@ -126,7 +127,7 @@ pub(in crate::app) enum ButtonIcon {
 
 pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
     match icon {
-        ButtonIcon::Add => include_root_str!("assets/Button Icons/Add.svg"),
+        ButtonIcon::Add | ButtonIcon::AddWorkspace => include_root_str!("assets/Button Icons/Add.svg"),
         ButtonIcon::About => include_root_str!("assets/Button Icons/About.svg"),
         ButtonIcon::AssetBrowser => include_root_str!("assets/Button Icons/Asset Browser.svg"),
         ButtonIcon::Browse => include_root_str!("assets/Button Icons/Browse.svg"),
@@ -460,7 +461,12 @@ fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
         return button_icon_svg(icon).to_owned();
     }
     let color = svg_color(color);
-    button_icon_svg(icon)
+    let source = if icon == ButtonIcon::AddWorkspace {
+        button_icon_svg(icon).replace("#7EEB47", "currentColor")
+    } else {
+        button_icon_svg(icon).to_owned()
+    };
+    source
         .replace("currentColor", &color)
         .replace("#A3C0C2", &color)
         .replace("#5CCC33", &color)
@@ -599,24 +605,6 @@ pub(in crate::app) fn aligned_menu_button<R>(
     let previous_padding = ui.spacing().button_padding.x;
     ui.spacing_mut().button_padding.x = 8.0;
     let menu = aligned_menu_custom_button(ui, egui::Button::new(title), None, add_contents);
-    ui.spacing_mut().button_padding.x = previous_padding;
-    menu
-}
-
-pub(in crate::app) fn right_aligned_menu_button<R>(
-    ui: &mut Ui,
-    title: impl Into<egui::WidgetText>,
-    popup_width: f32,
-    add_contents: impl FnOnce(&mut Ui) -> R,
-) -> egui::InnerResponse<Option<R>> {
-    let previous_padding = ui.spacing().button_padding.x;
-    ui.spacing_mut().button_padding.x = 8.0;
-    let menu = aligned_menu_custom_button(
-        ui,
-        egui::Button::new(title),
-        Some(popup_width),
-        add_contents,
-    );
     ui.spacing_mut().button_padding.x = previous_padding;
     menu
 }

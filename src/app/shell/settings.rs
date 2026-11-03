@@ -311,11 +311,21 @@ fn editing_kit_field_label(ui: &mut Ui, label: &str) {
     ui.label(RichText::new(label).strong().color(text_dark()));
 }
 
-fn editing_kit_text_input(value: &mut String, width: f32) -> egui::TextEdit<'_> {
+fn editing_kit_text_input(value: &mut String, width: f32) -> SinglelineTextEdit<'_> {
     crate::app::ui_kit::singleline_text_edit(value)
         .desired_width(width)
         .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
         .vertical_align(egui::Align::Center)
+}
+
+fn editing_kit_input_state(draft: &CustomEditingKitDraft, field: CustomEditingKitInput) -> InputState {
+    if draft.error.is_some() && draft.error_input.as_ref() == Some(&field) {
+        InputState::Invalid
+    } else if field == CustomEditingKitInput::Icon && draft.icon_warning.is_some() {
+        InputState::Warning
+    } else {
+        InputState::Normal
+    }
 }
 
 fn draw_editing_kit_form(
@@ -340,13 +350,16 @@ fn draw_editing_kit_form(
     ui.columns(2, |columns| {
         editing_kit_field_label(&mut columns[0], "Name");
         let width = columns[0].available_width();
+        let state = editing_kit_input_state(draft, CustomEditingKitInput::Name);
         if columns[0]
             .add(
                 editing_kit_text_input(&mut draft.name, width)
+                    .validation_state(state)
                     .hint_text(placeholder_text("Editing kit name")),
             )
             .changed()
         {
+            if draft.error_input == Some(CustomEditingKitInput::Name) { draft.error = None; }
             ui_repaint_for_kit_draft(&columns[0]);
         }
         editing_kit_field_label(&mut columns[1], "Engine");
@@ -363,6 +376,7 @@ fn draw_editing_kit_form(
                         )
                         .changed()
                     {
+                        draft.error = None;
                         refill_kit_folders(draft);
                         ui_repaint_for_kit_draft(ui);
                     }
@@ -371,6 +385,7 @@ fn draw_editing_kit_form(
     });
     ui.add_space(8.0);
     editing_kit_field_label(ui, "Editing Kit Root Folder");
+    let root_state = editing_kit_input_state(draft, CustomEditingKitInput::Root);
     ui.horizontal(|ui| {
         let width = (ui.available_width()
             - editing_kit_action_width(ui, "Browse")
@@ -381,6 +396,7 @@ fn draw_editing_kit_form(
         if ui
             .add(
                 editing_kit_text_input(&mut draft.root_input, width)
+                    .validation_state(root_state)
                     .hint_text(placeholder_text("Kit root, tags folder, or game install")),
             )
             .changed()
@@ -420,6 +436,7 @@ fn draw_editing_kit_form(
     }
     ui.add_space(8.0);
     editing_kit_field_label(ui, "Custom Icon (.png)");
+    let icon_state = editing_kit_input_state(draft, CustomEditingKitInput::Icon);
     ui.horizontal(|ui| {
         let mut display = draft_icon_path(ui.ctx(), &draft.icon)
             .map(|path| path.display().to_string())
@@ -432,6 +449,7 @@ fn draw_editing_kit_form(
             .max(40.0);
         ui.add(
             editing_kit_text_input(&mut display, width)
+                .validation_state(icon_state)
                 .interactive(false)
                 .hint_text(placeholder_text("Default engine artwork")),
         );
@@ -457,7 +475,10 @@ fn draw_editing_kit_form(
                     });
                     ui_repaint_for_kit_draft(ui);
                 }
-                Err(error) => draft.error = Some(error),
+                Err(error) => {
+                    draft.error = Some(error);
+                    draft.error_input = Some(CustomEditingKitInput::Icon);
+                }
             }
         }
         if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
@@ -581,6 +602,9 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
     let root = PathBuf::from(draft.root_input.trim());
     ui.add_space(8.0);
     editing_kit_field_label(ui, folder.label());
+    let field = match folder { KitFolder::Tags => CustomEditingKitInput::Tags, KitFolder::Data => CustomEditingKitInput::Data };
+    let state = editing_kit_input_state(draft, field.clone());
+    let mut changed = false;
     ui.horizontal(|ui| {
         let width = (ui.available_width()
             - editing_kit_action_width(ui, "Browse")
@@ -591,9 +615,10 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
         let hint = format!("{} (the root's own)", folder.name());
         let (input, auto) = folder.input(draft);
         if ui
-            .add(editing_kit_text_input(input, width).hint_text(placeholder_text(&hint)))
+            .add(editing_kit_text_input(input, width).validation_state(state).hint_text(placeholder_text(&hint)))
             .changed()
         {
+            changed = true;
             *auto = input.trim().is_empty();
             ui_repaint_for_kit_draft(ui);
         }
@@ -603,6 +628,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
                 dialog = dialog.set_directory(&root);
             }
             if let Some(path) = dialog.pick_folder() {
+                changed = true;
                 *input = path
                     .strip_prefix(&root)
                     .map(Path::to_path_buf)
@@ -614,6 +640,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
             }
         }
         if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
+            changed = true;
             input.clear();
             *auto = true;
             ui_repaint_for_kit_draft(ui);
@@ -637,6 +664,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
             for name in candidates.iter() {
                 let selected = input.trim().eq_ignore_ascii_case(name);
                 if ui.selectable_label(selected, name).clicked() {
+                    changed = true;
                     *input = name.clone();
                     *auto = false;
                     ui_repaint_for_kit_draft(ui);
@@ -644,6 +672,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
             }
         });
     }
+    if changed && draft.error_input == Some(field) { draft.error = None; }
 }
 
 fn settings_window_body(
@@ -948,9 +977,11 @@ impl Baboon {
     }
 
     fn commit_custom_editing_kit_draft(&mut self, draft: &mut CustomEditingKitDraft) -> bool {
+        draft.error_input = None;
         let name = draft.name.trim().to_owned();
         if name.is_empty() {
             draft.error = Some("Enter an editing kit name".to_owned());
+            draft.error_input = Some(CustomEditingKitInput::Name);
             return false;
         }
         let Some(game) = game_for_saved_id(&draft.game) else {
@@ -975,6 +1006,12 @@ impl Baboon {
             Ok(layout) => layout,
             Err(error) => {
                 draft.error = Some(error);
+                draft.error_input = Some(if choosable && root_input.is_dir()
+                    && (tags_input.is_some() || data_input.is_some()) {
+                    if validate_kit_layout(&root_input, game.as_str(), tags_input.as_deref(), None).is_err() {
+                        CustomEditingKitInput::Tags
+                    } else { CustomEditingKitInput::Data }
+                } else { CustomEditingKitInput::Root });
                 return false;
             }
         };
@@ -984,6 +1021,7 @@ impl Baboon {
             &layout.tags,
         ) {
             draft.error = Some("Another editing kit already uses this tags folder".to_owned());
+            draft.error_input = Some(if choosable { CustomEditingKitInput::Tags } else { CustomEditingKitInput::Root });
             return false;
         }
         let tags_folder = choosable
@@ -1023,6 +1061,7 @@ impl Baboon {
                     Ok(relative) => Some(relative),
                     Err(error) => {
                         draft.error = Some(error);
+                        draft.error_input = Some(CustomEditingKitInput::Icon);
                         return false;
                     }
                 }
@@ -2138,6 +2177,36 @@ fn ui_scale_from_percent(percent: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kit_settings_mark_the_invalid_input_only_after_validation() {
+        let mut app = Baboon::for_test();
+        let mut draft = CustomEditingKitDraft::new();
+        assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Name), InputState::Normal);
+        assert!(!app.commit_custom_editing_kit_draft(&mut draft));
+        assert_eq!(draft.error_input, Some(CustomEditingKitInput::Name));
+        assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Name), InputState::Invalid);
+        draft.name = "Test kit".to_owned();
+        draft.root_input = "C:/missing-test-kit-4ad686d7".to_owned();
+        assert!(!app.commit_custom_editing_kit_draft(&mut draft));
+        assert_eq!(draft.error_input, Some(CustomEditingKitInput::Root));
+        assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Name), InputState::Normal);
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 1000.0))),
+            ..Default::default()
+        }, |ui| { draw_editing_kit_form(ui, &mut draft, None); });
+        let borders: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) if rect.stroke == invalid_value_stroke() => Some(rect),
+            _ => None,
+        }).collect();
+        assert_eq!(borders.len(), 1, "the error highlights its field, not the entire form");
+        assert_eq!(borders[0].corner_radius, egui::CornerRadius::same(4));
+        draft.error = None;
+        draft.icon_warning = Some("Image dimensions differ from the recommendation".to_owned());
+        assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Icon), InputState::Warning);
+    }
+
     use super::*;
     use crate::app::shell::frame::EditingKitMenuEntry;
     use crate::app::shell::frame::visible_editing_kit_menu_entries;

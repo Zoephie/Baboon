@@ -370,6 +370,9 @@ impl Baboon {
             self.add_kit();
         }
         self.model.kits[self.model.active].requested_path = Some(path);
+        // A reserved workspace now owns the loading page, even when the
+        // request reused the empty workspace behind Home.
+        self.focus_kit(self.model.active);
         false
     }
 

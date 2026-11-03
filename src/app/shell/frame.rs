@@ -5797,6 +5797,71 @@ mod tests {
     }
 
     #[test]
+    fn add_workspace_tab_follows_the_last_kit_and_opens_the_load_menu() {
+        let mut h = Harness::new();
+        memory_kit(&mut h);
+        h.app.add_kit();
+        memory_kit(&mut h);
+        h.app.focus_kit(0);
+        idle(&mut h);
+        let output = crate::app::run_ui_test(&h.ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            focused: true,
+            ..Default::default()
+        }, |ui| h.app.run_frame(ui));
+        let group = home_group(&h);
+        let add = h.ctx.read_response(egui::Id::new("workspace_add_tab").with(group)).unwrap().rect;
+        let tree = &h.app.kit_tree;
+        let last = match tree.tiles.get(group).unwrap() {
+            egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs)) => *tabs.children.last().unwrap(),
+            _ => panic!("expected tabs"),
+        };
+        let tab = h.ctx.read_response(last.egui_id(tree.id())).unwrap().rect;
+        assert!((add.left() - tab.right()).abs() < 1.0, "Add follows the last kit, rather than the window edge");
+        assert!((add.width() - 32.0).abs() < 1.0);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { points, stroke } if stroke.color == grid_line()
+                && (points[0].x - (add.left() - 0.5)).abs() < 0.1
+                && points[0].x == points[1].x && points[0].y > add.top() && points[1].y < add.bottom())),
+            "the last inactive kit is separated from Add");
+        click_point(&mut h, add.center());
+        idle(&mut h);
+        for label in ["Load Folder...", "Load Tag...", "Load Monolithic blob_index.dat...", "Recent"] {
+            assert!(h.painted.iter().any(|text| text == label), "missing menu entry {label}");
+        }
+        assert_eq!(h.app.model.active, 0, "opening the menu alone does not activate another kit");
+    }
+
+    #[test]
+    fn loading_workspace_activates_its_kit_tab_instead_of_home() {
+        for with_loaded_kit in [false, true] {
+            let mut h = Harness::new();
+            if with_loaded_kit { memory_kit(&mut h); }
+            idle(&mut h);
+            let group = home_group(&h);
+            h.app.apply_app_action(AppAction::ShowHome { group }, &h.ctx.clone());
+            assert!(!h.app.open_kit_for(std::path::Path::new("C:/test-loading-kit")));
+            idle(&mut h);
+            let output = crate::app::run_ui_test(&h.ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                focused: true,
+                ..Default::default()
+            }, |ui| h.app.run_frame(ui));
+            let home = h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).unwrap().rect;
+            let kit = h.app.model.active_kit_id();
+            let tree = &h.app.kit_tree;
+            let pane = tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)).unwrap();
+            let tab = h.ctx.read_response(pane.egui_id(tree.id())).unwrap().rect;
+            let outlined = |rect: egui::Rect| output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Path(path) if path.points.len() > 10
+                    && path.points.iter().all(|point| rect.contains(*point))));
+            assert!(!outlined(home), "Home must not look active while a kit is loading");
+            assert!(tab.width() > 0.0 && outlined(tab), "the loading workspace tab must look active");
+        }
+    }
+
+    #[test]
     fn the_empty_workspace_has_only_the_icon_home_tab() {
         let mut h = Harness::new();
         idle(&mut h);

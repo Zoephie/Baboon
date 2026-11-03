@@ -6,8 +6,12 @@ pub(in crate::app) mod scroll;
 
 pub(in crate::app) mod style;
 pub(in crate::app) use style::*;
+mod input;
+pub(in crate::app) use input::*;
 pub(in crate::app) mod button_icons;
 pub(in crate::app) use button_icons::*;
+mod close;
+pub(in crate::app) use close::{close_button, paint_close_control};
 pub(in crate::app) mod tag_icons;
 pub(in crate::app) use tag_icons::*;
 pub(in crate::app) mod game_assets;

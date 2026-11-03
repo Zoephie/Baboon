@@ -464,10 +464,7 @@ pub(in crate::app) fn draw_tabbed_window_header(
         help_clicked = response.clicked();
     }
     let close = ui.interact(close_rect, ui.id().with("window_header_close"), Sense::click()).on_hover_text("Close window");
-    let cross = close_rect.shrink(5.0);
-    let stroke = Stroke::new(1.5_f32, ui.style().interact(&close).fg_stroke.color);
-    painter.line_segment([cross.left_top(), cross.right_bottom()], stroke);
-    painter.line_segment([cross.right_top(), cross.left_bottom()], stroke);
+    paint_close_control(ui, &close);
     if close.clicked() { *open = false; }
     help_clicked
 }
@@ -546,16 +543,7 @@ fn draw_icon_window_header_impl(
                 Sense::click(),
             )
             .on_hover_text(format!("Close {title}"));
-        let color = ui.style().interact(&close).fg_stroke.color;
-        let cross = close_rect.shrink(5.0);
-        ui.painter().line_segment(
-            [cross.left_top(), cross.right_bottom()],
-            Stroke::new(1.5_f32, color),
-        );
-        ui.painter().line_segment(
-            [cross.right_top(), cross.left_bottom()],
-            Stroke::new(1.5_f32, color),
-        );
+        paint_close_control(ui, &close);
         if close.clicked() {
             *open = false;
         }

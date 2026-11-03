@@ -363,9 +363,11 @@ fn foundation_value_text_filled_with_placeholder(
     let invalid = fill == Some(invalid_value_fill());
     let unapplied = fill == Some(unapplied_value_fill());
     let status_color = if unapplied { unapplied_value_text() } else { invalid_value_text() };
-    let fill = fill.unwrap_or(if read_only { foundation_input_read_only() } else { foundation_input() });
+    let state = if invalid { InputState::Invalid } else if unapplied { InputState::Warning } else { InputState::Normal };
+    let appearance = input_appearance(ui, state, read_only, false);
+    let fill = fill.unwrap_or(appearance.fill);
     let color = if read_only && color == text_dark() { subtle_dark() } else { color };
-    ui.painter().rect_filled(rect, 0.0, fill);
+    ui.painter().rect_filled(rect, appearance.corners, fill);
     let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
     let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
     let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
@@ -397,16 +399,8 @@ fn foundation_value_text_filled_with_placeholder(
     if showing_placeholder { ui.visuals_mut().weak_text_color = Some(text_dark().gamma_multiply(0.5)); }
     let response = ui.put(rect, edit);
     if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
-    let stroke = if invalid {
-        invalid_value_stroke()
-    } else if unapplied {
-        Stroke::new(1.0_f32, unapplied_value_text())
-    } else if response.has_focus() {
-        ui.visuals().selection.stroke
-    } else {
-        Stroke::new(1.0_f32, foundation_input_edge())
-    };
-    ui.painter().rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
+    let appearance = input_appearance(ui, state, read_only, response.has_focus());
+    ui.painter().rect_stroke(rect, appearance.corners, appearance.stroke, egui::StrokeKind::Middle);
     if let Some(status) = status {
         ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
             egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
@@ -968,7 +962,10 @@ pub(in crate::app) fn picker_results<R>(
         if filter_changed {
             scroll = scroll.vertical_scroll_offset(0.0);
         }
-        scroll.show(ui, add_contents).inner
+        scroll.show(ui, |ui| {
+            style_list_menu(ui);
+            ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), add_contents).inner
+        }).inner
     })
     .inner
 }
@@ -1086,6 +1083,78 @@ pub(in crate::app) fn search_clear_control_at(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn searchable_picker_rows_fill_the_list_width() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+            ui.set_width(320.0);
+            picker_results(ui, 180.0, false, |ui| {
+                let available = ui.available_width();
+                for (selected, label) in [(false, "<None>"), (true, "0. minor"), (false, "1. another entry")] {
+                    let row = ui.selectable_label(selected, label);
+                    assert!((row.rect.width() - available).abs() < 1.0,
+                        "{label}: row width {} must fill list width {available}", row.rect.width());
+                    assert!(row.rect.height() >= 28.0, "pickers share the standard menu row height");
+                }
+                assert_eq!(ui.visuals().widgets.hovered.weak_bg_fill, context_menu_hover());
+            });
+        });
+    }
+
+    #[test]
+    fn standard_inputs_and_tag_values_share_rounded_frames_and_validation_states() {
+        for dark in [false, true] {
+            for state in [InputState::Normal, InputState::Invalid, InputState::Warning] {
+                for focused in [false, true] {
+                    let ctx = egui::Context::default();
+                    let mut style = foundation_style();
+                    style.visuals = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+                    ctx.set_global_style(style);
+                    let id = egui::Id::new("shared_input");
+                    let mut standard_rect = egui::Rect::NOTHING;
+                    let mut tag_rect = egui::Rect::NOTHING;
+                    let mut expected_stroke = Stroke::NONE;
+                    let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                        if focused { ui.memory_mut(|memory| memory.request_focus(id)); }
+                        let mut value = "example".to_owned();
+                        standard_rect = ui.add(singleline_text_edit(&mut value).id(id)
+                            .desired_width(180.0).validation_state(state)).rect;
+                        let (_, rect) = ui.allocate_space(standard_rect.size());
+                        tag_rect = rect;
+                        let tag_id = egui::Id::new("shared_tag_input");
+                        if focused { ui.memory_mut(|memory| memory.request_focus(tag_id)); }
+                        let fill = match state {
+                            InputState::Normal => None,
+                            InputState::Invalid => Some(invalid_value_fill()),
+                            InputState::Warning => Some(unapplied_value_fill()),
+                        };
+                        foundation_value_text_filled(ui, rect, &mut value, Some(tag_id), text_dark(), 4.0, fill, None);
+                        expected_stroke = match state {
+                            InputState::Invalid => invalid_value_stroke(),
+                            InputState::Warning => Stroke::new(1.0, unapplied_value_text()),
+                            InputState::Normal if focused => ui.visuals().selection.stroke,
+                            InputState::Normal => Stroke::new(1.0, foundation_input_edge()),
+                        };
+                    });
+                    let border = |rect| output.shapes.iter().find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(shape) if shape.rect == rect && shape.stroke.width > 0.0 => Some(shape),
+                        _ => None,
+                    }).expect("input has a visible border");
+                    for rect in [standard_rect, tag_rect] {
+                        assert_eq!(border(rect).corner_radius, egui::CornerRadius::same(4));
+                        assert_eq!(border(rect).stroke, expected_stroke, "validation border survives focus");
+                    }
+                    let fill = |rect| output.shapes.iter().find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(shape) if shape.rect == rect && shape.fill != Color32::TRANSPARENT => Some(shape.fill),
+                        _ => None,
+                    }).unwrap();
+                    assert_eq!(fill(standard_rect), fill(tag_rect));
+                }
+            }
+        }
+    }
+
     /// A read-only value is laid out like an editable one: its text starts
     /// as far into the box, in the same font.
     #[test]

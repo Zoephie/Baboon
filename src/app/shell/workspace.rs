@@ -753,10 +753,7 @@ pub(in crate::app) fn draw_terminal_panel(
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if ui
-                                        .small_button("×")
-                                        .on_hover_text("Close terminal")
-                                        .clicked()
+                                    if close_button(ui, "Close terminal").clicked()
                                     {
                                         cx.send(KitsCommand::CloseTerminal);
                                     }

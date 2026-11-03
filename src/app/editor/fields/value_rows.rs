@@ -797,25 +797,19 @@ fn draw_foundation_data_row(
                             draft.mark_committed();
                         }
                     });
-                let visuals = ui.visuals();
                 let invalid = stored_bytes(&draft.text).is_err();
-                let stroke = if invalid {
-                    invalid_value_stroke()
-                } else if ui.memory(|memory| memory.has_focus(id)) {
-                    visuals.selection.stroke
-                } else {
-                    visuals.widgets.inactive.bg_stroke
-                };
+                let appearance = input_appearance(ui,
+                    if invalid { InputState::Invalid } else { InputState::Normal },
+                    !editable, ui.memory(|memory| memory.has_focus(id)));
                 ui.painter().set(
                     background,
                     egui::Shape::Vec(vec![
                         egui::Shape::rect_filled(
                             frame_rect,
-                            0.0,
-                            if invalid { invalid_value_fill() }
-                            else if editable { visuals.text_edit_bg_color() } else { foundation_input_read_only() },
+                            appearance.corners,
+                            appearance.fill,
                         ),
-                        egui::Shape::rect_stroke(frame_rect, 0.0, stroke, egui::StrokeKind::Inside),
+                        egui::Shape::rect_stroke(frame_rect, appearance.corners, appearance.stroke, egui::StrokeKind::Inside),
                     ]),
                 );
                 // While its text can still scroll, the box keeps the wheel:
