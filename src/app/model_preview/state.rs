@@ -260,6 +260,11 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) h2_prt: bool,
     /// What the panel set an opened Halo CE object's function inputs to.
     pub(in crate::app) ce_function_inputs: super::ce_functions::CeFunctionInputs,
+    /// How many times the panel has played each Halo CE event effect, by
+    /// model and index among the preview's effects.
+    pub(in crate::app) ce_event_counts: super::ce_functions::CeEventCounts,
+    /// Scale A and scale B the panel plays Halo CE event effects at.
+    pub(in crate::app) ce_event_scales: [f32; 2],
     /// What the panel has set of a Halo 2 object's functions.
     pub(in crate::app) h2_function_inputs: super::h2_functions::H2FunctionInputs,
     /// A texture-resolve job is running for the loaded model.
@@ -330,6 +335,8 @@ impl Default for ModelPreviewState {
             h2_self_shadow: false,
             h2_prt: true,
             ce_function_inputs: Default::default(),
+            ce_event_counts: Default::default(),
+            ce_event_scales: super::ce_functions::CE_EVENT_SCALES,
             h2_function_inputs: Default::default(),
             textures_pending: false,
             show_render: true,

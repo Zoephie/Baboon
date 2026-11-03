@@ -9,6 +9,8 @@
 //! holding `H2_SHOT_WEAPON` and `H2_SHOT_SECONDARY`, with named Halo 2
 //! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`, leaving out the
 //! features `H2_SHOT_DROP` names, and exports forced by `H2_SHOT_FORCE`.
+//! `H2_SHOT_PLAY=<text>@<seconds>` plays each Halo CE event effect whose
+//! name holds the text, that long before the shot.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -229,6 +231,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
             values
         },
         ce_points: Vec::new(),
+        ce_plays: super::ce_event_plays(&data, &state.ce_event_counts, state.ce_event_scales),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -268,6 +271,28 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
             let end = std::mem::replace(&mut frame.time, 0.0);
             renderer.paint(gl, &frame);
             frame.time = end;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+        }
+        if let Ok(play) = std::env::var("H2_SHOT_PLAY") {
+            let (text, before) = play.split_once('@').expect("H2_SHOT_PLAY is <text>@<seconds>");
+            let end = frame.time;
+            frame.time = end - before.parse::<f32>().unwrap();
+            renderer.paint(gl, &frame);
+            for (index, effect) in data.preview.ce_effects.iter().enumerate() {
+                if effect.event.as_deref().is_some_and(|name| name.contains(text)) {
+                    eprintln!("NOTE playing {}", effect.event.as_deref().unwrap_or_default());
+                    frame.ce_plays.counts[index] += 1;
+                }
+            }
+            // Step to the shot a frame at a time, as the app would.
+            let mut at = frame.time;
+            while at < end {
+                at = (at + 1.0 / 60.0).min(end);
+                frame.time = at;
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+                renderer.paint(gl, &frame);
+            }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }

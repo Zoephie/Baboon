@@ -519,14 +519,14 @@ fn with_nested_effects(source: &TagSource, mut effects: Vec<H3ObjectEffect>) -> 
 }
 
 /// The name an event's effect goes by among the object's functions.
-fn event_function_name(field: &str, path: &str) -> String {
+pub(super) fn event_function_name(field: &str, path: &str) -> String {
     let stem = path.rsplit('\\').next().unwrap_or(path);
     format!("{field}: {stem}")
 }
 
 /// Every effect reference under `holder`, by the field that names it, leaving
 /// out `attachments`, which run on their own.
-fn collect_event_effects(holder: TagStruct<'_>, found: &mut Vec<(String, String)>) {
+pub(super) fn collect_event_effects(holder: TagStruct<'_>, found: &mut Vec<(String, String)>) {
     let effect_group = u32::from_be_bytes(*b"effe");
     for field in holder.fields() {
         let name = field.name();

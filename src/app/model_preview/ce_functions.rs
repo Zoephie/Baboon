@@ -301,6 +301,52 @@ pub(crate) type CeObjectKey = (u64, u8);
 /// Inputs set by hand, each for the object it was set on.
 pub(crate) type CeFunctionInputs = std::collections::HashMap<CeObjectKey, [f32; 4]>;
 
+/// Plays of the event effects, by model and index among its effects.
+pub(crate) type CeEventCounts = std::collections::HashMap<(u64, usize), u32>;
+
+/// What a held trigger gives `weapon_effect_new` for its firing effect: its
+/// rate, which climbs to 1 while held, and its error, none on a cool weapon.
+/// Reloading, readying, damage and the rest give 0 and 0.
+pub(crate) const CE_EVENT_SCALES: [f32; 2] = [1.0, 0.0];
+
+/// A Play button for each effect the objects name for their events, each
+/// under its object's name when it is not the opened one's, and the scales
+/// they are played at.
+pub(super) fn draw_ce_event_effects(
+    ui: &mut Ui,
+    effects: &[super::ce_particles::CeEffectAt],
+    object_name: impl Fn(u8) -> Option<String>,
+    geometry: u64,
+    counts: &mut CeEventCounts,
+    scales: &mut [f32; 2],
+) {
+    let events: Vec<(usize, String)> = effects
+        .iter()
+        .enumerate()
+        .filter_map(|(index, effect)| {
+            let name = effect.event.as_deref()?;
+            Some((index, object_name(effect.object).map_or_else(|| name.to_owned(), |object| format!("{object}: {name}"))))
+        })
+        .collect();
+    if events.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    egui::CollapsingHeader::new("Effects").id_salt("ce_event_effects").show(ui, |ui| {
+        const SCALES: &str = "What effect_new_from_object is given. A firing effect gets its trigger's \
+                              rate and error; reloading, readying, damage and the rest get 0 and 0.";
+        for (scale, name) in scales.iter_mut().zip(["scale A", "scale B"]) {
+            ui.add(egui::Slider::new(scale, 0.0..=1.0).text(name)).on_hover_text(SCALES);
+        }
+        for (index, name) in events {
+            if ui.small_button(format!("Play {name}")).clicked() {
+                *counts.entry((geometry, index)).or_default() += 1;
+                ui.ctx().request_repaint();
+            }
+        }
+    });
+}
+
 /// Sliders for an opened object's inputs, and what its functions make of them.
 /// `read` is which outputs the model's shaders read, once they have resolved:
 /// the rest cannot change the picture, whatever the game uses them for.

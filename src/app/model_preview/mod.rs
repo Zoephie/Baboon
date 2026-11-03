@@ -1215,6 +1215,18 @@ fn draw_h2_weapon_pickers(ui: &mut Ui, data: &ModelPreviewData, state: &mut Mode
 
 fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
     draw_ce_weapon_picker(ui, data, state);
+    let held_name = |object: u8| {
+        let held = usize::from(object).checked_sub(1)?;
+        data.ce_attached.get(held).map(|held| held.name.clone())
+    };
+    ce_functions::draw_ce_event_effects(
+        ui,
+        &data.preview.ce_effects,
+        held_name,
+        data.geometry_id,
+        &mut state.ce_event_counts,
+        &mut state.ce_event_scales,
+    );
     draw_h2_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.h2_object_functions {
         let time = ui.input(|input| input.time) as f32;

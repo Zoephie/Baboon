@@ -677,8 +677,9 @@ pub(super) fn load_model_preview(
 }
 
 /// A Halo CE object's own lights, antennas, effects, contrails, light volumes,
-/// lightning, glows, particle systems and flags, then those of the weapon it
-/// holds, as object 1 on its markers in the hand.
+/// lightning, glows, particle systems, flags and the effects it names for its
+/// events, then those of the weapon it holds, as object 1 on its markers in
+/// the hand.
 fn read_ce_object_features(
     source: &TagSource,
     model_tag: &TagFile,
@@ -716,6 +717,13 @@ fn read_ce_object_features(
         preview.ce_lightning.extend(super::ce_widgets::read_ce_lightning(source, weapon, 1, markers));
         preview.ce_glows.extend(super::ce_widgets::read_ce_glows(source, weapon, 1, markers));
         preview.ce_particle_systems.extend(super::ce_particle_systems::read_ce_particle_systems(source, weapon, 1, markers));
+    }
+    // What each names for its events, which the panel plays: the weapon's on
+    // the weapon, as `weapon_effect_new` makes them.
+    let events = super::ce_particles::read_ce_event_effects(source, model_tag, 0, &preview.markers);
+    preview.ce_effects.extend(events);
+    if let Some((weapon, held)) = &held_tag {
+        preview.ce_effects.extend(super::ce_particles::read_ce_event_effects(source, weapon, 1, &held.markers));
     }
     let markers = preview.markers.clone();
     preview.ce_flags = super::ce_flags::read_ce_flags(source, model_tag, 0, &markers, preview);
@@ -4210,6 +4218,17 @@ mod kit_object_tests {
 
     /// The preview of the kit tag at `path`, as the panel loads it.
     fn kit_preview(root: &str, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> ModelPreviewData {
+        kit_preview_with(root, game, path, extension, group, &PreviewLoadSettings::default())
+    }
+
+    fn kit_preview_with(
+        root: &str,
+        game: GameId,
+        path: &str,
+        extension: &str,
+        group: &[u8; 4],
+        settings: &PreviewLoadSettings,
+    ) -> ModelPreviewData {
         let source = TagSource::LooseFolder {
             root: root.into(),
             game: Some(game),
@@ -4226,7 +4245,7 @@ mod kit_object_tests {
             group_name: Some(extension.to_owned()),
             location: TagEntryLocation::LooseFile(std::path::Path::new(root).join(key.replace('\\', "/"))),
         };
-        load_model_preview(&tag, &entry, &names, Some(&source), &PreviewLoadSettings::default()).unwrap()
+        load_model_preview(&tag, &entry, &names, Some(&source), settings).unwrap()
     }
 
     /// Whether previewing the tag at `path` comes with any change colors.
@@ -4470,6 +4489,96 @@ mod kit_object_tests {
         let chief = "objects\\characters\\masterchief\\masterchief";
         let data = kit_preview(&h3, GameId::Halo3, chief, "biped", b"bipd");
         assert!(data.preview.batches.iter().all(|batch| batch.sort_position.is_none()));
+    }
+
+    /// With `BLAM_TEST_HCEEK`: the cyborg's held rifle names `fire bullet`
+    /// for its trigger. It makes nothing until played; a play runs once on
+    /// the rifle and is gone when its particles are, as one
+    /// `effect_new_from_object` makes is never looped. Between ticks no
+    /// particle updates, so the muzzle flash, which steps a sprite an update
+    /// and has one, lives to be drawn.
+    #[test]
+    fn a_played_firing_effect_runs_once_on_the_held_weapon() {
+        use super::super::ce_particles::{CeEventPlays, CeObjectInputs, CeParticleField};
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let rifle = "weapons\\assault rifle\\assault rifle";
+        let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
+        let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
+        let effects = &data.preview.ce_effects;
+        let fire = effects
+            .iter()
+            .position(|effect| effect.object == 1 && effect.event.as_deref() == Some("firing effect: fire bullet"))
+            .expect("the held rifle's firing effect is listed on it");
+        let inputs = |_| CeObjectInputs { outputs: [0.0; 4], active: [false; 4], change_colors: [[1.0; 3]; 4] };
+        let mut plays = CeEventPlays { counts: vec![0; effects.len()], scales: [1.0, 0.0] };
+        let mut field = CeParticleField::default();
+        let mut time = 10.0;
+        let step = |field: &mut CeParticleField, plays: &CeEventPlays, time: &mut f32| {
+            *time += 1.0 / 60.0;
+            field.advance(effects, plays, inputs, None, 0.0, *time, 0);
+        };
+        step(&mut field, &plays, &mut time);
+        for _ in 0..60 {
+            step(&mut field, &plays, &mut time);
+        }
+        assert!(!field.runs_played(effects.len()), "unplayed, it makes nothing");
+        assert_eq!(field.particle_count(), 0);
+        plays.counts[fire] = 1;
+        let mut made = 0;
+        for _ in 0..4 {
+            let before = field.particle_count();
+            step(&mut field, &plays, &mut time);
+            let after = field.particle_count();
+            if before == 0 && after > 0 {
+                made = after;
+                // The frame after the tick runs none: all of them are kept.
+                step(&mut field, &plays, &mut time);
+                assert_eq!(field.particle_count(), made, "nothing updates between ticks");
+                break;
+            }
+        }
+        assert!(made > 0, "the play made particles on its first tick");
+        for _ in 0..60 * 40 {
+            step(&mut field, &plays, &mut time);
+        }
+        assert!(!field.runs_played(effects.len()), "a play runs once and is let go");
+    }
+
+    /// With `BLAM_TEST_HCEEK`: the plasma rifle's `overheated` loops its one
+    /// event, as an attachment would, but a play of it is not looping
+    /// (`effect_update` loops back only for flag 2, `effect_new_looping`'s),
+    /// so it runs through once and is let go.
+    #[test]
+    fn a_played_event_effect_does_not_loop() {
+        use super::super::ce_particles::{CeEventPlays, CeObjectInputs, CeParticleField};
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let rifle = "weapons\\plasma rifle\\plasma rifle";
+        let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
+        let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
+        let effects = &data.preview.ce_effects;
+        let overheated = effects
+            .iter()
+            .position(|effect| effect.event.as_deref().is_some_and(|name| name.ends_with(": overheated")))
+            .expect("the plasma rifle's overheated effect is listed");
+        assert!(effects[overheated].def.loops(), "its tag loops its event");
+        let inputs = |_| CeObjectInputs { outputs: [0.0; 4], active: [false; 4], change_colors: [[1.0; 3]; 4] };
+        let mut plays = CeEventPlays { counts: vec![0; effects.len()], scales: [1.0, 0.0] };
+        let mut field = CeParticleField::default();
+        field.advance(effects, &plays, inputs, None, 0.0, 10.0, 0);
+        plays.counts[overheated] = 1;
+        let mut ran = false;
+        for frame in 1..=30 * 60 {
+            field.advance(effects, &plays, inputs, None, 0.0, 10.0 + frame as f32 / 30.0, 0);
+            ran |= field.particle_count() > 0;
+        }
+        assert!(ran, "the play made particles");
+        assert!(!field.runs_played(effects.len()), "it ran through once and was let go");
     }
 
     /// Particle systems share `particle system particles`: with most of it

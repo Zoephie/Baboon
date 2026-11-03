@@ -418,6 +418,14 @@ impl CeEffectCache {
     }
 }
 
+impl CeEffectDef {
+    /// Whether it names events to loop, which only an attachment does.
+    #[cfg(test)]
+    pub(crate) fn loops(&self) -> bool {
+        self.loop_start.is_some() && self.loop_stop.is_some()
+    }
+}
+
 impl CeParticleDef {
     fn radius_scale(&self, age: f32, lifespan: f32) -> f32 {
         let [lower, upper] = self.radius_animation;
@@ -763,14 +771,18 @@ struct CeSpawn {
     velocity: [f32; 3],
 }
 
-/// An effect hung on the object by one of its `attachments`, or made by a
-/// particle on its own.
+/// An effect hung on the object by one of its `attachments`, one the object
+/// names for an event, or made by a particle on its own.
 #[derive(Debug, Clone)]
 pub(crate) struct CeEffectAt {
     pub(crate) object: u8,
     pub(crate) def: Arc<CeEffectDef>,
-    /// What made it, if a particle did: it then runs once, on no object.
+    /// What made it, if not an attachment: it then runs its events once.
     spawn: Option<CeSpawn>,
+    /// The name the panel plays it by, when it is one the object names for
+    /// an event (`firing effect`, `shield depleted effect`, ...). It never
+    /// runs itself: each play runs a copy, as each event makes a new one.
+    pub(crate) event: Option<String>,
     /// `A out`.. of `primary scale`, `secondary scale` and `change color`.
     primary: Option<usize>,
     secondary: Option<usize>,
@@ -782,9 +794,9 @@ impl super::ce_functions::ReadsOutputs for CeEffectAt {
     fn object(&self) -> u8 {
         self.object
     }
-    /// One a particle made runs on no object and reads none.
+    /// One a particle or an event made reads none.
     fn outputs_read(&self) -> Vec<usize> {
-        if self.spawn.is_some() {
+        if self.spawn.is_some() || self.event.is_some() {
             return Vec::new();
         }
         [self.primary, self.secondary].into_iter().flatten().collect()
@@ -819,30 +831,12 @@ pub(super) fn read_ce_effects(
         let Some(def) = cache.effect(source, &path) else {
             continue;
         };
-        // `object_get_marker_by_name`: no name is the origin; a missing one,
-        // nothing at all.
-        let locations = def
-            .locations
-            .iter()
-            .map(|name| {
-                if name.is_empty() {
-                    return vec![CeLocation { node: 0, position: [0.0; 3], axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }];
-                }
-                markers
-                    .iter()
-                    .filter(|marker| marker.name.eq_ignore_ascii_case(name))
-                    .map(|marker| CeLocation {
-                        node: marker.node_index.max(0) as usize,
-                        position: marker.position,
-                        axes: marker.axes,
-                    })
-                    .collect()
-            })
-            .collect();
+        let locations = locate(&def, markers);
         effects.push(CeEffectAt {
             object: owner,
             def,
             spawn: None,
+            event: None,
             primary: function_slot(attachment.read_int_any("primary scale")),
             secondary: function_slot(attachment.read_int_any("secondary scale")),
             change_color: function_slot(attachment.read_int_any("change color")),
@@ -850,6 +844,78 @@ pub(super) fn read_ce_effects(
         });
     }
     effects
+}
+
+/// `effect_build_locations` with `object_get_marker_by_name`: each of an
+/// effect's locations at every marker of its name; no name is the origin, a
+/// missing one nothing at all.
+fn locate(def: &CeEffectDef, markers: &[RenderModelPreviewMarker]) -> Vec<Vec<CeLocation>> {
+    def.locations
+        .iter()
+        .map(|name| {
+            if name.is_empty() {
+                return vec![CeLocation { node: 0, position: [0.0; 3], axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }];
+            }
+            markers
+                .iter()
+                .filter(|marker| marker.name.eq_ignore_ascii_case(name))
+                .map(|marker| CeLocation {
+                    node: marker.node_index.max(0) as usize,
+                    position: marker.position,
+                    axes: marker.axes,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The effects `object` names for its events (every effect reference but
+/// its `attachments`), each by the name the panel plays it by. The game
+/// makes them with `effect_new_from_object` on the object's markers: not
+/// looping, white, and deleted once their events have run.
+pub(super) fn read_ce_event_effects(
+    source: &TagSource,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+) -> Vec<CeEffectAt> {
+    let mut named = Vec::new();
+    super::h3_effects::collect_event_effects(object.root(), &mut named);
+    let mut cache = CeEffectCache::default();
+    let mut seen = std::collections::HashSet::new();
+    let mut effects = Vec::new();
+    for (field, path) in named {
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        // One with nothing the preview draws, such as a sound alone, has
+        // nothing to play.
+        let Some(def) = cache.effect(source, &path) else {
+            continue;
+        };
+        let locations = locate(&def, markers);
+        effects.push(CeEffectAt {
+            object: owner,
+            def,
+            spawn: None,
+            event: Some(super::h3_effects::event_function_name(&field, &path)),
+            primary: None,
+            secondary: None,
+            change_color: None,
+            locations,
+        });
+    }
+    effects
+}
+
+/// The panel's plays of the objects' event effects: how many times each of
+/// the preview's effects has been played, by index (zero for those that are
+/// not events), and the scales `effect_new_from_object` is given.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CeEventPlays {
+    pub(crate) counts: Vec<u32>,
+    /// Scale A and scale B.
+    pub(crate) scales: [f32; 2],
 }
 
 /// `effect_evaluate_function_integral`: the share of an event's particles
@@ -989,8 +1055,11 @@ pub(crate) struct CeParticleField {
     /// Particle systems parts have made: the effect, which of its systems,
     /// and the system as it runs.
     systems: Vec<(usize, usize, CeRunningSystem)>,
-    /// Effects particles have made, after the object's in every index.
+    /// Effects particles and the panel's plays have made, after the
+    /// object's in every index.
     spawned: Vec<CeEffectAt>,
+    /// How many plays of each event effect have been made.
+    played: Vec<u32>,
     /// `game_time_get`.
     tick: u32,
     owed: CeTicks,
@@ -1064,10 +1133,13 @@ impl CeParticleField {
     /// frame first runs the ticks it owes, `effects_update` being in
     /// `game_tick`, then moves particles and systems by its own time, as
     /// `game_frame` does. `others` particles of the systems' shared array are
-    /// in the object's attached systems.
+    /// in the object's attached systems. Each new play in `plays` starts a
+    /// copy of its event effect.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn advance(
         &mut self,
         effects: &[CeEffectAt],
+        plays: &CeEventPlays,
         inputs: impl Fn(u8) -> CeObjectInputs,
         bones: Option<&[[f32; 4]]>,
         ground: f32,
@@ -1081,6 +1153,8 @@ impl CeParticleField {
             self.lights.clear();
             self.systems.clear();
             self.spawned.clear();
+            // Plays made before the restart are not made again.
+            self.played = plays.counts.clone();
             self.system_random = Some(SystemRandom::seeded(0x5eed_4321));
             self.tick = 0;
             self.owed = CeTicks::default();
@@ -1097,6 +1171,7 @@ impl CeParticleField {
         };
         let now = resume_point(now, time, PRE_ROLL);
         let mut random = self.random.take().unwrap_or(Random(1));
+        self.play_events(effects, plays, &mut random);
         for dt in frame_steps(now, time) {
             let effects: Vec<CeEffectAt> = effects.iter().chain(&self.spawned).cloned().collect();
             let ticks = self.owed.run(dt);
@@ -1108,6 +1183,46 @@ impl CeParticleField {
         }
         self.time = Some(time);
         self.random = Some(random);
+    }
+
+    /// How many particles are alive.
+    #[cfg(test)]
+    pub(crate) fn particle_count(&self) -> usize {
+        self.particles.len()
+    }
+
+    /// Whether anything the object's own `own` effects did not make is still
+    /// running: what plays and particles made, and what those left.
+    pub(crate) fn runs_played(&self, own: usize) -> bool {
+        !self.spawned.is_empty()
+            || self.particles.iter().any(|particle| particle.effect >= own)
+            || self.lights.iter().any(|light| light.effect >= own)
+            || self.systems.iter().any(|(effect, _, _)| *effect >= own)
+    }
+
+    /// `effect_new_from_object` for each play not yet made: a copy of the
+    /// event's effect on the object's markers, at the plays' scales, white,
+    /// at rest, among those particles have made.
+    fn play_events(&mut self, effects: &[CeEffectAt], plays: &CeEventPlays, random: &mut Random) {
+        self.played.resize(effects.len(), 0);
+        for (index, effect) in effects.iter().enumerate() {
+            let wanted = plays.counts.get(index).copied().unwrap_or(0);
+            let made = std::mem::replace(&mut self.played[index], wanted);
+            if effect.event.is_none() {
+                continue;
+            }
+            for _ in made..wanted {
+                if self.spawned.len() >= MOST_SPAWNED {
+                    return;
+                }
+                let spawn = CeSpawn { scales: plays.scales, color: [1.0; 3], velocity: [0.0; 3] };
+                let copy = CeEffectAt { spawn: Some(spawn), event: None, ..effect.clone() };
+                let mut running = new_running();
+                set_event(&mut running, &copy.def, 0, random);
+                self.effects.push(running);
+                self.spawned.push(copy);
+            }
+        }
     }
 
     /// One `game_tick` of `effects_update`: every effect's events, and the
@@ -1124,6 +1239,10 @@ impl CeParticleField {
         self.tick += 1;
         let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
         for (index, effect) in effects.iter().enumerate() {
+            // An event's own effect only stands for its plays.
+            if effect.event.is_some() {
+                continue;
+            }
             let state = inputs(effect.object);
             let running = &mut self.effects[index];
             let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
@@ -1464,6 +1583,7 @@ fn spawn_effect(def: &Arc<CeEffectDef>, particle: &CeParticle, scale: f32) -> Op
             color: [1.0; 3],
             velocity: particle.velocity.map(|axis| axis * 0.033_333_335),
         }),
+        event: None,
         primary: None,
         secondary: None,
         change_color: None,
@@ -1743,8 +1863,11 @@ fn run_events(
         if running.in_event {
             generate_particles(index, running, effect, particles, random, bones);
             if ended {
+                // `effect_update` loops back only for a looping effect, one
+                // `effect_new_looping` made (flag 2): an attachment.
+                let looping = effect.spawn.is_none();
                 let mut next = match (def.loop_start, def.loop_stop) {
-                    (Some(start), Some(stop)) if running.event == stop && !running.stopping => start,
+                    (Some(start), Some(stop)) if looping && running.event == stop && !running.stopping => start,
                     _ => running.event + 1,
                 };
                 while next < def.events.len() && random.next() < def.events[next].skip {
@@ -2133,11 +2256,11 @@ mod tests {
     fn effects_tick_at_30_whatever_the_frame_rate() {
         let inputs = |_| CeObjectInputs { outputs: [0.0; 4], active: [false; 4], change_colors: [[0.0; 3]; 4] };
         let mut field = CeParticleField::default();
-        field.advance(&[], inputs, None, 0.0, 10.0, 0);
+        field.advance(&[], &CeEventPlays::default(), inputs, None, 0.0, 10.0, 0);
         let settled = field.tick;
         let mut ticks = Vec::new();
         for frame in 1..=8 {
-            field.advance(&[], inputs, None, 0.0, 10.0 + frame as f32 / 120.0, 0);
+            field.advance(&[], &CeEventPlays::default(), inputs, None, 0.0, 10.0 + frame as f32 / 120.0, 0);
             ticks.push(field.tick - settled);
         }
         assert_eq!(ticks, [0, 0, 0, 1, 1, 1, 1, 2]);

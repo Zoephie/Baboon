@@ -148,6 +148,7 @@ pub(super) fn draw_model_viewport(
         h2_flares_shown: h2_flares_shown(&data.preview, state),
         h2_shown: H2Shown::of(&data.preview, state),
         ce_points: Vec::new(),
+        ce_plays: ce_event_plays(data, &state.ce_event_counts, state.ce_event_scales),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -159,7 +160,7 @@ pub(super) fn draw_model_viewport(
     let mut frame = frame;
     frame.h2_prt_clusters = frame.h2_object_prt_clusters();
     frame.ce_points = frame.ce_point_lights();
-    if frame.h2_moves() {
+    if frame.h2_moves() || ce_events_running(data.geometry_id) {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     }
     painter.add(egui::PaintCallback {
@@ -894,6 +895,8 @@ struct ModelGpuFrame {
     h2_shown: H2Shown,
     /// Each object's point lights this frame, in step with `object_states`.
     ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
+    /// The panel's plays of Halo CE's event effects.
+    ce_plays: ce_particles::CeEventPlays,
     /// Draw opaque Halo 2 materials through their passes.
     game_shaders: bool,
     default_lights: bool,
@@ -1039,7 +1042,8 @@ pub(super) fn object_moves(
         || !data.preview.h3_cloth.is_empty()
         || !data.preview.h2_liquids.is_empty()
         || !data.preview.h2_contrails.is_empty()
-        || !data.preview.ce_effects.is_empty()
+        // An event's effect runs only when played, and asks for frames then.
+        || data.preview.ce_effects.iter().any(|effect| effect.event.is_none())
         || !data.preview.ce_contrails.is_empty()
         || !data.preview.ce_lightning.is_empty()
         || !data.preview.ce_glows.is_empty()
@@ -1278,6 +1282,28 @@ struct CachedModelGlRenderer {
     /// Geometry whose drawing panicked, with what the panic said: it is not
     /// drawn again, and the panel says why.
     failed: HashMap<u64, String>,
+}
+
+thread_local! {
+    /// Models whose played Halo CE event effects still have something
+    /// running, as the last frame drawn left them.
+    static CE_EVENTS_RUNNING: RefCell<std::collections::HashSet<u64>> = RefCell::new(Default::default());
+}
+
+/// Whether a played event effect on `geometry_id` still needs frames.
+fn ce_events_running(geometry_id: u64) -> bool {
+    CE_EVENTS_RUNNING.with(|running| running.borrow().contains(&geometry_id))
+}
+
+/// The panel's plays of `data`'s event effects, by index among its effects.
+pub(super) fn ce_event_plays(
+    data: &ModelPreviewData,
+    counts: &ce_functions::CeEventCounts,
+    scales: [f32; 2],
+) -> ce_particles::CeEventPlays {
+    let effects = &data.preview.ce_effects;
+    let count = |index| counts.get(&(data.geometry_id, index)).copied().unwrap_or(0);
+    ce_particles::CeEventPlays { counts: (0..effects.len()).map(count).collect(), scales }
 }
 
 /// Why drawing `geometry_id` stopped, if it panicked.
@@ -2805,7 +2831,17 @@ fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones:
     let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
     let ground = lowest.fold(0.0, f32::min);
     let others = uploaded.ce_pctl.particle_count();
-    uploaded.ce_particles.advance(&frame.preview.ce_effects, inputs, bones, ground, frame.time, others);
+    let effects = &frame.preview.ce_effects;
+    uploaded.ce_particles.advance(effects, &frame.ce_plays, inputs, bones, ground, frame.time, others);
+    let running = uploaded.ce_particles.runs_played(effects.len());
+    CE_EVENTS_RUNNING.with(|set| {
+        let mut set = set.borrow_mut();
+        if running {
+            set.insert(frame.geometry_id);
+        } else {
+            set.remove(&frame.geometry_id);
+        }
+    });
 }
 
 /// A Halo CE sprite through the `effect` shader: its map, framebuffer blend
@@ -3919,6 +3955,8 @@ impl ModelGlRenderer {
     }
 
     unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        // Set again if this frame steps the effects and something runs on.
+        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&frame.geometry_id));
         unsafe {
             let (slot, upload) = self.lru.acquire(frame.geometry_id, MODEL_GPU_SLOTS);
             if slot == self.slots.len() {
