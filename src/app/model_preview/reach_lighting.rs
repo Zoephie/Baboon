@@ -153,7 +153,7 @@ pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str) -> Option<H3V
 }
 
 /// `final_composite_base`'s factor on the lit target and on the bloom.
-pub(super) const REACH_DARK_MULTIPLIER: f32 = 8.0;
+pub(crate) const REACH_DARK_MULTIPLIER: f32 = 8.0;
 
 /// `final_composite`, as MCC runs it at the default settings: the lit target
 /// and bloom brought back up, `pow(x, 0.5)` for the default gamma

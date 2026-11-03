@@ -1307,7 +1307,13 @@ impl ModelGlRenderer {
             // put the model's own geometry back after the lights and sprites.
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             let mut bloom = None;
-            if frame.active_camo {
+            // Reach's: full camo, through `globals`' curves.
+            let reach_camo = frame.preview.reach_camo.as_ref().filter(|_| reach).map(|camo| camo.draw(1.0));
+            if let Some(draw) = reach_camo {
+                let values = [("k_vs_active_camo_factor", draw.factor), ("p_lighting_constant_9", draw.factor)];
+                self.reach_pass_values = Some(values.into_iter().collect());
+            }
+            if frame.active_camo && (!reach || reach_camo.is_some()) {
                 // Camo shows what is behind it, which the game blooms the same
                 // with or without the object. A preview's backdrop has no bloom
                 // of its own, so what camo hides is left dark for it.
@@ -1324,12 +1330,22 @@ impl ModelGlRenderer {
                     gl.enable(glow::BLEND);
                 }
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                // `render_object_callback`: fully transparent camo has no base
+                // to blend over, and draws opaque in its place.
+                let opaque = reach_camo.is_some_and(|draw| draw.opaque);
+                if opaque {
+                    gl.disable(glow::BLEND);
+                    gl.depth_mask(true);
+                }
                 for (batch, material) in &batches {
                     if let Some(pass) = material.camo.as_ref() {
                         self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
                     }
                 }
+                gl.enable(glow::BLEND);
+                gl.depth_mask(false);
             }
+            self.reach_pass_values = None;
             // `render_object_context`'s shield impact, over every lit part.
             if h3_shield_showing(frame.h2_values.as_ref()) {
                 h3_set_blend(gl, H3Blend::Additive);

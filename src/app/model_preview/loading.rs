@@ -772,6 +772,7 @@ fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::Ma
 /// volumes and effects read differently, and wait on their own readers.
 fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, model: &TagFile, preview: &mut RenderModelPreview) {
     preview.reach_shield = super::reach_shield::read_reach_shield(source, model);
+    preview.reach_camo = super::reach_camo::ReachCamo::read(source).map(std::sync::Arc::new);
     preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, own_marker_frame);
     let (lights, cheap) = super::reach_lights::read_reach_lights(source, model_tag, 0, &preview.markers, own_marker_frame);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.

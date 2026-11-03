@@ -1440,6 +1440,7 @@ pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
 mod h3_draw;
 #[path = "reach_lighting.rs"]
 mod reach_lighting;
+pub(super) use reach_lighting::REACH_DARK_MULTIPLIER;
 #[path = "reach_bloom.rs"]
 mod reach_bloom;
 #[path = "reach_light_pass.rs"]

@@ -697,6 +697,12 @@ fn prepare_h3_material(
     let camo = (definition.entry_points.iter().any(|entry| entry == "active_camo"))
         .then(|| sources.pass(&definition, &options, "active_camo", false))
         .transpose()?;
+    // Reach's writes back what it samples, which the preview's copy holds
+    // encoded.
+    let camo = match dialect {
+        H3Dialect::Reach => camo.and_then(|pass| super::reach_camo::camo_pass(&pass)).map(Arc::new),
+        H3Dialect::Halo3 => camo,
+    };
     let dynamic_light = (opaque && definition.entry_points.iter().any(|entry| entry == "dynamic_light"))
         .then(|| sources.pass(&definition, &options, "dynamic_light", false))
         .transpose()?;
