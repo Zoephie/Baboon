@@ -94,6 +94,8 @@ pub(crate) struct H3Light {
     color: H3Channel,
     intensity: H3Channel,
     pub(crate) gel: Option<Arc<H2Image>>,
+    /// Its `Lens Flare`, which `light_submit_lens_flares` draws at it.
+    flare: Option<Arc<H3Flare>>,
 }
 
 /// What a frame's pass reads of a light.
@@ -172,15 +174,15 @@ impl H3Light {
         &self.scale_by
     }
 
-    /// The light this frame, or none while it is out.
-    pub(crate) fn lit(
+    /// `light_update`'s `state.color` and `state.current_scale` this frame,
+    /// or none while the light is out.
+    pub(crate) fn state(
         &self,
         values: Option<&H2FunctionValues>,
         change_colors: &[[f32; 3]; 4],
-        bones: Option<&[[f32; 4]]>,
         time: f32,
         onset: f32,
-    ) -> Option<H3LitLight> {
+    ) -> Option<([f32; 3], f32)> {
         if let Some((times, event)) = &self.event {
             let elapsed = times.elapsed(*event, time - onset)?;
             if self.destroy_after > 0.0 && elapsed >= self.destroy_after {
@@ -191,9 +193,11 @@ impl H3Light {
         let color = self.color.function.evaluate_color(input, range);
         let (input, range) = self.intensity.sample(values, time);
         let mut intensity = self.intensity.function.evaluate(input, range);
+        let mut scale = 1.0;
         if !self.scale_by.is_empty() {
-            let scale = values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0);
-            intensity *= self.by_effect.map_or(scale, |effect| effect.of(scale));
+            let value = values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0);
+            scale = self.by_effect.map_or(value, |effect| effect.of(value));
+            intensity *= scale;
         }
         let tint = self.change_color.and_then(|channel| change_colors.get(channel)).copied();
         let [red, green, blue] = tint.unwrap_or([1.0; 3]);
@@ -201,6 +205,19 @@ impl H3Light {
         if color.iter().all(|channel| *channel <= 0.0) {
             return None;
         }
+        Some((color, scale))
+    }
+
+    /// The light this frame, or none while it is out.
+    pub(crate) fn lit(
+        &self,
+        values: Option<&H2FunctionValues>,
+        change_colors: &[[f32; 3]; 4],
+        bones: Option<&[[f32; 4]]>,
+        time: f32,
+        onset: f32,
+    ) -> Option<H3LitLight> {
+        let (color, _) = self.state(values, change_colors, time, onset)?;
         let (position, mut forward) = posed_on(self.node, self.position, self.forward, bones);
         let (_, mut up) = posed_on(self.node, self.position, self.up, bones);
         if self.world_oriented {
@@ -268,6 +285,11 @@ fn read_h3_light(source: &TagSource, path: &str) -> Option<H3LightTag> {
         color: H3Channel::read(root, "color")?,
         intensity: H3Channel::read(root, "intensity")?,
         gel,
+        flare: root
+            .read_tag_ref_path("Lens Flare")
+            .filter(|path| !path.is_empty())
+            .and_then(|path| read_h3_flare(source, &path))
+            .map(Arc::new),
     })
 }
 
@@ -285,6 +307,7 @@ struct H3LightTag {
     color: H3Channel,
     intensity: H3Channel,
     gel: Option<Arc<H2Image>>,
+    flare: Option<Arc<H3Flare>>,
 }
 
 /// An object's attached `light`s, at the first marker of each name, and those
@@ -334,6 +357,7 @@ pub(super) fn read_h3_lights(
         color: tag.color,
         intensity: tag.intensity,
         gel: tag.gel,
+        flare: tag.flare,
     };
     for attachment in elements(block, "attachments") {
         let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
@@ -408,6 +432,8 @@ pub(crate) struct H3Flare {
     rotates_from_center: bool,
     radius_by_distance: bool,
     radius_by_occlusion: bool,
+    /// `ignore external color`: a light's color does not tint it.
+    ignores_external_color: bool,
     bitmap: H3Bitmap,
 }
 
@@ -464,6 +490,8 @@ pub(crate) struct H3FlareAt {
     /// When its effect's event runs, for a flare an attached effect draws.
     event: Option<(Arc<H3EffectTimes>, usize)>,
     flare: Arc<H3Flare>,
+    /// A light's own flare: the light, whose state colors and scales it.
+    light: Option<Arc<H3Light>>,
 }
 
 /// `effect_generate_lens_flares`' use of the attachment's scale.
@@ -548,6 +576,7 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         rotates_from_center: reflected("rotate from center of screen"),
         radius_by_distance: reflected("radius scaled by distance"),
         radius_by_occlusion: reflected("radius scaled by occlusion factor"),
+        ignores_external_color: reflected("ignore external color"),
         bitmap,
     })
 }
@@ -588,6 +617,7 @@ pub(super) fn read_h3_flares(
                 by_effect,
                 event: event.clone(),
                 flare: Arc::clone(&flare),
+                light: None,
             });
         }
     };
@@ -610,6 +640,27 @@ pub(super) fn read_h3_flares(
         }
     });
     flares
+}
+
+/// `light_submit_lens_flares`: each light with a `Lens Flare` draws it where
+/// the light is, by the light's color and scale. Take `lights` once they are
+/// final, renamed for what they hang on.
+pub(super) fn light_flares(lights: &[H3Light]) -> Vec<H3FlareAt> {
+    let flare_of = |light: &H3Light| {
+        Some(H3FlareAt {
+            object: light.object,
+            node: light.node,
+            position: light.position,
+            forward: light.forward,
+            only_under: light.only_under.clone(),
+            scale_by: light.scale_by.clone(),
+            by_effect: None,
+            event: None,
+            flare: Arc::clone(light.flare.as_ref()?),
+            light: Some(Arc::new(light.clone())),
+        })
+    };
+    lights.iter().filter_map(flare_of).collect()
 }
 
 /// `k_minimum_visible_lens_flare`.
@@ -651,6 +702,28 @@ impl H3FlareAt {
 
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
+    }
+
+    /// For a light's own flare, the light.
+    pub(crate) fn light(&self) -> Option<&H3Light> {
+        self.light.as_deref()
+    }
+
+    /// What it burns by, and the color tinting it: for a light's own flare,
+    /// the light's `state` (its scale, and its color brought down to at most 1
+    /// with the excess taken into the scale, as `lens_flares_create_internal`
+    /// does); for any other, its scale and white.
+    fn scale_and_tint(
+        &self,
+        light: Option<([f32; 3], f32)>,
+        values: Option<&H2FunctionValues>,
+        time: f32,
+    ) -> (f32, [f32; 3]) {
+        let Some((color, scale)) = light else {
+            return (self.scale(values, time), [1.0; 3]);
+        };
+        let most = color.into_iter().fold(0.0, f32::max);
+        if most > 1.0 { (scale * most, color.map(|channel| channel / most)) } else { (scale, color) }
     }
 
     /// Whether its event's clock runs from when `scale_name` came on.
@@ -696,15 +769,17 @@ impl H3FlareAt {
     }
 
     /// `lens_flare_render_occlusion`'s patch, or none for a flare without one.
+    /// `light` is its light's `state`, for a light's own flare.
     pub(crate) fn occlusion_patch(
         &self,
+        light: Option<([f32; 3], f32)>,
         values: Option<&H2FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
     ) -> Option<CeSprite> {
         let flare = &*self.flare;
-        let scale = self.scale(values, time);
+        let (scale, _) = self.scale_and_tint(light, values, time);
         if !flare.tests_occlusion || scale <= 0.0 {
             return None;
         }
@@ -726,9 +801,12 @@ impl H3FlareAt {
     }
 
     /// `lens_flare_evaluate_parameters` and the screen-facing half of
-    /// `lens_flare_render_internal`. Only reflection 0 ever draws.
+    /// `lens_flare_render_internal`. Only reflection 0 ever draws. `light` is
+    /// its light's `state`, for a light's own flare.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn sprite(
         &self,
+        light: Option<([f32; 3], f32)>,
         values: Option<&H2FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
@@ -737,7 +815,7 @@ impl H3FlareAt {
         image: usize,
     ) -> Option<CeSprite> {
         let flare = &*self.flare;
-        let scale = self.scale(values, time);
+        let (scale, tint) = self.scale_and_tint(light, values, time);
         if scale <= 0.0 || occlusion <= 0.0 {
             return None;
         }
@@ -796,6 +874,9 @@ impl H3FlareAt {
             rotation += dot(to_flare, view.forward).atan2(dot(to_flare, left));
         }
         let mut color = flare.color;
+        if !flare.ignores_external_color {
+            (0..3).for_each(|channel| color[channel] *= tint[channel]);
+        }
         let curves = [(&flare.time_color, time), (&flare.age_color, age)];
         for (curve, input) in curves {
             if let Some(curve) = curve {

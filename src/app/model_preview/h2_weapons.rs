@@ -663,8 +663,10 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
     super::h3_screen_effects::add_screen_shader_materials(preview);
-    preview.h3_lights.extend(named!(lights, name));
+    let lights: Vec<_> = named!(lights, name).collect();
     preview.h3_flares.extend(named!(flares, name));
+    preview.h3_flares.extend(super::h3_lights::light_flares(&lights));
+    preview.h3_lights.extend(lights);
 }
 
 /// A unit's own `weapons` that are an `extension of parent` (vehicle and

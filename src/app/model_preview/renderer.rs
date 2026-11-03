@@ -4726,14 +4726,20 @@ impl ModelGlRenderer {
                 let values = frame.h2_values_of_object(at.object);
                 let onset = uploaded.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
                 let event_time = at.event_time(frame.time, onset);
-                let occlusion = match at.occlusion_patch(values, bones, &view, event_time) {
+                // A light's own flare goes out with its light.
+                let colors = frame.change_colors_of_object(at.object);
+                let light = match at.light().map(|light| light.state(values, &colors, frame.time, onset)) {
+                    Some(None) => continue,
+                    state => state.flatten(),
+                };
+                let occlusion = match at.occlusion_patch(light, values, bones, &view, event_time) {
                     None => Some(1.0),
                     Some(patch) => ce_flare_occlusion(gl, flares, camera, &view, &patch),
                 };
                 let Some(occlusion) = occlusion else {
                     continue;
                 };
-                if let Some(sprite) = at.sprite(values, bones, &view, event_time, occlusion, 0)
+                if let Some(sprite) = at.sprite(light, values, bones, &view, event_time, occlusion, 0)
                     && let Some(textures) = uploaded.flare_textures.get(first_h3 + index)
                 {
                     draw_flare_sprites(gl, flares, camera, &view, &[sprite], textures);

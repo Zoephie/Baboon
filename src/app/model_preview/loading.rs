@@ -744,6 +744,7 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
         .and_then(|path| super::materials::read_h3_shield_settings(source, &path));
     preview.h3_lights = super::h3_lights::read_h3_lights(source, model_tag, 0, &preview.markers, frame);
     preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, frame);
+    preview.h3_flares.extend(super::h3_lights::light_flares(&preview.h3_lights));
     preview.h3_light_volumes =
         super::h3_light_volumes::read_h3_light_volumes(source, model_tag, 0, &preview.markers, frame);
     let systems = super::h3_particles::read_h3_particles(source, model_tag, 0, &preview.markers, frame);
@@ -4364,6 +4365,22 @@ mod kit_object_tests {
         names.dedup();
         assert_eq!(names.len(), count, "a region name repeats");
         assert!(names.contains(&"plasma_cannon 2: barrel"));
+    }
+
+    /// `light_submit_lens_flares`: the Covenant portable light's light names a
+    /// lens flare, which draws at the light, in Halo 3 and ODST alike.
+    #[test]
+    fn a_lights_own_lens_flare_comes_with_it() {
+        let path = "objects\\levels\\solo\\070_waste\\cov_portable_light\\cov_portable_light";
+        for (env, game) in [("BLAM_TEST_H3EK", GameId::Halo3), ("BLAM_TEST_ODSTEK", GameId::Halo3Odst)] {
+            let Ok(root) = std::env::var(env) else {
+                eprintln!("skipping: {env} is not set");
+                continue;
+            };
+            let data = kit_preview(&root, game, path, "device_machine", b"mach");
+            let from_lights = data.preview.h3_flares.iter().filter(|at| at.light().is_some()).count();
+            assert_eq!(from_lights, 1, "{env}: the light's flare");
+        }
     }
 
     /// A Halo 3 light alone keeps the picture moving with its object, as
