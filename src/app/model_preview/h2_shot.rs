@@ -54,6 +54,8 @@ fn shot_game() -> GameId {
         GameId::HaloCe
     } else if std::env::var_os("H2_SHOT_ODST").is_some() {
         GameId::Halo3Odst
+    } else if std::env::var_os("H2_SHOT_REACH").is_some() {
+        GameId::HaloReach
     } else if std::env::var_os("H2_SHOT_H3").is_some() {
         GameId::Halo3
     } else {
@@ -370,7 +372,13 @@ fn h3_sweep() {
     let family = std::env::var("H3_FAMILY").unwrap_or_else(|_| "shader".to_owned());
     let source = TagSource::LooseFolder {
         root: root.clone().into(),
-        game: Some(if root.contains("odst") { GameId::Halo3Odst } else { GameId::Halo3 }),
+        game: Some(if root.contains("odst") {
+            GameId::Halo3Odst
+        } else if root.contains("reach") {
+            GameId::HaloReach
+        } else {
+            GameId::Halo3
+        }),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = headless_gl();
@@ -398,13 +406,14 @@ fn h3_sweep() {
                             eprintln!("NOTE TR {template} {entry}: {key}");
                         }
                     }
-                    Ok((vertex, pixel)) => {
+                    Ok(pass) => {
                         let mut failed = false;
-                        for (kind, text) in
-                            [(glow::VERTEX_SHADER, &vertex.source), (glow::FRAGMENT_SHADER, &pixel.source)]
-                        {
+                        let program = unsafe { gl.create_program().unwrap() };
+                        let mut shaders = Vec::new();
+                        for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
                             unsafe {
                                 let shader = gl.create_shader(kind).unwrap();
+                                shaders.push(shader);
                                 gl.shader_source(shader, text);
                                 gl.compile_shader(shader);
                                 if !gl.get_shader_compile_status(shader) {
@@ -419,8 +428,27 @@ fn h3_sweep() {
                                         }
                                     }
                                 }
+                                gl.attach_shader(program, shader);
+                            }
+                        }
+                        // A stage built from other options than its partner can
+                        // disagree on what passes between them.
+                        unsafe {
+                            if !failed {
+                                gl.link_program(program);
+                                if !gl.get_program_link_status(program) {
+                                    failed = true;
+                                    let log = gl.get_program_info_log(program);
+                                    let key: String = log.lines().next().unwrap_or("").chars().take(120).collect();
+                                    if *seen.entry(format!("LINK {key}")).and_modify(|count| *count += 1).or_insert(1) == 1 {
+                                        eprintln!("NOTE LINK {template} {entry}: {key}");
+                                    }
+                                }
+                            }
+                            for shader in shaders {
                                 gl.delete_shader(shader);
                             }
+                            gl.delete_program(program);
                         }
                         if failed { compile += 1 } else { good += 1 }
                     }

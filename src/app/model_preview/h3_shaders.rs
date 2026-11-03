@@ -1,8 +1,9 @@
-//! Halo 3's shaders, as tool compiles them.
+//! Halo 3's and Reach's shaders, as their tools compile them.
 //!
 //! A `render_method_definition` lists categories, each naming a function that
-//! the chosen option's function stands in for, and `shaders\<name>.fx` is
-//! compiled per entry point with those as defines. The sources live in
+//! the chosen option's function stands in for, and one source file is
+//! compiled per entry point with those as defines: `shaders\<name>.fx` in
+//! Halo 3, the definition's own `location` in Reach. The sources live in
 //! `.hlsl_include` tags, read from the user's kit.
 
 use std::collections::HashMap;
@@ -48,20 +49,42 @@ struct H3Category {
     options: Vec<H3Option>,
 }
 
+/// What Reach's tool reads of an entry point's first pass to pick the
+/// options each stage compiles with (`sub_140342850` builds the shared
+/// shaders; `get_compiled_vertex_shader` 0x14119A2A0 and
+/// `get_compiled_pixel_shader` 0x14119A170 choose among them).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct H3SharedStages {
+    /// Flag 0x1: the pixel shader is shared, not the material's own.
+    shared_pixel: bool,
+    /// Flag 0x2: the vertex shaders only tell the default option of their
+    /// category from any other, so only options 0 and 1 are compiled.
+    vertex_two_options: bool,
+    vertex_category: Option<usize>,
+    pixel_category: Option<usize>,
+}
+
 /// A `render_method_definition`, as far as compiling goes.
 #[derive(Debug, Clone)]
 pub(crate) struct H3Definition {
-    /// The `.fx` this family compiles: `shader`, `terrain`..
+    /// The family: `shader`, `terrain`..
     pub(crate) name: String,
+    /// The file it compiles, as an `#include` names it: Halo 3's `shader.fx`,
+    /// Reach's `templated\shader.fx`.
+    source_file: String,
     /// `use automatic macros`: categories and options named as defines too.
     automatic_macros: bool,
     categories: Vec<H3Category>,
     pub(crate) entry_points: Vec<String>,
+    /// Reach's shared-shader rules by entry point; Halo 3 has none, and
+    /// compiles both stages with the material's options.
+    shared: HashMap<String, H3SharedStages>,
     /// The first `vertex_types` entry, which every pixel shader compiles with.
     pixel_vertex_type: usize,
 }
 
 pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Definition> {
+    let dialect = H3Dialect::of(source);
     let tag = load_referenced_tag_from_source(source, path, "render_method_definition", b"rmdf").ok()?;
     let root = tag.root();
     let function = |holder: TagStruct<'_>, name: &str| holder.read_string_id(name).filter(|name| !name.is_empty());
@@ -81,12 +104,45 @@ pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Def
                 .collect(),
         })
         .collect();
-    let entry_points = elements(root, "entry_points")
-        .into_iter()
-        .filter_map(|entry| entry.read_enum_name("entry point"))
-        .map(|entry| entry_name(&entry).to_owned())
-        .collect();
+    // Reach lists entry points with no passes (glass's and mux's `default`),
+    // which tool compiles nothing for and the source has no function for.
+    let mut entry_points = Vec::new();
+    let mut shared = HashMap::new();
+    for entry in elements(root, "entry_points") {
+        let passes = elements(entry, "passes");
+        if dialect == H3Dialect::Reach && passes.is_empty() {
+            continue;
+        }
+        let Some(name) = entry.read_enum_name("entry point") else {
+            continue;
+        };
+        let name = entry_name(dialect, &name).to_owned();
+        if dialect == H3Dialect::Reach {
+            let first = passes[0];
+            let flags = first.read_int_any("flags").unwrap_or(0);
+            // `sub_140342850` asserts a stage depends on fewer than two.
+            let category = |block: &str| {
+                elements(first, block).first().and_then(|dependency| dependency.read_int_any("category"))
+                    .and_then(|category| usize::try_from(category).ok())
+            };
+            shared.insert(name.clone(), H3SharedStages {
+                shared_pixel: flags & 1 != 0,
+                vertex_two_options: flags & 2 != 0,
+                vertex_category: category("shared VS category dependencies"),
+                pixel_category: category("category dependencies"),
+            });
+        }
+        entry_points.push(name);
+    }
     let name = path.rsplit('\\').next()?.to_owned();
+    // Reach: `c_render_method::postprocess` (tool 0x141165700) compiles
+    // `shaders\<location>`; `generate-shared-shaders` (0x140345BD0) falls back on
+    // `templated\<name>` when it is empty. Halo 3 has no `location`.
+    let source_file = match root.read_string("location") {
+        Some(location) if !location.is_empty() => format!("{location}.fx"),
+        Some(_) => format!("templated\\{name}.fx"),
+        None => format!("{name}.fx"),
+    };
     let automatic_macros = root.read_int_any("flags").unwrap_or(0) & 1 != 0;
     let pixel_vertex_type = elements(root, "vertex_types")
         .first()
@@ -94,7 +150,7 @@ pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Def
         .and_then(|kind| usize::try_from(kind).ok())
         .filter(|kind| *kind < VERTEX_TYPES.len())
         .unwrap_or(0);
-    Some(H3Definition { name, automatic_macros, categories, entry_points, pixel_vertex_type })
+    Some(H3Definition { name, source_file, automatic_macros, categories, entry_points, shared, pixel_vertex_type })
 }
 
 impl H3Definition {
@@ -114,6 +170,31 @@ impl H3Definition {
         self.chosen("render_pass", options) == Some("post_lighting")
     }
 
+    /// The options one stage of `entry` compiles with: the material's own in
+    /// Halo 3. In Reach a vertex shader is shared by every material of the
+    /// family, compiled with each option at its default (none, under
+    /// automatic macros) except the one category it depends on; a shared
+    /// pixel shader the same.
+    fn stage_options(&self, options: &[usize], entry: &str, stage: Stage) -> Vec<Option<usize>> {
+        let own = || options.iter().copied().map(Some).collect();
+        let Some(rules) = self.shared.get(entry) else {
+            return own();
+        };
+        let (category, most) = match stage {
+            Stage::Vertex => (rules.vertex_category, if rules.vertex_two_options { 2 } else { usize::MAX }),
+            Stage::Pixel if rules.shared_pixel => (rules.pixel_category, usize::MAX),
+            Stage::Pixel => return own(),
+        };
+        let default = (!self.automatic_macros).then_some(0);
+        let mut chosen = vec![default; self.categories.len()];
+        if let Some(category) = category.filter(|category| *category < chosen.len()) {
+            let count = self.categories[category].options.len().min(most);
+            let option = options.get(category).copied().unwrap_or(0);
+            chosen[category] = Some(option.min(count.saturating_sub(1)));
+        }
+        chosen
+    }
+
     /// The `blend_mode` category's choice.
     pub(crate) fn blend(&self, options: &[usize]) -> H3Blend {
         let name = self.chosen("blend_mode", options).unwrap_or_default().to_ascii_lowercase();
@@ -123,34 +204,48 @@ impl H3Definition {
 }
 
 /// tool's name for an entry point, where the tag's enum spells it for people.
-fn entry_name(option: &str) -> &str {
-    match option {
-        "vertex color lighting" => "static_per_vertex_color",
-        "water tessellation" => "water_tessellation",
-        "water shading" => "water_shading",
-        other => other,
+fn entry_name(dialect: H3Dialect, option: &str) -> &str {
+    match (dialect, option) {
+        (_, "vertex color lighting") => "static_per_vertex_color",
+        (_, "water tessellation") => "water_tessellation",
+        (_, "water shading") => "water_shading",
+        // Reach tool's `entry_point` table, `off_14290E110`.
+        (H3Dialect::Reach, "imposter_static_lighting_sh") => "imposter_static_sh",
+        (H3Dialect::Reach, "imposter_static_lighting_prt_ambient") => "imposter_static_prt_ambient",
+        (_, other) => other,
     }
 }
 
-/// The function each stage compiles. Some entry points share one.
-fn entry_functions(entry: &str) -> (String, String) {
-    match entry {
-        "static_prt_ambient" | "static_prt_linear" | "static_prt_quadratic" => {
+/// The function each stage compiles. Some entry points share one. Reach's
+/// are tool's `off_14290DCC0` (vertex) and `off_14290DBD0` (pixel).
+fn entry_functions(dialect: H3Dialect, entry: &str) -> (String, String) {
+    let pair = |vertex: &str, pixel: &str| (vertex.to_owned(), pixel.to_owned());
+    match (dialect, entry) {
+        (_, "static_prt_ambient" | "static_prt_linear" | "static_prt_quadratic") => {
             (format!("{entry}_vs"), "static_prt_ps".to_owned())
         }
-        "dynamic_light_cinematic" => ("dynamic_light_cine_vs".to_owned(), "dynamic_light_cine_ps".to_owned()),
-        other => (format!("{other}_vs"), format!("{other}_ps")),
+        (H3Dialect::Halo3, "dynamic_light_cinematic") => pair("dynamic_light_cine_vs", "dynamic_light_cine_ps"),
+        (H3Dialect::Reach, "dynamic_light") => pair("default_dynamic_light_vs", "dynamic_light_ps"),
+        (H3Dialect::Reach, "dynamic_light_cinematic") => pair("default_dynamic_light_vs", "dynamic_light_cine_ps"),
+        (H3Dialect::Reach, "dynamic_light_hq_shadows") => pair("default_dynamic_light_vs", "dynamic_light_hq_shadows_ps"),
+        (H3Dialect::Reach, "dynamic_light_cinematic_hq_shadows") => {
+            pair("default_dynamic_light_vs", "dynamic_light_cine_hq_shadows_ps")
+        }
+        (H3Dialect::Reach, "imposter_static_prt_ambient") => pair("imposter_static_prt_ambient_vs", "imposter_static_prt_ps"),
+        (_, other) => (format!("{other}_vs"), format!("{other}_ps")),
     }
 }
 
-/// `sub_140C587A0`: what every shader compiles with.
-fn base_defines(vertex_type: usize, stage: Stage) -> Vec<(String, String)> {
+/// `sub_140C587A0`: what every shader compiles with. Reach's `sub_141171B10`
+/// adds `_standard_vs`, without which every vertex shader body is compiled
+/// out, and `disable_register_reorder`.
+fn base_defines(dialect: H3Dialect, vertex_type: usize, stage: Stage) -> Vec<(String, String)> {
     let (vertex, deform) = VERTEX_TYPES[vertex_type];
     let stage = match stage {
         Stage::Vertex => "VERTEX_SHADER",
         Stage::Pixel => "PIXEL_SHADER",
     };
-    [
+    let mut defines = vec![
         ("vertex_type", vertex),
         ("deform", deform),
         ("SHADER_30", "1"),
@@ -158,23 +253,28 @@ fn base_defines(vertex_type: usize, stage: Stage) -> Vec<(String, String)> {
         ("DX_VERSION", "11"),
         ("PARAM_ALLOC_FIRST_PASS", "1"),
         (stage, "1"),
-    ]
-    .map(|(name, value)| (name.to_owned(), value.to_owned()))
-    .to_vec()
+    ];
+    if dialect == H3Dialect::Reach {
+        defines.extend([("_standard_vs", "1"), ("disable_register_reorder", "1")]);
+    }
+    defines.into_iter().map(|(name, value)| (name.to_owned(), value.to_owned())).collect()
 }
 
-/// `sub_140C589E0`: each category's function, as its option's.
-fn option_defines(definition: &H3Definition, options: &[usize]) -> Vec<(String, String)> {
+/// `sub_140C589E0`: each category's function, as its option's. Reach's
+/// `build_options_macro` (0x141171D10) also takes no option at all, which
+/// writes no function and no choice but still names every option.
+fn option_defines(definition: &H3Definition, options: &[Option<usize>]) -> Vec<(String, String)> {
     let mut defines = Vec::new();
     for (index, category) in definition.categories.iter().enumerate() {
-        let chosen = options.get(index).copied().unwrap_or(0);
-        let chosen = chosen.min(category.options.len().saturating_sub(1));
-        let Some(option) = category.options.get(chosen) else {
+        let chosen = options.get(index).copied().unwrap_or(Some(0));
+        let chosen = chosen.map(|chosen| chosen.min(category.options.len().saturating_sub(1)));
+        let option = chosen.and_then(|chosen| category.options.get(chosen));
+        if option.is_none() && !(chosen.is_none() && definition.automatic_macros) {
             continue;
-        };
+        }
         for (name, value) in [
-            (&category.vertex_function, &option.vertex_function),
-            (&category.pixel_function, &option.pixel_function),
+            (&category.vertex_function, option.and_then(|option| option.vertex_function.as_ref())),
+            (&category.pixel_function, option.and_then(|option| option.pixel_function.as_ref())),
         ] {
             if let (Some(name), Some(value)) = (name, value) {
                 defines.push((name.clone(), value.clone()));
@@ -182,7 +282,9 @@ fn option_defines(definition: &H3Definition, options: &[usize]) -> Vec<(String, 
         }
         if definition.automatic_macros {
             let prefix = format!("category_{}", category.name);
-            defines.push((prefix.clone(), format!("{prefix}_option_{}", option.name)));
+            if let Some(option) = option {
+                defines.push((prefix.clone(), format!("{prefix}_option_{}", option.name)));
+            }
             for (index, option) in category.options.iter().enumerate() {
                 defines.push((format!("{prefix}_option_{}", option.name), index.to_string()));
             }
@@ -191,24 +293,54 @@ fn option_defines(definition: &H3Definition, options: &[usize]) -> Vec<(String, 
     defines
 }
 
-/// The tag behind an `#include`: `global.fx` is `shaders\global_fx`.
-fn include_tag(name: &str) -> String {
-    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
-    format!("shaders\\{}", file.replace('.', "_"))
+/// Whose tool lays out the sources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum H3Dialect {
+    Halo3,
+    Reach,
+}
+
+impl H3Dialect {
+    fn of(source: &TagSource) -> Self {
+        match source.game() {
+            Some(GameId::HaloReach) => Self::Reach,
+            _ => Self::Halo3,
+        }
+    }
+}
+
+/// The tag behind an `#include`. Halo 3 keeps every source in one folder:
+/// `global.fx` is `shaders\global_fx`. Reach's `c_tag_d3dx_include`
+/// (tool `sub_141219410`) keeps the folder and cuts the last extension:
+/// `templated\albedo.fx` is `shaders\templated\albedo`.
+fn include_tag(dialect: H3Dialect, name: &str) -> String {
+    match dialect {
+        H3Dialect::Halo3 => {
+            let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+            format!("shaders\\{}", file.replace('.', "_"))
+        }
+        H3Dialect::Reach => {
+            let path = name.replace('/', "\\");
+            let stem = path.rsplit_once('.').map_or(path.as_str(), |(stem, _)| stem);
+            format!("shaders\\{stem}")
+        }
+    }
 }
 
 /// A kit's sources, read once.
 pub(crate) struct H3Sources {
     source: TagSource,
+    dialect: H3Dialect,
     definitions: HashMap<String, Option<Arc<H3Definition>>>,
     files: HashMap<String, Option<Arc<str>>>,
-    passes: HashMap<(String, Vec<usize>, String, bool), Arc<H3Pass>>,
+    passes: HashMap<(String, [Vec<Option<usize>>; 2], String, bool), Arc<H3Pass>>,
 }
 
 impl H3Sources {
     pub(crate) fn new(source: &TagSource) -> Self {
+        let dialect = H3Dialect::of(source);
         let source = source.clone();
-        Self { source, definitions: HashMap::new(), files: HashMap::new(), passes: HashMap::new() }
+        Self { source, dialect, definitions: HashMap::new(), files: HashMap::new(), passes: HashMap::new() }
     }
 
     pub(crate) fn definition(&mut self, path: &str) -> Option<Arc<H3Definition>> {
@@ -220,18 +352,18 @@ impl H3Sources {
     }
 
     fn file(&mut self, name: &str) -> Option<Arc<str>> {
-        let source = &self.source;
+        let (source, dialect) = (&self.source, self.dialect);
         self.files
             .entry(name.to_owned())
             .or_insert_with(|| {
-                let tag = load_referenced_tag_from_source(source, &include_tag(name), "hlsl_include", b"hlsl").ok()?;
+                let tag = load_referenced_tag_from_source(source, &include_tag(dialect, name), "hlsl_include", b"hlsl").ok()?;
                 let data = tag.root().field("include file")?.as_data()?.to_vec();
                 Some(Arc::from(String::from_utf8_lossy(&data).trim_end_matches('\0')))
             })
             .clone()
     }
 
-    /// `sub_140C587A0`'s defines, then `<family>.fx` for one stage.
+    /// `sub_140C587A0`'s defines, then the family's file for one stage.
     fn stage(
         &mut self,
         definition: &H3Definition,
@@ -241,15 +373,16 @@ impl H3Sources {
         stage: Stage,
         own_albedo: bool,
     ) -> Result<Translated, String> {
-        let mut defines = base_defines(vertex_type, stage);
+        let mut defines = base_defines(self.dialect, vertex_type, stage);
         defines.push(("entry_point".to_owned(), entry.to_owned()));
         // `sub_140C587A0`: a blended shader has no albedo pass to read back.
-        if own_albedo {
+        // Reach's sources never read it; its blended shaders go by `blend_type`.
+        if own_albedo && self.dialect == H3Dialect::Halo3 {
             defines.push(("maybe_calc_albedo".to_owned(), "1".to_owned()));
         }
-        defines.extend(option_defines(definition, options));
-        let main = format!("#include \"{}.fx\"\n", definition.name);
-        let (vertex, pixel) = entry_functions(entry);
+        defines.extend(option_defines(definition, &definition.stage_options(options, entry, stage)));
+        let main = format!("#include \"{}\"\n", definition.source_file);
+        let (vertex, pixel) = entry_functions(self.dialect, entry);
         self.compile(&defines, &main, if stage == Stage::Vertex { &vertex } else { &pixel }, stage)
     }
 
@@ -269,8 +402,8 @@ impl H3Sources {
     /// One of the engine's own `.hlsl` passes, on a skinned vertex.
     pub(crate) fn explicit_pass(&mut self, file: &str) -> Result<Arc<H3Pass>, String> {
         let main = format!("#include \"{file}.hlsl\"\n");
-        let vertex_defines = base_defines(VERTEX_SKINNED, Stage::Vertex);
-        let pixel_defines = base_defines(VERTEX_SKINNED, Stage::Pixel);
+        let vertex_defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Vertex);
+        let pixel_defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Pixel);
         let vertex = self.compile(&vertex_defines, &main, "default_vs", Stage::Vertex)?;
         let pixel = self.compile(&pixel_defines, &main, "default_ps", Stage::Pixel)?;
         Ok(Arc::new(pass_of(vertex, pixel)))
@@ -286,7 +419,7 @@ impl H3Sources {
         Ok(Arc::new(pass))
     }
 
-    /// An entry point's two stages.
+    /// An entry point's pass, as the draw would link it.
     #[cfg(test)]
     pub(crate) fn translate_entry(
         &mut self,
@@ -294,8 +427,9 @@ impl H3Sources {
         options: &[usize],
         entry: &str,
         vertex_type: usize,
-    ) -> Result<(Translated, Translated), String> {
-        self.stages(definition, options, entry, vertex_type, false)
+    ) -> Result<H3Pass, String> {
+        let (vertex, pixel) = self.stages(definition, options, entry, vertex_type, false)?;
+        Ok(pass_of(vertex, pixel))
     }
 
     fn stages(
@@ -435,7 +569,10 @@ impl H3Sources {
         entry: &str,
         own_albedo: bool,
     ) -> Result<Arc<H3Pass>, String> {
-        let key = (definition.name.clone(), options.to_vec(), entry.to_owned(), own_albedo);
+        // Reach materials that differ only where a shared stage looks away
+        // compile the same pass.
+        let options_of = |stage| definition.stage_options(options, entry, stage);
+        let key = (definition.name.clone(), [options_of(Stage::Vertex), options_of(Stage::Pixel)], entry.to_owned(), own_albedo);
         if let Some(pass) = self.passes.get(&key) {
             return Ok(Arc::clone(pass));
         }
@@ -801,5 +938,77 @@ mod varying_tests {
         assert!(widened.contains("out vec2 v_TEXCOORD0;"));
         assert!(widened.contains("v_TEXCOORD0 = b;"));
         assert_eq!(widen_varyings(vertex, "in vec3 v_COLOR1;\nin vec2 v_TEXCOORD0;"), vertex);
+    }
+}
+
+#[cfg(test)]
+mod stage_option_tests {
+    use super::*;
+
+    fn category(name: &str, options: &[&str]) -> H3Category {
+        let option = |name: &&str| H3Option {
+            name: (*name).to_owned(),
+            vertex_function: None,
+            pixel_function: Some(format!("calc_{name}")),
+        };
+        H3Category {
+            name: name.to_owned(),
+            vertex_function: None,
+            pixel_function: Some(format!("calc_{name}_ps")),
+            options: options.iter().map(option).collect(),
+        }
+    }
+
+    fn definition(automatic_macros: bool, shared: &[(&str, H3SharedStages)]) -> H3Definition {
+        H3Definition {
+            name: "shader".to_owned(),
+            source_file: "templated\\shader.fx".to_owned(),
+            automatic_macros,
+            categories: vec![
+                category("albedo", &["default", "detail", "constant"]),
+                category("blend_mode", &["opaque", "additive", "multiply", "alpha_blend"]),
+            ],
+            entry_points: shared.iter().map(|(entry, _)| (*entry).to_owned()).collect(),
+            shared: shared.iter().map(|(entry, rules)| ((*entry).to_owned(), *rules)).collect(),
+            pixel_vertex_type: 0,
+        }
+    }
+
+    #[test]
+    fn halo_3_compiles_both_stages_with_the_materials_options() {
+        let halo3 = definition(false, &[]);
+        assert_eq!(halo3.stage_options(&[2, 3], "static_sh", Stage::Vertex), [Some(2), Some(3)]);
+        assert_eq!(halo3.stage_options(&[2, 3], "static_sh", Stage::Pixel), [Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn a_reach_vertex_shader_keeps_only_its_category_and_only_two_of_its_options() {
+        let rules = H3SharedStages { vertex_two_options: true, vertex_category: Some(1), ..Default::default() };
+        let reach = definition(false, &[("static_sh", rules)]);
+        assert_eq!(reach.stage_options(&[2, 3], "static_sh", Stage::Vertex), [Some(0), Some(1)], "alpha_blend shares additive's");
+        assert_eq!(reach.stage_options(&[2, 0], "static_sh", Stage::Vertex), [Some(0), Some(0)]);
+        assert_eq!(reach.stage_options(&[2, 3], "static_sh", Stage::Pixel), [Some(2), Some(3)], "the material's own pixel shader");
+        let uncapped = definition(false, &[("static_sh", H3SharedStages { vertex_two_options: false, ..rules })]);
+        assert_eq!(uncapped.stage_options(&[2, 3], "static_sh", Stage::Vertex), [Some(0), Some(3)]);
+    }
+
+    #[test]
+    fn a_shared_pixel_shader_reads_only_its_category_and_automatic_macros_default_to_none() {
+        let rules = H3SharedStages { shared_pixel: true, pixel_category: Some(0), ..Default::default() };
+        let reach = definition(true, &[("shadow_generate", rules)]);
+        assert_eq!(reach.stage_options(&[2, 3], "shadow_generate", Stage::Pixel), [Some(2), None]);
+        assert_eq!(reach.stage_options(&[2, 3], "shadow_generate", Stage::Vertex), [None, None]);
+    }
+
+    #[test]
+    fn no_option_names_every_option_but_chooses_none() {
+        let reach = definition(true, &[]);
+        let defines = option_defines(&reach, &[None, Some(3)]);
+        let has = |name: &str| defines.iter().any(|(known, _)| known == name);
+        assert!(!has("calc_albedo_ps"), "no function without an option: {defines:?}");
+        assert!(!has("category_albedo"), "{defines:?}");
+        assert!(has("category_albedo_option_detail"), "{defines:?}");
+        assert!(defines.contains(&("calc_blend_mode_ps".to_owned(), "calc_alpha_blend".to_owned())));
+        assert!(defines.contains(&("category_blend_mode".to_owned(), "category_blend_mode_option_alpha_blend".to_owned())));
     }
 }
