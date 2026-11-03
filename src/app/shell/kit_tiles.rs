@@ -5,6 +5,19 @@ use super::recents::{RecentAction, draw_recent_folders_menu};
 use super::*;
 use crate::app::shell::frame::wheel_scroll_tab_bar;
 
+
+fn draw_home_tab(ui: &mut Ui, group: egui_tiles::TileId, active: bool) -> egui::Response {
+    let (_, rect) = ui.allocate_space(Vec2::new(32.0, 26.0));
+    let response = ui.interact(rect, egui::Id::new("workspace_home_tab").with(group), Sense::click()).on_hover_text("Home");
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, "Home"));
+    let fill = if active { left_panel() } else if response.hovered() { context_menu_hover() }
+        else { Color32::TRANSPARENT };
+    crate::app::shell::frame::paint_connected_tab(ui, rect, fill, active);
+    paint_button_icon_at(ui, ButtonIcon::Home,
+        egui::Rect::from_center_size(rect.center(), Vec2::splat(18.0)), text_dark());
+    response
+}
+
 /// Which loader the "+" menu on the kit tab bar should start.
 #[derive(Clone, Copy)]
 enum LoadKind {
@@ -57,13 +70,29 @@ struct KitPaneBehavior<'a, 'c, 'p> {
     close_requests: Vec<KitId>,
     add_kit: Option<LoadKind>,
     recent_action: Option<RecentAction>,
+    tab_groups: HashMap<egui_tiles::TileId, egui_tiles::TileId>,
 }
 
 impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
+    fn tab_bar_left_ui(
+        &mut self, tiles: &egui_tiles::Tiles<KitId>, ui: &mut Ui,
+        tile_id: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
+    ) {
+        for child in &tabs.children { self.tab_groups.insert(*child, tile_id); }
+        let empty = tabs.active.and_then(|id| tiles.get(id)).is_some_and(|tile| {
+            matches!(tile, egui_tiles::Tile::Pane(kit) if self.cx.model.kit_index(*kit)
+                .is_some_and(|index| self.cx.model.kits[index].is_empty_workspace()))
+        });
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(4.0);
+        if draw_home_tab(ui, tile_id, empty || self.parts.shell.home_groups.contains(&tile_id)).clicked() {
+            self.cx.send(AppAction::ShowHome { group: tile_id });
+        }
+    }
     fn pane_ui(
         &mut self,
         ui: &mut Ui,
-        _tile_id: egui_tiles::TileId,
+        tile_id: egui_tiles::TileId,
         pane: &mut KitId,
     ) -> egui_tiles::UiResponse {
         let kit_id = *pane;
@@ -72,28 +101,22 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
             ui.label(RichText::new("This kit is no longer open").color(subtle_dark()));
             return egui_tiles::UiResponse::None;
         };
-        // Activate on a press inside the pane, not on hover. `active` decides
-        // where deferred work lands — the save prompt, Ctrl+S, an open colour
-        // picker or reference picker — and none of that should retarget just
-        // because the cursor crossed another game's pane on its way somewhere.
-        // Sent before the pane draws, so it lands before anything the pane
-        // sends.
-        if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect())
-        {
-            cx.send(AppAction::FocusKit(kit_id));
+        let group = self.tab_groups.get(&tile_id).copied();
+        let kit = &cx.model.kits[kit_index];
+        let home = kit.is_empty_workspace()
+            || group.is_some_and(|id| self.parts.shell.home_groups.contains(&id));
+        if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) {
+            if home && let Some(group) = group {
+                cx.send(AppAction::ShowHome { group });
+            } else {
+                cx.send(AppAction::FocusKit(kit_id));
+            }
         }
         let parts = &mut self.parts;
-        let kit = &cx.model.kits[kit_index];
-        // An unloaded workspace has no tags to browse or edit, so it offers
-        // ways to open one instead of an empty browser and an empty editor.
-        if kit.is_empty_workspace() {
-            draw_welcome_screen(
-                cx,
-                ui,
-                kit_index,
-                parts.shell,
-                &parts.kit_tools.editing_kit_validation,
-            );
+        if home {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, left_panel());
+            draw_welcome_screen(cx, ui, kit_index, parts.shell,
+                &parts.kit_tools.editing_kit_validation);
             return egui_tiles::UiResponse::None;
         }
         if is_campaign_evolved(kit) && cx.model.prefs.enable_chimp {
@@ -185,6 +208,14 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         id: egui::Id, tile_id: egui_tiles::TileId, state: &egui_tiles::TabState,
     ) -> egui::Response {
         const CLOSE_GAP: f32 = 20.0;
+        if self.cx.model.kits.len() == 1 && matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit))
+            if self.cx.model.kit_index(*kit).is_some_and(|index| self.cx.model.kits[index].is_empty_workspace())) {
+            return ui.allocate_response(Vec2::ZERO, Sense::hover());
+        }
+        let mut state = state.clone();
+        state.active &= !self.tab_groups.get(&tile_id)
+            .is_some_and(|group| self.parts.shell.home_groups.contains(group));
+        let state = &state;
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit))
             if self.cx.model.kit_index(*kit).is_some_and(|index| self.cx.model.kits[index].has_unwritten_modifications()));
         let text = self.tab_title_for_tile(tiles, tile_id);
@@ -382,24 +413,10 @@ fn is_campaign_evolved(kit: &Kit) -> bool {
 pub(in crate::app) fn draw_kit_tiles(
     ui: &mut Ui,
     cx: &Ctx,
-    mut parts: TileParts,
+    parts: TileParts,
     inputs: &TileInputs,
     kit_tree: &mut egui_tiles::Tree<KitId>,
 ) {
-    // Nothing to tab between: draw the welcome screen directly rather than
-    // wrapping it in a tree whose tab bar would be an empty strip. A
-    // zero-height tab bar still leaves the "+" and the bar's own painting
-    // behind, so the tree is skipped outright.
-    if cx.model.kits.len() == 1 && cx.model.kits[0].is_empty_workspace() {
-        draw_welcome_screen(
-            cx,
-            ui,
-            0,
-            &mut parts.shell,
-            &parts.kit_tools.editing_kit_validation,
-        );
-        return;
-    }
     let mut behavior = KitPaneBehavior {
         cx,
         parts,
@@ -407,8 +424,11 @@ pub(in crate::app) fn draw_kit_tiles(
         close_requests: Vec::new(),
         add_kit: None,
         recent_action: None,
+        tab_groups: HashMap::new(),
     };
     kit_tree.ui(&mut behavior, ui);
+    behavior.parts.shell.home_groups.retain(|id| matches!(kit_tree.tiles.get(*id),
+        Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(_)))));
     let KitPaneBehavior {
         close_requests,
         add_kit,
@@ -605,7 +625,7 @@ mod tests {
             });
         };
         // On the first tab's label, in the tab bar above both panes.
-        let on_first_tab = egui::pos2(40.0, 20.0);
+        let on_first_tab = egui::pos2(90.0, 20.0);
         let press = |pressed| egui::Event::PointerButton {
             pos: on_first_tab,
             button: egui::PointerButton::Primary,

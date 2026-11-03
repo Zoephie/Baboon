@@ -88,6 +88,8 @@ pub(crate) use launch::{StartupArguments, parse_startup_arguments};
 /// restored, the operation notice, toolbar icons and game artwork, and when
 /// prefs are next checked.
 pub(in crate::app) struct ShellFeature {
+    pub(in crate::app) home_open: bool,
+    pub(in crate::app) home_groups: HashSet<egui_tiles::TileId>,
     /// The most recent check's result, kept only while it is actually an
     /// update. The status line expires on a timer, so this is what keeps the
     /// news reachable after a silent startup check.

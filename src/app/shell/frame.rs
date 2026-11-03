@@ -3304,6 +3304,14 @@ mod tests {
 
     fn cases() -> Vec<Case> {
         let mut cases = vec![
+            case(
+                "home_welcome_with_loaded_kit",
+                &["shell.home_open"],
+                &[],
+                memory_kit,
+                |h| { idle(h); let group = home_group(h); h.app.apply_app_action(AppAction::ShowHome { group }, &h.ctx.clone()); },
+                &["Start", "Open a tags folder"],
+            ),
             // --- the shell ---
             case(
                 "kit_browser",
@@ -5560,6 +5568,87 @@ mod tests {
             idle(&mut h);
             assert_eq!(rects(&h), clean, "clearing the dirty state must not resize tabs");
         }
+    }
+
+    fn home_group(h: &Harness) -> egui_tiles::TileId {
+        let kit = h.app.model.kits[h.app.model.active].id;
+        let pane = h.app.kit_tree.tiles.iter().find_map(|(id, tile)|
+            matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)).unwrap();
+        h.app.kit_tree.tiles.parent_of(pane).unwrap()
+    }
+    #[test]
+    fn home_stays_in_its_editing_kit_split() {
+        let (mut h, _) = three_tabs();
+        let left = h.app.model.kits[0].id;
+        let right = h.app.add_kit();
+        fixture::install_kit(&mut h.app, fixture::synthetic_entries(1, 1, 4));
+        fixture::open_document(&mut h.app, "folder_00\\sub_00\\tag_003.biped", fixture::new_tag("biped"));
+        h.app.kit_tree = egui_tiles::Tree::new_horizontal("home_split_regression", vec![left, right]);
+        idle(&mut h);
+        let pane_id = |h: &Harness, kit| h.app.kit_tree.tiles.iter().find_map(|(id, tile)| {
+            matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)
+        }).unwrap();
+        let left_pane = pane_id(&h, left);
+        let right_pane = pane_id(&h, right);
+        let left_group = h.app.kit_tree.tiles.parent_of(left_pane).unwrap();
+        let right_group = h.app.kit_tree.tiles.parent_of(right_pane).unwrap();
+        let left_rect = h.app.kit_tree.tiles.rect(left_group).unwrap();
+        let right_rect = h.app.kit_tree.tiles.rect(right_group).unwrap();
+        click_point(&mut h, left_rect.min + egui::vec2(16.0, 13.0));
+        idle(&mut h);
+        assert!(h.painted.iter().any(|text| text == "tag_003.biped"),
+            "opening Home on the left must keep the right-hand tag page visible");
+        let right_tab = h.ctx.read_response(right_pane.egui_id(h.app.kit_tree.id())).unwrap().rect;
+        assert!(right_tab.left() >= right_rect.left(), "the other split's kit tabs must not move into the left tab bar");
+        assert_eq!(h.app.kit_tree.tiles.rect(left_group), Some(left_rect));
+        assert_eq!(h.app.kit_tree.tiles.rect(right_group), Some(right_rect));
+    }
+
+    #[test]
+    fn home_tab_preserves_dirty_documents_and_split_layout_and_returns_to_the_kit() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[h.app.model.active].id;
+        h.app.views[kit].tag_tree = egui_tiles::Tree::new_horizontal(crate::app::kits::tag_tree_id(kit), keys.clone());
+        h.app.model.kits[0].parsed_tags.get_mut(&keys[0]).unwrap().dirty.touch();
+        idle(&mut h);
+        let layout = |h: &Harness| h.app.views[kit].tag_tree.tiles.iter().filter_map(|(id, tile)| {
+            match tile { egui_tiles::Tile::Container(container) => Some((*id, container.children_vec())), _ => None }
+        }).collect::<HashMap<_, _>>();
+        let before = layout(&h);
+        let root = h.app.views[kit].tag_tree.root();
+        let home = h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).unwrap().rect.center();
+        click_point(&mut h, home);
+        idle(&mut h);
+        assert!(h.app.shell.home_open);
+        assert!(h.painted.iter().any(|text| text.contains("Open a tags folder")), "Home draws the welcome page");
+        assert_eq!(h.app.model.kits.len(), 1, "Home is not an extra empty editing kit");
+        assert_eq!(open_tabs(&h), keys);
+        assert!(h.app.model.kits[0].parsed_tags[&keys[0]].dirty.is_set());
+        press_key(&mut h, egui::Key::W, egui::Modifiers::COMMAND);
+        idle(&mut h);
+        assert_eq!(open_tabs(&h), keys, "Ctrl+W on Home must not close the hidden tag");
+        assert!(h.app.shell.home_open);
+        let tab_id = h.app.kit_tree.tiles.iter().find_map(|(id, tile)| {
+            matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit).then_some(*id)
+        }).unwrap().egui_id(h.app.kit_tree.id());
+        let tab = h.ctx.read_response(tab_id).unwrap().rect.center();
+        click_point(&mut h, tab);
+        idle(&mut h);
+        assert!(!h.app.shell.home_open);
+        assert_eq!(h.app.views[kit].tag_tree.root(), root);
+        assert_eq!(layout(&h), before);
+        assert_eq!(open_tabs(&h), keys);
+        assert!(h.app.model.kits[0].parsed_tags[&keys[0]].dirty.is_set());
+    }
+
+    #[test]
+    fn the_empty_workspace_has_only_the_icon_home_tab() {
+        let mut h = Harness::new();
+        idle(&mut h);
+        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).is_some());
+        assert!(!h.painted.iter().any(|text| text == "New workspace"));
+        assert!(h.painted.iter().any(|text| text.contains("Open a tags folder")));
+        assert_eq!(h.app.model.kits.len(), 1);
     }
 
     /// Clicking a tab also selects its tag for file actions such as Save As.

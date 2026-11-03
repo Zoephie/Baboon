@@ -41,7 +41,9 @@ impl Baboon {
         );
         // Terminal panel — rendered AFTER status so it sits above it.
         let active = self.model.kits[self.model.active].id;
-        draw_terminal_panel(&cx!(self, ctx), ui, &mut self.kit_tools, &mut self.views[active]);
+        if !self.shell.home_open {
+            draw_terminal_panel(&cx!(self, ctx), ui, &mut self.kit_tools, &mut self.views[active]);
+        }
         set_window_work_area(ctx, ui.available_rect_before_wrap());
 
         egui::CentralPanel::default()
@@ -104,7 +106,7 @@ impl Baboon {
         // happened. Checked against the open tabs rather than hooked into each
         // close path, so a close confirmed after the save prompt counts and a
         // cancelled one does not.
-        let focus = self.model.kits.get(self.model.active).and_then(|kit| {
+        let focus = self.model.kits.get(self.model.active).filter(|_| !self.shell.home_open).and_then(|kit| {
             kit.selected_key
                 .clone()
                 .map(|key| crate::app::audio::SoundOwner { kit: kit.id, key })
@@ -288,6 +290,7 @@ impl Baboon {
             return;
         }
         let shortcuts = pressed_shortcuts(ctx);
+        let shortcuts = shortcuts.into_iter().filter(|_| !self.shell.home_open).collect::<Vec<_>>();
         // Save, close and poke act on the tags as they stand. Giving up the
         // focused field now, before any pane draws, lets it see the loss and
         // commit on this pass; given up when the action is applied, after

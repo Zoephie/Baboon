@@ -487,6 +487,8 @@ impl Baboon {
                 allow_app_close_once: false,
             },
             shell: ShellFeature {
+                home_open: false,
+                home_groups: HashSet::new(),
                 available_update: None,
                 last_update_check: None,
                 restoring_kits: HashSet::new(),

@@ -256,8 +256,15 @@ impl Baboon {
     /// tab. A split needs no help — both panes are already visible, and
     /// `make_active` leaves a pane that is not in a tab group alone.
     pub(in crate::app) fn focus_kit(&mut self, index: usize) {
+        self.shell.home_open = false;
         self.model.active = index;
         let kit = self.model.kits[index].id;
+        if let Some(group) = self.kit_tree.tiles.iter().find_map(|(id, tile)| {
+            matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit)
+                .then(|| self.kit_tree.tiles.parent_of(*id)).flatten()
+        }) {
+            self.shell.home_groups.remove(&group);
+        }
         self.kit_tree
             .make_active(|_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit));
     }
@@ -317,6 +324,7 @@ impl Baboon {
         let Some(index) = self.model.kit_index(id) else {
             return;
         };
+        let stay_on_home = self.shell.home_open;
         self.remember_closed_tag_keys(index, self.views[id].tabs_from_tree());
         let closing_campaign_evolved = self.model.kits[index]
             .source
@@ -333,6 +341,7 @@ impl Baboon {
         // The tab bar would otherwise fall back to its first tab while the
         // actions went to the kit that slid into the closed one's place.
         self.focus_kit(active_after_removal(self.model.active, index, self.model.kits.len()));
+        self.shell.home_open = stay_on_home;
     }
 
     /// Route an open request for `path` to a kit.
