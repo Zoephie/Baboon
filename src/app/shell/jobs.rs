@@ -266,7 +266,8 @@ impl Baboon {
                     geometry_id,
                     collision,
                     physics,
-                } => self.handle_model_overlays_built(stamp, key, geometry_id, collision, physics),
+                    notes,
+                } => self.handle_model_overlays_built(stamp, key, geometry_id, collision, physics, notes),
                 WorkerMessage::ModelAnimationsListed { stamp, key, geometry_id, result } => {
                     self.handle_model_animations_listed(stamp, key, geometry_id, result)
                 }

@@ -204,6 +204,8 @@ pub(in crate::app) enum WorkerMessage {
         geometry_id: u64,
         collision: Option<RenderModelPreview>,
         physics: Option<RenderModelPreview>,
+        /// What would not build, for the preview to say.
+        notes: Vec<String>,
     },
     /// One model's materials resolved to decoded textures, off the UI thread.
     ModelTexturesResolved {

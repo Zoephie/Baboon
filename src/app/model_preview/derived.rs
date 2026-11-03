@@ -1504,54 +1504,53 @@ pub(super) fn rebrand_preview_region(preview: &mut RenderModelPreview, region_na
 /// The `.model`'s collision layer, posed on its own skeleton, ready to merge
 /// over the render preview. `None` when the reference is absent or unreadable
 /// — a missing overlay degrades to nothing rather than failing the preview.
-pub(super) fn hlmt_collision_overlay(
-    model_tag: &TagFile,
-    source: &TagSource,
-) -> Option<RenderModelPreview> {
-    let reference = tag_ref_path(&model_tag.root(), "collision model")?;
-    let collision =
-        load_referenced_tag_from_source(source, &reference, "collision_model", b"coll").ok()?;
+pub(super) fn hlmt_collision_overlay(model_tag: &TagFile, source: &TagSource) -> Overlay {
+    let Some(reference) = tag_ref_path(&model_tag.root(), "collision model") else {
+        return Ok(None);
+    };
+    let collision = load_referenced_tag_from_source(source, &reference, "collision_model", b"coll")
+        .map_err(|error| format!("Could not load {reference}.collision_model: {error}"))?;
     let skeleton = model_skeleton(source, model_tag);
-    build_collision_preview(&collision, skeleton.as_ref().map(|s| s.nodes())).ok()
+    let built = build_collision_preview(&collision, skeleton.as_ref().map(|s| s.nodes()));
+    built.map(Some).map_err(|error| format!("{reference}.collision_model: {error}"))
 }
+
+/// An overlay built off a model: none when the model names nothing to draw,
+/// and why when it names something that would not build.
+pub(super) type Overlay = Result<Option<RenderModelPreview>, String>;
 
 /// Halo CE's object tag is its model wrapper. Resolve the gbxmodel bind pose
 /// with CE's corrected quaternion convention and use it to place the direct
 /// collision-model reference.
-pub(super) fn halo1_object_collision_overlay(
-    object_tag: &TagFile,
-    source: &TagSource,
-) -> Option<RenderModelPreview> {
-    let model_reference = object_reference(object_tag, "model")?;
-    let collision_reference = object_reference(object_tag, "collision model")?;
-    let render =
-        load_referenced_tag_from_source(source, &model_reference, "gbxmodel", b"mod2").ok()?;
-    let collision = load_referenced_tag_from_source(
-        source,
-        &collision_reference,
-        "model_collision_geometry",
-        b"coll",
-    )
-    .ok()?;
-    let nodes = render_model_skeleton(&render).ok()?;
-    build_collision_preview(&collision, Some(&nodes)).ok()
+pub(super) fn halo1_object_collision_overlay(object_tag: &TagFile, source: &TagSource) -> Overlay {
+    let (Some(model_reference), Some(collision_reference)) =
+        (object_reference(object_tag, "model"), object_reference(object_tag, "collision model"))
+    else {
+        return Ok(None);
+    };
+    let render = load_referenced_tag_from_source(source, &model_reference, "gbxmodel", b"mod2")
+        .map_err(|error| format!("Could not load {model_reference}.gbxmodel: {error}"))?;
+    let collision = load_referenced_tag_from_source(source, &collision_reference, "model_collision_geometry", b"coll")
+        .map_err(|error| format!("Could not load {collision_reference}.model_collision_geometry: {error}"))?;
+    let nodes = render_model_skeleton(&render).map_err(|error| format!("{model_reference}.gbxmodel: {error}"))?;
+    let built = build_collision_preview(&collision, Some(&nodes));
+    built.map(Some).map_err(|error| format!("{collision_reference}.model_collision_geometry: {error}"))
 }
 
 /// The `.model`'s physics layer, likewise. Reads both spellings the H2-era
 /// definitions used (`physics_model` and `physics model`); the legacy H2
 /// `physics` (`phys`) reference is deliberately not resolved — it is not a
 /// `phmo` and has no shapes to draw.
-pub(super) fn hlmt_physics_overlay(
-    model_tag: &TagFile,
-    source: &TagSource,
-) -> Option<RenderModelPreview> {
+pub(super) fn hlmt_physics_overlay(model_tag: &TagFile, source: &TagSource) -> Overlay {
     let root = model_tag.root();
-    let reference =
-        tag_ref_path(&root, "physics_model").or_else(|| tag_ref_path(&root, "physics model"))?;
-    let physics =
-        load_referenced_tag_from_source(source, &reference, "physics_model", b"phmo").ok()?;
+    let Some(reference) = tag_ref_path(&root, "physics_model").or_else(|| tag_ref_path(&root, "physics model")) else {
+        return Ok(None);
+    };
+    let physics = load_referenced_tag_from_source(source, &reference, "physics_model", b"phmo")
+        .map_err(|error| format!("Could not load {reference}.physics_model: {error}"))?;
     let skeleton = model_skeleton(source, model_tag);
-    build_physics_preview(&physics, skeleton.as_ref().map(|s| s.nodes())).ok()
+    let built = build_physics_preview(&physics, skeleton.as_ref().map(|s| s.nodes()));
+    built.map(Some).map_err(|error| format!("{reference}.physics_model: {error}"))
 }
 
 impl Baboon {
@@ -1608,12 +1607,12 @@ impl Baboon {
         // must still send its message or the pending flag sticks and the
         // overlays never arrive.
         let (key, panic_key) = (key.to_owned(), key.to_owned());
-        let build = move || -> Option<_> {
+        let build = move || -> Option<(Overlay, Overlay)> {
                 let model = super::loading::read_opened_tag(&source, &entry, edits).ok()?;
                 if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
                     && is_object_family_group(model.header.group_tag, source.game())
                 {
-                    return Some((halo1_object_collision_overlay(&model, &source), None));
+                    return Some((halo1_object_collision_overlay(&model, &source), Ok(None)));
                 }
                 let model = super::loading::preview_model_tag(&source, &model).ok()?.unwrap_or(model);
                 // Classic models only: a Campaign Evolved hlmt previews
@@ -1628,8 +1627,16 @@ impl Baboon {
             &self.tx,
             ctx,
             move || {
-                let (collision, physics) = build().unwrap_or((None, None));
-                WorkerMessage::ModelOverlaysBuilt { stamp, key, geometry_id, collision, physics }
+                let (collision, physics) = build().unwrap_or((Ok(None), Ok(None)));
+                let mut notes = Vec::new();
+                let mut kept = |overlay: Overlay| {
+                    overlay.unwrap_or_else(|error| {
+                        notes.push(error);
+                        None
+                    })
+                };
+                let (collision, physics) = (kept(collision), kept(physics));
+                WorkerMessage::ModelOverlaysBuilt { stamp, key, geometry_id, collision, physics, notes }
             },
             move |_| WorkerMessage::ModelOverlaysBuilt {
                 stamp,
@@ -1637,6 +1644,7 @@ impl Baboon {
                 geometry_id,
                 collision: None,
                 physics: None,
+                notes: vec!["the collision and physics overlays: the builder crashed".to_owned()],
             },
         );
         true
@@ -1650,6 +1658,7 @@ impl Baboon {
         geometry_id: u64,
         collision: Option<RenderModelPreview>,
         physics: Option<RenderModelPreview>,
+        notes: Vec<String>,
     ) -> bool {
         let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
             return true;
@@ -1675,6 +1684,7 @@ impl Baboon {
                 return true;
             }
             state.overlays_loaded = true;
+            data.notes.extend(notes);
             if collision.is_none() && physics.is_none() {
                 return false;
             }
@@ -1717,6 +1727,32 @@ mod tests {
     use blam_tags::{
         AssInstance, AssMaterial, AssObject, AssVertex, JmsMaterial, JmsNode, JmsTriangle, JmsVertex,
     };
+
+    /// An overlay the model names but that will not load says why, where it
+    /// used to come back as no overlay at all.
+    #[test]
+    fn an_overlay_that_will_not_load_says_why() {
+        let tags = crate::core::test_kits::h3ek_tags();
+        let rel = "objects/vehicles/warthog/warthog.model";
+        if !tags.join(rel).is_file() {
+            eprintln!("skipping: BLAM_TEST_H3EK has no {rel}");
+            return;
+        }
+        // The model alone, so its collision model has nothing to find.
+        let root = std::env::temp_dir().join(format!("baboon-lone-model-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("objects/vehicles/warthog")).unwrap();
+        std::fs::copy(tags.join(rel), root.join(rel)).unwrap();
+        let model = blam_tags::TagFile::read(root.join(rel)).unwrap();
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: Some(crate::core::game::GameId::Halo3),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let overlay = hlmt_collision_overlay(&model, &source);
+        std::fs::remove_dir_all(&root).ok();
+        let error = overlay.expect_err("a missing collision model is an error, not no overlay");
+        assert!(error.starts_with("Could not load"), "{error}");
+    }
 
     /// Sidewinder's collision has 54,540 edges, indexed in 16 bits past
     /// 32767: every surface still closes its ring of edges into triangles.
@@ -2640,7 +2676,7 @@ mod tests {
             materials: vec![Default::default()],
             ..Default::default()
         };
-        app.handle_model_overlays_built(stamp, key.clone(), geometry_id, Some(overlay), None);
+        app.handle_model_overlays_built(stamp, key.clone(), geometry_id, Some(overlay), None, Vec::new());
         let state = &app.views[app.model.kits[0].id].caches.model_previews[&key];
         assert!(
             state.textures_pending,

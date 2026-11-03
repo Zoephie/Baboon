@@ -411,6 +411,7 @@ fn model_preview_data(
         h2_attached: Vec::new(),
         scenario_bsps: Vec::new(),
         animations: None,
+        notes: Vec::new(),
     }
 }
 
@@ -1888,6 +1889,14 @@ fn draw_model_viewport_with_stats(
         FontId::proportional(10.0),
         foundation_block_text(),
     );
+    // What the load left out, which would otherwise just be missing.
+    if !data.notes.is_empty() {
+        let summary = match data.notes.len() {
+            1 => "1 part of this preview left out".to_owned(),
+            count => format!("{count} parts of this preview left out"),
+        };
+        ui.label(RichText::new(summary).small().color(subtle_dark())).on_hover_text(data.notes.join("\n"));
+    }
     // Why a material drew untextured, which the resolve records and nothing
     // showed: the model just looked flat.
     if state.render_mode.uses_textures()

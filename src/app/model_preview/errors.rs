@@ -524,6 +524,7 @@ mod tests {
             return;
         }
         let preview = hlmt_collision_overlay(&read_h2_tag(&path, "model.json"), &h2_source(root))
+            .unwrap()
             .expect("resolve collision preview through the Halo 2 model wrapper");
         assert!(preview.errors.iter().any(|error| {
             error.label.eq_ignore_ascii_case("open edge")

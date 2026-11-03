@@ -331,7 +331,7 @@ fn halo_ce_monitor_collision_overlay_is_drawn() {
     .unwrap();
     let mut preview = build_render_preview(&render).unwrap();
     let collision =
-        halo1_object_collision_overlay(&object, &source).expect("collision overlay");
+        halo1_object_collision_overlay(&object, &source).unwrap().expect("collision overlay");
     merge_preview_append(&mut preview, &collision);
     let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
     let mut state = ModelPreviewState {

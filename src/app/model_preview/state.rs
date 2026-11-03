@@ -547,6 +547,9 @@ pub(in crate::app) struct ModelPreviewData {
     /// `.model` tags only: the linked animation graph's animation list, once
     /// the worker has read it. `None` elsewhere and before it lands.
     pub(in crate::app) animations: Option<std::sync::Arc<Vec<PreviewAnimationEntry>>>,
+    /// What the preview shows without, and why: a feature whose tags would
+    /// not read, a weapon that would not attach. The geometry is still there.
+    pub(in crate::app) notes: Vec<String>,
 }
 
 #[derive(Clone)]
