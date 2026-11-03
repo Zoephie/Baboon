@@ -1412,6 +1412,8 @@ pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
 mod h3_draw;
 #[path = "reach_lighting.rs"]
 mod reach_lighting;
+#[path = "reach_bloom.rs"]
+mod reach_bloom;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -3809,6 +3811,7 @@ struct ModelGlRenderer {
     /// How much of its effect the `shader_screen` drawing now is.
     h3_screen_alpha: Option<f32>,
     h3_bloom: Option<h3_bloom::H3Bloom>,
+    reach_bloom: Option<reach_bloom::ReachBloom>,
     h3_empty_vertices: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -3945,6 +3948,7 @@ impl ModelGlRenderer {
                 h3_vision_mask: None,
                 h3_screen_alpha: None,
                 h3_bloom: None,
+                reach_bloom: None,
                 h3_empty_vertices: None,
                 h2_gel: None,
                 h2_bloom: None,

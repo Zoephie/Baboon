@@ -1103,9 +1103,9 @@ impl ModelGlRenderer {
                 .collect();
             // A model's materials are all of one game.
             let reach = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Reach);
-            // Reach blooms by its own chain and shadows into a mask ahead of
-            // the lights; neither is built, so neither runs.
-            let (bloomed, self_shadow) = (frame.bloom && !reach, frame.self_shadow && !reach);
+            // Reach shadows into a mask ahead of the lights, which is not
+            // built, so its self shadow does not run.
+            let (bloomed, self_shadow) = (frame.bloom, frame.self_shadow && !reach);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear_depth_f32(1.0);
@@ -1263,7 +1263,7 @@ impl ModelGlRenderer {
                             self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
                         }
                     }
-                    bloom = self.h3_built_bloom(gl, accumulation_target, accumulation, size);
+                    bloom = self.h3_built_bloom(gl, accumulation_target, accumulation, size, reach);
                     gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
                     gl.enable(glow::DEPTH_TEST);
                     gl.enable(glow::BLEND);
@@ -1295,7 +1295,7 @@ impl ModelGlRenderer {
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             if bloomed && bloom.is_none() {
-                bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size);
+                bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size, reach);
             }
             let uploaded = &mut self.slots[slot];
             let values = |object: u8| frame.h2_values_of_object(object);
@@ -1322,12 +1322,19 @@ impl ModelGlRenderer {
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         size: [i32; 2],
+        reach: bool,
     ) -> Option<glow::NativeTexture> {
         unsafe {
+            let vertices = self.h3_empty_array(gl);
+            if reach {
+                if self.reach_bloom.is_none() {
+                    self.reach_bloom = super::reach_bloom::ReachBloom::new(gl, self.h3_no_bloom);
+                }
+                return self.reach_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size);
+            }
             if self.h3_bloom.is_none() {
                 self.h3_bloom = H3Bloom::new(gl, self.h3_no_bloom);
             }
-            let vertices = self.h3_empty_array(gl);
             self.h3_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size)
         }
     }
