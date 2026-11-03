@@ -368,8 +368,44 @@ enum H3ParticleController {
     Flock,
 }
 
-/// The emitter's own `movements`, or else its template's.
-fn read_controllers(source: &TagSource, emitter: TagStruct<'_>) -> Vec<H3ParticleController> {
+/// Where an emitter's particles are updated, as tool's `effect_postprocess`
+/// decides it (`c_particle_emitter_definition::decide_whether_cpu_or_gpu`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum H3ParticleUpdate {
+    /// `c_particle_emitter::frame_advance`, with every movement.
+    Cpu,
+    /// `particle_update.hlsl`: no collision, and physics once per emitter.
+    Gpu,
+}
+
+/// `decide_whether_cpu_or_gpu`. `force cpu updating` wins, then `force gpu
+/// updating`; otherwise an emitter goes on the card when its particle lists no
+/// attachments (H3's particle flag 0x20, ODST's 0x40) and its own movement asks
+/// for nothing past `physics` (movement flag 0x100). The emitter's and the
+/// system's own "can be gpu" bits are set by every postprocess, so always hold.
+fn particle_update(
+    system_flagged: impl Fn(&str) -> bool,
+    any_attachments: bool,
+    movement_flagged: impl Fn(&str) -> bool,
+) -> H3ParticleUpdate {
+    let plain_movement = !["collide with", "swarm", "wind"].iter().any(|wanted| movement_flagged(wanted));
+    if system_flagged("force cpu updating") {
+        H3ParticleUpdate::Cpu
+    } else if system_flagged("force gpu updating") || (!any_attachments && plain_movement) {
+        H3ParticleUpdate::Gpu
+    } else {
+        H3ParticleUpdate::Cpu
+    }
+}
+
+/// The emitter's `movements`, its own or else its template's, kept to the
+/// kinds its own flags name: tool's `postprocess_internal` drops the rest, and
+/// takes from the template only what fills a flagged kind in.
+fn read_controllers(
+    source: &TagSource,
+    emitter: TagStruct<'_>,
+    flagged: impl Fn(&str) -> bool,
+) -> Vec<H3ParticleController> {
     let Some(movement) = emitter.descend("particle movement") else {
         return Vec::new();
     };
@@ -382,9 +418,9 @@ fn read_controllers(source: &TagSource, emitter: TagStruct<'_>) -> Vec<H3Particl
     movements
         .into_iter()
         .filter_map(|entry| match entry.read_enum_name("type").as_deref() {
-            Some("physics") => Some(H3ParticleController::Physics),
-            Some("collider") => Some(H3ParticleController::Collider),
-            Some("swarm") => Some(H3ParticleController::Flock),
+            Some("physics") if flagged("physics") => Some(H3ParticleController::Physics),
+            Some("collider") if flagged("collide with") => Some(H3ParticleController::Collider),
+            Some("swarm") if flagged("swarm") => Some(H3ParticleController::Flock),
             _ => None,
         })
         .collect()
@@ -514,6 +550,9 @@ pub(crate) struct H3ParticleLook {
     backwards: bool,
     /// `attachments`: effects its particles start, by what starts them.
     attachments: Vec<(H3ParticleTrigger, String)>,
+    /// Whether the tag lists any attachment at all, which is what keeps its
+    /// emitters off the card (`c_particle_definition::postprocess`).
+    any_attachments: bool,
     /// A Halo 2 particle with `attached particle systems`: its own tag.
     carried_systems: Option<String>,
     /// Halo 2: `sub_61AE40` scales a death or collision effect by `speed - 0.5`.
@@ -970,6 +1009,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
                 (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then_some((trigger, path))
             })
             .collect(),
+        any_attachments: !elements(root, "attachments").is_empty(),
         carried_systems: None,
         death_scaled_by_speed: false,
         edge_fade: flagged("fade when viewed edge-on").then(|| {
@@ -1110,6 +1150,8 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
                 (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then_some((trigger, path))
             })
             .collect(),
+        // Read only for Halo 3 and ODST: Halo 2's emitters are all on the processor.
+        any_attachments: false,
         carried_systems: (!elements(root, "attached particle systems").is_empty()).then(|| path.to_owned()),
         death_scaled_by_speed: true,
         edge_fade: None,
@@ -1360,6 +1402,18 @@ impl H3ParticleCollider {
 }
 
 impl H3ParticlePhysics {
+    /// `c_particle_emitter_gpu::set_shader_update_state`: gravity, air
+    /// friction and rotational friction, once for the emitter at its system's
+    /// states.
+    fn on_card(&self, state: &H3ParticleState) -> [f32; 3] {
+        let read = |property: &Option<H3ParticleProperty>| property.as_ref().map(|property| property.scalar(state));
+        [
+            read(&self.gravity).unwrap_or(1.0) * GRAVITY,
+            read(&self.air_friction).unwrap_or(1.0),
+            read(&self.rotational_friction).unwrap_or(0.0),
+        ]
+    }
+
     /// `c_particle_controller::update_particles_physics`.
     fn update(&self, particles: &mut [Particle], state: H3ParticleState, dt: f32) {
         for particle in particles.iter_mut().filter(|particle| !particle.resting) {
@@ -1496,6 +1550,7 @@ impl H3ParticleAxis {
 
 #[derive(Debug)]
 struct H3Emitter {
+    update: H3ParticleUpdate,
     /// What a pulse's count may fall short of a whole particle by and still
     /// make one: Halo 2's `c_particle_emitter::pulse` (0x68d160) spawns while
     /// `count + 0.0001 >= 1`; Halo 3's floors it.
@@ -1562,7 +1617,14 @@ fn read_movement(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAl
     })
 }
 
-fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter> {
+/// A Halo 3 or ODST emitter; `system_flagged` reads its system's flags, and
+/// `any_attachments` is its particle's.
+fn read_emitter(
+    source: &TagSource,
+    emitter: TagStruct<'_>,
+    system_flagged: impl Fn(&str) -> bool,
+    any_attachments: bool,
+) -> Option<H3Emitter> {
     let mut seeds = SeedAllocator::default();
     let shape = H3EmissionShape::named(&emitter.read_enum_name("emission shape").unwrap_or_default())?;
     let mut property = |name: &str| H3ParticleProperty::named(emitter, name, &mut seeds);
@@ -1592,12 +1654,16 @@ fn read_emitter(source: &TagSource, emitter: TagStruct<'_>) -> Option<H3Emitter>
         property("particle alpha black point")?,
     );
     let axis_angle = property("emission axis angle")?;
-    let controllers = read_controllers(source, emitter);
+    let movement_flags = emitter.descend("particle movement").and_then(|movement| movement.read_flag_names("flags"));
+    let movement_flagged = |wanted: &str| movement_flags.iter().flatten().any(|(_, name)| name.starts_with(wanted));
+    let update = particle_update(system_flagged, any_attachments, movement_flagged);
+    let controllers = read_controllers(source, emitter, movement_flagged);
     let physics = read_physics(source, emitter, &mut seeds);
     let flock = read_flock(source, emitter, &mut seeds);
     let collider = read_collider(source, emitter, &mut seeds);
     let scroll = emitter.read_vec2("uv scrolling");
     Some(H3Emitter {
+        update,
         spawn_slack: 0.0,
         axis: H3ParticleAxis::named(&emitter.read_enum_name("particle axis (for models)").unwrap_or_default()),
         reference_axis: match emitter.read_enum_name("particle reference axis").as_deref() {
@@ -1664,6 +1730,7 @@ fn read_h2_emitter(
         })
         .collect();
     Some(H3Emitter {
+        update: H3ParticleUpdate::Cpu,
         spawn_slack: 0.0001,
         controllers,
         shape,
@@ -1762,7 +1829,8 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
         (Arc::new(look), elements(system, "emitters").iter().filter_map(read).map(Arc::new).collect())
     } else {
         let look = read_look(source, &path).map(Arc::new)?;
-        let read = |emitter: &TagStruct<'_>| read_emitter(source, *emitter).map(Arc::new);
+        let any_attachments = look.any_attachments;
+        let read = |emitter: &TagStruct<'_>| read_emitter(source, *emitter, flagged, any_attachments).map(Arc::new);
         (look, elements(system, "emitters").iter().filter_map(read).collect())
     };
     if emitters.is_empty() {
@@ -2043,6 +2111,8 @@ struct Particle {
     landed: bool,
     /// Slow enough on one to have stopped for good.
     resting: bool,
+    /// Not yet through an update: the card's first after a spawn moves nothing.
+    spawned_this_frame: bool,
     axis: [f32; 3],
     age: f32,
     inverse_lifespan: f32,
@@ -2335,6 +2405,7 @@ impl H3Emitter {
                 colliding: false,
                 landed: false,
                 resting: false,
+                spawned_this_frame: true,
                 axis,
                 age: if self.bunched { 0.0 } else { along * dt * inverse_lifespan },
                 inverse_lifespan,
@@ -2364,6 +2435,9 @@ impl H3Emitter {
         ground: Option<(([f32; 3], f32), bool, &mut Vec<(u64, [f32; 3], [f32; 3])>)>,
         dies_at_rest: bool,
     ) {
+        if self.update == H3ParticleUpdate::Gpu {
+            return self.step_on_card(state, particles, dt, ended);
+        }
         let mut ground = ground;
         for controller in &self.controllers {
             match controller {
@@ -2417,6 +2491,52 @@ impl H3Emitter {
             for axis in 0..3 {
                 particle.position[axis] += particle.velocity[axis] * dt;
             }
+            particle.rotation = (particle.rotation + particle.rotation_rate * dt).rem_euclid(1.0);
+            particle.frame = (particle.frame + particle.frame_rate * dt).rem_euclid(1.0);
+            true
+        });
+    }
+}
+
+impl H3Emitter {
+    /// `particle_update.hlsl`'s `update_particle_state`, for an emitter on the
+    /// card: a particle's first update after its spawn moves nothing; then it
+    /// ages, moves by the velocity it had, and only then is accelerated. Its
+    /// physics is the emitter's, and none without the `physics` movement.
+    fn step_on_card(
+        &self,
+        state: H3ParticleState,
+        particles: &mut Vec<Particle>,
+        dt: f32,
+        ended: &mut Vec<ParticleEvent>,
+    ) {
+        let physical = self.controllers.contains(&H3ParticleController::Physics);
+        let physics = self.physics.as_ref().filter(|_| physical);
+        let [gravity, air_friction, rotational_friction] = physics.map_or([0.0; 3], |physics| physics.on_card(&state));
+        particles.retain_mut(|particle| {
+            let dt = if std::mem::take(&mut particle.spawned_this_frame) { 0.0 } else { dt };
+            particle.age += particle.inverse_lifespan * dt;
+            if particle.age >= 1.0 {
+                ended.push((particle.id, particle.position, particle.velocity));
+                return false;
+            }
+            let (position, velocity) = (particle.position, particle.velocity);
+            particle.position = std::array::from_fn(|axis| position[axis] + velocity[axis] * dt);
+            let state = H3ParticleState {
+                age: particle.age,
+                seeds: particle.seeds,
+                system_seeds: particle.system_seeds,
+                emission_time: particle.emission_time,
+                rotation: particle.rotation,
+                ..state
+            };
+            let acceleration = self.acceleration.around(&state);
+            particle.velocity = std::array::from_fn(|axis| velocity[axis] + acceleration[axis] * dt);
+            particle.velocity[2] -= gravity * dt;
+            let air = (air_friction * dt).clamp(0.0, 1.0);
+            particle.velocity = particle.velocity.map(|axis| axis - air * axis);
+            let spin = (rotational_friction * dt).clamp(0.0, 1.0);
+            particle.rotation_rate -= spin * particle.rotation_rate;
             particle.rotation = (particle.rotation + particle.rotation_rate * dt).rem_euclid(1.0);
             particle.frame = (particle.frame + particle.frame_rate * dt).rem_euclid(1.0);
             true
@@ -3266,5 +3386,98 @@ mod tests {
         let (mut a, mut b) = (Random(3), Random(3));
         assert_eq!(a.next(), b.next());
         assert_ne!(a.next(), Random(4).next());
+    }
+
+    /// `decide_whether_cpu_or_gpu`: forcing the processor wins, then forcing
+    /// the card; otherwise the card takes a particle with no attachments
+    /// whose movement asks for nothing past `physics`.
+    #[test]
+    fn tool_puts_an_emitter_on_the_card_only_when_nothing_needs_the_processor() {
+        let named =
+            |names: &'static [&'static str]| move |wanted: &str| names.iter().any(|name| name.starts_with(wanted));
+        let decide = |system: &'static [&'static str], attachments, movement: &'static [&'static str]| {
+            particle_update(named(system), attachments, named(movement))
+        };
+        assert_eq!(decide(&[], false, &[]), H3ParticleUpdate::Gpu);
+        assert_eq!(decide(&[], false, &["physics"]), H3ParticleUpdate::Gpu);
+        assert_eq!(decide(&[], true, &["physics"]), H3ParticleUpdate::Cpu, "attachments play on the processor");
+        assert_eq!(decide(&[], false, &["physics", "collide with structure"]), H3ParticleUpdate::Cpu);
+        assert_eq!(decide(&[], false, &["swarm"]), H3ParticleUpdate::Cpu);
+        assert_eq!(decide(&["force gpu updating{force gpu rendering}"], true, &["wind"]), H3ParticleUpdate::Gpu);
+        let both = &["force cpu updating{force cpu rendering}", "force gpu updating{force gpu rendering}"];
+        assert_eq!(decide(both, false, &[]), H3ParticleUpdate::Cpu, "forcing the processor wins");
+    }
+
+    /// The first emitter of an effect's first system, from the Halo 3 kit.
+    fn kit_emitter(root: &str, path: &str) -> Arc<H3Emitter> {
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(GameId::Halo3),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let effect = load_referenced_tag_from_source(&source, path, "effect", b"effe").unwrap();
+        let event = elements(effect.root(), "events").into_iter().next().unwrap();
+        let system = elements(event, "particle systems").into_iter().next().unwrap();
+        Arc::clone(&read_system_parts(&source, system).unwrap().emitters[0])
+    }
+
+    /// With `BLAM_TEST_H3EK`: plain physics goes on the card, colliding stays
+    /// on the processor, and a template's movements need the emitter's own
+    /// flags, as tool's `postprocess_internal` keeps them.
+    #[test]
+    fn kit_emitters_update_where_tool_puts_them_and_move_as_their_flags_say() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let plain = kit_emitter(&root, "fx\\cinematics\\120lc_activation\\02\\shot_03\\halochunk_impact");
+        assert_eq!(plain.update, H3ParticleUpdate::Gpu);
+        assert_eq!(plain.controllers, [H3ParticleController::Physics]);
+        let colliding = kit_emitter(&root, "fx\\cinematics\\100ld_confront_truth\\07\\shot_04\\tentacle_erupt");
+        assert_eq!(colliding.update, H3ParticleUpdate::Cpu);
+        assert!(colliding.controllers.contains(&H3ParticleController::Collider));
+        // `_default`'s physics, with none of the emitter's own flags set.
+        let unflagged = kit_emitter(&root, "fx\\cinematics\\040lb_cov_flee\\08\\shot_4\\flood_spew");
+        assert!(unflagged.controllers.is_empty(), "{:?}", unflagged.controllers);
+    }
+
+    /// On the card a particle's spawn frame moves nothing; after that it moves
+    /// by the velocity it had before its emitter's air friction (2 here, with
+    /// no gravity) slows it, where the processor slows it first.
+    #[test]
+    fn a_particle_on_the_card_waits_a_frame_then_moves_before_it_accelerates() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let emitter = kit_emitter(&root, "fx\\cinematics\\120lc_activation\\02\\shot_03\\halochunk_impact");
+        let particle = Particle {
+            id: 1,
+            colliding: false,
+            landed: false,
+            resting: false,
+            spawned_this_frame: true,
+            axis: [0.0, 0.0, 1.0],
+            age: 0.0,
+            inverse_lifespan: 0.1,
+            position: [0.0; 3],
+            velocity: [1.0, 0.0, 0.0],
+            rotation: 0.0,
+            rotation_rate: 0.0,
+            frame: 0.0,
+            frame_rate: 0.0,
+            seeds: [0.0; SEEDS],
+            emission_time: 0.0,
+            flip: [false; 3],
+            sequence: 0,
+            system_seeds: [0.0; SYSTEM_SEEDS],
+        };
+        let (mut particles, mut ended, dt) = (vec![particle], Vec::new(), 1.0 / 60.0);
+        let state = H3ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
+        emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, false);
+        assert_eq!((particles[0].position, particles[0].age), ([0.0; 3], 0.0), "the spawn frame");
+        emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, false);
+        assert_eq!(particles[0].position[0], dt, "it moved by the velocity it had");
+        assert_eq!(particles[0].velocity[0], 1.0 - 2.0 * dt, "then friction took some off");
     }
 }
