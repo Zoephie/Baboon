@@ -1398,6 +1398,8 @@ mod h3_bloom;
 pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
 #[path = "h3_draw.rs"]
 mod h3_draw;
+#[path = "reach_lighting.rs"]
+mod reach_lighting;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -3787,6 +3789,7 @@ struct ModelGlRenderer {
     /// holds its pass, so no other pass can come to have its address.
     h3_programs: HashMap<usize, Result<h3_draw::H3Program, Arc<h3_shaders::H3Pass>>>,
     h3_composite_program: Option<glow::NativeProgram>,
+    reach_composite_program: Option<glow::NativeProgram>,
     h3_blur_program: Option<glow::NativeProgram>,
     h3_vision_program: Option<glow::NativeProgram>,
     h3_suck_program: Option<glow::NativeProgram>,
@@ -3923,6 +3926,7 @@ impl ModelGlRenderer {
                 h3_light: None,
                 h3_programs: HashMap::new(),
                 h3_composite_program: None,
+                reach_composite_program: None,
                 h3_blur_program: None,
                 h3_vision_program: None,
                 h3_suck_program: None,

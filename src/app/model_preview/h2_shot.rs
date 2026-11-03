@@ -124,6 +124,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 "gels" => preview.h2_gel_lights.clear(),
                 "volumes" => preview.h2_light_volumes.clear(),
                 "contrails" => preview.h2_contrails.clear(),
+                "prt" => preview.h3_prt = None,
                 other => panic!("H2_SHOT_DROP: no feature {other}"),
             }
         }
@@ -356,6 +357,36 @@ fn h2_shot() {
             pitch: f[5].parse().unwrap(),
         };
         render(&gl, &mut renderer, &source, &shot);
+    }
+}
+
+/// What one pass reads: `H3_PASS=<family>|<template>|<entry>` and
+/// `BLAM_TEST_H3EK` to the tags folder.
+#[test]
+fn h3_pass_inputs() {
+    use super::h3_shaders::{H3Sources, VERTEX_SKINNED, read_h3_definition};
+    let Ok(spec) = std::env::var("H3_PASS") else {
+        return;
+    };
+    let [family, template, entry]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
+    let root = std::env::var("BLAM_TEST_H3EK").unwrap();
+    let game = if root.contains("reach") { GameId::HaloReach } else { GameId::Halo3 };
+    let source = TagSource::LooseFolder {
+        root: root.clone().into(),
+        game: Some(game),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let definition = read_h3_definition(&source, &format!("shaders\\{family}")).unwrap();
+    let options: Vec<usize> = template.split('_').filter_map(|digit| digit.parse().ok()).collect();
+    let pass = H3Sources::new(&source).translate_entry(&definition, &options, entry, VERTEX_SKINNED).unwrap();
+    for (name, ty) in &pass.uniforms {
+        eprintln!("NOTE UNIFORM {name} {ty:?}");
+    }
+    for (name, kind) in &pass.textures {
+        eprintln!("NOTE TEXTURE {name} {kind:?}");
+    }
+    if std::env::var_os("H3_PASS_SOURCE").is_some() {
+        eprintln!("{}\n-----\n{}", pass.vertex, pass.pixel);
     }
 }
 

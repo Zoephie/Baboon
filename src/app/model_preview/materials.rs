@@ -4,7 +4,7 @@
 
 use super::*;
 use blam_tags::render_method::{
-    BitmapAddressMode, ParameterSource, RenderMethod, RenderMethodAnimatedParameterType,
+    BitmapAddressMode, BitmapFilterMode, ParameterSource, RenderMethod, RenderMethodAnimatedParameterType,
     RenderMethodBitmapExternMode,
     RenderMethodDefinition, RenderMethodOption, RenderMethodParameter, RenderMethodParameterType, ResolvedRenderMethod,
     ResolvedValue,
@@ -16,7 +16,7 @@ use super::ce_passes::{
 use super::ce_attachments::elements;
 use super::h3_shaders::{
     H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
-    H3Sampler, H3Texels, H3Texture, H3Value,
+    H3Dialect, H3Sampler, H3Texels, H3Texture, H3Value,
 };
 use super::h2_stage::H2VertexStage;
 use super::h2_passes::{
@@ -412,11 +412,8 @@ fn resolve_one_material(
         textures.slots[TextureSlot::AlphaTest as usize] =
             textures.slots[TextureSlot::Base as usize].clone();
     }
-    // Reach's shaders translate, but light with dual vMF constants the frame
-    // does not set yet, so they keep the general shader until it does.
     // `Game::of` calls every tag after Halo 2 `Halo3`, Reach's included.
-    let reach = source.game() == Some(GameId::HaloReach);
-    if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 && !reach {
+    if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 {
         match prepare_h3_material(source, &values, caches) {
             Ok(material) => textures.h3 = Some(Arc::new(material)),
             // The general shader still draws it, so this is only worth saying
@@ -666,6 +663,14 @@ fn prepare_h3_material(
         .find(|entry| definition.entry_points.iter().any(|known| known == *entry))
         .ok_or("no lit entry point")?;
     let opaque = blend == H3Blend::Opaque;
+    let dialect = sources.dialect();
+    let has = |entry: &str| definition.entry_points.iter().any(|known| known == entry);
+    // Reach's `select_mesh_entry_point_for_pass` (MCC `sub_14084C910`) lights
+    // what blends in a single pass, by the mesh's policy: one probe, or the
+    // ambient transfer.
+    let single_pass_entries = (dialect == H3Dialect::Reach && !opaque && has("single_pass_single_probe"))
+        .then_some(("single_pass_single_probe", "single_pass_single_probe_ambient"));
+    let lit_entry = single_pass_entries.as_ref().map_or(lit_entry, |(entry, _)| entry);
     // `render_method_update_postprocess`: the single pass flag counts as blended.
     let single_pass = method.postprocess_definition.as_ref().is_some_and(|baked| baked.flags & 1 != 0);
     let own_albedo = !opaque || single_pass;
@@ -689,9 +694,12 @@ fn prepare_h3_material(
     // `render_mesh_part_default`: a mesh's `PRT vertex type` picks one.
     let mut prt = [None, None, None];
     for (slot, entry) in prt.iter_mut().zip(["static_prt_ambient", "static_prt_linear", "static_prt_quadratic"]) {
-        if opaque && definition.entry_points.iter().any(|known| known == entry) {
+        if opaque && has(entry) {
             *slot = Some(sources.pass(&definition, &options, entry, own_albedo)?);
         }
+    }
+    if let Some((_, ambient)) = single_pass_entries.filter(|(_, ambient)| has(ambient)) {
+        prt[0] = Some(sources.pass(&definition, &options, ambient, own_albedo)?);
     }
     let screen_maps = method
         .parameters
@@ -700,6 +708,7 @@ fn prepare_h3_material(
         .map(|parameter| parameter.parameter_name.clone())
         .collect();
     let mut material = H3Material {
+        dialect,
         albedo,
         lit,
         screen_maps,
@@ -853,8 +862,39 @@ fn prepare_h3_material(
             };
             material.textures.push(H3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
         }
+        if dialect == H3Dialect::Reach {
+            reach_environment_maps(source, &**pass, &mut material, caches);
+        }
     }
     Ok(material)
+}
+
+/// Reach's cube maps are the rasterizer's own, not a shader's externs. With no
+/// level, `render_method_submit_dynamic_cubemap` (MCC `sub_140817F70`) binds
+/// `rasterizer_globals`' default bitmap 2 to both, clamped, trilinear.
+fn reach_environment_maps(source: &TagSource, pass: &H3Pass, material: &mut H3Material, caches: &mut ResolveCaches) {
+    const DEFAULT_CUBE: &str = "shaders\\default_bitmaps\\bitmaps\\default_dynamic_cube_map";
+    for (uniform, _) in &pass.textures {
+        let wanted = matches!(
+            uniform.as_str(),
+            "GlobalTexture_dynamic_environment_map_0" | "GlobalTexture_dynamic_environment_map_1"
+        );
+        if !wanted || material.textures.iter().any(|known| known.uniform == *uniform) {
+            continue;
+        }
+        let Some((image, texels, mips)) = h3_image(source, DEFAULT_CUBE, 0, SamplerKind::Cube, caches) else {
+            continue;
+        };
+        let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Trilinear };
+        material.textures.push(H3Texture {
+            uniform: uniform.clone(),
+            image,
+            texels,
+            mips,
+            sampler: Some(sampler),
+            frames: Vec::new(),
+        });
+    }
 }
 
 /// A `shield_impact` tag's constants and noise, as `render_object_context`

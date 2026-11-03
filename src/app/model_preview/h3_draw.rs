@@ -8,7 +8,8 @@ use std::borrow::Cow;
 
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::h3_shaders::{H3Animated, H3Blend, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
+use super::h3_shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
+use super::reach_lighting::{REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_frame_value};
 use super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
@@ -618,9 +619,18 @@ pub(super) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
 }
 
 /// What the rasterizer's globals hold for an object here, by uniform name.
-fn frame_value(frame: &ModelGpuFrame, name: &str, size: [i32; 2]) -> Option<H3Value> {
+fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2]) -> Option<H3Value> {
     let [width, height] = size.map(|side| side as f32);
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+    if dialect == H3Dialect::Reach {
+        if let Some(value) = reach_frame_value(frame, name) {
+            return Some(value);
+        }
+        // Reach's lighting constants past its four vMF are not an object's.
+        if name.starts_with("p_lighting_constant_") || name.starts_with("v_lighting_constant_") {
+            return None;
+        }
+    }
     if let Some(index) = name
         .strip_prefix("p_lighting_constant_")
         .or_else(|| name.strip_prefix("v_lighting_constant_"))
@@ -909,7 +919,7 @@ impl ModelGlRenderer {
                     H3Value::Floats([r, g, b, 1.0])
                 });
                 let mut value = change_color
-                    .or_else(|| frame_value(frame, name, size))
+                    .or_else(|| frame_value(frame, material.dialect, name, size))
                     .or_else(|| material.values.get(name).cloned());
                 let object = batch.material_index as usize;
                 let screen_values = self.h3_screen_alpha.map(|alpha| {
@@ -1091,6 +1101,11 @@ impl ModelGlRenderer {
                     Some((batch.clone(), Arc::clone(material)))
                 })
                 .collect();
+            // A model's materials are all of one game.
+            let reach = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Reach);
+            // Reach blooms by its own chain and shadows into a mask ahead of
+            // the lights; neither is built, so neither runs.
+            let (bloomed, self_shadow) = (frame.bloom && !reach, frame.self_shadow && !reach);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear_depth_f32(1.0);
@@ -1120,7 +1135,7 @@ impl ModelGlRenderer {
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.disable(glow::BLEND);
             // Generated from the light, for the apply pass below.
-            let shadowed = frame.self_shadow && {
+            let shadowed = self_shadow && {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 let drawn = self.draw_h2_shadow(gl, frame, slot, order);
                 gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1241,7 +1256,7 @@ impl ModelGlRenderer {
                 // Camo shows what is behind it, which the game blooms the same
                 // with or without the object. A preview's backdrop has no bloom
                 // of its own, so what camo hides is left dark for it.
-                if frame.bloom {
+                if bloomed {
                     gl.blend_func(glow::ZERO, glow::ZERO);
                     for (batch, material) in &batches {
                         if let Some(pass) = material.camo.as_ref() {
@@ -1279,7 +1294,7 @@ impl ModelGlRenderer {
                 self.draw_ce_flares(gl, frame, slot, SpriteStage::Rest);
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            if frame.bloom && bloom.is_none() {
+            if bloomed && bloom.is_none() {
                 bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size);
             }
             let uploaded = &mut self.slots[slot];
@@ -1289,7 +1304,11 @@ impl ModelGlRenderer {
             let effects = &frame.preview.h3_screen_effects;
             let (screen, shaders) =
                 h3_screen_effects::h3_screen_settings(effects, values, &mut uploaded.h3_onsets, bones, &view, frame.time);
-            self.h3_composite(gl, accumulation, bloom, screen);
+            if reach {
+                self.reach_composite(gl, accumulation, bloom, screen);
+            } else {
+                self.h3_composite(gl, accumulation, bloom, screen);
+            }
             self.h3_finish_picture(gl, frame, slot, framebuffer, size, &screen, &shaders);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
@@ -1385,6 +1404,43 @@ impl ModelGlRenderer {
             gl.disable(glow::DEPTH_TEST);
             gl.enable(glow::BLEND);
             // The accumulation is premultiplied: what adds light covers nothing.
+            gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            gl.enable(glow::DEPTH_TEST);
+        }
+    }
+
+    /// Reach's `final_composite`: see [`REACH_COMPOSITE_FRAGMENT`].
+    unsafe fn reach_composite(
+        &mut self,
+        gl: &glow::Context,
+        accumulation: glow::NativeTexture,
+        bloom: Option<glow::NativeTexture>,
+        screen: h3_screen_effects::H3ScreenSettings,
+    ) {
+        unsafe {
+            if self.reach_composite_program.is_none() {
+                self.reach_composite_program = screen_program(gl, REACH_COMPOSITE_FRAGMENT);
+            }
+            let Some(program) = self.reach_composite_program else {
+                return;
+            };
+            gl.use_program(Some(program));
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
+            gl.uniform_1_i32(gl.get_uniform_location(program, "accumulation").as_ref(), 0);
+            gl.active_texture(glow::TEXTURE1);
+            gl.bind_texture(glow::TEXTURE_2D, bloom.or(self.h3_no_bloom));
+            gl.uniform_1_i32(gl.get_uniform_location(program, "bloom").as_ref(), 1);
+            gl.active_texture(glow::TEXTURE0);
+            let matrix = screen.color_matrix();
+            let columns: [f32; 16] = std::array::from_fn(|at| matrix[at % 4][at / 4]);
+            gl.uniform_matrix_4_f32_slice(gl.get_uniform_location(program, "hue_saturation").as_ref(), false, &columns);
+            gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), REACH_DARK_MULTIPLIER);
+            gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
+            gl.disable(glow::DEPTH_TEST);
+            gl.enable(glow::BLEND);
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
             gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);

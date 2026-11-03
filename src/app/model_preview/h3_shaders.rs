@@ -362,6 +362,10 @@ impl H3Sources {
         Self { source, dialect, definitions: HashMap::new(), files: HashMap::new(), passes: HashMap::new() }
     }
 
+    pub(crate) fn dialect(&self) -> H3Dialect {
+        self.dialect
+    }
+
     pub(crate) fn definition(&mut self, path: &str) -> Option<Arc<H3Definition>> {
         let source = &self.source;
         self.definitions
@@ -715,6 +719,8 @@ impl H3Texels {
 /// A shader's passes and everything they read.
 #[derive(Debug)]
 pub(crate) struct H3Material {
+    /// Whose frame lights it: Halo 3's (and ODST's) or Reach's.
+    pub(crate) dialect: H3Dialect,
     pub(crate) albedo: Option<Arc<H3Pass>>,
     pub(crate) lit: Arc<H3Pass>,
     /// ODST's maps bound to the picture itself, by extern mode.
