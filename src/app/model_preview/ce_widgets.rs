@@ -1023,7 +1023,7 @@ impl CeGlowField {
                 .collect();
             self.time = Some(time);
         }
-        let last = self.time.unwrap_or(time);
+        let last = resume_point(self.time.unwrap_or(time), time, 0.0);
         let seconds = (time - last).max(0.0);
         // `game_time_get_elapsed`, in ticks.
         let ticks = ((time * 30.0).floor() - (last * 30.0).floor()).max(0.0) as i32;

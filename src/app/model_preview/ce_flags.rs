@@ -382,7 +382,7 @@ impl CeFlagField {
             // simulate before now.
             self.time = Some(time);
         }
-        let mut now = self.time.unwrap_or(time);
+        let mut now = resume_point(self.time.unwrap_or(time), time, 0.0);
         while now + TICK <= time {
             now += TICK;
             for (flag, running) in flags.iter().zip(&mut self.running) {

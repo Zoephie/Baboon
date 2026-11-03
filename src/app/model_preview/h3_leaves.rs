@@ -508,7 +508,7 @@ impl H3LeafField {
             let settle = systems.iter().map(|system| system.lifetime).fold(0.0, f32::max).min(MOST_SETTLE);
             self.time = Some(time - settle);
         }
-        let mut now = self.time.unwrap_or(time);
+        let mut now = resume_point(self.time.unwrap_or(time), time, MOST_SETTLE);
         while now + TICK <= time {
             now += TICK;
             self.ticks += 1.0;

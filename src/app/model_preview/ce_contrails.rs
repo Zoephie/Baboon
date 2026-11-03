@@ -391,7 +391,7 @@ impl CeContrailField {
                 .collect();
             self.time = Some(time - PRE_ROLL);
         }
-        let mut now = self.time.unwrap_or(time);
+        let mut now = resume_point(self.time.unwrap_or(time), time, PRE_ROLL);
         while now + STEP <= time {
             now += STEP;
             for (contrail, running) in contrails.iter().zip(&mut self.running) {

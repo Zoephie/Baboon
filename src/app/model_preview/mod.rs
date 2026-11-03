@@ -273,6 +273,17 @@ pub(crate) struct ModelErrorPoint {
 
 const MODEL_ERROR_FALLBACK_COLOR: [u8; 4] = [255, 55, 45, 255];
 
+/// How far a frame can trail the last before the gap counts as a stall (a
+/// hidden pane, a long load) and is skipped rather than replayed tick by tick.
+const MOST_FRAME_GAP: f32 = 1.0;
+
+/// Where a simulation at `now` picks up to reach `time`: no further back than
+/// its own `rollback` (what a reset steps through to settle) and one frame
+/// gap, so a stall never makes one frame simulate minutes.
+pub(super) fn resume_point(now: f32, time: f32, rollback: f32) -> f32 {
+    now.max(time - rollback - MOST_FRAME_GAP)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ModelErrorPrimitive {
     pub label: String,

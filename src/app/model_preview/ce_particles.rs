@@ -1061,9 +1061,10 @@ impl CeParticleField {
             self.random = Some(random);
             self.time = Some(time - PRE_ROLL);
         }
-        let Some(mut now) = self.time else {
+        let Some(now) = self.time else {
             return;
         };
+        let mut now = resume_point(now, time, PRE_ROLL);
         let mut random = self.random.take().unwrap_or(Random(1));
         while now + STEP <= time {
             now += STEP;

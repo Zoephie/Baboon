@@ -40,6 +40,16 @@ fn bitmap_header_control_rows(screen_width: f32, wrap_width: f32) -> (f32, f32) 
     (left_y, right_y)
 }
 
+/// A simulation steps through an ordinary frame and its own reset rollback,
+/// but a stall picks up just short of the frame instead of replaying it.
+#[test]
+fn a_stalled_simulation_skips_rather_than_replays() {
+    assert_eq!(resume_point(10.0, 10.02, 0.0), 10.0, "an ordinary frame");
+    assert_eq!(resume_point(4.0, 10.0, 6.0), 4.0, "a reset's own rollback");
+    let resumed = resume_point(10.0, 610.0, 6.0);
+    assert!((603.0..610.0).contains(&resumed), "ten minutes behind: {resumed}");
+}
+
 #[test]
 fn bitmap_header_moves_actions_to_a_second_row_below_its_wrap_width() {
     let (wide_left, wide_right) = bitmap_header_control_rows(640.0, 400.0);

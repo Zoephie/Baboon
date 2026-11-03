@@ -735,7 +735,7 @@ impl H3ClothField {
             // It settles before it is seen.
             self.time = Some(time - SETTLE);
         }
-        let mut now = self.time.unwrap_or(time);
+        let mut now = resume_point(self.time.unwrap_or(time), time, SETTLE);
         while now + TICK <= time {
             now += TICK;
             self.ticks += 1.0;

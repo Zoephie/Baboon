@@ -2568,9 +2568,10 @@ impl H3ParticleField {
             self.tracks = vec![Vec::new(); systems.len()];
             self.time = Some(time - PRE_ROLL);
         }
-        let Some(mut now) = self.time else {
+        let Some(now) = self.time else {
             return;
         };
+        let mut now = resume_point(now, time, PRE_ROLL);
         // By the frame's clock, which the steps trail: a function that has
         // just come on must not read as having come on in their future.
         let onset_of: Vec<f32> = systems
