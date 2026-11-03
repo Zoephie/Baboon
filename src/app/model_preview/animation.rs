@@ -59,12 +59,15 @@ pub(crate) struct DecodedAnimationPose {
     pub frames: Vec<Vec<PreviewNodeTransform>>,
     /// The animation's `loop frame index`.
     pub loop_frame: usize,
+    /// Reach: what its IK chains reach for, frame by frame.
+    pub reach_ik: Vec<super::reach_ik::ReachIkTrack>,
 }
 
 impl DecodedAnimationPose {
     fn new(skeleton: &Skeleton, pose: &blam_tags::Pose, loop_frame: usize) -> Self {
         Self {
             loop_frame,
+            reach_ik: Vec::new(),
             skeleton_names: skeleton
                 .nodes
                 .iter()
@@ -98,6 +101,8 @@ pub(crate) struct PreviewAnimationPose {
     pub reach: f32,
     /// The frame looping playback continues from after the last; 0 restarts.
     pub loop_frame: usize,
+    /// Reach's IK chain targets, solved after each sampled pose.
+    pub reach_ik: std::sync::Arc<Vec<super::reach_ik::ReachIkTrack>>,
 }
 
 impl PreviewAnimationPose {
@@ -108,6 +113,7 @@ impl PreviewAnimationPose {
             frames,
             reach,
             loop_frame: 0,
+            reach_ik: std::sync::Arc::default(),
         }
     }
 }
@@ -270,6 +276,14 @@ pub(super) fn animation_skinning_rows(
         inverse_binds.push(inverse_bind_matrix(node));
     }
     apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
+    super::reach_ik::apply_reach_ik(
+        &pose.reach_ik,
+        &data.preview.reach_ik_markers,
+        nodes,
+        &inverse_binds,
+        &mut matrices,
+        sampled_frames(playback, pose.frames.len()),
+    );
     let mut rows: Vec<[f32; 4]> = Vec::with_capacity(nodes.len() * 3);
     for (matrix, inverse_bind) in matrices.iter().zip(&inverse_binds) {
         let skin = *matrix * *inverse_bind;
@@ -326,7 +340,21 @@ pub(super) fn pose_for_shot(
         .collect();
     data.animations = Some(std::sync::Arc::new(list));
     state.animation.selected = Some(index);
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(index, vec![frame])));
+    // The one frame held is the clip's `at`th; its IK reads that frame.
+    let reach_ik = decoded
+        .reach_ik
+        .into_iter()
+        .map(|track| super::reach_ik::ReachIkTrack {
+            effector_frames: track.effector_frames.get(at).copied().into_iter().collect(),
+            weights: track.weights.get(at).copied().into_iter().collect(),
+            poles: track.poles.map(|poles| poles.get(at).copied().into_iter().collect()),
+            ..track
+        })
+        .collect();
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
+        reach_ik: std::sync::Arc::new(reach_ik),
+        ..PreviewAnimationPose::new(index, vec![frame])
+    }));
 }
 
 fn world_matrix((rotation, translation, scale): (RealQuaternion, RealVector3d, f32)) -> Matrix4 {
@@ -435,6 +463,11 @@ pub(super) fn armature_node_positions(
     if sampled_frames.is_some() {
         let inverse_binds: Vec<_> = nodes.iter().map(inverse_bind_matrix).collect();
         apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
+        if let Some(pose) = state.animation.pose.as_ref() {
+            let frames = self::sampled_frames(&state.animation, pose.frames.len());
+            let markers = &data.preview.reach_ik_markers;
+            super::reach_ik::apply_reach_ik(&pose.reach_ik, markers, nodes, &inverse_binds, &mut matrices, frames);
+        }
     }
     matrices.iter().map(Matrix4::translation).collect()
 }
@@ -1636,6 +1669,7 @@ impl Baboon {
                     .collect();
                 state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
                     loop_frame: decoded.loop_frame,
+                    reach_ik: std::sync::Arc::new(decoded.reach_ik),
                     ..PreviewAnimationPose::new(animation_index, frames)
                 }));
                 state.animation.time = 0.0;
@@ -1949,7 +1983,11 @@ fn decode_held_animation(
     }
 
     let loop_frame = usize::try_from(group.loop_frame_index).unwrap_or(0);
-    Ok(DecodedAnimationPose::new(&skeleton, &pose, loop_frame))
+    let graphs: Vec<&TagFile> = chain[graph..].iter().collect();
+    Ok(DecodedAnimationPose {
+        reach_ik: super::reach_ik::read_reach_ik_tracks(&graphs, group),
+        ..DecodedAnimationPose::new(&skeleton, &pose, loop_frame)
+    })
 }
 
 /// The Halo CE half of [`decode_model_animation`]: the extractor's skeleton

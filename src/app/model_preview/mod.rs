@@ -57,6 +57,7 @@ pub(crate) mod h3_shaders;
 mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
+mod reach_ik;
 mod reach_lights;
 mod reach_camo;
 mod reach_shadow;
@@ -154,6 +155,9 @@ pub(crate) struct RenderModelPreview {
     pub reach_camo: Option<Arc<reach_camo::ReachCamo>>,
     /// Whether a Reach object shadows itself, and its map's biases.
     pub reach_shadow_caster: Option<reach_shadow::ReachShadowCaster>,
+    /// The markers a Reach unit's IK chains can reach for: its own and its
+    /// held weapons', in bind space on the nodes they ride.
+    pub reach_ik_markers: Vec<reach_ik::ReachIkMarker>,
     pub h3_flares: Vec<h3_lights::H3FlareAt>,
     pub h3_light_volumes: Vec<h3_light_volumes::H3LightVolumeAt>,
     pub h3_particles: Vec<Arc<h3_particles::H3ParticleSystem>>,

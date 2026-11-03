@@ -10,6 +10,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::attachment::{MarkerFrame, WeaponOption, merge_attached};
 use super::ce_attachments::{attached_marker_frame, elements, loose_weapon_paths, weapon_ik};
+use super::attachment::{attach_point, attach_vector};
 use super::loading::build_render_preview;
 use super::ce_attachments::CeWeaponIk;
 use super::h2_passes::{h2_change_colors_for, read_h2_change_colors};
@@ -569,6 +570,15 @@ pub(super) fn attach_h2_weapon(
     };
     let parent = MarkerFrame::find(preview, &hand);
     let child = MarkerFrame::find(&attached, &grip);
+    // Reach's IK chains reach for the held weapon's markers where they ride.
+    if source.game() == Some(GameId::HaloReach) {
+        let place = |frame: &MarkerFrame| {
+            (frame.axes.map(|axis| attach_vector(&parent, &child, axis)), attach_point(&parent, &child, frame.position))
+        };
+        let holder = super::reach_ik::ReachIkHolder::Weapon(owner);
+        let node = Some(parent.node.max(0) as usize);
+        preview.reach_ik_markers.extend(super::reach_ik::reach_ik_markers(&attached, holder, place, node));
+    }
     if let Some(weapons) = ik {
         let class = string_id_in(&weapon, "weapon class");
         for mode in weapons.modes() {

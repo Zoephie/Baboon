@@ -777,6 +777,8 @@ fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, model: &T
     preview.reach_shield = super::reach_shield::read_reach_shield(source, model);
     preview.reach_camo = super::reach_camo::ReachCamo::read(source).map(std::sync::Arc::new);
     preview.reach_shadow_caster = super::reach_shadow::reach_shadow_caster(model_tag, model);
+    let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
+    preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);
     let markers = preview.markers.clone();
     let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
     super::h2_weapons::read_reach_attached_features(source, model_tag, 0, &markers, &frame, None, preview);
