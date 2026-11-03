@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::ce_attachments::{elements, object_block};
+use super::ce_attachments::{elements, has_flag, object_block};
 use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::ce_passes::argb;
 use super::h2_passes::{H2Image, ce_color_interpolate};
@@ -166,6 +166,11 @@ impl super::ce_functions::ReadsOutputs for CeGlow {
 }
 
 impl CeLightVolume {
+    /// Where its marker is, which `light_volume_submit` sorts it by.
+    pub(crate) fn marker(&self, bones: Option<&[[f32; 4]]>) -> [f32; 3] {
+        posed_on(self.node, self.position, self.forward, bones).0
+    }
+
     /// `light_volume_submit` and `light_volume_render`: sprites along the
     /// marker, brighter as it faces the camera the way the tag says.
     pub(crate) fn quads(&self, outputs: &[f32; 4], active: &[bool; 4], bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> Vec<CeAntennaQuad> {
@@ -262,6 +267,8 @@ pub(crate) struct CeLightning {
     /// Its `shader`'s blend, or `global_shader_effect_additive`'s.
     pub(crate) blend: i32,
     pub(crate) nonlinear_tint: bool,
+    /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
+    pub(crate) sort_bias: bool,
     pub(crate) image: Arc<H2Image>,
 }
 
@@ -321,13 +328,14 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
     let bitmap = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
     let image = Arc::new(decode_h2_image(source, &bitmap, SamplerKind::Texture2D, 0)?);
     let shader = elements(root, "shader").first().copied();
-    let (blend, nonlinear_tint) = match shader {
+    let (blend, nonlinear_tint, sort_bias) = match shader {
         Some(shader) => (
             shader.read_int_any("framebuffer blend function").unwrap_or(0) as i32,
             shader.read_int_any("shader flags").unwrap_or(0) & 2 != 0,
+            has_flag(shader, "shader flags", "sort bias"),
         ),
         // `global_shader_effect_additive`.
-        None => (3, false),
+        None => (3, false, false),
     };
     let source_of = |name: &str| slot(root.read_int_any(name));
     Some(CeLightning {
@@ -340,6 +348,7 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
         brightness_source: source_of("brightness scale source"),
         blend,
         nonlinear_tint,
+        sort_bias,
         image,
     })
 }

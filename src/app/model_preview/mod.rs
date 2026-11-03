@@ -251,6 +251,9 @@ pub(crate) struct RenderModelPreviewBatch {
     /// this separate from `region_name` lets collision geometry retain its
     /// real region/permutation taxonomy for variant selection.
     pub layer: ModelPreviewLayer,
+    /// Where its part sorts among the transparents, and the node that carries
+    /// that point: Halo CE's part centroid, read only by the CE sort.
+    pub sort_position: Option<([f32; 3], usize)>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

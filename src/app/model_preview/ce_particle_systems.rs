@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::ce_attachments::{elements, object_block};
+use super::ce_attachments::{elements, has_flag, object_block};
 use super::ce_lights::{CeFlareView, posed_on};
 use super::ce_particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use super::*;
@@ -88,6 +88,8 @@ struct ParticleState {
     blend: i32,
     map_flags: i128,
     nonlinear_tint: bool,
+    /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
+    sort_bias: bool,
     /// The shader's second `bitmap`.
     secondary: Option<Arc<CeSecondaryMap>>,
 }
@@ -244,6 +246,7 @@ pub(super) fn read_pctl_def(source: &TagSource, path: &str) -> Option<CePctlDef>
                 blend: state.read_int_any("framebuffer blend function").unwrap_or(0) as i32,
                 map_flags: state.read_int_any("map flags").unwrap_or(0),
                 nonlinear_tint: state.read_int_any("shader flags").unwrap_or(0) & 2 != 0,
+                sort_bias: has_flag(state, "shader flags", "sort bias"),
                 secondary: read_secondary_map(source, state, "bitmap"),
             });
         }
@@ -578,7 +581,19 @@ fn system_quads(
                 }
                 // The second sits a thousandth nearer, in view space.
                 let center: [f32; 3] = std::array::from_fn(|axis| particle.position[axis] - view.forward[axis] * nudge);
-                let shown = Shown { state, time, radius: current.radius, center, axis: particle.axis, rotation: particle.rotation, size, color, fade };
+                let group = quads.len();
+                let shown = Shown {
+                    state,
+                    time,
+                    radius: current.radius,
+                    center,
+                    axis: particle.axis,
+                    rotation: particle.rotation,
+                    size,
+                    color,
+                    fade,
+                    group,
+                };
                 if kind.rotational {
                     shown.rotational(sprite, kind.flags & ROTATIONAL_SIDEWAYS != 0, view, index, quads);
                 } else {
@@ -593,10 +608,14 @@ fn system_quads(
 #[derive(Debug, Clone)]
 pub(crate) struct CePctlQuad {
     pub(crate) system: usize,
+    /// Shared by the quads of one draw of one particle state, which
+    /// `particle_system_render` sends as a batch of its own.
+    pub(crate) group: usize,
     pub(crate) sheet: usize,
     pub(crate) image: usize,
     pub(crate) blend: i32,
     pub(crate) nonlinear_tint: bool,
+    pub(crate) sort_bias: bool,
     pub(crate) secondary: Option<CeSecondaryDraw>,
     pub(crate) color: [f32; 4],
     pub(crate) corners: [[f32; 5]; 4],
@@ -616,6 +635,8 @@ struct Shown<'a> {
     /// Alpha, red, green, blue.
     color: [f32; 4],
     fade: f32,
+    /// What its quads carry as [`CePctlQuad::group`].
+    group: usize,
 }
 
 impl Shown<'_> {
@@ -633,10 +654,12 @@ impl Shown<'_> {
         let secondary = self.state.secondary.as_ref().map(|map| map.draw(self.time, self.radius));
         quads.push(CePctlQuad {
             system,
+            group: self.group,
             sheet: self.state.sheet_index,
             image,
             blend: self.state.blend,
             nonlinear_tint: self.state.nonlinear_tint,
+            sort_bias: self.state.sort_bias,
             secondary,
             color: [red, green, blue, alpha.clamp(0.0, 1.0)],
             corners,

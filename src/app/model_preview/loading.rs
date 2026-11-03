@@ -817,6 +817,7 @@ pub(super) fn build_particle_model_preview(
             index_count,
             flat_color: None,
             layer: ModelPreviewLayer::Render,
+            sort_position: None,
         });
     }
 
@@ -846,6 +847,11 @@ pub(in crate::app) fn build_render_preview(
         }
     }
     let mut preview = render_model_to_preview(&render_model, &render_meshes);
+    // Only Halo CE's transparents sort by where their parts are; the later
+    // games' sorting positions belong to a renderer the preview does not run.
+    if blam_tags::game::Game::of(render_tag) != blam_tags::game::Game::Halo1 {
+        preview.batches.iter_mut().for_each(|batch| batch.sort_position = None);
+    }
     // A gbxmodel's `shaders` run parallel to its materials.
     if let Some(shaders) = render_tag.root().field("shaders").and_then(|field| field.as_block()) {
         for (index, material) in preview.materials.iter_mut().enumerate() {
@@ -4043,6 +4049,39 @@ mod kit_object_tests {
         let data = kit_preview(&root, GameId::Halo3, path, "scenery", b"scen");
         assert_eq!(data.preview.h3_lights.len(), 1);
         assert!(super::super::renderer::has_effects(&data.preview));
+    }
+
+    /// A Halo CE part sorts from its centroid on the node tool's postprocess
+    /// gives it, the one its vertices weigh most: tags on disk say node 0 for
+    /// every part. The later games' batches carry no sort position.
+    #[test]
+    fn a_halo_ce_part_sorts_from_its_centroid_on_its_heaviest_node() {
+        let (Ok(ce), Ok(h3)) = (std::env::var("BLAM_TEST_HCEEK"), std::env::var("BLAM_TEST_H3EK")) else {
+            eprintln!("skipping: BLAM_TEST_HCEEK or BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let data = kit_preview(&ce, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd");
+        let preview = &data.preview;
+        let mut off_the_root = 0;
+        for batch in preview.batches.iter().filter(|batch| batch.layer == ModelPreviewLayer::Render) {
+            let (point, node) = batch.sort_position.expect("every CE part knows where it sorts");
+            let start = batch.index_start as usize;
+            let indices = &preview.indices[start..start + batch.index_count as usize];
+            let mut weights = vec![0.0f32; preview.nodes.len()];
+            for vertex in indices.iter().map(|index| &preview.vertices[*index as usize]) {
+                for (node, weight) in vertex.node_indices.iter().zip(vertex.node_weights) {
+                    weights[*node as usize] += weight;
+                }
+            }
+            let heaviest = (0..weights.len()).max_by(|a, b| weights[*a].total_cmp(&weights[*b])).unwrap();
+            assert_eq!(node, heaviest, "a part's sort node is its heaviest");
+            off_the_root += usize::from(node != 0);
+            assert!(point.iter().all(|axis| axis.is_finite()));
+        }
+        assert!(off_the_root > 0, "some part rides a node past the root");
+        let chief = "objects\\characters\\masterchief\\masterchief";
+        let data = kit_preview(&h3, GameId::Halo3, chief, "biped", b"bipd");
+        assert!(data.preview.batches.iter().all(|batch| batch.sort_position.is_none()));
     }
 }
 

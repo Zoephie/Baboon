@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::ce_attachments::{elements, object_block};
+use super::ce_attachments::{elements, has_flag, object_block};
 use super::ce_lights::{CeFlareView, posed_on};
 use super::ce_particles::CePointPhysics;
 use super::ce_passes::argb;
@@ -95,6 +95,8 @@ pub(crate) struct CeContrailDef {
     pub(crate) blend: i32,
     fade_mode: i32,
     pub(crate) nonlinear_tint: bool,
+    /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
+    pub(crate) sort_bias: bool,
     states: Vec<PointState>,
     /// Every image of its bitmap, by index.
     pub(crate) images: Vec<Option<Arc<H2Image>>>,
@@ -165,6 +167,7 @@ fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
         blend: short("framebuffer blend function"),
         fade_mode: short("framebuffer fade mode"),
         nonlinear_tint: shader_flags & 2 != 0,
+        sort_bias: has_flag(root, "shader flags", "sort bias"),
         states,
         images,
     })

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::ce_attachments::{elements, object_block};
+use super::ce_attachments::{elements, has_flag, object_block};
 use super::ce_lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
 use super::ce_particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, Random as SystemRandom, new_unattached, read_pctl_def, unattached_quads,
@@ -353,6 +353,8 @@ pub(crate) struct CeParticleDef {
     pub(crate) blend: i32,
     fade_mode: i32,
     pub(crate) nonlinear_tint: bool,
+    /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
+    pub(crate) sort_bias: bool,
     /// One over the widest of its sprites in pixels, which tool bakes at +168.
     sprite_scale: f32,
     sequences: Vec<Vec<CeSpriteFrame>>,
@@ -463,6 +465,7 @@ fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) 
         blend: short("framebuffer blend function"),
         fade_mode: short("framebuffer fade mode"),
         nonlinear_tint: shader_flags & 2 != 0,
+        sort_bias: has_flag(root, "shader flags", "sort bias"),
         sprite_scale: if widest > 0.0 { 1.0 / widest } else { 1.0 },
         secondary: nth_field_path(root, "bitmap", 1).and_then(|field| read_secondary_map(source, root, &field)),
         collision_effect: spawned_effect(source, root, "collision effect", cache),
@@ -929,6 +932,7 @@ pub(crate) struct CeParticleQuad {
     pub(crate) def: usize,
     pub(crate) blend: i32,
     pub(crate) nonlinear_tint: bool,
+    pub(crate) sort_bias: bool,
     pub(crate) secondary: Option<CeSecondaryDraw>,
     pub(crate) image: usize,
     pub(crate) corners: [[f32; 5]; 4],
@@ -1178,7 +1182,10 @@ impl CeParticleField {
             let Some(system) = at.def.systems.get(*def) else {
                 continue;
             };
-            for quad in unattached_quads(system, running, 0, view, &pixel, random, time) {
+            // Each system numbers its groups from nought.
+            let base = quads.len();
+            for mut quad in unattached_quads(system, running, 0, view, &pixel, random, time) {
+                quad.group += base;
                 quads.push((def_key(&at.def), *def, quad));
             }
         }
@@ -1291,6 +1298,7 @@ impl CeParticleField {
                 def: particle.def,
                 blend: def.blend,
                 nonlinear_tint: def.nonlinear_tint,
+                sort_bias: def.sort_bias,
                 secondary: None,
                 image: sprite.image,
                 corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],

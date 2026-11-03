@@ -2100,6 +2100,205 @@ impl ModelGpuSlot {
         self.grid_built = false;
     }
 
+    /// Upload the maps of the sprites, flares, antennas and effects the
+    /// slot's geometry draws, once per geometry.
+    unsafe fn sync_sprite_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        if self.flare_geometry == Some(frame.geometry_id) {
+            return;
+        }
+        unsafe {
+            let drained = self
+                .particle_textures
+                .drain(..)
+                .chain(self.strip_textures.drain(..))
+                .chain(self.leaf_textures.drain(..));
+            for texture in drained.flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            let maps = |look: &h3_particles::H3SpriteShader| {
+                let [base, alpha, palette, second] = look.samplers;
+                [
+                    (&look.base_map, base),
+                    (&look.alpha_map, alpha),
+                    (&look.palette_map, palette),
+                    (&look.second_map, second),
+                ]
+                .map(|(map, sampler)| {
+                    map.as_ref().and_then(|(image, texels, mips)| {
+                        h3_draw::upload_h2_image_linear(gl, image, *texels, mips, sampler)
+                    })
+                })
+            };
+            self.particle_textures =
+                frame.preview.h3_particles.iter().map(|system| maps(&system.look.shader)).collect();
+            self.strip_textures = frame.preview.h3_strips.iter().map(|strip| maps(strip.shader())).collect();
+            self.leaf_textures = frame.preview.h3_leaves.iter().map(|leaves| maps(leaves.shader())).collect();
+            for texture in self.flare_textures.drain(..).flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            self.flare_textures = frame
+                .preview
+                .ce_lights
+                .iter()
+                .map(|light| {
+                    let images = light.flare.iter().flat_map(|flare| &flare.images);
+                    images.map(|image| upload_h2_image(gl, image)).collect()
+                })
+                .chain(frame.preview.h2_flares.iter().map(|at| {
+                    at.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect()
+                }))
+                .chain(frame.preview.h3_flares.iter().map(|at| {
+                    let (image, texels, mips) = at.bitmap();
+                    vec![h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)]
+                }))
+                .collect();
+            for texture in self.ce_effect_flare_textures.drain().flat_map(|(_, lights)| lights).flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            let reachable = ce_particles::reachable_defs(&frame.preview.ce_effects);
+            self.ce_effect_flare_textures = reachable
+                .iter()
+                .map(|def| {
+                    let lights = def.lights.iter().map(|light| {
+                        let images = light.light.flare.iter().flat_map(|flare| &flare.images);
+                        images.map(|image| upload_h2_image(gl, image)).collect()
+                    });
+                    (ce_particles::def_key(def), lights.collect())
+                })
+                .collect();
+            for texture in self.antenna_textures.drain(..).flatten() {
+                gl.delete_texture(texture);
+            }
+            self.antenna_textures = frame
+                .preview
+                .ce_antennas
+                .iter()
+                .map(|antenna| upload_h2_image(gl, &antenna.image))
+                .chain(frame.preview.h2_antennas.iter().map(|antenna| match &antenna.h3_bitmap {
+                    // `build_sprite`.
+                    Some((image, texels, mips)) => {
+                        let sampler = H3Sampler {
+                            address: [BitmapAddressMode::Clamp; 2],
+                            filter: BitmapFilterMode::Bilinear,
+                        };
+                        h3_draw::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
+                    }
+                    None => upload_h2_image(gl, &antenna.image),
+                }))
+                .collect();
+            for texture in self.ce_particle_textures.drain().flat_map(|(_, particles)| particles).flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            for texture in self.ce_contrail_textures.drain(..).flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            for texture in self.ce_light_volume_textures.drain(..).flatten() {
+                gl.delete_texture(texture);
+            }
+            self.ce_light_volume_textures =
+                frame.preview.ce_light_volumes.iter().map(|volume| upload_h2_image(gl, &volume.image)).collect();
+            for texture in self.ce_lightning_textures.drain(..).flatten() {
+                gl.delete_texture(texture);
+            }
+            self.ce_lightning_textures =
+                frame.preview.ce_lightning.iter().map(|lightning| upload_h2_image(gl, &lightning.image)).collect();
+            for texture in self.ce_glow_textures.drain(..).flatten() {
+                gl.delete_texture(texture);
+            }
+            self.ce_glow_textures = frame.preview.ce_glows.iter().map(|glow| upload_h2_image(gl, &glow.image)).collect();
+            for texture in self.ce_pctl_textures.drain(..).flatten().flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            self.ce_pctl_textures = frame
+                .preview
+                .ce_particle_systems
+                .iter()
+                .map(|system| {
+                    system.def.sheets.iter().map(|sheet| {
+                        sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
+                    }).collect()
+                })
+                .collect();
+            for (_, texture) in self.ce_secondary_textures.drain() {
+                gl.delete_texture(texture);
+            }
+            for texture in self.ce_effect_pctl_textures.drain().flat_map(|(_, systems)| systems).flatten().flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            self.ce_effect_pctl_textures = reachable
+                .iter()
+                .map(|def| {
+                    let systems = def.systems.iter().map(|system| {
+                        system.sheets.iter().map(|sheet| {
+                            sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
+                        }).collect()
+                    });
+                    (ce_particles::def_key(def), systems.collect())
+                })
+                .collect();
+            self.ce_contrail_textures = frame
+                .preview
+                .ce_contrails
+                .iter()
+                .map(|contrail| {
+                    contrail.def.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
+                })
+                .collect();
+            self.ce_particle_textures = reachable
+                .iter()
+                .map(|def| {
+                    let particles = def.particles.iter().map(|particle| {
+                        particle.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
+                    });
+                    (ce_particles::def_key(def), particles.collect())
+                })
+                .collect();
+            for texture in self.h2_liquid_textures.drain(..).flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            self.h2_liquid_textures = frame
+                .preview
+                .h2_liquids
+                .iter()
+                .map(|at| at.arcs().iter().map(|arc| arc.bitmap().and_then(|image| upload_h2_image(gl, image))).collect())
+                .collect();
+            for texture in self.h2_contrail_textures.drain(..).flatten() {
+                gl.delete_texture(texture);
+            }
+            self.h2_contrail_textures = frame
+                .preview
+                .h2_contrails
+                .iter()
+                .map(|at| at.bitmap().and_then(|image| upload_h2_image(gl, image)))
+                .collect();
+            for texture in self.h2_volume_textures.drain(..).flatten().flatten() {
+                gl.delete_texture(texture);
+            }
+            self.h2_volume_textures = frame
+                .preview
+                .h2_light_volumes
+                .iter()
+                .map(|at| {
+                    let bitmaps = at.volumes().iter().map(|volume| volume.bitmap());
+                    bitmaps.map(|bitmap| bitmap.and_then(|image| upload_h2_image(gl, image))).collect()
+                })
+                .collect();
+            for texture in self.volume_textures.drain(..).flatten() {
+                gl.delete_texture(texture);
+            }
+            self.volume_textures = frame
+                .preview
+                .h3_light_volumes
+                .iter()
+                .map(|at| {
+                    let (image, texels, mips) = at.bitmap();
+                    h3_draw::upload_h2_image_linear(gl, image, *texels, mips, at.sampler())
+                })
+                .collect();
+            self.flare_geometry = Some(frame.geometry_id);
+        }
+    }
+
     /// Start every simulation over, for a model new to this slot.
     ///
     /// The fields restart on their own only when their count changes or time
@@ -2578,133 +2777,309 @@ fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones:
     uploaded.ce_particles.advance(&frame.preview.ce_effects, inputs, bones, ground, frame.time);
 }
 
-/// `render_particles` for Halo CE's effects: each sprite through the
-/// `effect` shader its particle names, tested against the model's depth.
-unsafe fn draw_ce_particles(
+/// A Halo CE sprite through the `effect` shader: its map, framebuffer blend
+/// function and nonlinear tint, each corner's color, its corners, and the
+/// shader's second map.
+type CeSprite = (glow::NativeTexture, i32, bool, [[f32; 4]; 4], [[f32; 5]; 4], Option<ce_particles::CeSecondaryDraw>);
+
+/// What one of Halo CE's transparent groups draws.
+enum CeGroupDraw {
+    /// Through the `effect` shader.
+    Sprites(Vec<CeSprite>),
+    /// Through the flares' plain color-times-map program: an antenna, or with
+    /// `additive` a light volume, which `rasterizer_widget_begin(5, 1)` adds.
+    Plain { quads: Vec<ce_lights::CeAntennaQuad>, texture: glow::NativeTexture, additive: bool },
+}
+
+/// One of Halo CE's transparent groups, which `rasterizer_transparent_geometry_draw`
+/// sorts with the model's transparent parts by `z_sort`, far to near.
+struct CeGroup {
+    z_sort: f32,
+    draw: CeGroupDraw,
+}
+
+/// How much nearer `sort bias` sorts a group (`_rasterizer_dynamic_unlit_geometry_draw`).
+const CE_SORT_BIAS: f32 = 0.25;
+
+/// `z_sort`: how far in front of the eye the point lies along the view,
+/// negated, so the farthest sorts first; `sort bias` brings it nearer.
+fn ce_z_sort(view: &ce_lights::CeFlareView, point: [f32; 3], sort_bias: bool) -> f32 {
+    let along: f32 = (0..3).map(|axis| (point[axis] - view.eye[axis]) * view.forward[axis]).sum();
+    if sort_bias { CE_SORT_BIAS - along } else { -along }
+}
+
+/// The mean of the quads' corners: `build_sprites_end`'s centroid, the mean
+/// of its sprites' centers.
+fn mean_corner<'a>(quads: impl Iterator<Item = &'a [[f32; 5]; 4]>) -> [f32; 3] {
+    let (mut sum, mut count) = ([0.0f32; 3], 0.0f32);
+    for corner in quads.flatten() {
+        for axis in 0..3 {
+            sum[axis] += corner[axis];
+        }
+        count += 1.0;
+    }
+    sum.map(|axis| axis / count.max(1.0))
+}
+
+/// The middle of the quads' bounds, as `lightning_submit` takes a bolt's.
+fn bounds_middle<'a>(quads: impl Iterator<Item = &'a [[f32; 5]; 4]>) -> [f32; 3] {
+    let (mut low, mut high) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    for corner in quads.flatten() {
+        for axis in 0..3 {
+            low[axis] = low[axis].min(corner[axis]);
+            high[axis] = high[axis].max(corner[axis]);
+        }
+    }
+    std::array::from_fn(|axis| if low[axis] <= high[axis] { (low[axis] + high[axis]) * 0.5 } else { 0.0 })
+}
+
+/// Which source a sprite group comes from, in [`CeSpriteGroups`]' keys.
+const CE_LIGHTNING: u8 = 0;
+const CE_EFFECT_SYSTEM: u8 = 1;
+const CE_SYSTEM: u8 = 2;
+const CE_GLOW: u8 = 3;
+const CE_CONTRAIL: u8 = 4;
+const CE_PARTICLE: u8 = 5;
+
+/// Sprites gathered into the groups the game submits them in, in the order
+/// each group first appears.
+#[derive(Default)]
+struct CeSpriteGroups {
+    /// Each group's `sort bias`, whether its centroid is the middle of its
+    /// bounds rather than the mean, and its sprites.
+    groups: Vec<(bool, bool, Vec<CeSprite>)>,
+    by_key: HashMap<(u8, usize, usize), usize>,
+}
+
+impl CeSpriteGroups {
+    fn push(&mut self, key: (u8, usize, usize), sort_bias: bool, by_bounds: bool, sprite: CeSprite) {
+        let at = *self.by_key.entry(key).or_insert_with(|| {
+            self.groups.push((sort_bias, by_bounds, Vec::new()));
+            self.groups.len() - 1
+        });
+        self.groups[at].2.push(sprite);
+    }
+
+    fn sorted_by(self, view: &ce_lights::CeFlareView) -> impl Iterator<Item = CeGroup> {
+        self.groups.into_iter().map(move |(sort_bias, by_bounds, sprites)| {
+            let corners = sprites.iter().map(|sprite| &sprite.4);
+            let centroid = if by_bounds { bounds_middle(corners) } else { mean_corner(corners) };
+            CeGroup { z_sort: ce_z_sort(view, centroid, sort_bias), draw: CeGroupDraw::Sprites(sprites) }
+        })
+    }
+}
+
+/// Halo CE's effects, particle systems, glows, contrails, lightning, antennas
+/// and light volumes brought up to the frame, as the groups the game submits
+/// them in: a bolt, a particle state's draw, a glow, a contrail, the
+/// particles of each definition, an antenna, a light volume. The slot's maps
+/// are uploaded already.
+fn ce_groups(
     gl: &glow::Context,
-    effect_gl: &mut Option<CeEffectGl>,
-    main: glow::NativeProgram,
     uploaded: &mut ModelGpuSlot,
     frame: &ModelGpuFrame,
     bones: Option<&[[f32; 4]]>,
     view: &ce_lights::CeFlareView,
+) -> Vec<CeGroup> {
+    let camera = &frame.camera;
+    let effects = &frame.preview.ce_effects;
+    let states = &frame.object_states;
+    advance_ce_effects(uploaded, frame, bones);
+    let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
+    let ground = lowest.fold(0.0, f32::min);
+    let mut viewport = [0; 4];
+    unsafe { gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport) };
+    let half_width = viewport[2].max(1) as f32 * 0.5;
+    // `render_frustum_sphere_diameter_in_pixels`.
+    let pixels = |center: [f32; 3], radius: f32| {
+        let middle = ce_flare_clip(camera, center);
+        let side = ce_flare_clip(camera, std::array::from_fn(|axis| center[axis] + view.right[axis] * radius));
+        ((side[0] / side[3] - middle[0] / middle[3]).abs() * half_width * 2.0).max(0.0)
+    };
+    let contrails = &frame.preview.ce_contrails;
+    let switched = |object: u8| {
+        states.get(object as usize).map_or(([0.0; 4], [false; 4]), |state| (state.outputs, state.active))
+    };
+    uploaded.ce_contrails.advance(contrails, switched, bones, ground, frame.time);
+    let change_colors = |object: u8| states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors);
+    let mut sprites = CeSpriteGroups::default();
+    // Made afresh every frame, as the game draws it.
+    let seed = (frame.time * 1000.0) as u32;
+    for (index, lightning) in frame.preview.ce_lightning.iter().enumerate() {
+        let Some(texture) = uploaded.ce_lightning_textures.get(index).copied().flatten() else {
+            continue;
+        };
+        let seed = seed.wrapping_add(index as u32 * 7919);
+        let state = states.get(usize::from(lightning.object));
+        let outputs = state.map_or([0.0; 4], |state| state.outputs);
+        let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
+        for quad in lightning.quads(&outputs, &colors, bones, view, seed) {
+            let sprite = (texture, lightning.blend, lightning.nonlinear_tint, quad.colors, quad.corners, None);
+            sprites.push((CE_LIGHTNING, index, 0), lightning.sort_bias, true, sprite);
+        }
+    }
+    // `particle_systems_render`, for those effects' parts made.
+    let pixel_of = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
+    for (effect, system, quad) in uploaded.ce_particles.system_quads(effects, view, pixel_of) {
+        let texture = uploaded
+            .ce_effect_pctl_textures
+            .get(&effect)
+            .and_then(|systems| systems.get(system))
+            .and_then(|sheets| sheets.get(quad.sheet))
+            .and_then(|images| images.get(quad.image))
+            .copied()
+            .flatten();
+        if let Some(texture) = texture {
+            let sprite = (texture, quad.blend, quad.nonlinear_tint, [quad.color; 4], quad.corners, quad.secondary);
+            sprites.push((CE_EFFECT_SYSTEM, quad.group, 0), quad.sort_bias, false, sprite);
+        }
+    }
+    // And those on the object's attachments.
+    let systems = &frame.preview.ce_particle_systems;
+    if !systems.is_empty() {
+        let inputs = |object: u8| {
+            let state = states.get(usize::from(object));
+            (
+                state.map_or([0.0; 4], |state| state.outputs),
+                state.map_or([false; 4], |state| state.active),
+                state.map_or([[1.0; 3]; 4], |state| state.change_colors),
+            )
+        };
+        uploaded.ce_pctl.advance(systems, inputs, bones, ground, frame.time);
+        let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
+        for quad in uploaded.ce_pctl.quads(systems, view, pixel) {
+            let texture = uploaded.ce_pctl_textures.get(quad.system).and_then(|sheets| sheets.get(quad.sheet)).and_then(|images| images.get(quad.image)).copied().flatten();
+            if let Some(texture) = texture {
+                let sprite = (texture, quad.blend, quad.nonlinear_tint, [quad.color; 4], quad.corners, quad.secondary);
+                sprites.push((CE_SYSTEM, quad.group, 0), quad.sort_bias, false, sprite);
+            }
+        }
+    }
+    // `glow_render`, through `global_shader_effect_additive`.
+    let glows = &frame.preview.ce_glows;
+    // `glow_update` reads an output only while it is on, else nothing.
+    let read_if_on = |object: u8| {
+        let (outputs, active) = switched(object);
+        std::array::from_fn(|slot| if active[slot] { outputs[slot] } else { 0.0 })
+    };
+    uploaded.ce_glows.advance(glows, read_if_on, bones, frame.time);
+    let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
+    for (index, quad) in uploaded.ce_glows.quads(glows, view, pixel) {
+        if let Some(texture) = uploaded.ce_glow_textures.get(index).copied().flatten() {
+            sprites.push((CE_GLOW, index, 0), false, false, (texture, 3, false, quad.colors, quad.corners, None));
+        }
+    }
+    for quad in uploaded.ce_contrails.quads(contrails, change_colors, view) {
+        let Some(contrail) = contrails.get(quad.contrail) else {
+            continue;
+        };
+        let texture = uploaded.ce_contrail_textures.get(quad.contrail).and_then(|images| images.get(quad.image)).copied().flatten();
+        if let Some(texture) = texture {
+            let sprite = (texture, contrail.def.blend, contrail.def.nonlinear_tint, quad.colors, quad.corners, None);
+            sprites.push((CE_CONTRAIL, quad.contrail, 0), contrail.def.sort_bias, false, sprite);
+        }
+    }
+    for quad in uploaded.ce_particles.quads(effects, bones, view, pixels) {
+        let texture = uploaded
+            .ce_particle_textures
+            .get(&quad.effect)
+            .and_then(|defs| defs.get(quad.def))
+            .and_then(|images| images.get(quad.image))
+            .copied()
+            .flatten();
+        if let Some(texture) = texture {
+            let sprite = (texture, quad.blend, quad.nonlinear_tint, [quad.color; 4], quad.corners, quad.secondary);
+            sprites.push((CE_PARTICLE, quad.effect, quad.def), quad.sort_bias, false, sprite);
+        }
+    }
+    let mut groups: Vec<CeGroup> = sprites.sorted_by(view).collect();
+    // `antenna_render_proper`: one group each, at the mean of its sprites.
+    for (antenna, texture) in frame.preview.ce_antennas.iter().zip(&uploaded.antenna_textures) {
+        let Some(texture) = *texture else {
+            continue;
+        };
+        let quads = antenna.quads(bones, view);
+        let centroid = mean_corner(quads.iter().map(|quad| &quad.corners));
+        let draw = CeGroupDraw::Plain { quads, texture, additive: false };
+        groups.push(CeGroup { z_sort: ce_z_sort(view, centroid, false), draw });
+    }
+    // `light_volume_submit`: one group each, at its marker.
+    for (volume, texture) in frame.preview.ce_light_volumes.iter().zip(&uploaded.ce_light_volume_textures) {
+        let Some(texture) = *texture else {
+            continue;
+        };
+        let (outputs, active) = switched(volume.object);
+        let quads = volume.quads(&outputs, &active, bones, view);
+        let draw = CeGroupDraw::Plain { quads, texture, additive: true };
+        groups.push(CeGroup { z_sort: ce_z_sort(view, volume.marker(bones), false), draw });
+    }
+    groups
+}
+
+/// `rasterizer_transparent_geometry_group_draw` for one of Halo CE's groups,
+/// tested against the model's depth and not written.
+#[allow(clippy::too_many_arguments)]
+unsafe fn draw_ce_group(
+    gl: &glow::Context,
+    effect_gl: &mut Option<CeEffectGl>,
+    main: glow::NativeProgram,
+    flares: &CeFlareGl,
+    uploaded: &mut ModelGpuSlot,
+    camera: &ModelGpuCamera,
+    group: CeGroup,
 ) {
     unsafe {
-        if effect_gl.is_none() {
-            *effect_gl = ce_effect_gl(gl, main);
-        }
-        let Some(effect_gl) = effect_gl.as_ref() else {
-            return;
-        };
-        let camera = &frame.camera;
-        let effects = &frame.preview.ce_effects;
-        let states = &frame.object_states;
-        advance_ce_effects(uploaded, frame, bones);
-        let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
-        let ground = lowest.fold(0.0, f32::min);
-        let mut viewport = [0; 4];
-        gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
-        let half_width = viewport[2].max(1) as f32 * 0.5;
-        // `render_frustum_sphere_diameter_in_pixels`.
-        let pixels = |center: [f32; 3], radius: f32| {
-            let middle = ce_flare_clip(camera, center);
-            let side = ce_flare_clip(camera, std::array::from_fn(|axis| center[axis] + view.right[axis] * radius));
-            ((side[0] / side[3] - middle[0] / middle[3]).abs() * half_width * 2.0).max(0.0)
-        };
-        let contrails = &frame.preview.ce_contrails;
-        let switched = |object: u8| {
-            states.get(object as usize).map_or(([0.0; 4], [false; 4]), |state| (state.outputs, state.active))
-        };
-        uploaded.ce_contrails.advance(contrails, switched, bones, ground, frame.time);
-        let change_colors = |object: u8| states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors);
-        // What each sprite draws with: texture, blend, nonlinear tint, each
-        // corner's color, corners.
-        type Sprite = (glow::NativeTexture, i32, bool, [[f32; 4]; 4], [[f32; 5]; 4], Option<ce_particles::CeSecondaryDraw>);
-        let mut sprites: Vec<Sprite> = Vec::new();
-        // Made afresh every frame, as the game draws it.
-        let seed = (frame.time * 1000.0) as u32;
-        for (index, lightning) in frame.preview.ce_lightning.iter().enumerate() {
-            let Some(texture) = uploaded.ce_lightning_textures.get(index).copied().flatten() else {
-                continue;
-            };
-            let seed = seed.wrapping_add(index as u32 * 7919);
-            let state = states.get(usize::from(lightning.object));
-            let outputs = state.map_or([0.0; 4], |state| state.outputs);
-            let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
-            for quad in lightning.quads(&outputs, &colors, bones, view, seed) {
-                sprites.push((texture, lightning.blend, lightning.nonlinear_tint, quad.colors, quad.corners, None));
+        gl.enable(glow::DEPTH_TEST);
+        gl.depth_func(glow::LEQUAL);
+        gl.depth_mask(false);
+        gl.disable(glow::CULL_FACE);
+        gl.color_mask(true, true, true, false);
+        gl.enable(glow::BLEND);
+        gl.blend_equation(glow::FUNC_ADD);
+        gl.active_texture(glow::TEXTURE0);
+        match group.draw {
+            CeGroupDraw::Sprites(sprites) => {
+                if effect_gl.is_none() {
+                    *effect_gl = ce_effect_gl(gl, main);
+                }
+                if let Some(effect_gl) = effect_gl.as_ref() {
+                    draw_ce_sprites(gl, effect_gl, uploaded, camera, sprites);
+                }
             }
-        }
-        // `particle_systems_render`, for those effects' parts made.
-        let pixel_of = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
-        for (effect, system, quad) in uploaded.ce_particles.system_quads(effects, view, pixel_of) {
-            let texture = uploaded
-                .ce_effect_pctl_textures
-                .get(&effect)
-                .and_then(|systems| systems.get(system))
-                .and_then(|sheets| sheets.get(quad.sheet))
-                .and_then(|images| images.get(quad.image))
-                .copied()
-                .flatten();
-            if let Some(texture) = texture {
-                sprites.push((texture, quad.blend, quad.nonlinear_tint, [quad.color; 4], quad.corners, quad.secondary));
-            }
-        }
-        // And those on the object's attachments.
-        let systems = &frame.preview.ce_particle_systems;
-        if !systems.is_empty() {
-            let inputs = |object: u8| {
-                let state = states.get(usize::from(object));
-                (
-                    state.map_or([0.0; 4], |state| state.outputs),
-                    state.map_or([false; 4], |state| state.active),
-                    state.map_or([[1.0; 3]; 4], |state| state.change_colors),
-                )
-            };
-            uploaded.ce_pctl.advance(systems, inputs, bones, ground, frame.time);
-            let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
-            for quad in uploaded.ce_pctl.quads(systems, view, pixel) {
-                let texture = uploaded.ce_pctl_textures.get(quad.system).and_then(|sheets| sheets.get(quad.sheet)).and_then(|images| images.get(quad.image)).copied().flatten();
-                if let Some(texture) = texture {
-                    sprites.push((texture, quad.blend, quad.nonlinear_tint, [quad.color; 4], quad.corners, quad.secondary));
+            CeGroupDraw::Plain { quads, texture, additive } => {
+                gl.use_program(Some(flares.program));
+                gl.bind_vertex_array(Some(flares.vertex_array));
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                gl.uniform_1_i32(flares.map.as_ref(), 0);
+                // Plain color times map.
+                gl.uniform_1_f32(flares.highlight.as_ref(), -1.0);
+                gl.uniform_2_f32(flares.tint.as_ref(), 0.0, 0.0);
+                gl.blend_func(glow::SRC_ALPHA, if additive { glow::ONE } else { glow::ONE_MINUS_SRC_ALPHA });
+                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                for quad in quads {
+                    let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                        let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                        [a, b, c, d, u, v]
+                    });
+                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                    let [red, green, blue, alpha] = quad.color;
+                    gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
+                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                 }
             }
         }
-        // `glow_render`, through `global_shader_effect_additive`.
-        let glows = &frame.preview.ce_glows;
-        // `glow_update` reads an output only while it is on, else nothing.
-        let read_if_on = |object: u8| {
-            let (outputs, active) = switched(object);
-            std::array::from_fn(|slot| if active[slot] { outputs[slot] } else { 0.0 })
-        };
-        uploaded.ce_glows.advance(glows, read_if_on, bones, frame.time);
-        let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
-        for (index, quad) in uploaded.ce_glows.quads(glows, view, pixel) {
-            if let Some(texture) = uploaded.ce_glow_textures.get(index).copied().flatten() {
-                sprites.push((texture, 3, false, quad.colors, quad.corners, None));
-            }
-        }
-        for quad in uploaded.ce_contrails.quads(contrails, change_colors, view) {
-            let Some(contrail) = contrails.get(quad.contrail) else {
-                continue;
-            };
-            let texture = uploaded.ce_contrail_textures.get(quad.contrail).and_then(|images| images.get(quad.image)).copied().flatten();
-            if let Some(texture) = texture {
-                sprites.push((texture, contrail.def.blend, contrail.def.nonlinear_tint, quad.colors, quad.corners, None));
-            }
-        }
-        for quad in uploaded.ce_particles.quads(effects, bones, view, pixels) {
-            let texture = uploaded
-                .ce_particle_textures
-                .get(&quad.effect)
-                .and_then(|defs| defs.get(quad.def))
-                .and_then(|images| images.get(quad.image))
-                .copied()
-                .flatten();
-            if let Some(texture) = texture {
-                sprites.push((texture, quad.blend, quad.nonlinear_tint, [quad.color; 4], quad.corners, quad.secondary));
-            }
-        }
+    }
+}
+
+/// `render_particles`' draw: each sprite through the `effect` shader.
+unsafe fn draw_ce_sprites(
+    gl: &glow::Context,
+    effect_gl: &CeEffectGl,
+    uploaded: &mut ModelGpuSlot,
+    camera: &ModelGpuCamera,
+    sprites: Vec<CeSprite>,
+) {
+    unsafe {
         gl.use_program(Some(effect_gl.program));
         gl.bind_vertex_array(Some(effect_gl.vertex_array));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(effect_gl.buffer));
@@ -3776,7 +4151,11 @@ impl ModelGlRenderer {
                     self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
                 }
                 let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
-                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Transparent, None);
+                if ce_sorts_transparents(frame) {
+                    self.draw_ce_transparents(gl, frame, slot);
+                } else {
+                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Transparent, None);
+                }
                 // `sub_6C18F0`: `object_overshield_amount` is the vitality past 1.
                 let value = |name: &str| {
                     frame.h2_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
@@ -3828,11 +4207,6 @@ impl ModelGlRenderer {
         }
     }
 
-    /// `rasterizer_lens_flares_draw`: added to the frame by their alpha, on
-    /// color alone, over everything. What hides one is its occlusion test, a
-    /// patch whose share of pixels past the depth buffer scales the flare. The
-    /// game reads that a frame late and eases it; a pane paints on demand, so
-    /// this waits for the answer.
     /// Whether a frame has flares or antennas to draw.
     fn draws_object_sprites(&self, frame: &ModelGpuFrame) -> bool {
         let preview = &frame.preview;
@@ -3858,6 +4232,84 @@ impl ModelGlRenderer {
                 && preview.h3_leaves.is_empty())
     }
 
+    /// Halo CE's transparents as `rasterizer_transparent_geometry_draw` draws
+    /// them: the model's transparent parts and the effects' groups in one sort
+    /// by `z_sort`, far to near, each part from its centroid on its node.
+    unsafe fn draw_ce_transparents(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        enum Transparent {
+            Part(usize),
+            Group(CeGroup),
+        }
+        unsafe {
+            let view = ce_flare_view(&frame.camera);
+            let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+            let mut groups = Vec::new();
+            if self.draws_object_sprites(frame) && ce_has_groups(&frame.preview) {
+                if self.ce_flares.is_none() {
+                    self.ce_flares = ce_flare_gl(gl, self.program);
+                }
+                let uploaded = &mut self.slots[slot];
+                uploaded.sync_sprite_textures(gl, frame);
+                groups = ce_groups(gl, uploaded, frame, bones, &view);
+            }
+            let points = &self.slots[slot].h2_sort_points;
+            let parts = frame.visible_batches.iter().map(|&index| {
+                let place = frame.preview.batches.get(index).and_then(|batch| batch.sort_position);
+                let point = match place {
+                    Some((point, node)) => ce_lights::posed_on(node, point, [0.0; 3], bones).0,
+                    None => points.get(index).copied().unwrap_or(frame.camera.center),
+                };
+                (ce_z_sort(&view, point, false), Transparent::Part(index))
+            });
+            let groups = groups.into_iter().map(|group| (group.z_sort, Transparent::Group(group)));
+            let mut sorted: Vec<_> = parts.chain(groups).collect();
+            sorted.sort_by(|(a, _), (b, _)| a.total_cmp(b));
+            let vertex_array = self.slots[slot].vertex_array;
+            for (_, transparent) in sorted {
+                match transparent {
+                    Transparent::Part(index) => {
+                        // What the passes take as theirs: the model's vertices
+                        // and the frame's culling.
+                        gl.bind_vertex_array(Some(vertex_array));
+                        if frame.show_backfaces {
+                            gl.disable(glow::CULL_FACE);
+                        } else {
+                            gl.enable(glow::CULL_FACE);
+                        }
+                        self.draw_h2_passes(gl, frame, slot, &[index], H2Layer::Transparent, None);
+                    }
+                    Transparent::Group(group) => {
+                        let Some(flares) = self.ce_flares.as_ref() else {
+                            continue;
+                        };
+                        let uploaded = &mut self.slots[slot];
+                        draw_ce_group(gl, &mut self.ce_effect_gl, self.program, flares, uploaded, &frame.camera, group);
+                    }
+                }
+            }
+            // As the passes leave it.
+            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(vertex_array));
+            gl.disable(glow::BLEND);
+            gl.blend_equation(glow::FUNC_ADD);
+            gl.enable(glow::DEPTH_TEST);
+            gl.depth_func(glow::LESS);
+            gl.depth_mask(true);
+            gl.color_mask(true, true, true, true);
+            gl.active_texture(glow::TEXTURE0);
+            if frame.show_backfaces {
+                gl.disable(glow::CULL_FACE);
+            } else {
+                gl.enable(glow::CULL_FACE);
+            }
+        }
+    }
+
+    /// `rasterizer_lens_flares_draw`: added to the frame by their alpha, on
+    /// color alone, over everything. What hides one is its occlusion test, a
+    /// patch whose share of pixels past the depth buffer scales the flare. The
+    /// game reads that a frame late and eases it; a pane paints on demand, so
+    /// this waits for the answer.
     pub(super) unsafe fn draw_ce_flares(
         &mut self,
         gl: &glow::Context,
@@ -3883,197 +4335,7 @@ impl ModelGlRenderer {
             let particle_gl = &self.h3_particle_gl;
             let no_map = self.h3_no_bloom;
             let uploaded = &mut self.slots[slot];
-            if uploaded.flare_geometry != Some(frame.geometry_id) {
-                let drained = uploaded
-                    .particle_textures
-                    .drain(..)
-                    .chain(uploaded.strip_textures.drain(..))
-                    .chain(uploaded.leaf_textures.drain(..));
-                for texture in drained.flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                let maps = |look: &h3_particles::H3SpriteShader| {
-                    let [base, alpha, palette, second] = look.samplers;
-                    [
-                        (&look.base_map, base),
-                        (&look.alpha_map, alpha),
-                        (&look.palette_map, palette),
-                        (&look.second_map, second),
-                    ]
-                    .map(|(map, sampler)| {
-                        map.as_ref().and_then(|(image, texels, mips)| {
-                            h3_draw::upload_h2_image_linear(gl, image, *texels, mips, sampler)
-                        })
-                    })
-                };
-                uploaded.particle_textures =
-                    frame.preview.h3_particles.iter().map(|system| maps(&system.look.shader)).collect();
-                uploaded.strip_textures = frame.preview.h3_strips.iter().map(|strip| maps(strip.shader())).collect();
-                uploaded.leaf_textures = frame.preview.h3_leaves.iter().map(|leaves| maps(leaves.shader())).collect();
-                for texture in uploaded.flare_textures.drain(..).flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.flare_textures = frame
-                    .preview
-                    .ce_lights
-                    .iter()
-                    .map(|light| {
-                        let images = light.flare.iter().flat_map(|flare| &flare.images);
-                        images.map(|image| upload_h2_image(gl, image)).collect()
-                    })
-                    .chain(frame.preview.h2_flares.iter().map(|at| {
-                        at.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect()
-                    }))
-                    .chain(frame.preview.h3_flares.iter().map(|at| {
-                        let (image, texels, mips) = at.bitmap();
-                        vec![h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)]
-                    }))
-                    .collect();
-                for texture in uploaded.ce_effect_flare_textures.drain().flat_map(|(_, lights)| lights).flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                let reachable = ce_particles::reachable_defs(&frame.preview.ce_effects);
-                uploaded.ce_effect_flare_textures = reachable
-                    .iter()
-                    .map(|def| {
-                        let lights = def.lights.iter().map(|light| {
-                            let images = light.light.flare.iter().flat_map(|flare| &flare.images);
-                            images.map(|image| upload_h2_image(gl, image)).collect()
-                        });
-                        (ce_particles::def_key(def), lights.collect())
-                    })
-                    .collect();
-                for texture in uploaded.antenna_textures.drain(..).flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.antenna_textures = frame
-                    .preview
-                    .ce_antennas
-                    .iter()
-                    .map(|antenna| upload_h2_image(gl, &antenna.image))
-                    .chain(frame.preview.h2_antennas.iter().map(|antenna| match &antenna.h3_bitmap {
-                        // `build_sprite`.
-                        Some((image, texels, mips)) => {
-                            let sampler = H3Sampler {
-                                address: [BitmapAddressMode::Clamp; 2],
-                                filter: BitmapFilterMode::Bilinear,
-                            };
-                            h3_draw::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
-                        }
-                        None => upload_h2_image(gl, &antenna.image),
-                    }))
-                    .collect();
-                for texture in uploaded.ce_particle_textures.drain().flat_map(|(_, particles)| particles).flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                for texture in uploaded.ce_contrail_textures.drain(..).flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                for texture in uploaded.ce_light_volume_textures.drain(..).flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.ce_light_volume_textures =
-                    frame.preview.ce_light_volumes.iter().map(|volume| upload_h2_image(gl, &volume.image)).collect();
-                for texture in uploaded.ce_lightning_textures.drain(..).flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.ce_lightning_textures =
-                    frame.preview.ce_lightning.iter().map(|lightning| upload_h2_image(gl, &lightning.image)).collect();
-                for texture in uploaded.ce_glow_textures.drain(..).flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.ce_glow_textures = frame.preview.ce_glows.iter().map(|glow| upload_h2_image(gl, &glow.image)).collect();
-                for texture in uploaded.ce_pctl_textures.drain(..).flatten().flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.ce_pctl_textures = frame
-                    .preview
-                    .ce_particle_systems
-                    .iter()
-                    .map(|system| {
-                        system.def.sheets.iter().map(|sheet| {
-                            sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                        }).collect()
-                    })
-                    .collect();
-                for (_, texture) in uploaded.ce_secondary_textures.drain() {
-                    gl.delete_texture(texture);
-                }
-                for texture in uploaded.ce_effect_pctl_textures.drain().flat_map(|(_, systems)| systems).flatten().flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.ce_effect_pctl_textures = reachable
-                    .iter()
-                    .map(|def| {
-                        let systems = def.systems.iter().map(|system| {
-                            system.sheets.iter().map(|sheet| {
-                                sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                            }).collect()
-                        });
-                        (ce_particles::def_key(def), systems.collect())
-                    })
-                    .collect();
-                uploaded.ce_contrail_textures = frame
-                    .preview
-                    .ce_contrails
-                    .iter()
-                    .map(|contrail| {
-                        contrail.def.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                    })
-                    .collect();
-                uploaded.ce_particle_textures = reachable
-                    .iter()
-                    .map(|def| {
-                        let particles = def.particles.iter().map(|particle| {
-                            particle.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                        });
-                        (ce_particles::def_key(def), particles.collect())
-                    })
-                    .collect();
-                for texture in uploaded.h2_liquid_textures.drain(..).flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.h2_liquid_textures = frame
-                    .preview
-                    .h2_liquids
-                    .iter()
-                    .map(|at| at.arcs().iter().map(|arc| arc.bitmap().and_then(|image| upload_h2_image(gl, image))).collect())
-                    .collect();
-                for texture in uploaded.h2_contrail_textures.drain(..).flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.h2_contrail_textures = frame
-                    .preview
-                    .h2_contrails
-                    .iter()
-                    .map(|at| at.bitmap().and_then(|image| upload_h2_image(gl, image)))
-                    .collect();
-                for texture in uploaded.h2_volume_textures.drain(..).flatten().flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.h2_volume_textures = frame
-                    .preview
-                    .h2_light_volumes
-                    .iter()
-                    .map(|at| {
-                        let bitmaps = at.volumes().iter().map(|volume| volume.bitmap());
-                        bitmaps.map(|bitmap| bitmap.and_then(|image| upload_h2_image(gl, image))).collect()
-                    })
-                    .collect();
-                for texture in uploaded.volume_textures.drain(..).flatten() {
-                    gl.delete_texture(texture);
-                }
-                uploaded.volume_textures = frame
-                    .preview
-                    .h3_light_volumes
-                    .iter()
-                    .map(|at| {
-                        let (image, texels, mips) = at.bitmap();
-                        h3_draw::upload_h2_image_linear(gl, image, *texels, mips, at.sampler())
-                    })
-                    .collect();
-                uploaded.flare_geometry = Some(frame.geometry_id);
-            }
+            uploaded.sync_sprite_textures(gl, frame);
             let camera = &frame.camera;
             let view = ce_flare_view(camera);
             gl.use_program(Some(flares.program));
@@ -4197,7 +4459,7 @@ impl ModelGlRenderer {
                 }
                 gl.color_mask(true, true, true, h3);
             }
-            let quads = if antennas { preview_antennas(frame, &uploaded.antenna_textures, bones, &view) } else { Vec::new() };
+            let quads = if antennas { h2_antennas(frame, &uploaded.antenna_textures, bones, &view) } else { Vec::new() };
             for (quads, texture) in quads {
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                 for quad in quads {
@@ -4211,38 +4473,11 @@ impl ModelGlRenderer {
                     gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
                 }
             }
-            if antennas && !frame.preview.ce_light_volumes.is_empty() {
-                // `rasterizer_widget_begin(5, 1)`: source alpha and one, depth
-                // tested, not written.
-                gl.enable(glow::DEPTH_TEST);
-                gl.depth_func(glow::LEQUAL);
-                gl.depth_mask(false);
-                gl.blend_equation(glow::FUNC_ADD);
-                gl.blend_func(glow::SRC_ALPHA, glow::ONE);
-                let volumes = frame.preview.ce_light_volumes.iter().zip(&uploaded.ce_light_volume_textures);
-                for (volume, texture) in volumes {
-                    let state = frame.object_states.get(usize::from(volume.object));
-                    let outputs = state.map_or([0.0; 4], |state| state.outputs);
-                    let active = state.map_or([false; 4], |state| state.active);
-                    let Some(texture) = texture else {
-                        continue;
-                    };
-                    gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                    for quad in volume.quads(&outputs, &active, bones, &view) {
-                        let vertices = quad.corners.map(|[x, y, z, u, v]| {
-                            let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
-                            [a, b, c, d, u, v]
-                        });
-                        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
-                        let [red, green, blue, alpha] = quad.color;
-                        gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
-                        gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
-                    }
+            // Halo CE's groups, when the transparents did not sort them in.
+            if antennas && ce_has_groups(&frame.preview) && !ce_sorts_transparents(frame) {
+                for group in ce_groups(gl, uploaded, frame, bones, &view) {
+                    draw_ce_group(gl, &mut self.ce_effect_gl, self.program, flares, uploaded, camera, group);
                 }
-                gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-            }
-            if antennas && !(frame.preview.ce_effects.is_empty() && frame.preview.ce_contrails.is_empty() && frame.preview.ce_lightning.is_empty() && frame.preview.ce_glows.is_empty() && frame.preview.ce_particle_systems.is_empty()) {
-                draw_ce_particles(gl, &mut self.ce_effect_gl, self.program, uploaded, frame, bones, &view);
                 gl.use_program(Some(flares.program));
                 gl.bind_vertex_array(Some(flares.vertex_array));
                 gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
@@ -5412,6 +5647,41 @@ mod tests {
     use blam_tags::math::{RealPoint2d, RealPoint3d, RealVector3d};
     use blam_tags::render_model::{GeometryPartType, RenderMeshPart, RenderVertex};
 
+    /// An eye at the origin looking along +X.
+    fn looking_along_x() -> ce_lights::CeFlareView {
+        ce_lights::CeFlareView { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, 1.0, 0.0], up: [0.0, 0.0, 1.0] }
+    }
+
+    /// `z_sort` puts the farther first, and `sort bias` a quarter unit nearer.
+    #[test]
+    fn ce_z_sort_runs_far_to_near_and_sort_bias_draws_later() {
+        let view = looking_along_x();
+        let far = ce_z_sort(&view, [10.0, 3.0, 0.0], false);
+        let near = ce_z_sort(&view, [2.0, -5.0, 1.0], false);
+        assert!(far < near, "farther sorts first");
+        assert_eq!(ce_z_sort(&view, [2.0, 0.0, 0.0], true), near + CE_SORT_BIAS);
+    }
+
+    /// Sprites of one key make one group, at the mean of their corners, or
+    /// for a bolt at the middle of their bounds; the groups keep the order
+    /// they first appeared in.
+    #[test]
+    fn ce_sprites_group_by_key_at_their_centroid() {
+        let view = looking_along_x();
+        let texture = glow::NativeTexture(std::num::NonZeroU32::new(1).unwrap());
+        let at = |x: f32| (texture, 0, false, [[1.0; 4]; 4], [[x, 0.0, 0.0, 0.0, 0.0]; 4], None);
+        let mut sprites = CeSpriteGroups::default();
+        sprites.push((CE_PARTICLE, 7, 0), false, false, at(2.0));
+        sprites.push((CE_LIGHTNING, 0, 0), false, true, at(1.0));
+        sprites.push((CE_PARTICLE, 7, 0), false, false, at(6.0));
+        sprites.push((CE_LIGHTNING, 0, 0), false, true, at(9.0));
+        sprites.push((CE_LIGHTNING, 0, 0), false, true, at(9.0));
+        let groups: Vec<CeGroup> = sprites.sorted_by(&view).collect();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].z_sort, -4.0, "the particles' mean");
+        assert_eq!(groups[1].z_sort, -5.0, "the bolt's middle, not its mean");
+    }
+
     /// Two previews on screen draw alternately. Each model is uploaded once
     /// and then stays; with one slot, every draw replaced the other model.
     #[test]
@@ -6560,6 +6830,7 @@ fn instances_batch(
         index_count,
         flat_color: None,
         layer: ModelPreviewLayer::Render,
+        sort_position: None,
     });
 }
 
@@ -6636,6 +6907,8 @@ fn append_render_mesh_to_preview(
         };
         let index_count = index_end - index_start;
         if index_count > 0 {
+            let sort_position =
+                part.sort_position.map(|at| (point3_to_array(at.position), usize::from(at.node_indices[0])));
             preview.batches.push(RenderModelPreviewBatch {
                 region_name: region_name.to_owned(),
                 permutation_name: permutation_name.to_owned(),
@@ -6644,6 +6917,7 @@ fn append_render_mesh_to_preview(
                 index_count,
                 flat_color: None,
                 layer: ModelPreviewLayer::Render,
+                sort_position,
             });
         }
     }
@@ -6787,16 +7061,36 @@ unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeT
 /// Mipmaps matter here beyond quality: a detail map tiling twenty times across
 /// a model aliases into noise without them, which is exactly where a preview
 /// looks worst.
-fn preview_antennas(
+/// Halo 2's antennas, whose maps follow Halo CE's in the slot's.
+fn h2_antennas(
     frame: &ModelGpuFrame,
     textures: &[Option<glow::NativeTexture>],
     bones: Option<&[[f32; 4]]>,
     view: &ce_lights::CeFlareView,
 ) -> Vec<(Vec<ce_lights::CeAntennaQuad>, glow::NativeTexture)> {
     let preview = &frame.preview;
-    let ce = preview.ce_antennas.iter().map(|antenna| antenna.quads(bones, view));
-    let h2 = preview.h2_antennas.iter().map(|antenna| antenna.quads(bones, view));
-    ce.chain(h2).zip(textures).filter_map(|(quads, texture)| Some((quads, (*texture)?))).collect()
+    let quads = preview.h2_antennas.iter().map(|antenna| antenna.quads(bones, view));
+    let textures = textures.iter().skip(preview.ce_antennas.len());
+    quads.zip(textures).filter_map(|(quads, texture)| Some((quads, (*texture)?))).collect()
+}
+
+/// Whether the preview has any of Halo CE's effects, particle systems, glows,
+/// contrails, lightning, antennas or light volumes.
+fn ce_has_groups(preview: &RenderModelPreview) -> bool {
+    !(preview.ce_effects.is_empty()
+        && preview.ce_particle_systems.is_empty()
+        && preview.ce_glows.is_empty()
+        && preview.ce_contrails.is_empty()
+        && preview.ce_lightning.is_empty()
+        && preview.ce_antennas.is_empty()
+        && preview.ce_light_volumes.is_empty())
+}
+
+/// Whether Halo CE's effects sort in among the model's transparent parts, as
+/// the game draws them, rather than after: a CE model's batches know where
+/// they sort, and the transparents draw only when shading does.
+fn ce_sorts_transparents(frame: &ModelGpuFrame) -> bool {
+    frame.render_mode.draws_shading() && frame.preview.batches.iter().any(|batch| batch.sort_position.is_some())
 }
 
 fn ce_flare_view(camera: &ModelGpuCamera) -> ce_lights::CeFlareView {

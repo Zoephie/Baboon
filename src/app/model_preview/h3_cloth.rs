@@ -528,6 +528,7 @@ pub(super) fn read_h3_cloth(
             index_count: cloth.indices.len() as u32 * 2,
             flat_color: None,
             layer: ModelPreviewLayer::Render,
+            sort_position: None,
         });
         // Either game's PRT attributes stay parallel to the vertices.
         if let Some(prt) = preview.h2_prt.as_mut() {

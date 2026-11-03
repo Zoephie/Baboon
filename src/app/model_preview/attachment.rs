@@ -209,10 +209,13 @@ pub(super) fn merge_attached(
     }
     preview.materials.append(&mut other.materials);
     let label = |region: &str| format!("{name}: {region}");
+    let node = usize::try_from(parent.node).unwrap_or(0);
     for mut batch in other.batches {
         batch.index_start += index_base;
         batch.material_index += material_base;
         batch.region_name = label(&batch.region_name);
+        // Moved and bound as its vertices are.
+        batch.sort_position = batch.sort_position.map(|(point, _)| (attach_point(&parent, &child, point), node));
         preview.batches.push(batch);
     }
     for mut region in other.regions {

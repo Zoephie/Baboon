@@ -104,6 +104,7 @@ fn push_derived_batch(
             PHYSICS_REGION => ModelPreviewLayer::Physics,
             _ => ModelPreviewLayer::Render,
         },
+        sort_position: None,
     });
     ensure_preview_region(preview, region_name);
 }
@@ -264,6 +265,7 @@ fn append_collision_jms(
             index_count,
             flat_color: Some(COLLISION_COLOR),
             layer: ModelPreviewLayer::Collision,
+            sort_position: None,
         });
         ensure_preview_region_permutation(preview, &region_name, &permutation_name);
     }
@@ -559,6 +561,7 @@ fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderMode
         index_count: preview.indices.len() as u32 - index_start,
         flat_color: Some(PHYSICS_COLOR),
         layer: ModelPreviewLayer::Physics,
+        sort_position: None,
     });
     ensure_preview_region(preview, PHYSICS_REGION);
 }
@@ -938,6 +941,7 @@ fn ass_to_preview(ass: &AssFile, render_only: bool) -> RenderModelPreview {
                 index_count,
                 flat_color: color,
                 layer: ModelPreviewLayer::Render,
+                sort_position: None,
             });
         }
         ensure_preview_region(&mut preview, region);
@@ -1110,6 +1114,7 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
             index_count,
             flat_color: None,
             layer: ModelPreviewLayer::Render,
+            sort_position: None,
         });
     }
     if !preview.batches.is_empty() {
@@ -1461,6 +1466,7 @@ pub(super) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderMod
             index_count: (end - start) as u32,
             flat_color: batch.flat_color,
             layer: batch.layer,
+            sort_position: batch.sort_position,
         });
     }
     for region in &src.regions {

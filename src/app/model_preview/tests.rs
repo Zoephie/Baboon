@@ -177,11 +177,13 @@ fn physics_overlay_is_not_a_model_setup_variant_region() {
             RenderModelPreviewBatch {
                 region_name: "body".into(),
                 layer: ModelPreviewLayer::Render,
+                sort_position: None,
                 ..Default::default()
             },
             RenderModelPreviewBatch {
                 region_name: PHYSICS_REGION.into(),
                 layer: ModelPreviewLayer::Physics,
+                sort_position: None,
                 ..Default::default()
             },
         ],
