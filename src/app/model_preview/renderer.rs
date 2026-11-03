@@ -129,7 +129,8 @@ pub(super) fn draw_model_viewport(
         game_shaders: state.h2_game_shaders,
         default_lights: state.h2_default_lights,
         active_camo: state.h2_active_camo,
-        bloom: state.h2_bloom,
+        // Halo CE's renderer has no bloom: only the remaster's does.
+        bloom: state.h2_bloom && !data.halo_ce,
         self_shadow: state.h2_self_shadow,
         prt: state.h2_prt,
         light_follows_camera: state.h2_light_follows_camera,

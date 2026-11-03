@@ -560,6 +560,9 @@ pub(in crate::app) struct ModelPreviewData {
     /// What the preview shows without, and why: a feature whose tags would
     /// not read, a weapon that would not attach. The geometry is still there.
     pub(in crate::app) notes: Vec<String>,
+    /// Opened from a Halo CE tag, whose renderer has no bloom, self shadow,
+    /// PRT or default lights.
+    pub(in crate::app) halo_ce: bool,
 }
 
 #[derive(Clone)]

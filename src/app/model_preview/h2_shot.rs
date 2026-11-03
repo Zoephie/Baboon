@@ -188,7 +188,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         game_shaders: state.h2_game_shaders,
         default_lights: state.h2_default_lights,
         active_camo: std::env::var_os("H2_SHOT_CAMO").is_some(),
-        bloom: std::env::var_os("H2_SHOT_BLOOM").is_some(),
+        bloom: std::env::var_os("H2_SHOT_BLOOM").is_some() && !data.halo_ce,
         self_shadow: std::env::var_os("H2_SHOT_SHADOW").is_some(),
         prt: std::env::var_os("H2_SHOT_NO_PRT").is_none(),
         light_follows_camera: state.h2_light_follows_camera,

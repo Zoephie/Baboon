@@ -443,6 +443,7 @@ fn model_preview_data(
         scenario_bsps: Vec::new(),
         animations: None,
         notes: Vec::new(),
+        halo_ce: false,
     }
 }
 
@@ -1623,22 +1624,28 @@ fn draw_model_view_settings_menu(
                     "Draw Halo CE, Halo 2 and Halo 3 materials through the game's own \
                      shaders, lit by its default lighting.",
                 );
-            ui.add_enabled(
-                state.h2_game_shaders,
-                egui::Checkbox::new(&mut state.h2_default_lights, "Default Lights"),
-            )
-            .on_hover_text(
-                "Light Halo 2 models as the game does in a level with no lightmaps: \
-                 fixed lighting plus two sphere lights. Off, they are lit as an \
-                 object in a level with lightmaps.",
-            );
-            ui.add_enabled(state.h2_game_shaders, egui::Checkbox::new(&mut state.h2_prt, "PRT"))
+            // Default Lights, PRT and Self Shadow change nothing a Halo CE
+            // model draws, and its renderer has no bloom, so its menu leaves
+            // them out.
+            let halo_ce = data.halo_ce;
+            if !halo_ce {
+                ui.add_enabled(
+                    state.h2_game_shaders,
+                    egui::Checkbox::new(&mut state.h2_default_lights, "Default Lights"),
+                )
                 .on_hover_text(
-                    "Use the occlusion Halo 2 and Halo 3 models bake into their vertices. \
-                     Off, they light as though nothing shades them.",
+                    "Light Halo 2 models as the game does in a level with no lightmaps: \
+                     fixed lighting plus two sphere lights. Off, they are lit as an \
+                     object in a level with lightmaps.",
                 );
+                ui.add_enabled(state.h2_game_shaders, egui::Checkbox::new(&mut state.h2_prt, "PRT"))
+                    .on_hover_text(
+                        "Use the occlusion Halo 2 and Halo 3 models bake into their vertices. \
+                         Off, they light as though nothing shades them.",
+                    );
+            }
             ui.add_enabled(
-                state.h2_game_shaders && !state.h2_default_lights,
+                state.h2_game_shaders && (halo_ce || !state.h2_default_lights),
                 egui::Checkbox::new(&mut state.h2_light_follows_camera, "Light Follows Camera"),
             )
             .on_hover_text(
@@ -1653,23 +1660,27 @@ fn draw_model_view_settings_menu(
                 "Draw a Halo 2 or Halo 3 model through its active camouflage, for \
                  the models that have it.",
             );
-            ui.add_enabled(
-                state.h2_game_shaders,
-                egui::Checkbox::new(&mut state.h2_bloom, "Bloom"),
-            )
-            .on_hover_text(
-                "Add the glow of Halo 2 and Halo 3 materials with a bloom pass. The \
-                 blur is Halo 2's, and its strength is this preview's own: the \
-                 game's follows the exposure of the whole scene.",
-            );
-            ui.add_enabled(
-                state.h2_game_shaders,
-                egui::Checkbox::new(&mut state.h2_self_shadow, "Self Shadow"),
-            )
-            .on_hover_text(
-                "Shadow Halo 2 and Halo 3 models from their main light. Halo 3 uses the \
-                 game's own shadow pass; Halo 2's is the preview's, as the game draws none here.",
-            );
+            if !halo_ce {
+                ui.add_enabled(
+                    state.h2_game_shaders,
+                    egui::Checkbox::new(&mut state.h2_bloom, "Bloom"),
+                )
+                .on_hover_text(
+                    "Add the glow of Halo 2 and Halo 3 materials with a bloom pass. The \
+                     blur is Halo 2's, and its strength is this preview's own: the \
+                     game's follows the exposure of the whole scene.",
+                );
+            }
+            if !halo_ce {
+                ui.add_enabled(
+                    state.h2_game_shaders,
+                    egui::Checkbox::new(&mut state.h2_self_shadow, "Self Shadow"),
+                )
+                .on_hover_text(
+                    "Shadow Halo 2 and Halo 3 models from their main light. Halo 3 uses the \
+                     game's own shadow pass; Halo 2's is the preview's, as the game draws none here.",
+                );
+            }
         },
     );
     let least = min_preview_scale(&data.preview);

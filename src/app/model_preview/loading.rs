@@ -293,6 +293,18 @@ pub(super) fn load_model_preview(
     source: Option<&TagSource>,
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
+    let mut data = load_tag_preview(model_tag, entry, names, source, settings)?;
+    data.halo_ce = blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1;
+    Ok(data)
+}
+
+fn load_tag_preview(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    names: &TagNameIndex,
+    source: Option<&TagSource>,
+    settings: &PreviewLoadSettings,
+) -> Result<ModelPreviewData, String> {
     let high_detail = settings.high_detail;
     // `particle_model` carries its geometry inline with no wrapper, but
     // it is not a render_model: no regions, no permutations, no
@@ -4548,6 +4560,20 @@ mod kit_object_tests {
             step(&mut field, &plays, &mut time);
         }
         assert!(!field.runs_played(effects.len()), "a play runs once and is let go");
+    }
+
+    /// A preview knows it came from a Halo CE tag, whose renderer has no
+    /// bloom, and one from Halo 2 does not.
+    #[test]
+    fn a_preview_knows_it_is_halo_ce() {
+        let (Ok(ce), Ok(h2)) = (std::env::var("BLAM_TEST_HCEEK"), std::env::var("BLAM_TEST_H2EK")) else {
+            eprintln!("skipping: BLAM_TEST_HCEEK or BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let cyborg = kit_preview(&ce, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd");
+        assert!(cyborg.halo_ce);
+        let blade = kit_preview(&h2, GameId::Halo2, "objects\\weapons\\melee\\energy_blade\\energy_blade", "weapon", b"weap");
+        assert!(!blade.halo_ce);
     }
 
     /// With `BLAM_TEST_HCEEK`: firing the held rifle's trigger plays its
