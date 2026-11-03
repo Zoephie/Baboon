@@ -331,6 +331,19 @@ fn holder_of<'a>(from: TagStruct<'a>, field: &str) -> Option<TagStruct<'a>> {
     from.fields_all().filter_map(|field| field.as_struct()).find_map(|inner| holder_of(inner, field))
 }
 
+/// A weapon type's actions and overlays. Reach puts them a level down, in
+/// the type's `sets`, where `any` is the set a unit is in until something
+/// names another; earlier graphs keep them on the type.
+fn type_slots<'a>(kind: TagStruct<'a>) -> (Vec<TagStruct<'a>>, Vec<TagStruct<'a>>) {
+    let Some(sets) = kind.field("sets").and_then(|field| field.as_block()) else {
+        return (elements(kind, "actions"), elements(kind, "overlays"));
+    };
+    let set = (0..sets.len())
+        .filter_map(|index| sets.element(index))
+        .find(|set| set.read_string_id("label").as_deref() == Some(ANY));
+    set.map_or_else(Default::default, |set| (elements(set, "actions"), elements(set, "overlay animations")))
+}
+
 fn graph_entries(graph: &TagFile) -> Vec<GraphEntry> {
     let mut entries = Vec::new();
     let Some(holder) = holder_of(graph.root(), "modes") else {
@@ -354,8 +367,7 @@ fn graph_entries(graph: &TagFile) -> Vec<GraphEntry> {
     for mode in elements(holder, "modes") {
         for class in elements(mode, "weapon class") {
             for kind in elements(class, "weapon type") {
-                let actions = elements(kind, "actions");
-                let overlays = elements(kind, "overlays");
+                let (actions, overlays) = type_slots(kind);
                 entries.push(GraphEntry {
                     slots: actions.iter().chain(&overlays).map(|slot| (label(*slot), clip_of(slot))).collect(),
                     mode: label(mode),
@@ -398,7 +410,7 @@ fn graph_overlays(graph: &TagFile) -> BTreeSet<String> {
     for mode in elements(holder, "modes") {
         for class in elements(mode, "weapon class") {
             for kind in elements(class, "weapon type") {
-                let overlays = elements(kind, "overlays");
+                let (_, overlays) = type_slots(kind);
                 labels.extend(overlays.iter().filter_map(|overlay| overlay.read_string_id("label")));
             }
         }
@@ -422,7 +434,9 @@ fn clips_without_ik(graph: &TagFile) -> BTreeSet<String> {
         return BTreeSet::new();
     };
     let flagged = elements(holder, "animations").into_iter().filter(|clip| {
-        clip.read_int_any("playback flags").is_some_and(|flags| flags & DISABLE_WEAPON_IK != 0)
+        // Reach calls them `user flags`; the bits are the same.
+        let flags = clip.read_int_any("playback flags").or_else(|| clip.read_int_any("user flags"));
+        flags.is_some_and(|flags| flags & DISABLE_WEAPON_IK != 0)
     });
     flagged.filter_map(|clip| clip.read_string_id("name")).collect()
 }
@@ -599,6 +613,7 @@ fn fold_attached(
     // `Game::of` calls Reach `Halo3` too; its attachments, lights and held
     // weapons read differently, and wait on their own readers.
     if source.game() == Some(GameId::HaloReach) {
+        read_reach_attached_features(source, object, owner, &attached.markers, &frame, Some(name), preview);
     } else if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
         read_h3_attached_features(source, object, owner, &attached.markers, &frame, Some(name), preview);
         read_extension_weapons(source, object, owner, &attached.markers, &frame, preview, Some(name));
@@ -682,6 +697,32 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     preview.h3_flares.extend(named!(flares, name));
     preview.h3_flares.extend(super::h3_lights::light_flares(&lights));
     preview.h3_lights.extend(lights);
+}
+
+/// What hangs on a Reach object brought into the preview, or on the one
+/// opened (`name` none): its flares, lights and cheap lights, and the
+/// `light_apply` passes they are drawn with.
+pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+    source: &TagSource,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+    frame: &F,
+    name: Option<&str>,
+    preview: &mut RenderModelPreview,
+) {
+    let flares = super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
+    preview.h3_flares.extend(named!(flares, name));
+    let (lights, cheap) = super::reach_lights::read_reach_lights(source, object, owner, markers, frame);
+    preview.reach_lights.extend(named!(lights, name));
+    preview.reach_cheap_lights.extend(named!(cheap, name));
+    // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
+    let lit = !(preview.reach_lights.is_empty() && preview.reach_cheap_lights.is_empty());
+    if lit && preview.reach_light_passes.is_empty() {
+        let mut sources = super::h3_shaders::H3Sources::new(source);
+        let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
+        preview.reach_light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
+    }
 }
 
 /// A unit's own `weapons` that are an `extension of parent` (vehicle and
@@ -1129,5 +1170,32 @@ mod tests {
         let clips = ["combat:unarmed:airborne_arc", "combat:unarmed:idle", "combat:rifle:melee_airborne"];
         assert!(unit.hidden(&clips, UNARMED, &[]).is_empty());
         assert_eq!(unit.hidden(&clips, "rifle", &[]), BTreeSet::from([0, 1]));
+    }
+
+    /// With `BLAM_TEST_HREK`: Reach keeps a type's actions and overlays in its
+    /// `any` set, which the Spartan's rifles and its grip are read from.
+    #[test]
+    fn a_reach_graph_reads_its_slots_from_the_any_set() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::HaloReach),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let spartan = "objects\\characters\\spartans\\spartans";
+        let graph = load_referenced_tag_from_source(&source, spartan, "model_animation_graph", b"jmad").unwrap();
+        let entries = graph_entries(&graph);
+        let ar = entries.iter().find(|entry| (entry.mode.as_str(), entry.class.as_str(), entry.kind.as_str()) == ("combat", "rifle", "ar"));
+        let ar = ar.expect("combat:rifle:ar");
+        assert!(ar.slots.iter().any(|(label, clip)| label == GRIP && clip.as_deref() == Some("combat:rifle:ar:grip")), "{:?}", ar.slots);
+        let rifle = entries.iter().find(|entry| (entry.mode.as_str(), entry.class.as_str(), entry.kind.as_str()) == ("combat", "rifle", ANY));
+        assert!(rifle.is_some_and(|entry| entry.has_idle), "the rifle class idles under any");
+        let unit = load_referenced_tag_from_source(&source, spartan, "biped", b"bipd").unwrap();
+        let weapons = unit_weapons(&source, &unit, None);
+        let paths: Vec<_> = weapons.equippable.iter().map(|weapon| weapon.option.name.as_str()).collect();
+        assert!(paths.contains(&"assault_rifle") && paths.contains(&"sniper_rifle"), "{paths:?}");
+        assert_eq!(clips_without_ik(&graph).len(), 2, "two clips turn weapon IK off by their user flags");
     }
 }

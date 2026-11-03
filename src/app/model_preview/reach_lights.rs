@@ -13,7 +13,7 @@ use super::ce_attachments::{elements, object_block};
 use super::ce_lights::posed_on;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
-use super::h3_effects::{marker_name, part_markers};
+use super::h3_effects::{adopt_event_function, marker_name, part_markers};
 use super::*;
 use crate::core::source::TagSource;
 
@@ -243,6 +243,15 @@ impl ReachLight {
         self.only_under.as_ref()
     }
 
+    /// Follow the regions `merge_attached` renames for what `name` brings.
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
+        self
+    }
+
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         let tag = &self.tag;
         [&tag.color.input, &tag.color.range, &tag.intensity.input, &tag.intensity.range, &self.scale_by]
@@ -339,6 +348,15 @@ impl ReachLight {
 impl ReachCheapLight {
     pub(crate) fn only_under(&self) -> Option<&(String, String)> {
         self.only_under.as_ref()
+    }
+
+    /// As [`ReachLight::on_attached`].
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
+        self
     }
 
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {

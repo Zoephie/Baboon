@@ -458,7 +458,10 @@ fn load_tag_preview(
         }
         let weapons_family = matches!(
             source,
-            TagSource::LooseFolder { game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst), .. }
+            TagSource::LooseFolder {
+                game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach),
+                ..
+            }
         );
         if weapons_family {
             let known = settings.h2_equippable.as_deref();
@@ -774,16 +777,9 @@ fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, model: &T
     preview.reach_shield = super::reach_shield::read_reach_shield(source, model);
     preview.reach_camo = super::reach_camo::ReachCamo::read(source).map(std::sync::Arc::new);
     preview.reach_shadow_caster = super::reach_shadow::reach_shadow_caster(model_tag, model);
-    preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, own_marker_frame);
-    let (lights, cheap) = super::reach_lights::read_reach_lights(source, model_tag, 0, &preview.markers, own_marker_frame);
-    // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
-    if !(lights.is_empty() && cheap.is_empty()) {
-        let mut sources = super::h3_shaders::H3Sources::new(source);
-        let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
-        preview.reach_light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
-    }
-    preview.reach_lights = lights;
-    preview.reach_cheap_lights = cheap;
+    let markers = preview.markers.clone();
+    let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
+    super::h2_weapons::read_reach_attached_features(source, model_tag, 0, &markers, &frame, None, preview);
 }
 
 /// A Halo 3 or ODST object's own shield, lights, flares, light volumes,
