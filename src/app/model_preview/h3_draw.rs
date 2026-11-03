@@ -823,6 +823,12 @@ impl ModelGlRenderer {
             let shields = frame.textures.iter().flat_map(|textures| textures.iter());
             let global = shields.filter_map(|texture| texture.h3.as_ref()?.shield.as_ref()).next();
             let settings = frame.preview.h3_shield.as_ref().or(global.map(|shield| &shield.settings));
+            let reach = frame.preview.reach_shield.as_ref().map(|shield| shield.settings.textures.iter());
+            for texture in reach.into_iter().flatten() {
+                if let Some(found) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
+                    uploaded.shield.insert(texture.uniform.clone(), found);
+                }
+            }
             if let Some(settings) = settings {
                 for texture in &settings.textures {
                     if let Some(found) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
@@ -973,6 +979,9 @@ impl ModelGlRenderer {
                 if let Some(value) = value {
                     set_value(gl, location.as_ref(), ty, &value);
                 }
+                if let Some(value) = self.reach_pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
+                    set_value(gl, location.as_ref(), ty, &H3Value::Floats(*value));
+                }
                 let settings = frame.preview.h3_shield.as_ref().or(shield.map(|shield| &shield.settings));
                 if let Some(value) = shield.and(settings).and_then(|settings| settings.values.get(name)) {
                     set_value(gl, location.as_ref(), ty, value);
@@ -1001,6 +1010,7 @@ impl ModelGlRenderer {
                     "albedo_texture" => targets.map(|targets| targets.albedo),
                     "normal_texture" => targets.map(|targets| targets.normal),
                     "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
+                    "depth_buffer" => self.h3_depth_copy,
                     other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
                         targets.map(|targets| targets.behind)
                     }
@@ -1333,6 +1343,9 @@ impl ModelGlRenderer {
                 }
                 gl.color_mask(true, true, true, true);
             }
+            if reach {
+                self.draw_reach_shield(gl, frame, slot);
+            }
             // `c_player_view::render`: after the transparents, before the bloom
             // and the tone curve, so these are in the same light as the scene.
             if sprites {
@@ -1358,6 +1371,72 @@ impl ModelGlRenderer {
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+        }
+    }
+
+    /// `c_render_shield::render_object_internal`: every part that takes the
+    /// shield, through 61 or 119, added over what lies behind with no depth
+    /// written and no face culled.
+    unsafe fn draw_reach_shield(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        let Some(shield) = frame.preview.reach_shield.clone() else {
+            return;
+        };
+        let damage = frame.h2_values.as_ref().and_then(|values| values.get(H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
+        if !shield.settings.showing(damage) {
+            return;
+        }
+        let parts: Vec<_> = frame
+            .shield_batches
+            .iter()
+            .filter_map(|&index| frame.preview.batches.get(index))
+            .filter_map(|batch| {
+                let index = batch.material_index as usize;
+                let material = self.h3_material(frame, index)?;
+                let textures = frame.textures.as_ref()?.get(index)?;
+                super::reach_shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
+                    .then(|| (batch.clone(), Arc::clone(material)))
+            })
+            .collect();
+        if parts.is_empty() {
+            return;
+        }
+        let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
+        let center = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
+        let state = shield.settings.state(damage, frame.time, frame.h2_values.as_ref());
+        let mut values = shield.settings.values(&state, center);
+        let camera = &frame.camera;
+        let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
+        values.insert(
+            super::reach_shield::DEPTH_DECODE,
+            [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye],
+        );
+        values.insert(super::reach_shield::WORLD_SCALE, [camera.scale; 4]);
+        unsafe {
+            // What the pass fades against: everything drawn so far.
+            if let Some(targets) = self.h3_targets.as_ref() {
+                let [width, height] = targets.size;
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
+                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
+                let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
+                gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
+                self.h3_depth_copy = Some(targets.depth_copy);
+            }
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.enable(glow::DEPTH_TEST);
+            gl.depth_func(glow::LEQUAL);
+            gl.depth_mask(false);
+            gl.disable(glow::CULL_FACE);
+            gl.enable(glow::BLEND);
+            gl.blend_equation(glow::FUNC_ADD);
+            gl.blend_func(glow::ONE, glow::ONE);
+            gl.color_mask(true, true, true, true);
+            self.reach_pass_values = Some(values);
+            for (batch, material) in &parts {
+                self.h3_draw_pass(gl, frame, slot, batch, material, shield.pass(), None);
+            }
+            self.reach_pass_values = None;
+            h3_set_cull(gl, frame);
         }
     }
 

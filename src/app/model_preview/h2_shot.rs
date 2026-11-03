@@ -125,6 +125,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 "volumes" => preview.h2_light_volumes.clear(),
                 "contrails" => preview.h2_contrails.clear(),
                 "prt" => preview.h3_prt = None,
+                "shield" => preview.reach_shield = None,
                 "reach_lights" => {
                     preview.reach_lights.clear();
                     preview.reach_cheap_lights.clear();
@@ -163,6 +164,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let camera = PreviewCamera::new(&data, &state, rect);
     let preview = Arc::clone(&data.preview);
     let mut visible_batches = visible_batch_indices(&preview, &state);
+    let shield_batches = visible_batches.clone();
     without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
     // `H2_SHOT_HIDE=a,b` leaves out the materials whose shaders end in these.
     if let Ok(hidden) = std::env::var("H2_SHOT_HIDE") {
@@ -186,6 +188,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         mesh_id: data.mesh_id,
         textures_id: data.textures_id,
         visible_batches,
+        shield_batches,
         camera: camera.gpu_uniforms(),
         render_mode,
         background: preview_background(&egui::Visuals::dark()),
@@ -366,6 +369,47 @@ fn h2_shot() {
     }
 }
 
+/// Reach's shield passes, 61 and 119, translate with the preview's depth
+/// read and the oscillation maps in their vertex stage, and link.
+/// `BLAM_TEST_HREK` to the tags folder.
+#[test]
+fn reach_shield_passes_link() {
+    let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+        return;
+    };
+    let source = TagSource::LooseFolder {
+        root: root.into(),
+        game: Some(GameId::HaloReach),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let model = load_referenced_tag_from_source(&source, "objects\\characters\\spartans\\spartans", "model", b"hlmt").unwrap();
+    let shield = super::reach_shield::read_reach_shield(&source, &model).expect("the Spartan's shield");
+    let gl = headless_gl();
+    let passes: Vec<_> = shield.passes().collect();
+    assert_eq!(passes.len(), 2, "both explicit shaders");
+    for pass in passes {
+        assert!(pass.pixel.contains(super::reach_shield::DEPTH_DECODE), "the depth read is the preview's");
+        assert!(!pass.pixel.contains("depth_constants.z - "), "Reach's own depth read is gone");
+        assert!(!pass.vertex.contains("GlobalTexture_shield_impact_noise_texture"), "the vertex stage reads oscillation");
+        unsafe {
+            let program = gl.create_program().unwrap();
+            for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
+                let shader = gl.create_shader(kind).unwrap();
+                gl.shader_source(shader, text);
+                gl.compile_shader(shader);
+                assert!(gl.get_shader_compile_status(shader), "{}", gl.get_shader_info_log(shader));
+                gl.attach_shader(program, shader);
+            }
+            gl.link_program(program);
+            assert!(gl.get_program_link_status(program), "{}", gl.get_program_info_log(program));
+            for (name, _) in &pass.textures {
+                let location = gl.get_uniform_location(program, name);
+                eprintln!("NOTE shield TEXTURE {name} {}", location.is_some());
+            }
+        }
+    }
+}
+
 /// Reach's four `light_apply` passes translate and link. `BLAM_TEST_HREK`
 /// to the tags folder.
 #[test]
@@ -411,7 +455,6 @@ fn h3_pass_inputs() {
     let Ok(spec) = std::env::var("H3_PASS") else {
         return;
     };
-    let [family, template, entry]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
     let root = std::env::var("BLAM_TEST_H3EK").unwrap();
     let game = if root.contains("reach") { GameId::HaloReach } else { GameId::Halo3 };
     let source = TagSource::LooseFolder {
@@ -419,9 +462,15 @@ fn h3_pass_inputs() {
         game: Some(game),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
-    let definition = read_h3_definition(&source, &format!("shaders\\{family}")).unwrap();
-    let options: Vec<usize> = template.split('_').filter_map(|digit| digit.parse().ok()).collect();
-    let pass = H3Sources::new(&source).translate_entry(&definition, &options, entry, VERTEX_SKINNED).unwrap();
+    // `explicit|<file>` translates one of the explicit shaders.
+    let pass = if let Some(file) = spec.strip_prefix("explicit|") {
+        H3Sources::new(&source).explicit_pass(file).unwrap()
+    } else {
+        let [family, template, entry]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
+        let definition = read_h3_definition(&source, &format!("shaders\\{family}")).unwrap();
+        let options: Vec<usize> = template.split('_').filter_map(|digit| digit.parse().ok()).collect();
+        Arc::new(H3Sources::new(&source).translate_entry(&definition, &options, entry, VERTEX_SKINNED).unwrap())
+    };
     for (name, ty) in &pass.uniforms {
         eprintln!("NOTE UNIFORM {name} {ty:?}");
     }

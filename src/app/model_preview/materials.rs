@@ -177,6 +177,8 @@ pub(crate) struct MaterialTextures {
     /// Reach's `only render for shields`: `render_model_postprocess` (the
     /// 360's) makes its parts a shield's, which no ordinary pass draws.
     pub shield_only: bool,
+    /// Reach's `never render for shields`: an ordinary part the shield skips.
+    pub never_shield: bool,
     /// Why it draws bare unless its passes do.
     pub bare_without_passes: Option<String>,
 }
@@ -390,6 +392,7 @@ fn resolve_one_material(
     });
 
     let shield_only = render_method.flags.contains(blam_tags::render_method::GlobalRenderMethodFlags::OnlyRenderForShields);
+    let never_shield = render_method.flags.contains(blam_tags::render_method::GlobalRenderMethodFlags::NeverRenderForShields);
     let values = Values {
         resolved: resolved.as_ref(),
         method: &render_method,
@@ -398,6 +401,7 @@ fn resolve_one_material(
     let mut textures = MaterialTextures {
         used_shader_parameters_only: resolved.is_none(),
         shield_only,
+        never_shield,
         ..Default::default()
     };
     for (slot, parameter) in SLOT_PARAMETERS {

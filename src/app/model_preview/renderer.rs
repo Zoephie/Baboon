@@ -106,6 +106,7 @@ pub(super) fn draw_model_viewport(
     let camera = PreviewCamera::new(data, state, rect);
     let preview = Arc::clone(&data.preview);
     let mut visible_batches = visible_batch_indices(&preview, state);
+    let shield_batches = visible_batches.clone();
     without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
     let skinning_rows = animation_skinning_rows(data, state);
     let time = preview_clock(ui);
@@ -116,6 +117,7 @@ pub(super) fn draw_model_viewport(
         mesh_id: data.mesh_id,
         textures_id: data.textures_id,
         visible_batches,
+        shield_batches,
         camera: camera.gpu_uniforms(),
         render_mode: state.render_mode,
         background: preview_background(ui.visuals()),
@@ -882,6 +884,8 @@ struct ModelGpuFrame {
     /// What `textures` belongs to; see `ModelPreviewData::textures_id`.
     textures_id: u64,
     visible_batches: Vec<usize>,
+    /// `visible_batches` with the parts only a shield draws.
+    shield_batches: Vec<usize>,
     camera: ModelGpuCamera,
     render_mode: ModelRenderMode,
     show_backfaces: bool,
@@ -1003,7 +1007,8 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     // `sub_6C18F0` gates the shield overlay on this itself.
     let h3_shield = owned.iter().filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
     let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(H2Layer::ShieldDamaged));
-    let gate = (shield || h3_shield).then_some("current_shield_damage");
+    let reach_shield = object == 0 && data.preview.reach_shield.is_some();
+    let gate = (shield || h3_shield || reach_shield).then_some("current_shield_damage");
     let gate = gate.into_iter().chain(h3_shield.then_some(h3_draw::H3_OVERSHIELD));
     for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares).chain(gate) {
         if !names.iter().any(|known| known == name) {
@@ -1086,6 +1091,10 @@ pub(super) fn object_moves(
         || !data.preview.ce_particle_systems.is_empty()
         || !data.preview.ce_flags.is_empty()
         || !data.preview.h3_leaves.is_empty()
+        || data.preview.reach_shield.as_ref().is_some_and(|shield| {
+            let damage = h2_values.and_then(|values| values.get(h3_draw::H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
+            shield.settings.showing(damage)
+        })
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
@@ -3835,6 +3844,8 @@ struct ModelGlRenderer {
     reach_bloom: Option<reach_bloom::ReachBloom>,
     /// Reach's inline lights this frame, `simple_lights` rows.
     reach_inline: Vec<[[f32; 4]; 5]>,
+    /// Constants a Reach pass of the frame sets over the material's: the shield's and the camo's.
+    reach_pass_values: Option<std::collections::HashMap<&'static str, [f32; 4]>>,
     h3_empty_vertices: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -3973,6 +3984,7 @@ impl ModelGlRenderer {
                 h3_bloom: None,
                 reach_bloom: None,
                 reach_inline: Vec::new(),
+                reach_pass_values: None,
                 h3_empty_vertices: None,
                 h2_gel: None,
                 h2_bloom: None,

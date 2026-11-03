@@ -444,7 +444,7 @@ fn load_tag_preview(
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its flares and lights", preview, |preview| {
-                read_reach_object_features(source, model_tag, preview);
+                read_reach_object_features(source, model_tag, model, preview);
             });
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
@@ -770,7 +770,8 @@ fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::Ma
 
 /// What a Reach object brings so far: its flares and lights. Its light
 /// volumes and effects read differently, and wait on their own readers.
-fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, preview: &mut RenderModelPreview) {
+fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, model: &TagFile, preview: &mut RenderModelPreview) {
+    preview.reach_shield = super::reach_shield::read_reach_shield(source, model);
     preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, own_marker_frame);
     let (lights, cheap) = super::reach_lights::read_reach_lights(source, model_tag, 0, &preview.markers, own_marker_frame);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.

@@ -424,7 +424,11 @@ impl H3Sources {
 
     /// One of the engine's own `.hlsl` passes, on a skinned vertex.
     pub(crate) fn explicit_pass(&mut self, file: &str) -> Result<Arc<H3Pass>, String> {
-        let main = format!("#include \"{file}.hlsl\"\n");
+        // Reach keeps its explicit shaders in `shaders\explicit`.
+        let main = match self.dialect {
+            H3Dialect::Halo3 => format!("#include \"{file}.hlsl\"\n"),
+            H3Dialect::Reach => format!("#include \"explicit\\{file}.hlsl\"\n"),
+        };
         let vertex_defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Vertex);
         let pixel_defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Pixel);
         let vertex = self.compile(&vertex_defines, &main, "default_vs", Stage::Vertex)?;
