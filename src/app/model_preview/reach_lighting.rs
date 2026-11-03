@@ -27,9 +27,13 @@ const DEFAULT_LIGHT_COLOR: [f32; 3] = [4.659558, 3.947189, 3.600812];
 /// many stops down, and the final composite brings it back.
 const HDR_TARGET_STOPS: f32 = 3.0;
 
+/// What the stops bring light down by: `2^HDR_TARGET_STOPS`.
+pub(super) const REACH_HDR_DIVISOR: f32 = 8.0;
+
 /// `get_render_exposure` at the default `camera_fx_settings`' 0 stops and a
 /// white point of 1 (the 360's 0x8272B0F8; MCC's not located).
-const EXPOSURE: f32 = 1.0;
+pub(super) const REACH_EXPOSURE: f32 = 1.0;
+use REACH_EXPOSURE as EXPOSURE;
 
 /// What `setup_object_lighting_for_pass` (the 360's 0x826DD650) gives an
 /// object's static lighting pass.

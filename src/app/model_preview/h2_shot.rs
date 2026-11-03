@@ -125,6 +125,10 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 "volumes" => preview.h2_light_volumes.clear(),
                 "contrails" => preview.h2_contrails.clear(),
                 "prt" => preview.h3_prt = None,
+                "reach_lights" => {
+                    preview.reach_lights.clear();
+                    preview.reach_cheap_lights.clear();
+                }
                 other => panic!("H2_SHOT_DROP: no feature {other}"),
             }
         }
@@ -211,6 +215,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         h2_attached_colors: super::h2_attached_colors(&data),
         h3_flares_shown: super::h3_flares_shown(&data.preview, &state),
         h3_lights_shown: super::h3_lights_shown(&data.preview, &state),
+        reach_lights_shown: super::reach_lights_shown(&data.preview, &state),
         h3_volumes_shown: super::h3_volumes_shown(&data.preview, &state),
         h3_systems_shown: super::h3_systems_shown(&data.preview, &state),
         h3_strips_shown: super::h3_strips_shown(&data.preview, &state),
@@ -358,6 +363,43 @@ fn h2_shot() {
             pitch: f[5].parse().unwrap(),
         };
         render(&gl, &mut renderer, &source, &shot);
+    }
+}
+
+/// Reach's four `light_apply` passes translate and link. `BLAM_TEST_HREK`
+/// to the tags folder.
+#[test]
+fn reach_light_passes_link() {
+    let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+        return;
+    };
+    let source = TagSource::LooseFolder {
+        root: root.into(),
+        game: Some(GameId::HaloReach),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let gl = headless_gl();
+    let mut sources = super::h3_shaders::H3Sources::new(&source);
+    for file in ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"] {
+        let pass = sources.reach_light_pass(file).unwrap_or_else(|error| panic!("{file}: {error}"));
+        for (name, _) in &pass.uniforms {
+            eprintln!("NOTE {file} UNIFORM {name}");
+        }
+        for (name, _) in &pass.textures {
+            eprintln!("NOTE {file} TEXTURE {name}");
+        }
+        unsafe {
+            let program = gl.create_program().unwrap();
+            for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
+                let shader = gl.create_shader(kind).unwrap();
+                gl.shader_source(shader, text);
+                gl.compile_shader(shader);
+                assert!(gl.get_shader_compile_status(shader), "{file}: {}", gl.get_shader_info_log(shader));
+                gl.attach_shader(program, shader);
+            }
+            gl.link_program(program);
+            assert!(gl.get_program_link_status(program), "{file}: {}", gl.get_program_info_log(program));
+        }
     }
 }
 

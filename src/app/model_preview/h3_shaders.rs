@@ -432,6 +432,22 @@ impl H3Sources {
         Ok(Arc::new(pass_of(vertex, pixel)))
     }
 
+    /// One of Reach's `light_apply` explicit shaders (`lights\\<file>`): its
+    /// pixel stage only, over a triangle that covers the picture. The game
+    /// draws it over the light's volume behind a stencil; outside a light's
+    /// reach its falloff is 0, so the whole picture serves.
+    pub(crate) fn reach_light_pass(&mut self, file: &str) -> Result<Arc<H3Pass>, String> {
+        let main = format!("#include \"lights\\{file}.hlsl\"\n");
+        let defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Pixel);
+        let pixel = self.compile(&defines, &main, "default_ps", Stage::Pixel)?;
+        let vertex =
+            Translated { source: SCREEN_VERTEX.to_owned(), uniforms: Vec::new(), textures: Vec::new(), attributes: Vec::new() };
+        let mut pass = pass_of(vertex, pixel);
+        pass.vertex = SCREEN_VERTEX.to_owned();
+        pass.fullscreen = true;
+        Ok(Arc::new(pass))
+    }
+
     /// A `shader_screen`'s pixel shader, fed by a triangle over the picture
     /// rather than the world vertices its family's `default_vs` reads.
     pub(crate) fn screen_pass(&mut self, definition: &H3Definition, options: &[usize]) -> Result<Arc<H3Pass>, String> {

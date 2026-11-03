@@ -144,6 +144,7 @@ pub(super) fn draw_model_viewport(
         h2_attached_colors: h2_attached_colors(data),
         h3_flares_shown: h3_flares_shown(&data.preview, state),
         h3_lights_shown: h3_lights_shown(&data.preview, state),
+        reach_lights_shown: reach_lights_shown(&data.preview, state),
         h3_volumes_shown: h3_volumes_shown(&data.preview, state),
         h3_systems_shown: h3_systems_shown(&data.preview, state),
         h3_strips_shown: h3_strips_shown(&data.preview, state),
@@ -368,6 +369,14 @@ fn visible_instances(preview: &RenderModelPreview, state: &ModelPreviewState) ->
 fn h3_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
     preview.h3_flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+}
+
+/// The same of Reach's lights and then its cheap lights.
+pub(super) fn reach_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+    let shown = |only| marker_active(only, &state.region_selections);
+    let lights = preview.reach_lights.iter().map(|light| light.only_under().is_none_or(shown));
+    let cheap = preview.reach_cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
+    lights.chain(cheap).collect()
 }
 
 /// The same of Halo 3's lights.
@@ -900,6 +909,8 @@ struct ModelGpuFrame {
     h2_attached_colors: Vec<(u8, [[f32; 3]; 4])>,
     h3_flares_shown: Vec<bool>,
     h3_lights_shown: Vec<bool>,
+    /// Reach's lights and then its cheap lights, as `h3_lights_shown`.
+    reach_lights_shown: Vec<bool>,
     h3_volumes_shown: Vec<bool>,
     h3_systems_shown: Vec<bool>,
     h3_strips_shown: Vec<bool>,
@@ -959,6 +970,8 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let flares = data.preview.h2_flares.iter().filter(|at| at.object == object).map(|at| at.scale_name());
     let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == object);
     let h3_lights = data.preview.h3_lights.iter().filter(|light| light.object == object);
+    let reach_lights = data.preview.reach_lights.iter().filter(|light| light.object == object);
+    let reach_cheap = data.preview.reach_cheap_lights.iter().filter(|light| light.object == object);
     let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == object);
     let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == object);
     let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == object);
@@ -973,6 +986,8 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let flares = flares
         .chain(h3)
         .chain(h3_lights.flat_map(|light| light.inputs()))
+        .chain(reach_lights.flat_map(|light| light.inputs()))
+        .chain(reach_cheap.flat_map(|light| light.inputs()))
         .chain(h3_flares.map(|at| at.scale_name()))
         .chain(h3_volumes.flat_map(|at| at.scale_names()))
         .chain(h3_systems.flat_map(|at| at.scale_names()))
@@ -1053,6 +1068,8 @@ pub(super) fn object_moves(
         || data.preview.h2_point_lights.iter().any(|light| light.animates())
         || data.preview.h2_gel_lights.iter().any(|light| light.animates())
         || data.preview.h3_lights.iter().any(|light| light.animates())
+        || data.preview.reach_lights.iter().any(|light| light.animates())
+        || data.preview.reach_cheap_lights.iter().any(|light| light.animates())
         || data.preview.h3_flares.iter().any(|at| at.animates())
         || data.preview.h3_light_volumes.iter().any(|at| at.animates())
         || !data.preview.h3_particles.is_empty()
@@ -1096,6 +1113,8 @@ pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
         && preview.h2_contrails.is_empty()
         && preview.h2_liquids.is_empty()
         && preview.h3_lights.is_empty()
+        && preview.reach_lights.is_empty()
+        && preview.reach_cheap_lights.is_empty()
         && preview.h3_flares.is_empty()
         && preview.h3_light_volumes.is_empty()
         && preview.h3_particles.is_empty()
@@ -1414,6 +1433,8 @@ mod h3_draw;
 mod reach_lighting;
 #[path = "reach_bloom.rs"]
 mod reach_bloom;
+#[path = "reach_light_pass.rs"]
+mod reach_light_pass;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -3812,6 +3833,8 @@ struct ModelGlRenderer {
     h3_screen_alpha: Option<f32>,
     h3_bloom: Option<h3_bloom::H3Bloom>,
     reach_bloom: Option<reach_bloom::ReachBloom>,
+    /// Reach's inline lights this frame, `simple_lights` rows.
+    reach_inline: Vec<[[f32; 4]; 5]>,
     h3_empty_vertices: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -3949,6 +3972,7 @@ impl ModelGlRenderer {
                 h3_screen_alpha: None,
                 h3_bloom: None,
                 reach_bloom: None,
+                reach_inline: Vec::new(),
                 h3_empty_vertices: None,
                 h2_gel: None,
                 h2_bloom: None,

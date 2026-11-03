@@ -57,6 +57,7 @@ pub(crate) mod h3_shaders;
 mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
+mod reach_lights;
 mod renderer;
 mod variants;
 
@@ -138,6 +139,12 @@ pub(crate) struct RenderModelPreview {
     /// The model's own `shield impact parameter override`.
     pub h3_shield: Option<Arc<h3_shaders::H3ShieldSettings>>,
     pub h3_lights: Vec<h3_lights::H3Light>,
+    /// Reach's attached `light`s and `cheap_light`s.
+    pub reach_lights: Vec<reach_lights::ReachLight>,
+    pub reach_cheap_lights: Vec<reach_lights::ReachCheapLight>,
+    /// `light_apply`, `_frustum`, `_specular` and `_frustum_specular`, by
+    /// `combo` (frustum 1, specular 2), for its screen-space lights.
+    pub reach_light_passes: Vec<Option<Arc<h3_shaders::H3Pass>>>,
     pub h3_flares: Vec<h3_lights::H3FlareAt>,
     pub h3_light_volumes: Vec<h3_light_volumes::H3LightVolumeAt>,
     pub h3_particles: Vec<Arc<h3_particles::H3ParticleSystem>>,

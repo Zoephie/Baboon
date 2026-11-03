@@ -443,7 +443,7 @@ fn load_tag_preview(
             let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
-            feature_into(&mut notes, "its flares", preview, |preview| {
+            feature_into(&mut notes, "its flares and lights", preview, |preview| {
                 read_reach_object_features(source, model_tag, preview);
             });
         }
@@ -768,10 +768,19 @@ fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::Ma
     (place, marker.node_index.max(0) as usize)
 }
 
-/// What a Reach object brings so far: its flares. Its lights, light
+/// What a Reach object brings so far: its flares and lights. Its light
 /// volumes and effects read differently, and wait on their own readers.
 fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, preview: &mut RenderModelPreview) {
     preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, own_marker_frame);
+    let (lights, cheap) = super::reach_lights::read_reach_lights(source, model_tag, 0, &preview.markers, own_marker_frame);
+    // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
+    if !(lights.is_empty() && cheap.is_empty()) {
+        let mut sources = super::h3_shaders::H3Sources::new(source);
+        let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
+        preview.reach_light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
+    }
+    preview.reach_lights = lights;
+    preview.reach_cheap_lights = cheap;
 }
 
 /// A Halo 3 or ODST object's own shield, lights, flares, light volumes,

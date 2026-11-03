@@ -234,11 +234,11 @@ const HALF_LENS: f32 = 30.0 * std::f32::consts::PI / 180.0;
 
 /// The targets a frame draws through.
 pub(super) struct H3Targets {
-    size: [i32; 2],
+    pub(super) size: [i32; 2],
     albedo_framebuffer: glow::NativeFramebuffer,
     accumulation_framebuffer: glow::NativeFramebuffer,
-    albedo: glow::NativeTexture,
-    normal: glow::NativeTexture,
+    pub(super) albedo: glow::NativeTexture,
+    pub(super) normal: glow::NativeTexture,
     accumulation: glow::NativeTexture,
     /// A copy of the scene behind the object, for active camo.
     behind: glow::NativeTexture,
@@ -248,8 +248,8 @@ pub(super) struct H3Targets {
     /// `behind`, to blit into.
     behind_framebuffer: glow::NativeFramebuffer,
     /// A copy of the depth, for what fades against it.
-    depth_copy: glow::NativeTexture,
-    depth_copy_framebuffer: glow::NativeFramebuffer,
+    pub(super) depth_copy: glow::NativeTexture,
+    pub(super) depth_copy_framebuffer: glow::NativeFramebuffer,
     /// `apply_distortions`' two: how far each pixel leans, and what it reads.
     distortion: glow::NativeTexture,
     distortion_framebuffer: glow::NativeFramebuffer,
@@ -452,12 +452,12 @@ impl H3Targets {
 pub(super) struct H3Program {
     /// Held so its address, the program's key, stays its own.
     _pass: Arc<H3Pass>,
-    program: glow::NativeProgram,
+    pub(super) program: glow::NativeProgram,
     locations: HashMap<String, Option<glow::NativeUniformLocation>>,
 }
 
 impl H3Program {
-    unsafe fn location(&mut self, gl: &glow::Context, name: &str) -> Option<glow::NativeUniformLocation> {
+    pub(super) unsafe fn location(&mut self, gl: &glow::Context, name: &str) -> Option<glow::NativeUniformLocation> {
         if let Some(found) = self.locations.get(name) {
             return found.clone();
         }
@@ -480,7 +480,7 @@ pub(super) struct H3SlotTextures {
 
 /// `clip_position` as the matrix `mul(position, View_Projection)` wants: GLSL's
 /// columns are HLSL's rows here, so this is a plain column matrix.
-fn view_projection(camera: &ModelGpuCamera) -> [f32; 16] {
+pub(super) fn view_projection(camera: &ModelGpuCamera) -> [f32; 16] {
     let scale = camera.scale;
     let clip = |vector: [f32; 3], offset: [f32; 3]| {
         let view = rotate_view_vector(camera.yaw, camera.pitch, vector);
@@ -697,6 +697,11 @@ fn view_matrix(frame: &ModelGpuFrame) -> [f32; 16] {
     matrix
 }
 
+/// A translated uniform's value, by its type.
+pub(super) unsafe fn set_uniform_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
+    unsafe { set_value(gl, location, ty, value) }
+}
+
 unsafe fn set_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
     unsafe {
         match (ty, value) {
@@ -733,7 +738,7 @@ impl ModelGlRenderer {
             && frame.textures.iter().any(|textures| textures.iter().any(|texture| texture.h3.is_some()))
     }
 
-    unsafe fn h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<H3Program> {
+    pub(super) unsafe fn h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<H3Program> {
         let key = Arc::as_ptr(pass) as usize;
         match self.h3_programs.remove(&key) {
             Some(Ok(program)) => return Some(program),
@@ -897,6 +902,8 @@ impl ModelGlRenderer {
                     "simple_lights" => {
                         if let Some((lit, _)) = &self.h3_light {
                             gl.uniform_4_f32_slice(location.as_ref(), lit.rows.as_flattened());
+                        } else if material.dialect == H3Dialect::Reach && !self.reach_inline.is_empty() {
+                            gl.uniform_4_f32_slice(location.as_ref(), self.reach_inline.as_flattened().as_flattened());
                         }
                         continue;
                     }
@@ -918,7 +925,9 @@ impl ModelGlRenderer {
                     let [r, g, b] = frame.change_colors_of(batch.material_index as usize)[*channel];
                     H3Value::Floats([r, g, b, 1.0])
                 });
+                let reach_light = (material.dialect == H3Dialect::Reach).then(|| self.reach_simple_light(name)).flatten();
                 let mut value = change_color
+                    .or(reach_light)
                     .or_else(|| frame_value(frame, material.dialect, name, size))
                     .or_else(|| material.values.get(name).cloned());
                 let object = batch.material_index as usize;
@@ -1150,6 +1159,9 @@ impl ModelGlRenderer {
             gl.color_mask(true, true, true, true);
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
+            // `build_simple_light_draw_list`, before the static pass reads it.
+            let reach_lit = if reach { self.reach_frame_lights(frame, slot) } else { Vec::new() };
+            self.set_reach_inline_lights(&reach_lit);
             let (opaque, blended): (Vec<_>, Vec<_>) =
                 batches
                     .iter()
@@ -1190,6 +1202,15 @@ impl ModelGlRenderer {
                     }
                 }
                 self.h3_light = None;
+            }
+            // `c_lights_view::render`: after the static lighting, before what blends.
+            if reach {
+                self.draw_reach_screen_lights(gl, frame, &reach_lit, accumulation_target);
+                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                h3_set_cull(gl, frame);
+                gl.depth_func(glow::LEQUAL);
+                gl.depth_mask(false);
+                gl.blend_func(glow::ONE, glow::ONE);
             }
             // `c_transparency_renderer`: what blends, far to near, sprites among
             // the materials.
@@ -1672,7 +1693,7 @@ impl ModelGlRenderer {
         }
     }
 
-    unsafe fn h3_empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
+    pub(super) unsafe fn h3_empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
         unsafe {
             *self.h3_empty_vertices.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
         }
