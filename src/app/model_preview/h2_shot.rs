@@ -159,6 +159,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let camera = PreviewCamera::new(&data, &state, rect);
     let preview = Arc::clone(&data.preview);
     let mut visible_batches = visible_batch_indices(&preview, &state);
+    without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
     // `H2_SHOT_HIDE=a,b` leaves out the materials whose shaders end in these.
     if let Ok(hidden) = std::env::var("H2_SHOT_HIDE") {
         visible_batches.retain(|&batch| {

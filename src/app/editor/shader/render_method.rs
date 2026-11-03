@@ -10,6 +10,8 @@ pub(in crate::app) fn render_method_flags_mask(render_method: &RenderMethod) -> 
             GlobalRenderMethodFlags::DontFogMe => 0,
             GlobalRenderMethodFlags::UseCustomSetting => 1,
             GlobalRenderMethodFlags::CalculateZCamera => 2,
+            GlobalRenderMethodFlags::NeverRenderForShields => 3,
+            GlobalRenderMethodFlags::OnlyRenderForShields => 4,
         };
         mask |= 1u64 << bit;
     }

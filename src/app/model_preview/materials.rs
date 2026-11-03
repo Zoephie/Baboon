@@ -174,6 +174,9 @@ pub(crate) struct MaterialTextures {
     pub h2_layers: [Vec<H2DrawPass>; H2_LAYER_COUNT],
     /// Halo 3's own shader, translated from the kit's source.
     pub h3: Option<Arc<H3Material>>,
+    /// Reach's `only render for shields`: `render_model_postprocess` (the
+    /// 360's) makes its parts a shield's, which no ordinary pass draws.
+    pub shield_only: bool,
     /// Why it draws bare unless its passes do.
     pub bare_without_passes: Option<String>,
 }
@@ -386,6 +389,7 @@ fn resolve_one_material(
         })
     });
 
+    let shield_only = render_method.flags.contains(blam_tags::render_method::GlobalRenderMethodFlags::OnlyRenderForShields);
     let values = Values {
         resolved: resolved.as_ref(),
         method: &render_method,
@@ -393,6 +397,7 @@ fn resolve_one_material(
     };
     let mut textures = MaterialTextures {
         used_shader_parameters_only: resolved.is_none(),
+        shield_only,
         ..Default::default()
     };
     for (slot, parameter) in SLOT_PARAMETERS {

@@ -105,7 +105,8 @@ pub(super) fn draw_model_viewport(
 
     let camera = PreviewCamera::new(data, state, rect);
     let preview = Arc::clone(&data.preview);
-    let visible_batches = visible_batch_indices(&preview, state);
+    let mut visible_batches = visible_batch_indices(&preview, state);
+    without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
     let skinning_rows = animation_skinning_rows(data, state);
     let time = preview_clock(ui);
     let h2_values = h2_function_values_for(data, &state.h2_function_inputs, time);
@@ -291,6 +292,17 @@ pub(super) fn draw_model_viewport(
 /// permutations `monitor`/`lightning-100` while the collision model's only
 /// one is `__base` — the selected name matches no overlay batch, and the
 /// overlay draws its region's first permutation instead of vanishing.
+/// Leave out what only a shield draws, once the materials are known.
+pub(super) fn without_shield_parts(visible: &mut Vec<usize>, preview: &RenderModelPreview, textures: Option<&[MaterialTextures]>) {
+    let Some(textures) = textures else {
+        return;
+    };
+    visible.retain(|&batch| {
+        let material = preview.batches.get(batch).map_or(0, |batch| batch.material_index as usize);
+        !textures.get(material).is_some_and(|texture| texture.shield_only)
+    });
+}
+
 pub(super) fn visible_batch_indices(
     preview: &RenderModelPreview,
     state: &ModelPreviewState,
@@ -5683,6 +5695,18 @@ fn slice_bytes<T>(slice: &[T]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shields_parts_leave_the_ordinary_passes_once_materials_are_known() {
+        let batch = |material_index| RenderModelPreviewBatch { material_index, ..Default::default() };
+        let preview = RenderModelPreview { batches: vec![batch(0), batch(1), batch(0)], ..Default::default() };
+        let textures = [MaterialTextures::default(), MaterialTextures { shield_only: true, ..Default::default() }];
+        let mut visible = vec![0, 1, 2];
+        without_shield_parts(&mut visible, &preview, None);
+        assert_eq!(visible, [0, 1, 2], "nothing is known yet");
+        without_shield_parts(&mut visible, &preview, Some(&textures));
+        assert_eq!(visible, [0, 2]);
+    }
 
     #[test]
     fn a_permutation_of_mesh_none_draws_nothing_whatever_its_count() {
