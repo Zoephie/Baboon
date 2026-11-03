@@ -124,6 +124,15 @@ pub(in crate::app) struct EditingKitRecents {
     pub(in crate::app) tags: Vec<PathBuf>,
 }
 
+/// Expanded sidebar categories, saved independently for each editing kit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub(in crate::app) struct BrowserSectionState {
+    pub(in crate::app) favorites: bool,
+    pub(in crate::app) shortcuts: bool,
+    pub(in crate::app) recents: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::app) struct EditingKitShortcut {
     pub(in crate::app) label: &'static str,
@@ -520,6 +529,7 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) recent_folders: Vec<PathBuf>,
     pub(in crate::app) editing_kit_favorites: Vec<EditingKitFavorites>,
     pub(in crate::app) editing_kit_recents: Vec<EditingKitRecents>,
+    pub(in crate::app) browser_section_states: HashMap<String, BrowserSectionState>,
     pub(in crate::app) recents_handled_session: Option<String>,
     pub(in crate::app) custom_color_swatches: Vec<Option<ColorPaletteSwatch>>,
     pub(in crate::app) palette_last_dir: Option<PathBuf>,
@@ -598,6 +608,7 @@ impl Default for GuiPrefs {
             recent_folders: Vec::new(),
             editing_kit_favorites: Vec::new(),
             editing_kit_recents: Vec::new(),
+            browser_section_states: HashMap::new(),
             recents_handled_session: None,
             custom_color_swatches: default_color_swatches(),
             palette_last_dir: None,

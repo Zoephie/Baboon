@@ -875,10 +875,13 @@ fn draw_kit_browser_inner(
             folder: request.folder,
         });
         let sort = view.browser.sort;
+        let section_key = crate::app::shell::shortcuts::shortcut_kit_key(cx.model, kit_index);
+        let saved_sections = cx.model.prefs.browser_section_states.get(&section_key).copied().unwrap_or_default();
+        let mut sections = saved_sections;
         let action = ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let (favorite_action, favorites_visible) = draw_favorites(
+            .show(ui, |ui| with_browser_section_state(ui, &mut sections, |ui| {
+                let (favorite_action, _) = draw_favorites(
                     ui,
                     &active_favorite_entries,
                     // Favorites follow the visible folder browser's lazy
@@ -898,9 +901,6 @@ fn draw_kit_browser_inner(
                     &search_keywords,
                     game,
                 );
-                if favorites_visible {
-                    ui.add_space(8.0);
-                }
                 let (_, add_shortcut) = show_browser_navigation_section_with_add(
                     ui,
                     "browser_shortcuts",
@@ -1102,8 +1102,11 @@ fn draw_kit_browser_inner(
                     }
                 };
                 favorite_action.or(recent_action).or(tree_action)
-            })
+            }))
             .inner;
+        if sections != saved_sections {
+            cx.edit_prefs(move |prefs| { prefs.browser_section_states.insert(section_key, sections); });
+        }
         if !load_requests.is_empty() {
             cx.send(BrowserCommand::LoadFolders {
                 kit: kit_id,
@@ -1637,6 +1640,58 @@ mod tests {
         assert!(added);
         assert!(visible);
         assert!(frame(Vec::new()).1);
+    }
+
+    #[test]
+    fn browser_categories_restore_saved_choices_in_a_fresh_ui() {
+        use crate::app::prefs::BrowserSectionState;
+        fn frame(ctx: &egui::Context, state: &mut BrowserSectionState, events: Vec<egui::Event>)
+            -> ([egui::Rect; 3], [bool; 3])
+        {
+            let mut headers = [egui::Rect::NOTHING; 3];
+            let mut visible = [false; 3];
+            let _ = crate::app::run_ui_test(ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+                with_browser_section_state(ui, state, |ui| {
+                    for (index, (id, title)) in [
+                        ("browser_favorites", "Favorites"),
+                        ("browser_shortcuts", "Shortcuts"),
+                        ("browser_recents", "Recents"),
+                    ].into_iter().enumerate() {
+                        headers[index] = show_browser_navigation_section(ui, id, title,
+                            ButtonIcon::Pin, text_dark(), |ui| {
+                                visible[index] = true;
+                                ui.label("Entry");
+                            }).rect;
+                    }
+                });
+            });
+            (headers, visible)
+        }
+        let context = || {
+            let ctx = egui::Context::default();
+            ctx.global_style_mut(|style| style.animation_time = 0.0);
+            ctx
+        };
+        let ctx = context();
+        let mut saved = BrowserSectionState::default();
+        assert_eq!(frame(&ctx, &mut saved, vec![]).1, [false; 3]);
+        for index in [0, 2] {
+            let pos = frame(&ctx, &mut saved, vec![]).0[index].center();
+            frame(&ctx, &mut saved, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(&ctx, &mut saved, vec![egui::Event::PointerButton {
+                    pos, pressed, button: egui::PointerButton::Primary, modifiers: Default::default(),
+                }]);
+            }
+        }
+        assert_eq!(saved, BrowserSectionState { favorites: true, shortcuts: false, recents: true });
+        let fresh = context();
+        frame(&fresh, &mut saved, vec![]);
+        assert_eq!(frame(&fresh, &mut saved, vec![]).1, [true, false, true]);
+        let mut other_kit = BrowserSectionState::default();
+        frame(&fresh, &mut other_kit, vec![]);
+        assert_eq!(frame(&fresh, &mut other_kit, vec![]).1, [false; 3]);
+        assert_eq!(frame(&fresh, &mut saved, vec![]).1, [true, false, true]);
     }
 
     #[test]

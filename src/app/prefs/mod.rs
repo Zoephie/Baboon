@@ -275,6 +275,7 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             EditingKitRecents { tags_root: kit.tags_root, tags: kit.tags.into_iter().take(5).collect() }
         }).filter(|kit| !kit.tags.is_empty()).collect(),
         recents_handled_session: value.get("recents_handled_session").and_then(Value::as_str).map(str::to_owned),
+        browser_section_states: value.get("browser_section_states").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default(),
         custom_color_swatches: load_custom_color_swatches(&value),
         palette_last_dir: value
             .get("palette_last_dir")
@@ -837,6 +838,7 @@ fn prefs_to_value(
     value["kit_shortcut_layouts"] = json!(prefs.kit_shortcut_layouts);
     value["shortcut_order"] = json!(prefs.shortcut_order);
     value["shortcut_overrides"] = json!(prefs.shortcut_overrides);
+    value["browser_section_states"] = json!(prefs.browser_section_states);
     value["hidden_shortcuts"] = json!(prefs.hidden_shortcuts);
     value["blender_shortcut_migrated"] = json!(prefs.blender_shortcut_migrated);
     value["follow_system_theme"] = Value::Bool(prefs.follow_system_theme);
@@ -1206,6 +1208,26 @@ mod tests {
             vec![PathBuf::from("objects/brute.model")]
         );
         assert!(favorites[1].folders.is_empty());
+    }
+
+    #[test]
+    fn browser_categories_round_trip_per_kit_and_default_to_collapsed() {
+        let prefs = prefs_from_value(&json!({ "browser_section_states": {
+            "profile:first": { "favorites": true, "recents": true },
+            "profile:second": { "shortcuts": true }
+        }}));
+        assert_eq!(prefs.browser_section_states["profile:first"], BrowserSectionState {
+            favorites: true, shortcuts: false, recents: true,
+        });
+        assert_eq!(prefs.browser_section_states["profile:second"], BrowserSectionState {
+            favorites: false, shortcuts: true, recents: false,
+        });
+        let restored = prefs_from_value(&prefs_to_value(&prefs, &HashSet::new(), true));
+        assert_eq!(restored.browser_section_states, prefs.browser_section_states);
+        assert!(prefs_from_value(&json!({})).browser_section_states.is_empty());
+        assert_eq!(BrowserSectionState::default(), BrowserSectionState {
+            favorites: false, shortcuts: false, recents: false,
+        });
     }
 
     #[test]

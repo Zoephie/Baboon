@@ -3222,6 +3222,29 @@ fn show_favorites_section<R>(ui: &mut Ui, add_body: impl FnOnce(&mut Ui) -> R) -
         ButtonIcon::FavouriteFilled, Color32::from_rgb(242, 196, 48), add_body)
 }
 
+/// Bind the sidebar's collapsing headers to explicit preferences instead of
+/// egui's transient widget memory, retaining normal collapse animations.
+pub(super) fn with_browser_section_state<R>(
+    ui: &mut Ui,
+    state: &mut crate::app::prefs::BrowserSectionState,
+    draw: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let sections = ["browser_favorites", "browser_shortcuts", "browser_recents"];
+    for (section, open) in sections.iter().zip([state.favorites, state.shortcuts, state.recents]) {
+        let mut header = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(), ui.make_persistent_id(section), false);
+        header.set_open(open);
+        header.store(ui.ctx());
+    }
+    let result = draw(ui);
+    let open = sections.map(|section| {
+        egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(), ui.make_persistent_id(section), false).is_open()
+    });
+    [state.favorites, state.shortcuts, state.recents] = open;
+    result
+}
+
 pub(in crate::app) fn show_browser_navigation_section<R>(
     ui: &mut Ui,
     id_source: impl std::hash::Hash + std::fmt::Debug,

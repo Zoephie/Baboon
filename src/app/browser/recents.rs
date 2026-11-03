@@ -73,7 +73,6 @@ pub(super) fn draw_recents(
     let entries: Vec<_> = entries.iter().filter(|entry| scoped_entry_matches(entry, filter, search_scope,
         keywords.get(&entry.key).map(Vec::as_slice).unwrap_or_default())).collect();
     if entries.is_empty() { return None; }
-    ui.add_space(8.0);
     let mut action = None;
     show_browser_navigation_section(ui, "browser_recents", "Recents", ButtonIcon::Recent, text_dark(), |ui| {
         for entry in entries {
