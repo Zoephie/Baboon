@@ -1,5 +1,10 @@
 //! Halo 3's baked occlusion: each mesh's `PRT vertex type` picks an entry point
 //! and `per_mesh_prt_data` holds its coefficients, a vertex at a time.
+//!
+//! Reach keeps only the ambient term. Its tool (`sub_140B14EB0`) derives each
+//! mesh's `lighting policy` from that type: ambient lights by
+//! `static_prt_ambient`, linear and quadratic are "no longer supported" and
+//! light by `static_sh`. The client (`sub_1404019F0`) clamps the gray to 0..1.
 
 use blam_tags::TagFile;
 
@@ -83,9 +88,12 @@ pub(in crate::app) fn read_h3_prt(
     if tag_meshes.len() != meshes.len() || data.len() != meshes.len() {
         return None;
     }
+    // The tags on disk leave the policy at 0; only its field marks the rules.
+    let reach = tag_meshes.first().is_some_and(|mesh| mesh.field("lighting policy").is_some());
     let mut per_mesh = Vec::with_capacity(meshes.len());
     for ((mesh, tag_mesh), element) in meshes.iter().zip(&tag_meshes).zip(&data) {
         let kind = H3PrtKind::from_tag(tag_mesh.read_int_any("PRT vertex type").unwrap_or(0));
+        let kind = if reach && kind != H3PrtKind::Ambient { H3PrtKind::None } else { kind };
         let bytes = element.field("mesh pca data").and_then(|field| field.as_data()).unwrap_or(&[]);
         let mut prt = H3Prt::default();
         prt.pad(mesh.vertices.len());
@@ -103,6 +111,9 @@ pub(in crate::app) fn read_h3_prt(
                     let sum: f32 =
                         (0..CHANNELS).map(|channel| word((channel * count + coefficient) * 4)).sum();
                     *value = sum / CHANNELS as f32;
+                    if reach {
+                        *value = value.clamp(0.0, 1.0);
+                    }
                 }
             }
             // The transfer lies in the same frame as the mesh's own normals,

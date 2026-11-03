@@ -3216,6 +3216,27 @@ mod tests {
     /// silently yields `""` (every object would become `_1`, `_2`, …) or
     /// keeps the `.particle_model` extension.
     #[test]
+    fn reach_lights_quadratic_meshes_by_sh_and_clamps_its_ambient_transfer() {
+        let Some(tags) = kit_tags("haloreach") else {
+            return;
+        };
+        let read = |path: &str| {
+            let tag = TagFile::read(tags.join(path)).unwrap();
+            let model = RenderModel::from_tag(&tag).unwrap();
+            let meshes = RenderModel::derive_render_meshes(&tag).unwrap();
+            super::super::h3_prt::read_h3_prt(&tag, &model, &meshes).unwrap()
+        };
+        // Its meshes bake quadratic transfer, which Reach's tool no longer lights by.
+        let quadratic = read("objects/test/test_fbx_characters/test_fbx_civilian_female_custom_animation/test_fbx_civilian_female_custom_animation.render_model");
+        assert!((0..quadratic.vertices.len() as u32).all(|vertex| quadratic.kind_at(vertex) == super::super::h3_prt::H3PrtKind::None));
+        let ambient = read("objects/characters/spartans/spartans.render_model");
+        assert!((0..ambient.vertices.len() as u32).any(|vertex| ambient.kind_at(vertex) == super::super::h3_prt::H3PrtKind::Ambient));
+        // The client's clamp to 0..1 is kept, but no object in the kit has an
+        // ambient value outside it (all 1,549 render models scanned), so
+        // nothing here can show it.
+    }
+
+    #[test]
     fn load_model_preview_derives_object_names_from_the_entry() {
         let Some(tags) = kit_tags("haloreach") else {
             return;
