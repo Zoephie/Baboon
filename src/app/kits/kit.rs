@@ -305,7 +305,9 @@ impl Baboon {
     /// so "open another game" is add-then-load rather than a separate path.
     pub(in crate::app) fn add_kit(&mut self) -> KitId {
         let id = self.push_empty_kit();
-        self.model.active = self.model.kits.len() - 1;
+        // Insert while the previous kit still identifies the target split.
+        self.sync_kit_tree();
+        self.focus_kit(self.model.kits.len() - 1);
         id
     }
 

@@ -66,6 +66,14 @@ pub(super) fn findable_galley(
     ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
+pub(super) fn findable_wrapped_galley(
+    ui: &Ui, text: &str, font_id: FontId, color: Color32, kind: FindTargetKind,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = findable_layout_job(ui, text, font_id, color, kind);
+    job.wrap.max_width = ui.available_width().max(1.0);
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
 /// Return whether the current Foundation cell has a rendered match of `kind`.
 pub(in crate::app) fn findable_text_has_match(ui: &Ui, text: &str, kind: FindTargetKind) -> bool {
     findable_highlight_data(ui, text, kind).is_some()
@@ -185,13 +193,28 @@ fn findable_layout_job(
 }
 
 pub(in crate::app) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Option<&str>) {
-    let width = FOUNDATION_LABEL_WIDTH.min(ui.available_width().max(1.0));
+    foundation_label_cell_inner(ui, text, help, false, 0.0);
+}
+
+pub(super) fn foundation_stacked_label_cell(ui: &mut Ui, text: &str, help: Option<&str>) {
+    foundation_label_cell_inner(ui, text, help, true, 0.0);
+}
+
+pub(super) fn foundation_label_cell_with_trailing_space(ui: &mut Ui, text: &str, help: Option<&str>, reserve: f32) {
+    foundation_label_cell_inner(ui, text, help, false, reserve);
+}
+
+fn foundation_label_cell_inner(ui: &mut Ui, text: &str, help: Option<&str>, stacked: bool, reserve: f32) {
+    let width = if stacked { ui.available_width().max(1.0) }
+        else { FOUNDATION_LABEL_WIDTH.min(ui.available_width().max(1.0)) };
     let height = 24.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     // Reserve a gutter for the "?" documentation cue. Foundation always reserves
     // the space (the cue is Hidden, not Collapsed, when absent) so field names
     // stay aligned whether or not a field has a doc string.
-    let gutter = 11.0;
+    let gutter = FOUNDATION_LABEL_INSET;
+    let shown = truncate_for_cell(text, width - gutter - 4.0 - reserve);
+    let truncated = shown != text;
     if help.is_some() {
         // The cue: a bold blue "?" left of the name (Foundation uses #3DA1CC).
         ui.painter().text(
@@ -202,8 +225,6 @@ pub(in crate::app) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Optio
             Color32::from_rgb(61, 161, 204),
         );
     }
-    let shown = truncate_for_cell(text, width - gutter - 4.0);
-    let truncated = shown != text;
     paint_findable_text(
         ui,
         rect.left_center() + Vec2::new(gutter, 0.0),
@@ -399,10 +420,9 @@ fn tag_reference_value_width(available: f32) -> f32 {
     available.min(520.0).max(300.0)
 }
 
-pub(in crate::app) fn shared_tag_reference_value_width(ui: &Ui, depth: usize) -> f32 {
-    let indent = depth as f32 * 12.0;
+pub(in crate::app) fn shared_tag_reference_value_width(ui: &Ui, _depth: usize) -> f32 {
     let available =
-        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - 260.0).clamp(220.0, 760.0);
+        (ui.available_width() - FOUNDATION_LABEL_WIDTH - 260.0).clamp(220.0, 760.0);
     tag_reference_value_width(available)
 }
 
@@ -491,15 +511,12 @@ pub(in crate::app) fn text_edit_cursor_to_start_on_tab_focus(ui: &Ui, response: 
     }
 }
 
-pub(in crate::app) fn foundation_value_width(value: &str, available: f32) -> f32 {
-    if available < 300.0 { return available.max(1.0); }
-    if value.len() > 48 {
-        available
-    } else if value.len() > 18 {
-        available.min(520.0).max(300.0)
-    } else {
-        available.min(180.0).max(140.0)
-    }
+pub(in crate::app) fn foundation_value_width(ui: &Ui, value: &str, available: f32) -> f32 {
+    // Match the input's font and padding. Character-count bands caused short
+    // identifiers to jump to a wider box despite fitting the normal width.
+    let font = ui.style().text_styles[&TextStyle::Monospace].clone();
+    let text_width = ui.painter().layout_no_wrap(value.to_owned(), font, text_dark()).size().x;
+    (text_width + 2.0 * VALUE_PADDING + 2.0).max(180.0).min(available.max(1.0))
 }
 
 pub(in crate::app) fn flag_value_parts(value: &TagFieldData) -> Option<(u64, Vec<(u32, String)>)> {

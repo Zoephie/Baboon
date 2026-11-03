@@ -256,7 +256,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     let stacked = stacked_field_row(ui);
     let row_response = foundation_field_row(ui, meta, depth, |ui| {
             let value_width = if stacked {
-                (ui.available_width() - 120.0).max(ui.available_width() * 0.55).max(1.0)
+                (ui.available_size_before_wrap().x - 4.0 * (ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x)
+                    - foundation_caption_space(ui, suffix) - 2.0).max(1.0)
             } else { value_width };
             let editable = droppable;
             let has_ref = target.is_some();
@@ -774,7 +775,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
     flag_names: &[(u32, String)],
     field: TagField<'_>,
 
-    depth: usize,
+    _depth: usize,
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
@@ -805,11 +806,10 @@ pub(in crate::app) fn draw_foundation_flags_row(
         .collect::<Vec<_>>();
 
     let stacked = stacked_field_row(ui);
-    let indent = (depth as f32 * 12.0).min(if stacked { 24.0 } else { f32::INFINITY });
     let row_width = ui.available_width();
-    let label_height = if stacked { 28.0 } else { 0.0 };
-    let panel_width = if stacked { (row_width - indent).max(1.0) }
-        else { (row_width - indent - FOUNDATION_LABEL_WIDTH - 40.0).clamp(360.0, 760.0) };
+    let label_height = if stacked { 26.0 } else { 0.0 };
+    let panel_width = if stacked { (row_width - FOUNDATION_LABEL_INSET).max(1.0) }
+        else { (row_width - FOUNDATION_LABEL_WIDTH - 40.0).clamp(360.0, 760.0) };
     let flag_row_height = 21.0;
     let panel_height = if display_flags.is_empty() {
         32.0
@@ -826,16 +826,20 @@ pub(in crate::app) fn draw_foundation_flags_row(
     let mut label_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(egui::Rect::from_min_size(
-                rect.left_top() + Vec2::new(indent, 4.0),
+                rect.left_top() + Vec2::new(0.0, 4.0),
                 Vec2::new(FOUNDATION_LABEL_WIDTH, 24.0),
             ))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    foundation_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
+    if stacked {
+        foundation_stacked_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
+    } else {
+        foundation_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
+    }
 
     let flags_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(if stacked { indent }
-            else { indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x }, label_height),
+        rect.left_top() + Vec2::new(if stacked { FOUNDATION_LABEL_INSET }
+            else { FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x }, label_height),
         Vec2::new(panel_width, panel_height),
     );
     painter.rect_filled(flags_rect, 0.0, foundation_input());
@@ -1136,7 +1140,6 @@ mod tests {
         let mut value_left = 0.0;
         let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             ui.horizontal(|ui| {
-                ui.add_space(12.0);
                 foundation_label_cell(ui, "otherrow", None);
                 value_left = ui.allocate_exact_size(Vec2::new(100.0, 24.0), Sense::hover()).0.left();
             });

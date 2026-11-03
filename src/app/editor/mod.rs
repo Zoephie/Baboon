@@ -308,13 +308,14 @@ fn draw_tag_fields_scroll(
         return;
     }
 
-    ScrollArea::both()
+    // Generic fields reflow to the pane's width. A minimum-width, horizontally
+    // scrolling canvas prevents their narrow layouts from ever being reached.
+    ScrollArea::vertical()
         .id_salt(("tag_scroll", edit.view_scope, edit.tag_key))
         .max_height(scroll_height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             scroll_during_drag(ui);
-            ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
             if is_object_family {
                 draw_inherited_object_fields(ui, tag.root(), names, expert_mode, edit);
             } else {
@@ -324,6 +325,55 @@ fn draw_tag_fields_scroll(
 }
 
 const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;
+
+#[cfg(test)]
+mod responsive_page_tests {
+    use super::*;
+
+    #[test]
+    fn regression_breakpoints_reach_the_scrolling_tag_fields_page() {
+        let tag = TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let entry = TagEntry {
+            key: "responsive.damage_effect".to_owned(),
+            display_path: "responsive.damage_effect".to_owned(),
+            group_tag: u32::from_be_bytes(*b"jpt!"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from("responsive.damage_effect")),
+        };
+        for width in [360.0, 600.0, 1200.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut positions = Vec::new();
+            for _ in 0..4 {
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 800.0))),
+                    ..Default::default()
+                }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        fields::with_test_edit_context(|edit| {
+                            draw_tag_fields_scroll(ui, &tag, (0, 0, 0, 0), &entry,
+                                &TagNameIndex::default(), None, &mut HashMap::new(), &mut HashMap::new(),
+                                &mut H2TemplateCache::default(), &mut None, &mut None, false, edit, false, false);
+                        });
+                    });
+                });
+                positions = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                    _ => None,
+                }).collect();
+            }
+            let label = positions.iter().find(|(text, _)| text == "radius").unwrap().1;
+            let controls = positions.iter().find(|(text, _)| text == "to")
+                .expect("the bounds inputs must be visible within the field page").1;
+            if width < 760.0 {
+                assert!(controls.top() > label.bottom(),
+                    "the real {width}px field page must put inputs below labels: label={label:?}, controls={controls:?}");
+            } else {
+                assert!((controls.center().y - label.center().y).abs() < 3.0);
+            }
+        }
+    }
+}
 
 pub(in crate::app) mod fields;
 pub(in crate::app) use fields::*;

@@ -71,6 +71,7 @@ struct KitPaneBehavior<'a, 'c, 'p> {
     add_kit: Option<LoadKind>,
     recent_action: Option<RecentAction>,
     tab_groups: HashMap<egui_tiles::TileId, egui_tiles::TileId>,
+    primary_group: Option<egui_tiles::TileId>,
 }
 
 impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
@@ -85,8 +86,14 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         });
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(4.0);
-        if draw_home_tab(ui, tile_id, empty || self.parts.shell.home_groups.contains(&tile_id)).clicked() {
-            self.cx.send(AppAction::ShowHome { group: tile_id });
+        // Tile traversal visits the top/left child first, including nested
+        // splits, so the first tab bar is the primary workspace's bar.
+        if *self.primary_group.get_or_insert(tile_id) == tile_id {
+            if draw_home_tab(ui, tile_id, empty || self.parts.shell.home_groups.contains(&tile_id)).clicked() {
+                self.cx.send(AppAction::ShowHome { group: tile_id });
+            }
+        } else {
+            self.parts.shell.home_groups.remove(&tile_id);
         }
     }
     fn pane_ui(
@@ -443,12 +450,19 @@ pub(in crate::app) fn draw_kit_tiles(
         add_kit: None,
         recent_action: None,
         tab_groups: HashMap::new(),
+        primary_group: None,
     };
     ui.style_mut().interaction.resize_grab_radius_side = 7.0;
     kit_tree.ui(&mut behavior, ui);
     crate::app::shell::frame::paint_kit_split_grips(ui, kit_tree);
     behavior.parts.shell.home_groups.retain(|id| matches!(kit_tree.tiles.get(*id),
-        Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(_)))));
+        Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(_))))
+        && Some(*id) == behavior.primary_group);
+    let active_kit = cx.model.kits[cx.model.active].id;
+    behavior.parts.shell.home_open = kit_tree.tiles.iter().find_map(|(id, tile)| {
+        matches!(tile, egui_tiles::Tile::Pane(kit) if *kit == active_kit)
+            .then(|| behavior.tab_groups.get(id)).flatten()
+    }).is_some_and(|group| behavior.parts.shell.home_groups.contains(group));
     let KitPaneBehavior {
         close_requests,
         add_kit,
@@ -498,7 +512,7 @@ impl Baboon {
     ///
     /// The kit list is the content store and the tree only references it, so
     /// this only ever repairs the tree — it never creates or removes a kit.
-    fn sync_kit_tree(&mut self) {
+    pub(in crate::app) fn sync_kit_tree(&mut self) {
         let live: Vec<KitId> = self.model.kits.iter().map(|kit| kit.id).collect();
         let laid_out: Vec<(egui_tiles::TileId, KitId)> = self
             .kit_tree
@@ -518,16 +532,29 @@ impl Baboon {
             if laid_out.iter().any(|(_, laid)| *laid == kit_id) {
                 continue;
             }
+            let active_kit = self.model.kits[self.model.active].id;
+            let target = self.kit_tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(kit) if *kit == active_kit).then_some(*id))
+                .or_else(|| self.kit_tree.active_tiles().into_iter().find(|id|
+                    matches!(self.kit_tree.tiles.get(*id), Some(egui_tiles::Tile::Pane(_)))));
             let tile_id = self.kit_tree.tiles.insert_pane(kit_id);
-            match self.kit_tree.root() {
-                Some(root) => {
-                    if let Some(egui_tiles::Tile::Container(container)) =
-                        self.kit_tree.tiles.get_mut(root)
+            match target {
+                Some(target) => {
+                    let parent = self.kit_tree.tiles.parent_of(target);
+                    if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
+                        parent.and_then(|id| self.kit_tree.tiles.get_mut(id))
                     {
-                        container.add_child(tile_id);
+                        tabs.children.push(tile_id);
                     } else {
-                        let tabs = self.kit_tree.tiles.insert_tab_tile(vec![root, tile_id]);
-                        self.kit_tree.root = Some(tabs);
+                        // Wrap a bare pane in place, preserving its split slot.
+                        let tabs = self.kit_tree.tiles.insert_tab_tile(vec![target, tile_id]);
+                        if let Some(egui_tiles::Tile::Container(container)) =
+                            parent.and_then(|id| self.kit_tree.tiles.get_mut(id))
+                        {
+                            let _ = container.replace_child(target, tabs);
+                        } else {
+                            self.kit_tree.root = Some(tabs);
+                        }
                     }
                 }
                 None => self.kit_tree.root = Some(tile_id),
@@ -544,6 +571,38 @@ mod tests {
     //! the cursor passed over one. Two workspaces side by side, driven headless.
 
     use super::*;
+
+    #[test]
+    fn regression_new_kits_join_the_last_active_split() {
+        for wrapped in [false, true] {
+            for focused in [0, 1] {
+                let (mut app, kits) = tabbed_kits(2);
+                app.kit_tree = egui_tiles::Tree::new_horizontal("kit_open_regression", kits.clone());
+                let pane = |app: &Baboon, kit| app.kit_tree.tiles.iter().find_map(|(id, tile)|
+                    matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)).unwrap();
+                let root = app.kit_tree.root().unwrap();
+                if wrapped {
+                    for kit in &kits {
+                        let child = pane(&app, *kit);
+                        let tabs = app.kit_tree.tiles.insert_tab_tile(vec![child]);
+                        if let Some(egui_tiles::Tile::Container(container)) = app.kit_tree.tiles.get_mut(root) {
+                            let _ = container.replace_child(child, tabs);
+                        }
+                    }
+                }
+                app.focus_kit(focused);
+                let added = app.add_kit();
+                app.sync_kit_tree();
+                assert_eq!(app.kit_tree.root(), Some(root));
+                let Some(egui_tiles::Tile::Container(container)) = app.kit_tree.tiles.get(root) else { panic!("split disappeared") };
+                assert_eq!(container.children().count(), 2, "opening a kit must not add a third split");
+                assert_eq!(app.kit_tree.tiles.parent_of(pane(&app, added)),
+                    app.kit_tree.tiles.parent_of(pane(&app, kits[focused])),
+                    "the new kit belongs to the last active pane's tab group");
+                assert!(visible_kits(&app).contains(&added));
+            }
+        }
+    }
 
     fn input(time: f64, events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {

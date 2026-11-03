@@ -5669,6 +5669,59 @@ mod tests {
         assert!(after.width() > before.width() + 25.0, "the browser edge resizes alongside its scroll area");
     }
 
+    #[test]
+    fn dirty_tag_tabs_are_amber_and_inactive_neighbors_have_dividers() {
+        let (mut h, keys) = three_tabs();
+        h.app.model.kits[0].parsed_tags.get_mut(&keys[0]).unwrap().dirty.touch();
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(crate::app::run_ui_test(&h.ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                focused: true,
+                ..Default::default()
+            }, |ui| h.app.run_frame(ui)));
+        }
+        let kit = h.app.model.kits[0].id;
+        let tree = &h.app.views[kit].tag_tree;
+        let pane = tree.tiles.iter().find_map(|(id, tile)|
+            matches!(tile, egui_tiles::Tile::Pane(key) if key == &keys[0]).then_some(*id)).unwrap();
+        let tab = h.ctx.read_response(pane.egui_id(tree.id())).unwrap().rect;
+        let amber = crate::app::browser::modified_text();
+        let shapes = output.unwrap().shapes;
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Circle(circle) if circle.fill == amber && tab.contains(circle.center))), "dirty tabs have an amber dot");
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.fill == amber.gamma_multiply(0.12) && tab.contains_rect(rect.rect))), "dirty tabs have an amber fill");
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { points, stroke } if stroke.color == grid_line()
+                && (points[0].x - (tab.right() - 0.5)).abs() < 0.1
+                && points[0].x == points[1].x && points[0].y > tab.top() && points[1].y < tab.bottom())),
+            "neighboring inactive tabs have a visible divider");
+    }
+
+    #[test]
+    fn tag_content_scrolls_to_the_page_bottom_border() {
+        let (mut h, keys) = three_tabs();
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(crate::app::run_ui_test(&h.ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                focused: true,
+                ..Default::default()
+            }, |ui| h.app.run_frame(ui)));
+        }
+        let kit = h.app.model.kits[0].id;
+        let tree = &h.app.views[kit].tag_tree;
+        let page = tree.tiles.iter().find_map(|(id, tile)|
+            matches!(tile, egui_tiles::Tile::Pane(key) if key == &keys[2]).then(|| tree.tiles.rect(*id)).flatten()).unwrap();
+        let clip = output.unwrap().shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text().starts_with("OBJECT") => Some(shape.clip_rect),
+            _ => None,
+        }).expect("the actual field group was painted");
+        assert!((clip.bottom() - page.bottom()).abs() < 1.0,
+            "scrolling content reaches the page border: clip={clip:?}, page={page:?}");
+    }
+
     fn home_group(h: &Harness) -> egui_tiles::TileId {
         let kit = h.app.model.kits[h.app.model.active].id;
         let pane = h.app.kit_tree.tiles.iter().find_map(|(id, tile)|
@@ -5676,7 +5729,7 @@ mod tests {
         h.app.kit_tree.tiles.parent_of(pane).unwrap()
     }
     #[test]
-    fn home_stays_in_its_editing_kit_split() {
+    fn regression_home_only_appears_in_the_primary_split() {
         let (mut h, _) = three_tabs();
         let left = h.app.model.kits[0].id;
         let right = h.app.add_kit();
@@ -5693,6 +5746,9 @@ mod tests {
         let right_group = h.app.kit_tree.tiles.parent_of(right_pane).unwrap();
         let left_rect = h.app.kit_tree.tiles.rect(left_group).unwrap();
         let right_rect = h.app.kit_tree.tiles.rect(right_group).unwrap();
+        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(left_group)).is_some());
+        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(right_group)).is_none(),
+            "only the top-left Editing Kit split has a Home tab");
         click_point(&mut h, left_rect.min + egui::vec2(16.0, 13.0));
         idle(&mut h);
         assert!(h.painted.iter().any(|text| text == "tag_003.biped"),

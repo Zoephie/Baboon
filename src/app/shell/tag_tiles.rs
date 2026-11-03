@@ -36,6 +36,7 @@ struct TagPaneBehavior<'a, 'c, 'p> {
     /// Campaign Evolved source, and worse the more tabs are open.
     tab_labels: HashMap<String, (String, Option<u32>)>,
     active_tab_rects: HashMap<egui_tiles::TileId, egui::Rect>,
+    inactive_dividers: HashSet<egui_tiles::TileId>,
     close_requests: Vec<String>,
     /// Deferred tab context-menu choices, applied after the tree is drawn for
     /// the same reason closes are: they mutate the layout or the open set.
@@ -52,6 +53,20 @@ struct TagPaneBehavior<'a, 'c, 'p> {
 }
 
 impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
+    fn tab_bar_left_ui(
+        &mut self, tiles: &egui_tiles::Tiles<String>, _ui: &mut Ui,
+        _tile_id: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
+    ) {
+        // The tab container is temporarily removed from Tiles while its
+        // children draw, so record neighboring inactive tabs at this hook.
+        let visible = tabs.children.iter().copied().filter(|id| tiles.is_visible(*id)).collect::<Vec<_>>();
+        for pair in visible.windows(2) {
+            if !tabs.is_active(pair[0]) && !tabs.is_active(pair[1]) {
+                self.inactive_dividers.insert(pair[0]);
+            }
+        }
+    }
+
     fn pane_ui(
         &mut self,
         ui: &mut Ui,
@@ -113,7 +128,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                 left: 10,
                 right: 10,
                 top: 8,
-                bottom: 8,
+                bottom: 0,
             })
             .show(ui, |ui| {
                 crate::app::ScrollArea::vertical()
@@ -362,19 +377,13 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             // The selected tab is an extension of the page, like Find/Replace:
             // rounded above, flush below, with no outline separating the two.
             crate::app::shell::frame::paint_connected_tab(ui, tab_rect, bg, state.active);
-            if !state.active {
-                let next_inactive = tiles.parent_of(tile_id).and_then(|parent| tiles.get(parent))
-                    .and_then(|tile| match tile {
-                        egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs)) => {
-                            tabs.children.iter().skip_while(|&&id| id != tile_id).skip(1)
-                                .find(|&&id| tiles.is_visible(id)).map(|&id| !tabs.is_active(id))
-                        }
-                        _ => None,
-                    }).unwrap_or(false);
-                if next_inactive {
-                    ui.painter().vline(tab_rect.right(), (tab_rect.top() + 5.0)..=(tab_rect.bottom() - 5.0),
-                        Stroke::new(1.0, grid_line().gamma_multiply(0.5)));
-                }
+            if dirty {
+                ui.painter().rect_filled(tab_rect.shrink(2.0), 2.0,
+                    crate::app::browser::modified_text().gamma_multiply(0.12));
+            }
+            if !state.active && self.inactive_dividers.contains(&tile_id) {
+                ui.painter().vline(tab_rect.right() - 0.5, (tab_rect.top() + 5.0)..=(tab_rect.bottom() - 5.0),
+                    Stroke::new(1.0, grid_line()));
             }
             let inner = tab_rect.shrink(x_margin);
             if group_tag.is_some() {
@@ -412,7 +421,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                 if dirty {
                     ui.painter().circle_filled(
                         egui::pos2(close_rect.left() - CLOSE_GAP * 0.5, close_rect.center().y),
-                        2.0, text_color,
+                        2.0, crate::app::browser::modified_text(),
                     );
                 }
                 let close_id = ui.auto_id_with("tab_close_btn");
@@ -684,6 +693,7 @@ pub(in crate::app) fn draw_tag_tiles(
         kit,
         tab_labels,
         active_tab_rects: HashMap::new(),
+        inactive_dividers: HashSet::new(),
         close_requests: Vec::new(),
         reveal: None,
         reveal_in_explorer: None,

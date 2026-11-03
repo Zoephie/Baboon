@@ -10,7 +10,6 @@ fn foundation_function_row(
         foundation_field_row(ui, meta, depth, contents);
     } else {
         ui.horizontal_top(|ui| {
-            ui.add_space(depth as f32 * 12.0);
             foundation_label_cell(ui, &meta.label, meta.help.as_deref());
             contents(ui);
         });
@@ -423,7 +422,8 @@ pub(in crate::app) fn draw_foundation_enum_row(
     edit: &mut FieldEditContext<'_>,
 ) {
     let mut selected = current.unwrap_or(-1);
-    foundation_field_row(ui, meta, depth, |ui| {
+    let breakpoint = foundation_field_breakpoint(ui, depth, 180.0, "");
+    foundation_field_row_at(ui, meta, depth, breakpoint, |ui| {
 
         ui.add_enabled_ui(edit.can_edit(meta), |ui| {
             let selected_label = enum_option_label(options, selected);
@@ -438,7 +438,7 @@ pub(in crate::app) fn draw_foundation_enum_row(
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
                 egui::ComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
-                    .width(240.0_f32.min(ui.available_width().max(1.0)))
+                    .width(240.0_f32.min(ui.available_size_before_wrap().x.max(1.0)))
                     .selected_text(selected_text),
                 |ui| {
                     // `!` options are listed only in expert mode, as Foundation does.
