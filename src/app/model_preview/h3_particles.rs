@@ -378,52 +378,79 @@ enum H3ParticleUpdate {
     Gpu,
 }
 
-/// `decide_whether_cpu_or_gpu`. `force cpu updating` wins, then `force gpu
-/// updating`; otherwise an emitter goes on the card when its particle lists no
-/// attachments (H3's particle flag 0x20, ODST's 0x40) and its own movement asks
-/// for nothing past `physics` (movement flag 0x100). The emitter's and the
-/// system's own "can be gpu" bits are set by every postprocess, so always hold.
+/// `decide_whether_cpu_or_gpu`, and whether a particle that comes to rest
+/// moves on to the card (`becomes gpu when at rest`). `force cpu updating`
+/// wins, then `force gpu updating`, and either rules out the move; otherwise an
+/// emitter goes on the card when its particle lists no attachments (H3's
+/// particle flag 0x20, ODST's 0x40) and its own movement asks for nothing past
+/// `physics` (movement flag 0x100), and its resting particles move there when
+/// the particle lists no attachments. The emitter's and the system's own "can
+/// be gpu" bits are set by every postprocess, so always hold.
 fn particle_update(
     system_flagged: impl Fn(&str) -> bool,
     any_attachments: bool,
     movement_flagged: impl Fn(&str) -> bool,
-) -> H3ParticleUpdate {
+) -> (H3ParticleUpdate, bool) {
     let plain_movement = !["collide with", "swarm", "wind"].iter().any(|wanted| movement_flagged(wanted));
     if system_flagged("force cpu updating") {
-        H3ParticleUpdate::Cpu
-    } else if system_flagged("force gpu updating") || (!any_attachments && plain_movement) {
-        H3ParticleUpdate::Gpu
+        (H3ParticleUpdate::Cpu, false)
+    } else if system_flagged("force gpu updating") {
+        (H3ParticleUpdate::Gpu, false)
+    } else if !any_attachments && plain_movement {
+        (H3ParticleUpdate::Gpu, true)
     } else {
-        H3ParticleUpdate::Cpu
+        (H3ParticleUpdate::Cpu, !any_attachments)
     }
 }
 
-/// The emitter's `movements`, its own or else its template's, kept to the
-/// kinds its own flags name: tool's `postprocess_internal` drops the rest, and
-/// takes from the template only what fills a flagged kind in.
-fn read_controllers(
+/// The movements a Halo 3 or ODST emitter runs: tool's `postprocess_internal`
+/// keeps one for each kind its own flags name (adding any the tag lacks) and
+/// sorts them by `sub_140A846A0`'s table: physics, wind, swarm, collider. The
+/// preview has no wind.
+fn flagged_controllers(flagged: impl Fn(&str) -> bool) -> Vec<H3ParticleController> {
+    [
+        (flagged("physics"), H3ParticleController::Physics),
+        (flagged("swarm"), H3ParticleController::Flock),
+        (flagged("collide with"), H3ParticleController::Collider),
+    ]
+    .into_iter()
+    .filter_map(|(on, controller)| on.then_some(controller))
+    .collect()
+}
+
+/// One parameter of a flagged movement kind as tool leaves it
+/// (`sub_140A84700`): the emitter's own, else its template's and on up the
+/// template chain (`sub_140A848F0`), else a constant 1.
+fn movement_parameter(
     source: &TagSource,
-    emitter: TagStruct<'_>,
-    flagged: impl Fn(&str) -> bool,
-) -> Vec<H3ParticleController> {
-    let Some(movement) = emitter.descend("particle movement") else {
-        return Vec::new();
-    };
-    let template = movement
-        .read_tag_ref_path("template")
-        .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
-    let own = elements(movement, "movements");
-    let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
-    movements
-        .into_iter()
-        .filter_map(|entry| match entry.read_enum_name("type").as_deref() {
-            Some("physics") if flagged("physics") => Some(H3ParticleController::Physics),
-            Some("collider") if flagged("collide with") => Some(H3ParticleController::Collider),
-            Some("swarm") if flagged("swarm") => Some(H3ParticleController::Flock),
-            _ => None,
-        })
-        .collect()
+    movement: TagStruct<'_>,
+    kind: &str,
+    id: i128,
+    seeds: &mut SeedAllocator,
+) -> Option<H3ParticleProperty> {
+    chained_parameter(source, movement, kind, id, seeds, MOST_TEMPLATES).or_else(|| H3ParticleProperty::fixed(1.0))
+}
+
+/// How deep a template chain is followed, against one that names itself.
+const MOST_TEMPLATES: usize = 8;
+
+fn chained_parameter(
+    source: &TagSource,
+    holder: TagStruct<'_>,
+    kind: &str,
+    id: i128,
+    seeds: &mut SeedAllocator,
+    depth: usize,
+) -> Option<H3ParticleProperty> {
+    let of_kind = |entry: &TagStruct<'_>| entry.read_enum_name("type").as_deref() == Some(kind);
+    let entry = elements(holder, "movements").into_iter().find(of_kind);
+    let parameters = entry.map(|entry| elements(entry, "parameters")).unwrap_or_default();
+    if let Some(found) = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id)) {
+        return H3ParticleProperty::named(found, "property", seeds);
+    }
+    let path = holder.read_tag_ref_path("template").filter(|path| !path.is_empty() && depth > 0)?;
+    let template = load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok()?;
+    chained_parameter(source, template.root(), kind, id, seeds, depth - 1)
 }
 
 /// A Halo 2 `particle_physics`' movements, its own or its template's.
@@ -1282,13 +1309,23 @@ struct H3ParticleCollider {
     friction: H3ParticleProperty,
 }
 
-fn read_collider(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
-    read_collider_of(source, emitter.descend("particle movement")?, seeds)
+/// A Halo 3 or ODST emitter's `collider` movement, when it collides with
+/// structure, the only thing the preview's ground stands for
+/// (`update_particles_collider`): friction is parameter 0 and elasticity 1.
+fn read_collider(
+    source: &TagSource,
+    emitter: TagStruct<'_>,
+    flagged: impl Fn(&str) -> bool,
+    seeds: &mut SeedAllocator,
+) -> Option<H3ParticleCollider> {
+    let movement = emitter.descend("particle movement").filter(|_| flagged("collide with structure"))?;
+    let friction = movement_parameter(source, movement, "collider", 0, seeds)?;
+    Some(H3ParticleCollider { elasticity: movement_parameter(source, movement, "collider", 1, seeds)?, friction })
 }
 
-/// The `collider` movement of what holds `movements` and their `template`, if
-/// it collides with structure: friction is parameter 0 and elasticity 1, as
-/// Halo 2's `sub_53DF20` reads them too.
+/// A Halo 2 `particle_physics`' `collider` movement, its own or its
+/// template's, if it collides with structure: friction is parameter 0 and
+/// elasticity 1, as `sub_53DF20` reads them.
 fn read_collider_of(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
     let template = movement
         .read_tag_ref_path("template")
@@ -1341,20 +1378,15 @@ fn bounce(
 /// `update_particles_collider`'s `push_out_distance`.
 const PUSH_OUT: f32 = 0.005;
 
-fn read_flock(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleFlock> {
-    let movement = emitter.descend("particle movement")?;
-    let template = movement
-        .read_tag_ref_path("template")
-        .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
-    let own = elements(movement, "movements");
-    let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
-    let swarm = movements.into_iter().find(|entry| entry.read_enum_name("type").as_deref() == Some("swarm"))?;
-    let mut by_id = |id: i128| {
-        let parameters = elements(swarm, "parameters");
-        let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
-        H3ParticleProperty::named(found, "property", seeds)
-    };
+/// A Halo 3 or ODST emitter's `swarm` movement, when its flags name one.
+fn read_flock(
+    source: &TagSource,
+    emitter: TagStruct<'_>,
+    flagged: impl Fn(&str) -> bool,
+    seeds: &mut SeedAllocator,
+) -> Option<H3ParticleFlock> {
+    let movement = emitter.descend("particle movement").filter(|_| flagged("swarm"))?;
+    let mut by_id = |id: i128| movement_parameter(source, movement, "swarm", id, seeds);
     Some(H3ParticleFlock {
         separation_distance: by_id(0)?,
         separation_weight: by_id(1)?,
@@ -1436,16 +1468,20 @@ impl H3ParticlePhysics {
 }
 
 impl H3ParticleFlock {
-    /// `update_particles_flocking`. Avoidance is of a world the preview lacks.
+    /// `update_particles_flocking`, over the processor's particles: those
+    /// moved to the card are off its list. Avoidance is of a world the
+    /// preview lacks.
     fn update(&self, particles: &mut [Particle], base: H3ParticleState, home: [f32; 3], dt: f32) {
-        let places: Vec<([f32; 3], [f32; 3])> = particles.iter().map(|particle| (particle.position, particle.velocity)).collect();
-        for (at, particle) in particles.iter_mut().enumerate() {
+        let on_processor = |particle: &Particle| (!particle.on_card).then_some((particle.position, particle.velocity));
+        let places: Vec<Option<([f32; 3], [f32; 3])>> = particles.iter().map(on_processor).collect();
+        for (at, particle) in particles.iter_mut().enumerate().filter(|(_, particle)| !particle.on_card) {
             let state = H3ParticleState { age: particle.age, seeds: particle.seeds, rotation: particle.rotation, ..base };
             let distance_to = |other: &([f32; 3], [f32; 3])| {
                 let delta = minus(other.0, particle.position);
                 dot(delta, delta)
             };
-            let neighbors = places.iter().enumerate().filter(|(index, _)| *index != at).map(|(_, neighbor)| neighbor);
+            let others = places.iter().enumerate().filter(|(index, _)| *index != at);
+            let neighbors = others.filter_map(|(_, neighbor)| neighbor.as_ref());
             let neighbor = neighbors.min_by(|a, b| distance_to(a).total_cmp(&distance_to(b)));
             let mut force = [0.0; 3];
             let mut add = |amount: [f32; 3]| force = std::array::from_fn(|axis| force[axis] + amount[axis]);
@@ -1551,6 +1587,8 @@ impl H3ParticleAxis {
 #[derive(Debug)]
 struct H3Emitter {
     update: H3ParticleUpdate,
+    /// `becomes gpu when at rest`: a particle that stops moves on to the card.
+    card_at_rest: bool,
     /// What a pulse's count may fall short of a whole particle by and still
     /// make one: Halo 2's `c_particle_emitter::pulse` (0x68d160) spawns while
     /// `count + 0.0001 >= 1`; Halo 3's floors it.
@@ -1593,10 +1631,20 @@ struct H3Emitter {
     rotation_given: bool,
 }
 
-fn read_physics(source: &TagSource, emitter: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
-    read_movement(source, emitter.descend("particle movement")?, seeds)
+/// A Halo 3 or ODST emitter's `physics` movement, when its flags name one:
+/// gravity is parameter 0, air friction 1 and rotational friction 2.
+fn read_physics(
+    source: &TagSource,
+    emitter: TagStruct<'_>,
+    flagged: impl Fn(&str) -> bool,
+    seeds: &mut SeedAllocator,
+) -> Option<H3ParticlePhysics> {
+    let movement = emitter.descend("particle movement").filter(|_| flagged("physics"))?;
+    let mut parameter = |id: i128| movement_parameter(source, movement, "physics", id, seeds);
+    Some(H3ParticlePhysics { gravity: parameter(0), air_friction: parameter(1), rotational_friction: parameter(2) })
 }
 
+/// A Halo 2 `particle_physics`' physics movement, its own or its template's.
 fn read_movement(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
     let template = movement
         .read_tag_ref_path("template")
@@ -1656,14 +1704,15 @@ fn read_emitter(
     let axis_angle = property("emission axis angle")?;
     let movement_flags = emitter.descend("particle movement").and_then(|movement| movement.read_flag_names("flags"));
     let movement_flagged = |wanted: &str| movement_flags.iter().flatten().any(|(_, name)| name.starts_with(wanted));
-    let update = particle_update(system_flagged, any_attachments, movement_flagged);
-    let controllers = read_controllers(source, emitter, movement_flagged);
-    let physics = read_physics(source, emitter, &mut seeds);
-    let flock = read_flock(source, emitter, &mut seeds);
-    let collider = read_collider(source, emitter, &mut seeds);
+    let (update, card_at_rest) = particle_update(system_flagged, any_attachments, movement_flagged);
+    let controllers = flagged_controllers(movement_flagged);
+    let physics = read_physics(source, emitter, movement_flagged, &mut seeds);
+    let flock = read_flock(source, emitter, movement_flagged, &mut seeds);
+    let collider = read_collider(source, emitter, movement_flagged, &mut seeds);
     let scroll = emitter.read_vec2("uv scrolling");
     Some(H3Emitter {
         update,
+        card_at_rest,
         spawn_slack: 0.0,
         axis: H3ParticleAxis::named(&emitter.read_enum_name("particle axis (for models)").unwrap_or_default()),
         reference_axis: match emitter.read_enum_name("particle reference axis").as_deref() {
@@ -1731,6 +1780,7 @@ fn read_h2_emitter(
         .collect();
     Some(H3Emitter {
         update: H3ParticleUpdate::Cpu,
+        card_at_rest: false,
         spawn_slack: 0.0001,
         controllers,
         shape,
@@ -2113,6 +2163,8 @@ struct Particle {
     resting: bool,
     /// Not yet through an update: the card's first after a spawn moves nothing.
     spawned_this_frame: bool,
+    /// Moved from the processor to the card when it came to rest.
+    on_card: bool,
     axis: [f32; 3],
     age: f32,
     inverse_lifespan: f32,
@@ -2406,6 +2458,7 @@ impl H3Emitter {
                 landed: false,
                 resting: false,
                 spawned_this_frame: true,
+                on_card: false,
                 axis,
                 age: if self.bunched { 0.0 } else { along * dt * inverse_lifespan },
                 inverse_lifespan,
@@ -2460,6 +2513,10 @@ impl H3Emitter {
         }
         // `c_particle_emitter::frame_advance`.
         particles.retain_mut(|particle| {
+            if particle.on_card {
+                // `set_shader_update_state` gives a processor emitter's no physics.
+                return self.card_frame(particle, state, dt, [0.0; 3], ended);
+            }
             particle.age += particle.inverse_lifespan * dt;
             if self.persistent {
                 particle.age = particle.age.fract();
@@ -2485,6 +2542,9 @@ impl H3Emitter {
             }
             if comes_to_rest(particle.landed, particle.velocity) {
                 particle.resting = true;
+                if self.card_at_rest {
+                    particle.move_to_card();
+                }
                 return true;
             }
             particle.landed = false;
@@ -2512,35 +2572,61 @@ impl H3Emitter {
     ) {
         let physical = self.controllers.contains(&H3ParticleController::Physics);
         let physics = self.physics.as_ref().filter(|_| physical);
-        let [gravity, air_friction, rotational_friction] = physics.map_or([0.0; 3], |physics| physics.on_card(&state));
-        particles.retain_mut(|particle| {
-            let dt = if std::mem::take(&mut particle.spawned_this_frame) { 0.0 } else { dt };
-            particle.age += particle.inverse_lifespan * dt;
-            if particle.age >= 1.0 {
-                ended.push((particle.id, particle.position, particle.velocity));
-                return false;
-            }
-            let (position, velocity) = (particle.position, particle.velocity);
-            particle.position = std::array::from_fn(|axis| position[axis] + velocity[axis] * dt);
-            let state = H3ParticleState {
-                age: particle.age,
-                seeds: particle.seeds,
-                system_seeds: particle.system_seeds,
-                emission_time: particle.emission_time,
-                rotation: particle.rotation,
-                ..state
-            };
-            let acceleration = self.acceleration.around(&state);
-            particle.velocity = std::array::from_fn(|axis| velocity[axis] + acceleration[axis] * dt);
-            particle.velocity[2] -= gravity * dt;
-            let air = (air_friction * dt).clamp(0.0, 1.0);
-            particle.velocity = particle.velocity.map(|axis| axis - air * axis);
-            let spin = (rotational_friction * dt).clamp(0.0, 1.0);
-            particle.rotation_rate -= spin * particle.rotation_rate;
-            particle.rotation = (particle.rotation + particle.rotation_rate * dt).rem_euclid(1.0);
-            particle.frame = (particle.frame + particle.frame_rate * dt).rem_euclid(1.0);
-            true
-        });
+        let constants = physics.map_or([0.0; 3], |physics| physics.on_card(&state));
+        particles.retain_mut(|particle| self.card_frame(particle, state, dt, constants, ended));
+    }
+
+    /// One frame of `update_particle_state` for one particle, with the
+    /// emitter's gravity, air friction and rotational friction; false once it
+    /// dies.
+    fn card_frame(
+        &self,
+        particle: &mut Particle,
+        state: H3ParticleState,
+        dt: f32,
+        [gravity, air_friction, rotational_friction]: [f32; 3],
+        ended: &mut Vec<ParticleEvent>,
+    ) -> bool {
+        let dt = if std::mem::take(&mut particle.spawned_this_frame) { 0.0 } else { dt };
+        particle.age += particle.inverse_lifespan * dt;
+        if particle.age >= 1.0 {
+            ended.push((particle.id, particle.position, particle.velocity));
+            return false;
+        }
+        let (position, velocity) = (particle.position, particle.velocity);
+        particle.position = std::array::from_fn(|axis| position[axis] + velocity[axis] * dt);
+        let state = H3ParticleState {
+            age: particle.age,
+            seeds: particle.seeds,
+            system_seeds: particle.system_seeds,
+            emission_time: particle.emission_time,
+            rotation: particle.rotation,
+            ..state
+        };
+        let acceleration = self.acceleration.around(&state);
+        particle.velocity = std::array::from_fn(|axis| velocity[axis] + acceleration[axis] * dt);
+        particle.velocity[2] -= gravity * dt;
+        let air = (air_friction * dt).clamp(0.0, 1.0);
+        particle.velocity = particle.velocity.map(|axis| axis - air * axis);
+        let spin = (rotational_friction * dt).clamp(0.0, 1.0);
+        particle.rotation_rate -= spin * particle.rotation_rate;
+        particle.rotation = (particle.rotation + particle.rotation_rate * dt).rem_euclid(1.0);
+        particle.frame = (particle.frame + particle.frame_rate * dt).rem_euclid(1.0);
+        true
+    }
+}
+
+impl Particle {
+    /// `frame_advance`'s move to the card for a particle at rest: it keeps a
+    /// thousandth of a unit a second along its way (or straight down), stops
+    /// turning, and is queued afresh, so the card's next update moves nothing.
+    fn move_to_card(&mut self) {
+        let speed = dot(self.velocity, self.velocity).sqrt();
+        let way = if speed > 0.0 { self.velocity.map(|axis| axis / speed) } else { [0.0, 0.0, -1.0] };
+        self.velocity = way.map(|axis| axis * 0.001);
+        self.rotation_rate = 0.0;
+        self.on_card = true;
+        self.spawned_this_frame = true;
     }
 }
 
@@ -3390,22 +3476,37 @@ mod tests {
 
     /// `decide_whether_cpu_or_gpu`: forcing the processor wins, then forcing
     /// the card; otherwise the card takes a particle with no attachments
-    /// whose movement asks for nothing past `physics`.
+    /// whose movement asks for nothing past `physics`, and a particle with no
+    /// attachments moves to the card when it rests unless something was forced.
     #[test]
     fn tool_puts_an_emitter_on_the_card_only_when_nothing_needs_the_processor() {
+        use H3ParticleUpdate::{Cpu, Gpu};
         let named =
             |names: &'static [&'static str]| move |wanted: &str| names.iter().any(|name| name.starts_with(wanted));
         let decide = |system: &'static [&'static str], attachments, movement: &'static [&'static str]| {
             particle_update(named(system), attachments, named(movement))
         };
-        assert_eq!(decide(&[], false, &[]), H3ParticleUpdate::Gpu);
-        assert_eq!(decide(&[], false, &["physics"]), H3ParticleUpdate::Gpu);
-        assert_eq!(decide(&[], true, &["physics"]), H3ParticleUpdate::Cpu, "attachments play on the processor");
-        assert_eq!(decide(&[], false, &["physics", "collide with structure"]), H3ParticleUpdate::Cpu);
-        assert_eq!(decide(&[], false, &["swarm"]), H3ParticleUpdate::Cpu);
-        assert_eq!(decide(&["force gpu updating{force gpu rendering}"], true, &["wind"]), H3ParticleUpdate::Gpu);
+        assert_eq!(decide(&[], false, &[]), (Gpu, true));
+        assert_eq!(decide(&[], false, &["physics"]), (Gpu, true));
+        assert_eq!(decide(&[], true, &["physics"]), (Cpu, false), "attachments play on the processor");
+        assert_eq!(decide(&[], false, &["physics", "collide with structure"]), (Cpu, true), "on to the card at rest");
+        assert_eq!(decide(&[], false, &["swarm"]), (Cpu, true));
+        assert_eq!(decide(&["force gpu updating{force gpu rendering}"], true, &["wind"]), (Gpu, false));
+        let force_cpu = &["force cpu updating{force cpu rendering}"];
+        assert_eq!(decide(force_cpu, false, &["collide with structure"]), (Cpu, false), "forced stays put");
         let both = &["force cpu updating{force cpu rendering}", "force gpu updating{force gpu rendering}"];
-        assert_eq!(decide(both, false, &[]), H3ParticleUpdate::Cpu, "forcing the processor wins");
+        assert_eq!(decide(both, false, &[]), (Cpu, false), "forcing the processor wins");
+    }
+
+    /// Tool keeps one movement for each flagged kind, in its table's order
+    /// whatever order the tag lists them in.
+    #[test]
+    fn movements_follow_the_flags_in_tools_order() {
+        use H3ParticleController::{Collider, Flock, Physics};
+        let named =
+            |names: &'static [&'static str]| move |wanted: &str| names.iter().any(|name| name.starts_with(wanted));
+        assert_eq!(flagged_controllers(named(&["collide with bipeds", "swarm", "physics"])), [Physics, Flock, Collider]);
+        assert_eq!(flagged_controllers(named(&[])), []);
     }
 
     /// The first emitter of an effect's first system, from the Halo 3 kit.
@@ -3433,12 +3534,16 @@ mod tests {
         let plain = kit_emitter(&root, "fx\\cinematics\\120lc_activation\\02\\shot_03\\halochunk_impact");
         assert_eq!(plain.update, H3ParticleUpdate::Gpu);
         assert_eq!(plain.controllers, [H3ParticleController::Physics]);
+        let state = H3ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
+        let physics = plain.physics.as_ref().map(|physics| physics.on_card(&state));
+        assert_eq!(physics, Some([0.0, 2.0, 1.0]), "gravity, air and rotational friction");
         let colliding = kit_emitter(&root, "fx\\cinematics\\100ld_confront_truth\\07\\shot_04\\tentacle_erupt");
         assert_eq!(colliding.update, H3ParticleUpdate::Cpu);
         assert!(colliding.controllers.contains(&H3ParticleController::Collider));
         // `_default`'s physics, with none of the emitter's own flags set.
         let unflagged = kit_emitter(&root, "fx\\cinematics\\040lb_cov_flee\\08\\shot_4\\flood_spew");
         assert!(unflagged.controllers.is_empty(), "{:?}", unflagged.controllers);
+        assert!(unflagged.physics.is_none(), "the template's physics is not the emitter's");
     }
 
     /// On the card a particle's spawn frame moves nothing; after that it moves
@@ -3457,6 +3562,7 @@ mod tests {
             landed: false,
             resting: false,
             spawned_this_frame: true,
+            on_card: false,
             axis: [0.0, 0.0, 1.0],
             age: 0.0,
             inverse_lifespan: 0.1,
@@ -3479,5 +3585,52 @@ mod tests {
         emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, false);
         assert_eq!(particles[0].position[0], dt, "it moved by the velocity it had");
         assert_eq!(particles[0].velocity[0], 1.0 - 2.0 * dt, "then friction took some off");
+    }
+
+    /// With `BLAM_TEST_H3EK`: a colliding emitter's particle that stops on the
+    /// ground moves to the card, with a thousandth of a unit a second left and
+    /// no physics; its first frame there moves nothing.
+    #[test]
+    fn a_particle_at_rest_moves_to_the_card_and_drifts() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let emitter = kit_emitter(&root, "fx\\cinematics\\100ld_confront_truth\\07\\shot_04\\tentacle_erupt");
+        assert_eq!((emitter.update, emitter.card_at_rest), (H3ParticleUpdate::Cpu, true));
+        let particle = Particle {
+            id: 1,
+            colliding: false,
+            landed: true,
+            resting: false,
+            spawned_this_frame: false,
+            on_card: false,
+            axis: [0.0, 0.0, 1.0],
+            age: 0.0,
+            inverse_lifespan: 0.1,
+            position: [0.0; 3],
+            velocity: [0.1, 0.0, 0.0],
+            rotation: 0.0,
+            rotation_rate: 0.5,
+            frame: 0.0,
+            frame_rate: 0.0,
+            seeds: [0.0; SEEDS],
+            emission_time: 0.0,
+            flip: [false; 3],
+            sequence: 0,
+            system_seeds: [0.0; SYSTEM_SEEDS],
+        };
+        let (mut particles, mut ended, dt) = (vec![particle], Vec::new(), 1.0 / 60.0);
+        let state = H3ParticleState { system_age: 0.5, effect_a: 1.0, effect_b: 1.0, lod: 1.0, ..Default::default() };
+        emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, true);
+        let rested = particles[0].clone();
+        assert!(rested.on_card && rested.rotation_rate == 0.0, "{rested:?}");
+        assert!((dot(rested.velocity, rested.velocity).sqrt() - 0.001).abs() < 1e-6);
+        emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, true);
+        assert_eq!(particles.len(), 1, "on the card it no longer dies at rest");
+        assert_eq!(particles[0].position, rested.position, "its first frame there");
+        emitter.step(state, &mut particles, dt, [0.0; 3], &mut ended, None, true);
+        let moved: [f32; 3] = std::array::from_fn(|axis| rested.position[axis] + rested.velocity[axis] * dt);
+        assert_eq!(particles[0].position, moved, "it drifts by what it kept");
     }
 }
