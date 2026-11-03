@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use blam_tags::bitmap::BitmapFormat;
-use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, BLEND_MODES};
+use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, BLEND_MODES, REACH_BLEND_MODES};
 
 use blam_tags::TagStruct;
 use blam_tags::tag_function::FunctionType;
@@ -69,6 +69,7 @@ struct H3SharedStages {
 pub(crate) struct H3Definition {
     /// The family: `shader`, `terrain`..
     pub(crate) name: String,
+    dialect: H3Dialect,
     /// The file it compiles, as an `#include` names it: Halo 3's `shader.fx`,
     /// Reach's `templated\shader.fx`.
     source_file: String,
@@ -150,7 +151,7 @@ pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Def
         .and_then(|kind| usize::try_from(kind).ok())
         .filter(|kind| *kind < VERTEX_TYPES.len())
         .unwrap_or(0);
-    Some(H3Definition { name, source_file, automatic_macros, categories, entry_points, shared, pixel_vertex_type })
+    Some(H3Definition { name, dialect, source_file, automatic_macros, categories, entry_points, shared, pixel_vertex_type })
 }
 
 impl H3Definition {
@@ -195,11 +196,29 @@ impl H3Definition {
         chosen
     }
 
-    /// The `blend_mode` category's choice.
+    /// The `blend_mode` category's choice, for a method held in another tag.
     pub(crate) fn blend(&self, options: &[usize]) -> H3Blend {
-        let name = self.chosen("blend_mode", options).unwrap_or_default().to_ascii_lowercase();
-        let index = BLEND_MODES.iter().position(|mode| name.starts_with(mode)).unwrap_or(0);
-        H3Blend::ALL[index]
+        self.blend_of(options, false)
+    }
+
+    /// The `blend_mode` category's choice, as each game's bake reads its name:
+    /// Halo 3's `blend_mode_from_string` ignoring case, Reach's
+    /// `get_alpha_blend_mode_by_name` (0x141167210) minding it. Without the
+    /// category Reach blends `shader_glass` and nothing else.
+    pub(crate) fn blend_of(&self, options: &[usize], glass: bool) -> H3Blend {
+        let Some(name) = self.chosen("blend_mode", options) else {
+            return if glass && self.dialect == H3Dialect::Reach { H3Blend::AlphaBlend } else { H3Blend::Opaque };
+        };
+        let index = match self.dialect {
+            H3Dialect::Halo3 => {
+                let name = name.to_ascii_lowercase();
+                BLEND_MODES.iter().position(|mode| name.starts_with(mode))
+            }
+            // Reach's entries past `motion_blur_inhibit` are its own; no
+            // Reach definition offers them as options, so none reach here.
+            H3Dialect::Reach => REACH_BLEND_MODES[..13].iter().position(|mode| name.starts_with(mode)),
+        };
+        H3Blend::ALL[index.unwrap_or(0)]
     }
 }
 
@@ -962,6 +981,7 @@ mod stage_option_tests {
     fn definition(automatic_macros: bool, shared: &[(&str, H3SharedStages)]) -> H3Definition {
         H3Definition {
             name: "shader".to_owned(),
+            dialect: H3Dialect::Reach,
             source_file: "templated\\shader.fx".to_owned(),
             automatic_macros,
             categories: vec![
@@ -972,6 +992,23 @@ mod stage_option_tests {
             shared: shared.iter().map(|(entry, rules)| ((*entry).to_owned(), *rules)).collect(),
             pixel_vertex_type: 0,
         }
+    }
+
+    #[test]
+    fn reach_reads_blend_names_minding_case_and_blends_glass_without_a_category() {
+        let mut reach = definition(false, &[]);
+        reach.categories[1].options[1].name = "ADDITIVE".to_owned();
+        assert_eq!(reach.blend(&[0, 1]), H3Blend::Opaque, "Reach minds case");
+        assert_eq!(reach.blend(&[0, 3]), H3Blend::AlphaBlend);
+        reach.dialect = H3Dialect::Halo3;
+        assert_eq!(reach.blend(&[0, 1]), H3Blend::Additive, "Halo 3 does not");
+
+        let mut glass = definition(false, &[]);
+        glass.categories.truncate(1);
+        assert_eq!(glass.blend_of(&[0], true), H3Blend::AlphaBlend);
+        assert_eq!(glass.blend_of(&[0], false), H3Blend::Opaque);
+        glass.dialect = H3Dialect::Halo3;
+        assert_eq!(glass.blend_of(&[0], true), H3Blend::Opaque);
     }
 
     #[test]

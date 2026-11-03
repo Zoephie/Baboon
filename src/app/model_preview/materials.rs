@@ -205,6 +205,8 @@ struct ResolveCaches {
     h3_images: HashMap<(String, i16, usize), Option<H3Bitmap>>,
     definitions: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
     options: HashMap<String, Option<Arc<RenderMethodOption>>>,
+    /// Reach's reference shaders by path; Spartan armor shares a few.
+    references: HashMap<String, Option<Arc<RenderMethod>>>,
     /// Decoded bitmaps by `(path, image index)`. Shared maps are common —
     /// masterchief's visor variants all reach for the same detail map.
     bitmaps: HashMap<(String, i16), Option<TextureImage>>,
@@ -356,7 +358,7 @@ fn resolve_one_material(
         }
         _ => {}
     }
-    let Ok(render_method) = RenderMethod::from_tag(&shader) else {
+    let Ok(mut render_method) = RenderMethod::from_tag(&shader) else {
         // Halo CE and Halo 2 shaders are not render methods at all; they carry
         // their bitmaps as fixed schema fields instead. Naming that is more use
         // than "failed to parse".
@@ -368,12 +370,14 @@ fn resolve_one_material(
     // the detail maps' tiling is exactly such a value. It is not required
     // though: a definition that will not parse still leaves every explicitly
     // authored bitmap working, which is nearly all of them.
-    let resolved = cached_render_method_definition(
-        source,
-        &render_method.definition_path,
-        &mut caches.definitions,
-    )
-    .map(|definition| {
+    let definition = cached_render_method_definition(source, &render_method.definition_path, &mut caches.definitions);
+    if let Some(definition) = &definition
+        && source.game() == Some(GameId::HaloReach)
+    {
+        let reference = reach_reference(source, &render_method, &material.shader_path, &mut caches.references);
+        render_method.apply_reference_shader(definition, reference.as_deref());
+    }
+    let resolved = definition.map(|definition| {
         ResolvedRenderMethod::resolve(&render_method, &definition, |option_path| {
             // The engine's resolver takes owned options; this runs once per
             // texture resolve on a worker, not per frame.
@@ -408,7 +412,11 @@ fn resolve_one_material(
         textures.slots[TextureSlot::AlphaTest as usize] =
             textures.slots[TextureSlot::Base as usize].clone();
     }
-    if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 {
+    // Reach's shaders translate, but light with dual vMF constants the frame
+    // does not set yet, so they keep the general shader until it does.
+    // `Game::of` calls every tag after Halo 2 `Halo3`, Reach's included.
+    let reach = source.game() == Some(GameId::HaloReach);
+    if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 && !reach {
         match prepare_h3_material(source, &values, caches) {
             Ok(material) => textures.h3 = Some(Arc::new(material)),
             // The general shader still draws it, so this is only worth saying
@@ -513,10 +521,37 @@ pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: S
     })
 }
 
+/// The template a Reach shader names as its `reference`, which Reach's tool
+/// (`postprocess_as_child`, 0x141166270) lays under it before the bake. A
+/// shader naming itself has none, as tool refuses it.
+fn reach_reference(
+    source: &TagSource,
+    method: &RenderMethod,
+    own_path: &str,
+    cache: &mut HashMap<String, Option<Arc<RenderMethod>>>,
+) -> Option<Arc<RenderMethod>> {
+    let (group, path) = method.reference.as_ref()?;
+    if path.eq_ignore_ascii_case(own_path) {
+        return None;
+    }
+    cache
+        .entry(path.to_ascii_lowercase())
+        .or_insert_with(|| {
+            let extension = blam_tags::paths::group_tag_to_extension(*group)?;
+            let tag = load_referenced_tag_from_source(source, path, extension, &group.to_be_bytes()).ok()?;
+            RenderMethod::from_tag(&tag).ok().map(Arc::new)
+        })
+        .clone()
+}
+
 /// A render method held inside another tag, resolved as the bake would.
 pub(super) fn resolve_embedded_method(source: &TagSource, shader: TagStruct<'_>) -> Option<ResolvedRenderMethod> {
-    let method = RenderMethod::from_struct(&shader).ok()?;
+    let mut method = RenderMethod::from_struct(&shader).ok()?;
     let definition = cached_render_method_definition(source, &method.definition_path, &mut HashMap::new())?;
+    if source.game() == Some(GameId::HaloReach) {
+        let reference = reach_reference(source, &method, "", &mut HashMap::new());
+        method.apply_reference_shader(&definition, reference.as_deref());
+    }
     let mut options = HashMap::new();
     let resolved = ResolvedRenderMethod::resolve(&method, &definition, |option_path| {
         cached_render_method_option(source, option_path, &mut options).map(|option| (*option).clone())
@@ -622,7 +657,8 @@ fn prepare_h3_material(
         .definition(&method.definition_path)
         .ok_or_else(|| format!("{} did not read", method.definition_path))?;
     let options: Vec<usize> = method.options.iter().map(|option| (*option).max(0) as usize).collect();
-    let blend = definition.blend(&options);
+    let glass = method.group_tag == u32::from_be_bytes(*b"rmgl");
+    let blend = definition.blend_of(&options, glass);
     // ODST's `black` has only `albedo`, which is all it needs to be black.
     let lit_entry = H3_LIT_ENTRIES
         .iter()
