@@ -555,7 +555,7 @@ fn draw_chimp_texture_preview(
             .find(|(index, _)| *index == selected_export)
             .map(|(_, label)| label.as_str())
             .unwrap_or("Texture export");
-        egui::ComboBox::from_id_salt(("chimp_texture_export", document.package.clone()))
+        crate::app::ui_kit::ValueComboBox::from_id_salt(("chimp_texture_export", document.package.clone()))
             .selected_text(selected_label)
             .show_ui(ui, |ui| {
                 for (index, label) in &options {

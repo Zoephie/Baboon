@@ -558,7 +558,7 @@ fn draw_chimp_integer(
                     .map(|(_, name)| name.as_str())
                     .unwrap_or("Unknown");
                 let mut changed = false;
-                egui::ComboBox::from_id_salt(ui.next_auto_id())
+                crate::app::ui_kit::ValueComboBox::from_id_salt(ui.next_auto_id())
                     .selected_text(format!("{selected} ({})", *value as u64))
                     .show_ui(ui, |ui| {
                         for (candidate, name) in &definition.values {
@@ -580,7 +580,7 @@ fn draw_chimp_integer(
         }) => {
             if let Some(definition) = usmap_enum(usmap, enum_name) {
                 let mut changed = false;
-                egui::ComboBox::from_id_salt(ui.next_auto_id())
+                crate::app::ui_kit::ValueComboBox::from_id_salt(ui.next_auto_id())
                     .selected_text(
                         definition
                             .values
@@ -1394,7 +1394,7 @@ fn draw_chimp_property_bag_type(
 ) -> bool {
     use chimp_hw::PropertyBagPropertyType as T;
     let mut changed = false;
-    egui::ComboBox::from_id_salt(id)
+    crate::app::ui_kit::ValueComboBox::from_id_salt(id)
         .selected_text(format!("{value:?}"))
         .show_ui(ui, |ui| {
             for candidate in [
@@ -1435,7 +1435,7 @@ fn draw_chimp_property_bag_container(
 ) -> bool {
     use chimp_hw::PropertyBagContainerType as T;
     let mut changed = false;
-    egui::ComboBox::from_id_salt(id)
+    crate::app::ui_kit::ValueComboBox::from_id_salt(id)
         .selected_text(format!("{value:?}"))
         .show_ui(ui, |ui| {
             for candidate in [T::None, T::Array, T::Set] {

@@ -340,7 +340,7 @@ pub(in crate::app) fn draw_shader_category_row(
         ui.add_enabled_ui(editable, |ui| {
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
-                egui::ComboBox::from_id_salt((
+                crate::app::ui_kit::ValueComboBox::from_id_salt((
                     edit.view_scope,
                     edit.tag_key,
                     "shader_category",

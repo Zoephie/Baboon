@@ -389,7 +389,7 @@ fn draw_tool_command_arg(
             ToolCommandArgKind::Enum => {
                 let (_, wheel_delta) = combo_box_with_scroll(
                     ui,
-                    egui::ComboBox::from_id_salt(("tool_arg_enum", &command.name, &arg.name))
+                    crate::app::ui_kit::ValueComboBox::from_id_salt(("tool_arg_enum", &command.name, &arg.name))
                         .selected_text(if value.is_empty() {
                             arg.values.first().map(String::as_str).unwrap_or("")
                         } else {

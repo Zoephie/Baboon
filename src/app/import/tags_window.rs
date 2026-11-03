@@ -175,7 +175,7 @@ impl Dialog for TagImportDialog {
                         ui.label(RichText::new("From").color(subtle_dark()));
                         let previous = dialog.source_game.clone();
                         ui.add_enabled_ui(!busy, |ui| {
-                            egui::ComboBox::from_id_salt("tag_import_source_game")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("tag_import_source_game")
                                 .selected_text(&dialog.source_game)
                                 .width(200.0)
                                 .show_ui(ui, |ui| {

@@ -113,7 +113,7 @@ fn draw_cache_import_body(
         .unwrap_or_else(|| "no kit loaded".to_owned());
     let target_before = dialog.target_index;
     ui.add_enabled_ui(!dialog.running, |ui| {
-        egui::ComboBox::from_id_salt("cache_import_target")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("cache_import_target")
             .selected_text(selected_label)
             .show_ui(ui, |ui| {
                 for (index, target) in dialog.targets.iter().enumerate() {

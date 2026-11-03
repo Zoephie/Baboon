@@ -1154,7 +1154,7 @@ mod tests {
                 egui::CentralPanel::default().show(ui, |ui| {
                     dropdown_height = combo_box_with_scroll(
                         ui,
-                        egui::ComboBox::from_id_salt("button_height_test").selected_text("0. default"),
+                        crate::app::ui_kit::ValueComboBox::from_id_salt("button_height_test").selected_text("0. default"),
                         |_| {},
                     )
                     .0

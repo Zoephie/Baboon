@@ -363,7 +363,7 @@ fn draw_editing_kit_form(
             ui_repaint_for_kit_draft(&columns[0]);
         }
         editing_kit_field_label(&mut columns[1], "Engine");
-        egui::ComboBox::from_id_salt("editing_kit_form_engine")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("editing_kit_form_engine")
             .selected_text(game_display_name(&draft.game))
             .width(columns[1].available_width())
             .show_ui(&mut columns[1], |ui| {
@@ -1428,7 +1428,7 @@ fn draw_settings_general_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
         "Choose what happens when opening Baboon after exiting with open windows.",
         170.0,
         |ui| {
-            egui::ComboBox::from_id_salt("session_restore")
+            crate::app::ui_kit::ValueComboBox::from_id_salt("session_restore")
                 .width(170.0)
                 .selected_text(restore_label(s.prefs.session_restore))
                 .show_ui(ui, |ui| {
@@ -1617,7 +1617,7 @@ fn settings_row_contents_channel(
             },
         );
         let previous = prefs.update_channel;
-        egui::ComboBox::from_id_salt("settings_update_channel")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("settings_update_channel")
             .width(170.0)
             .selected_text(prefs.update_channel.label())
             .show_ui(ui, |ui| {
@@ -1722,7 +1722,7 @@ fn draw_settings_expansion_behavior(ui: &mut Ui, s: &mut SettingsDraw) {
         "Applies to tags opened from now on. Groups you open or close yourself keep the state you chose.",
         150.0,
         |ui| {
-            egui::ComboBox::from_id_salt("settings_nested_default")
+            crate::app::ui_kit::ValueComboBox::from_id_salt("settings_nested_default")
                 .width(150.0)
                 .selected_text(s.prefs.nested_default.label())
                 .show_ui(ui, |ui| {
@@ -1960,7 +1960,7 @@ pub(in crate::app) fn draw_theme_picker(ui: &mut Ui, prefs: &mut GuiPrefs) {
         egui::ThemePreference::Dark => "Dark",
         egui::ThemePreference::Light => "Light",
     };
-    egui::ComboBox::from_id_salt("settings_theme")
+    crate::app::ui_kit::ValueComboBox::from_id_salt("settings_theme")
         .width(170.0)
         .selected_text(label(theme))
         .show_ui(ui, |ui| {
@@ -2001,7 +2001,7 @@ fn draw_settings_interface_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
         "Angle fields hold radians on disk. Guerilla and the other Halo tools show them in degrees, and so does Baboon. Choose Radians to read and type the stored radians instead. Field search, TSV copy/paste and the tag diff follow the same setting.",
         150.0,
         |ui| {
-            egui::ComboBox::from_id_salt("settings_angles")
+            crate::app::ui_kit::ValueComboBox::from_id_salt("settings_angles")
                 .width(150.0)
                 .selected_text(if s.prefs.angles_in_degrees {
                     "Degrees"
@@ -2299,7 +2299,7 @@ mod tests {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let right = ui.max_rect().right();
                         settings_row(ui, "Block Default Expansion Behavior", "Applies to tags opened from now on. A group you open or close yourself keeps the state you chose.", 150.0, |ui| {
-                            egui::ComboBox::from_id_salt("test_expansion").width(150.0).selected_text("Expanded").show_ui(ui, |_| {});
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("test_expansion").width(150.0).selected_text("Expanded").show_ui(ui, |_| {});
                         });
                         let mut speed = 1.0;
                         draw_speed_row(ui, "Scroll Speed", "Scroll help", &mut speed, 0.5..=2.0, 1.0);
@@ -2406,7 +2406,7 @@ mod tests {
                         24.0
                     );
                 }
-                let engine = egui::ComboBox::from_id_salt("height_test_engine")
+                let engine = crate::app::ui_kit::ValueComboBox::from_id_salt("height_test_engine")
                     .selected_text("Halo 2")
                     .show_ui(ui, |_| {});
                 assert_eq!(engine.response.rect.height(), 24.0);

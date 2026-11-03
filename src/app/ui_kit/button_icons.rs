@@ -669,12 +669,14 @@ pub(in crate::app) fn fixed_width_icon_text_dropdown_button<R>(
     icon: ButtonIcon,
     label: &str,
     width: f32,
-    add_contents: impl FnOnce(&mut Ui) -> R,
+    add_contents: impl FnOnce(&mut ValueComboUi<'_>) -> R,
 ) -> egui::InnerResponse<Option<R>> {
     let mut rect = ui.available_rect_before_wrap();
     rect.set_width(width);
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-        icon_text_dropdown_button_sized(ui, icon, label, Some(width), add_contents)
+        icon_text_dropdown_button_sized(ui, icon, label, Some(width), |ui| {
+            value_dropdown_contents(ui, ui.spacing().combo_height, add_contents)
+        })
     }).inner
 }
 

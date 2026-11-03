@@ -500,20 +500,7 @@ pub(in crate::app) fn context_menu_separator(ui: &mut Ui) {
 /// Shared geometry and interaction treatment for ordinary list menus. egui's
 /// menu implementation deliberately replaces normal button padding with a
 /// two-point inset, so restore the roomier application row here.
-pub(in crate::app) fn style_list_menu(ui: &mut Ui) {
-    ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
-    ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
-    ui.spacing_mut().interact_size.y = 28.0;
-    ui.visuals_mut().override_text_color = Some(text_dark());
-    ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
-    ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-    ui.visuals_mut().widgets.hovered.bg_fill = context_menu_hover();
-    ui.visuals_mut().widgets.hovered.weak_bg_fill = context_menu_hover();
-    ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::NONE;
-    ui.visuals_mut().widgets.active.bg_fill = context_menu_hover();
-    ui.visuals_mut().widgets.active.weak_bg_fill = context_menu_hover();
-    ui.visuals_mut().widgets.active.bg_stroke = Stroke::NONE;
-}
+pub(in crate::app) use crate::app::ui_kit::style_list_menu;
 
 pub(in crate::app) fn style_tag_context_menu(ui: &mut Ui) {
     // `set_min_width` is not enough here: during egui's menu sizing pass the

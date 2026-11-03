@@ -1592,7 +1592,7 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
             state.focus = [0.0; 3];
             state.scale = 1.0;
         }
-        egui::ComboBox::from_id_salt(("standalone_model_render_mode", &data.source_key))
+        crate::app::ui_kit::ValueComboBox::from_id_salt(("standalone_model_render_mode", &data.source_key))
             .selected_text(state.render_mode.label())
             .show_ui(ui, |ui| {
                 for mode in ModelRenderMode::ALL {

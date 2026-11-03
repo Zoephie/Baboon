@@ -580,7 +580,7 @@ pub(super) fn draw_sound_output_controls(
         // H3 continues opening that missing bank while the combo says
         // "default".
         let before = current;
-        egui::ComboBox::from_id_salt("sound_language")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("sound_language")
             .selected_text(format!(
                 "\u{1F310} {}",
                 shown.map_or("default", |choice| choice.label.as_str())

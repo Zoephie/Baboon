@@ -437,7 +437,7 @@ pub(in crate::app) fn draw_foundation_enum_row(
             .unwrap_or_else(|| selected_label.clone().into());
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
-                egui::ComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
+                crate::app::ui_kit::ValueComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
                     .width(240.0_f32.min(ui.available_size_before_wrap().x.max(1.0)))
                     .selected_text(selected_text),
                 |ui| {

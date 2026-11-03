@@ -130,7 +130,7 @@ fn foundation_master_type_combo(
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("foundation_fn_type")
+    crate::app::ui_kit::ValueComboBox::from_id_salt("foundation_fn_type")
         .selected_text(master_label(current))
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -206,7 +206,7 @@ fn color_type_combo(
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("function_color_type")
+    crate::app::ui_kit::ValueComboBox::from_id_salt("function_color_type")
         .selected_text(color_type_label(editor, current))
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -241,7 +241,7 @@ fn h2_function_type_combo(ui: &mut Ui, editor: &mut TagFunctionEditor, editable:
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("h2_function_type")
+    crate::app::ui_kit::ValueComboBox::from_id_salt("h2_function_type")
         .selected_text(label)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -1191,16 +1191,13 @@ fn periodic_function_combo(
     let current = params.function_index as usize;
     let label = names.get(current).copied().unwrap_or("unknown");
     let mut changed = false;
-    egui::ComboBox::from_id_salt(("periodic_function", slot))
+    crate::app::ui_kit::ValueComboBox::from_id_salt(("periodic_function", slot))
         .selected_text(label)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (index, label) in names.iter().enumerate() {
                 if ui
-                    .add_enabled(
-                        editable,
-                        egui::Button::selectable(index == current, *label),
-                    )
+                    .selectable_label_enabled(editable, index == current, *label)
                     .clicked()
                 {
                     params.function_index = index as u8;
@@ -1259,16 +1256,13 @@ fn transition_function_combo(
     let current = params.function_index as usize;
     let label = names.get(current).copied().unwrap_or("unknown");
     let mut changed = false;
-    egui::ComboBox::from_id_salt(("transition_function", slot))
+    crate::app::ui_kit::ValueComboBox::from_id_salt(("transition_function", slot))
         .selected_text(label)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (index, label) in names.iter().enumerate() {
                 if ui
-                    .add_enabled(
-                        editable,
-                        egui::Button::selectable(index == current, *label),
-                    )
+                    .selectable_label_enabled(editable, index == current, *label)
                     .clicked()
                 {
                     params.function_index = index as u8;

@@ -149,7 +149,7 @@ impl Dialog for ImportTagDialog {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Source profile").color(subtle_dark()));
-                            egui::ComboBox::from_id_salt("import_source_profile")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("import_source_profile")
                                 .selected_text(source_game.as_str())
                                 .show_ui(ui, |ui| {
                                     for game in &identical_profiles {

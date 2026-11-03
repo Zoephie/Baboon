@@ -1093,7 +1093,7 @@ impl Dialog for TagDiffState {
                             TagCompareSource::GitHead => "Git HEAD",
                             TagCompareSource::GitHistory => "Git History…",
                         };
-                        egui::ComboBox::from_id_salt("tag_compare_source")
+                        crate::app::ui_kit::ValueComboBox::from_id_salt("tag_compare_source")
                             .selected_text(source_name)
                             .width(field_width)
                             .truncate()
@@ -1202,7 +1202,7 @@ impl Dialog for TagDiffState {
                                             },
                                         )
                                     });
-                                egui::ComboBox::from_id_salt("tag_diff_open_tag")
+                                crate::app::ui_kit::ValueComboBox::from_id_salt("tag_diff_open_tag")
                                     .selected_text(
                                         selected.as_deref().unwrap_or("Select an open tag"),
                                     )
@@ -1275,7 +1275,7 @@ impl Dialog for TagDiffState {
                                         .as_ref()
                                         .is_some_and(|root| same_recent_path(root, &kit.tags))
                                 });
-                                egui::ComboBox::from_id_salt("tag_compare_kit")
+                                crate::app::ui_kit::ValueComboBox::from_id_salt("tag_compare_kit")
                                     .selected_text(
                                         chosen
                                             .map(|kit| kit.name.as_str())
@@ -1338,7 +1338,7 @@ impl Dialog for TagDiffState {
                                     })
                                     .map(commit_text)
                                     .unwrap_or_else(|| "Select a commit".to_owned());
-                                egui::ComboBox::from_id_salt("tag_compare_git_history")
+                                crate::app::ui_kit::ValueComboBox::from_id_salt("tag_compare_git_history")
                                     .selected_text(selected)
                                     .width(field_width)
                                     .truncate()

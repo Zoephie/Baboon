@@ -138,7 +138,7 @@ impl Dialog for FindWindow {
                     .show(ui, |ui| {
                         find_row_label(ui, "Within:");
                         if let Some(options) = &mut query.strings {
-                            egui::ComboBox::from_id_salt("find_string_within")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("find_string_within")
                                 .selected_text(if options.selected_rows { "Selected Rows" } else { "Current Tag" })
                                 .width(option_width).truncate().show_ui(ui, |ui| {
                                     changed |= ui.selectable_value(&mut options.selected_rows, false, "Current Tag").changed();
@@ -146,7 +146,7 @@ impl Dialog for FindWindow {
                                 });
                         } else {
                         ui.scope(|ui| {
-                            egui::ComboBox::from_id_salt("find_within")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("find_within")
                                 .selected_text(query.within.label())
                                 .width(option_width)
                                 .show_ui(ui, |ui| {
@@ -190,14 +190,14 @@ impl Dialog for FindWindow {
                                 (false, true) => if hud { "Text" } else { "String Text" },
                                 (false, false) => "Nothing",
                             };
-                            egui::ComboBox::from_id_salt("find_string_look_in")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("find_string_look_in")
                                 .selected_text(label)
                                 .width(option_width).truncate()
                                 .show_ui(ui, |ui| {
                                 changed |= ui
-                                    .add_enabled(
+                                    .checkbox_enabled(
                                         has_ids,
-                                        ThemedCheckbox::new(&mut options.ids, if hud { "Names" } else { "String IDs" }),
+                                        &mut options.ids, if hud { "Names" } else { "String IDs" },
                                     )
                                     .on_disabled_hover_text(
                                         "Halo CE string lists have no string IDs",
@@ -218,7 +218,7 @@ impl Dialog for FindWindow {
                                 });
                                 response.on_hover_text("Field Values is the only option in Replace mode because only field values can be edited.");
                             } else {
-                            egui::ComboBox::from_id_salt("find_look_in")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("find_look_in")
                                 .selected_text(query.look_in.label())
                                 .width(option_width)
                                 .show_ui(ui, |ui| {
@@ -256,7 +256,7 @@ impl Dialog for FindWindow {
                                         .cloned()
                                         .unwrap_or_else(|| "Current Language".to_owned()),
                                 };
-                                egui::ComboBox::from_id_salt("find_string_language")
+                                crate::app::ui_kit::ValueComboBox::from_id_salt("find_string_language")
                                     .selected_text(label)
                                     .width(option_width).truncate()
                                     .show_ui(ui, |ui| {

@@ -21,6 +21,22 @@ pub(in crate::app) const ICON_BUTTON_SIZE: Vec2 = Vec2::new(24.0, 24.0);
 /// Horizontal inset for text-only buttons. Icon-only buttons use their fixed
 /// 24×24 frame, leaving four points around the 16×16 glyph.
 pub(in crate::app) const BUTTON_TEXT_PADDING_X: f32 = 8.0;
+
+/// Shared full-width menu row styling for action menus and value pickers.
+pub(in crate::app) fn style_list_menu(ui: &mut Ui) {
+    ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+    ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
+    ui.spacing_mut().interact_size.y = 28.0;
+    ui.visuals_mut().override_text_color = Some(text_dark());
+    ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
+    ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    ui.visuals_mut().widgets.hovered.bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.hovered.weak_bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::NONE;
+    ui.visuals_mut().widgets.active.bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.active.weak_bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.active.bg_stroke = Stroke::NONE;
+}
 /// Visual separation between an icon and its label: two points of spacing
 /// plus the label's four-point inner inset from the design specification.
 pub(in crate::app) const BUTTON_ICON_TEXT_GAP: f32 = 6.0;

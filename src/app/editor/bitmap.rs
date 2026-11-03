@@ -494,7 +494,7 @@ fn draw_bitmap_index_control(
     );
     let (combo, wheel_delta) = combo_box_with_scroll(
         ui,
-        egui::ComboBox::from_id_salt((id_salt, count))
+        crate::app::ui_kit::ValueComboBox::from_id_salt((id_salt, count))
             .selected_text(selected_text)
             .width(64.0),
         |ui| {

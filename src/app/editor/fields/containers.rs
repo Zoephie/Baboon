@@ -2625,8 +2625,8 @@ fn searchable_block_selector_with_none(
 
 pub(in crate::app) fn combo_box_with_scroll<R>(
     ui: &mut Ui,
-    combo: egui::ComboBox,
-    add_contents: impl FnOnce(&mut Ui) -> R,
+    combo: ValueComboBox,
+    add_contents: impl FnOnce(&mut ValueComboUi<'_>) -> R,
 ) -> (egui::InnerResponse<Option<R>>, Option<i32>) {
     let response = ui
         .scope(|ui| {
@@ -2639,7 +2639,7 @@ pub(in crate::app) fn combo_box_with_scroll<R>(
             // instance selector would scroll rather than grow the moment an
             // element was added.
             ui.spacing_mut().combo_height = COMBO_POPUP_MAX_HEIGHT;
-            combo.show_ui(ui, add_contents)
+            combo.height(COMBO_POPUP_MAX_HEIGHT).show_ui(ui, add_contents)
         })
         .inner;
     let popup_open = response.inner.is_some();
