@@ -529,8 +529,9 @@ pub(super) fn read_resolved_map(
     Some((bitmap, sampler))
 }
 
-/// A map's `_xform`: its scale, then its offset. A shader's animators override
-/// the option's default scale.
+/// A map's `_xform`: its scale, then its offset. Tool's
+/// `render_method_update_real_parameter` starts from identity and takes only
+/// the shader's own animators; the option's default bitmap scale is not used.
 fn h3_xform(values: &Values<'_>, parameter: &str) -> [f32; 4] {
     // `update_real_parameter`: identity, whatever `default_bitmap_scale` says.
     let mut xform = [1.0, 1.0, 0.0, 0.0];
@@ -1485,27 +1486,13 @@ fn cached_h2_template(
 /// Where a named parameter's value comes from.
 ///
 /// The resolver is preferred because a good deal of this is *option defaults*
-/// rather than anything the shader authors — `detail_map_scale_uniform` is 16
-/// by default and dervish's shader never mentions it. Reading the shader block
-/// alone finds only what it overrides, which is how the detail maps ended up
-/// tiling once across a whole model.
+/// rather than anything the shader authors. Reading the shader block alone
+/// finds only what it overrides.
 struct Values<'a> {
     resolved: Option<&'a ResolvedRenderMethod>,
     method: &'a RenderMethod,
     /// `render_method`'s `sort layer`, by option name.
     sort_layer: i32,
-}
-
-impl Values<'_> {
-    fn real(&self, name: &str) -> Option<f32> {
-        if let Some(resolved) = self.resolved
-            && let Some(found) = resolved.find(name)
-            && let ParameterSource::Inline(ResolvedValue::Real(value)) = &found.source
-        {
-            return value.is_finite().then_some(*value);
-        }
-        real_parameter(self.method, name)
-    }
 }
 
 /// What one slot binds to.
@@ -1520,7 +1507,8 @@ struct SlotBitmap {
 /// Find a slot's bitmap: through the resolver when the definition loaded, and
 /// off the shader's own parameters when it did not.
 fn slot_binding(values: &Values<'_>, parameter: &str) -> Option<SlotBitmap> {
-    let scale = [slot_scale(values, parameter); 2];
+    let [x, y, ..] = h3_xform(values, parameter);
+    let scale = [x, y];
     if let Some(resolved) = values.resolved {
         let found = resolved.find(parameter)?;
         let ParameterSource::Inline(ResolvedValue::Bitmap(binding)) = &found.source else {
@@ -1555,33 +1543,6 @@ fn slot_binding(values: &Values<'_>, parameter: &str) -> Option<SlotBitmap> {
     })
 }
 
-/// A slot's UV multiplier.
-///
-/// Two places carry this and the option's is the one that usually holds the
-/// real number: `detail_map_scale_uniform` defaults to **16** while dervish's
-/// shader never mentions it, so reading only the shader's own `scale uniform`
-/// animator left every detail map tiling once across the whole model.
-fn slot_scale(values: &Values<'_>, parameter: &str) -> f32 {
-    let from_option = values.real(&format!("{parameter}_scale_uniform"));
-    let from_animator = parameter_named(values.method, parameter)
-        .and_then(|found| {
-            found.animated_parameters.iter().find(|animated| {
-                animated.parameter_type.map(|kind| kind.get())
-                    == Some(RenderMethodAnimatedParameterType::ScaleUniform)
-            })
-        })
-        .and_then(|animated| animated.function.as_ref())
-        .map(|function| function.evaluate(0.0, 0.0));
-
-    // The animator wins when the shader authored one — that is an explicit
-    // override of the option's default.
-    from_animator
-        .filter(|scale| scale.is_finite() && *scale > 0.0 && (*scale - 1.0).abs() > f32::EPSILON)
-        .or(from_option)
-        .filter(|scale| scale.is_finite() && *scale > 0.0)
-        .unwrap_or(1.0)
-}
-
 fn parameter_named<'a>(
     render_method: &'a RenderMethod,
     name: &str,
@@ -1590,21 +1551,6 @@ fn parameter_named<'a>(
         .parameters
         .iter()
         .find(|candidate| candidate.parameter_name == name)
-}
-
-/// A real parameter's value — the plain field when it is authored, otherwise its
-/// `value` animator, which is where the shipped tags actually put it.
-fn real_parameter(render_method: &RenderMethod, name: &str) -> Option<f32> {
-    let found = parameter_named(render_method, name)?;
-    if found.real_parameter != 0.0 && found.real_parameter.is_finite() {
-        return Some(found.real_parameter);
-    }
-    let animated = found.animated_parameters.iter().find(|animated| {
-        animated.parameter_type.map(|kind| kind.get())
-            == Some(RenderMethodAnimatedParameterType::Value)
-    })?;
-    let value = animated.function.as_ref()?.evaluate(0.0, 0.0);
-    value.is_finite().then_some(value)
 }
 
 fn cached_bitmap(
@@ -1940,13 +1886,11 @@ mod tests {
         );
     }
 
-    /// The detail maps' tiling comes from the resolver's option defaults.
-    ///
-    /// `detail_map_scale_uniform` is **16** and dervish's shader never mentions it,
-    /// so reading only the shader's own block found nothing and every detail map
-    /// tiled once across the whole model — which is most of what "detail" is for.
+    /// The detail maps tile by the shader's own scale animator, as tool's
+    /// `render_method_update_real_parameter` bakes them: dervish's armor
+    /// authors 16.
     #[test]
-    fn detail_tiling_comes_from_the_option_defaults() {
+    fn detail_tiling_comes_from_the_shaders_animator() {
         let Some(root) = kit_root(CASES[0].env, CASES[0].default_root) else {
             eprintln!("skipping: H3EK not present");
             return;
@@ -1965,7 +1909,7 @@ mod tests {
         let material = &resolved[0];
         assert!(
             !material.used_shader_parameters_only,
-            "the render-method definition should load; without it the option          default below is unreachable"
+            "the render-method definition should load"
         );
 
         for slot in [TextureSlot::Detail, TextureSlot::BumpDetail] {
@@ -1974,7 +1918,7 @@ mod tests {
                 .expect("dervish carries both detail maps");
             assert!(
                 image.scale.iter().all(|scale| (scale - 16.0).abs() < 0.01),
-                "detail tiling should come from the option default, got {:?}",
+                "detail tiling should come from the shader's animator, got {:?}",
                 image.scale
             );
         }

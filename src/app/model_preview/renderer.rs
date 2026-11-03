@@ -2822,13 +2822,15 @@ void main() {
     }
     gl_FragDepth = depth;
     float a = v_color.a;
+    // `sub_85F3B0` draws min with the multiply shader, and subtract and max
+    // with the add one.
     if (u_blend == 0) {
         r0.a *= a;
-    } else if (u_blend == 1) {
+    } else if (u_blend == 1 || u_blend == 5) {
         r0.rgb = mix(vec3(1.0), r0.rgb, a);
     } else if (u_blend == 2) {
         r0.rgb = mix(vec3(0.5), r0.rgb, a);
-    } else if (u_blend == 3) {
+    } else if (u_blend == 3 || u_blend == 4 || u_blend == 6) {
         r0.rgb *= a;
     } else if (u_blend == 7) {
         r0 *= a;
