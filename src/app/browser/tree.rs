@@ -7,6 +7,9 @@ pub(in crate::app) fn browser_open_requested(
     response: &egui::Response,
     double_click_to_open: bool,
 ) -> bool {
+    if response.ctx.input(|input| input.modifiers.ctrl || input.modifiers.command) {
+        return false;
+    }
     if double_click_to_open {
         response.double_clicked()
     } else {
@@ -4127,12 +4130,15 @@ mod tests {
     fn browser_click_selects_without_opening_and_keeps_the_active_tag_distinct() {
         for pointer_button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
         for double_click in [false, true] {
+        for ctrl in [false, true] {
             let ctx = egui::Context::default();
             let entry = entry(TagEntryLocation::LooseFile(PathBuf::from("example.model")));
             let mut selection = None;
             let mut row = egui::Rect::NOTHING;
             let mut frame = |events| {
                 let mut action = None;
+                let mut events: Vec<_> = events;
+                events.insert(0, egui::Event::ModifiersChanged(if ctrl { egui::Modifiers::CTRL } else { egui::Modifiers::NONE }));
                 let output = crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         set_browser_selected_tag(ui, selection.clone());
@@ -4147,12 +4153,12 @@ mod tests {
             let pos = row.center();
             frame(vec![egui::Event::PointerMoved(pos)]);
             let button = |pressed| egui::Event::PointerButton {
-                pos, button: pointer_button, pressed, modifiers: egui::Modifiers::NONE,
+                pos, button: pointer_button, pressed, modifiers: if ctrl { egui::Modifiers::CTRL } else { egui::Modifiers::NONE },
             };
             frame(vec![button(true)]);
             let (output, action, _, selected) = frame(vec![button(false)]);
             assert_eq!(selected.as_deref(), Some(entry.key.as_str()));
-            assert_eq!(matches!(action, Some(BrowserAction::Select(_))), !double_click && pointer_button == egui::PointerButton::Primary);
+            assert_eq!(matches!(action, Some(BrowserAction::Select(_))), !ctrl && !double_click && pointer_button == egui::PointerButton::Primary);
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Rect(rect) if rect.stroke == ctx.global_style().visuals.selection.stroke
                     && rect.stroke_kind == egui::StrokeKind::Inside)));
@@ -4160,6 +4166,7 @@ mod tests {
             let (_, action, _, selected) = frame(vec![egui::Event::PointerGone]);
             assert_eq!(selected.as_deref(), Some(entry.key.as_str()));
             assert!(action.is_none());
+        }
         }
         }
     }

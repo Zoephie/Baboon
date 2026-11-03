@@ -58,6 +58,10 @@ impl Baboon {
             !input.focused || input.pointer.any_pressed() || input.events.iter().any(|event| {
                 if copy_event(event) || navigation_key(event).is_some() { return false; }
                 match event {
+                    egui::Event::Key { key: egui::Key::ControlLeft | egui::Key::ControlRight
+                        | egui::Key::ShiftLeft | egui::Key::ShiftRight
+                        | egui::Key::AltLeft | egui::Key::AltRight
+                        | egui::Key::SuperLeft | egui::Key::SuperRight, .. } => false,
                     egui::Event::Key { pressed: true, .. }
                     | egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Cut => true,
                     egui::Event::MouseWheel { .. } => owner.is_some_and(|(_, bounds)|
@@ -1082,6 +1086,18 @@ mod tests {
             };
             frame(&mut app, vec![egui::Event::PointerMoved(row.center()), button(row.center(), true)]);
             frame(&mut app, vec![button(row.center(), false)]);
+            // Native input emits physical modifier keys before the Copy event.
+            for key in [egui::Key::ControlLeft, egui::Key::ControlRight] {
+                frame(&mut app, vec![egui::Event::Key {
+                    key, physical_key: Some(key), pressed: true, repeat: false,
+                    modifiers: egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND),
+                }]);
+                let browser = &app.views[app.model.kits[0].id].browser;
+                let selected = if let Some(pane) = pane.as_deref() {
+                    &browser.folder_browsers[pane].selected_tag
+                } else { &browser.selected_tag };
+                assert_eq!(selected.as_deref(), Some(entry.key.as_str()), "Ctrl alone must preserve selection");
+            }
             for copy in [egui::Event::Copy, egui::Event::Key {
                 key: egui::Key::C, physical_key: None, pressed: true, repeat: false,
                 modifiers: egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND),
