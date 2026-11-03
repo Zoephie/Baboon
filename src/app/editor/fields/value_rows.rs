@@ -3,6 +3,38 @@
 
 use super::*;
 
+pub(super) fn stacked_field_row(ui: &Ui) -> bool {
+    ui.available_width() < 760.0
+}
+
+/// Keep the label beside its controls when there is room; in narrow panes
+/// give the controls their own wrapping row instead of a minimum-width canvas.
+pub(super) fn foundation_field_row<R>(
+    ui: &mut Ui, meta: &FieldDisplayMeta, depth: usize,
+    controls: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let indent = depth as f32 * 12.0;
+    if stacked_field_row(ui) {
+        let indent = indent.min(24.0);
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(indent);
+                foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(indent);
+                controls(ui)
+            }).inner
+        })
+    } else {
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+            foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+            controls(ui)
+        })
+    }
+}
+
 pub(in crate::app) fn draw_foundation_value_row(
     ui: &mut Ui,
     field: TagField<'_>,
@@ -246,9 +278,7 @@ pub(in crate::app) fn draw_foundation_color_row(
     );
     let editable = edit.can_edit(meta);
 
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_field_row(ui, meta, depth, |ui| {
         draw_foundation_component_cells(ui, &parts, 76.0, path, editable, edit);
 
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
@@ -285,9 +315,7 @@ pub(in crate::app) fn draw_foundation_multi_value_row(
     suffix: &str,
     depth: usize,
 ) {
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_field_row(ui, meta, depth, |ui| {
         for (label, value) in parts {
             if !label.is_empty() {
                 ui.label(RichText::new(label).color(subtle_dark()).small());
@@ -341,7 +369,6 @@ pub(in crate::app) fn draw_foundation_bounds_row(
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let lower_key = format!("{buffer_key}|lower");
     let upper_key = format!("{buffer_key}|upper");
@@ -350,9 +377,7 @@ pub(in crate::app) fn draw_foundation_bounds_row(
     let mut lower = edit.buffers.take(&lower_key, lower_value);
     let mut upper = edit.buffers.take(&upper_key, upper_value);
 
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_field_row(ui, meta, depth, |ui| {
         let editable = edit.can_edit(meta);
         let lower_response = foundation_value_cell(ui, &mut lower.text, 92.0, lower_id, editable);
         ui.label(RichText::new("to").color(subtle_dark()).small());
@@ -398,10 +423,7 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let indent = depth as f32 * 12.0;
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_field_row(ui, meta, depth, |ui| {
         let editable = edit.can_edit(meta);
         draw_foundation_component_cells(ui, parts, 92.0, path, editable, edit);
         if !suffix.is_empty() {
@@ -587,9 +609,7 @@ fn draw_foundation_data_row(
     edit: &mut FieldEditContext<'_>,
 ) {
     let indent = depth as f32 * 12.0;
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_field_row(ui, meta, depth, |ui| {
         ui.label(RichText::new(data_size_text(bytes.len())).color(text_dark()));
     });
     let Some(definition) = data_definitions(edit.definitions_root, edit.game)
@@ -617,7 +637,7 @@ fn draw_foundation_data_row(
         field_edit_ops(path, &hex)
     };
     ui.horizontal_top(|ui| {
-        ui.add_space(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x);
+        ui.add_space(if stacked_field_row(ui) { indent.min(24.0) } else { indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x });
         // Foundation's box is at least 600 wide and grows to 200 tall; Halo 2
         // Guerilla's is a fixed 540 by 128 in an 11-pixel fixed-pitch font.
         // Neither wraps. This one starts as wide as there is room for and as
@@ -734,7 +754,7 @@ fn draw_foundation_data_row(
     });
     if let Err(too_long) = stored_bytes(&draft.text) {
         ui.horizontal(|ui| {
-            ui.add_space(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x);
+            ui.add_space(if stacked_field_row(ui) { indent.min(24.0) } else { indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x });
             ui.label(RichText::new(too_long.to_string()).color(invalid_value_text()).small());
         });
     }
@@ -883,14 +903,15 @@ pub(super) fn draw_foundation_labelled_cell_row(
     depth: usize,
     cell: impl FnOnce(&mut Ui, f32),
 ) {
-    let indent = depth as f32 * 12.0;
-    let suffix_reserve = if suffix.is_empty() { 0.0 } else { 96.0 };
-    let available_value_width =
-        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - suffix_reserve - 28.0)
-            .clamp(180.0, 920.0);
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    let stacked = stacked_field_row(ui);
+    let indent = (depth as f32 * 12.0).min(if stacked { 24.0 } else { f32::INFINITY });
+    let suffix_reserve = if suffix.is_empty() || stacked { 0.0 } else { 96.0 };
+    let available_value_width = if stacked {
+        (ui.available_width() - indent - 8.0).max(1.0)
+    } else {
+        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - suffix_reserve - 28.0).clamp(180.0, 920.0)
+    };
+    foundation_field_row(ui, meta, depth, |ui| {
         cell(ui, available_value_width);
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
@@ -941,6 +962,59 @@ pub(in crate::app) fn block_flags_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn narrow_fields_stack_labels_and_keep_block_controls_within_the_pane() {
+        let tag = blam_tags::TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let root = tag.root();
+        let flags = root.fields_all().find(|field|
+            matches!(field.options(), Some(blam_tags::TagOptions::Flags(options)) if options.len() >= 2)).unwrap();
+        for width in [280.0, 480.0, 720.0, 1200.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut text_rect = egui::Rect::NOTHING;
+            let mut label_rect = egui::Rect::NOTHING;
+            let mut overflow = 0.0_f32;
+            let mut header_height = 0.0;
+            for _ in 0..3 {
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 1400.0))),
+                    ..Default::default()
+                }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let right = ui.max_rect().right();
+                        super::with_test_edit_context(|edit| {
+                            let meta = field_display_meta("responsive field");
+                            let id = edit.widget_id(("text", format!("{}|text", edit.tag_key)));
+                            draw_foundation_editable_text_row(ui, &meta, &"long value ".repeat(10), "world units", 1, "text", edit);
+                            text_rect = ctx.read_response(id).unwrap().rect;
+                            draw_foundation_tag_reference_row(ui, &field_display_meta("reference"), "NONE", None, None, 1, "reference", edit, 520.0);
+                            draw_foundation_enum_row(ui, &field_display_meta("option"), &["one", "two"], Some(0), 1, "option", edit);
+                            draw_foundation_flags_row(ui, &field_display_meta("flags"), 0, &[], flags, 1, "flags", edit);
+                        });
+                        let top = ui.cursor().top();
+                        draw_foundation_block_control(ui, "A block with a longer title", "0. example", 0, 4,
+                            None, true, true, "responsive", "test", "block", 1, true, None, false,
+                            PasteGate::Empty, Some("160 bytes"), |index| format!("{index}. example"), |_| {});
+                        header_height = ui.cursor().top() - top;
+                        overflow = ui.min_rect().right() - right;
+                    });
+                });
+                label_rect = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "responsive field" =>
+                        Some(text.galley.rect.translate(text.pos.to_vec2())),
+                    _ => None,
+                }).unwrap();
+            }
+            assert!(overflow < 1.0, "{width}px pane overflowed by {overflow}px");
+            if width < 760.0 {
+                assert!(label_rect.bottom() <= text_rect.top(), "the label moves above its input at {width}px");
+                assert!(header_height > 60.0, "the block toolbar wraps at {width}px");
+            } else {
+                assert!((label_rect.center().y - text_rect.center().y).abs() < 3.0);
+            }
+        }
+    }
 
     /// A block-flags field lists its target block's elements as checkboxes,
     /// named as the editor names them, and a click sets the element's bit.

@@ -185,7 +185,7 @@ fn findable_layout_job(
 }
 
 pub(in crate::app) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Option<&str>) {
-    let width = FOUNDATION_LABEL_WIDTH;
+    let width = FOUNDATION_LABEL_WIDTH.min(ui.available_width().max(1.0));
     let height = 24.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     // Reserve a gutter for the "?" documentation cue. Foundation always reserves
@@ -492,6 +492,7 @@ pub(in crate::app) fn text_edit_cursor_to_start_on_tab_focus(ui: &Ui, response: 
 }
 
 pub(in crate::app) fn foundation_value_width(value: &str, available: f32) -> f32 {
+    if available < 300.0 { return available.max(1.0); }
     if value.len() > 48 {
         available
     } else if value.len() > 18 {

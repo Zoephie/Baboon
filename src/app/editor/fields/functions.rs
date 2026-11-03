@@ -3,6 +3,20 @@
 
 use super::*;
 
+fn foundation_function_row(
+    ui: &mut Ui, meta: &FieldDisplayMeta, depth: usize, contents: impl FnOnce(&mut Ui),
+) {
+    if stacked_field_row(ui) {
+        foundation_field_row(ui, meta, depth, contents);
+    } else {
+        ui.horizontal_top(|ui| {
+            ui.add_space(depth as f32 * 12.0);
+            foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+            contents(ui);
+        });
+    }
+}
+
 pub(in crate::app) fn draw_foundation_function_row(
     ui: &mut Ui,
     meta: &FieldDisplayMeta,
@@ -25,9 +39,9 @@ fn draw_foundation_function_row_contents(
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    ui.horizontal_top(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_function_row(ui, meta, depth, |ui| {
+        crate::app::ScrollArea::horizontal().id_salt(("function_surface", path))
+            .auto_shrink([false, true]).show(ui, |ui| {
         Frame::NONE
             .fill(foundation_group_bg())
             .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
@@ -92,6 +106,7 @@ fn draw_foundation_function_row_contents(
                     });
                 });
             });
+        });
     });
 }
 
@@ -132,9 +147,10 @@ fn draw_foundation_wrapped_function_row_contents(
     depth: usize,
     edit: &mut FieldEditContext<'_>,
 ) {
-    ui.horizontal_top(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &label, None);
+    let meta = field_display_meta(&label);
+    foundation_function_row(ui, &meta, depth, |ui| {
+        crate::app::ScrollArea::horizontal().id_salt(("wrapped_function_surface", data_path_id(&view)))
+            .auto_shrink([false, true]).show(ui, |ui| {
         Frame::NONE
             .fill(foundation_group_bg())
             .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
@@ -190,6 +206,7 @@ fn draw_foundation_wrapped_function_row_contents(
                     });
                 });
             });
+        });
     });
 }
 
@@ -406,9 +423,8 @@ pub(in crate::app) fn draw_foundation_enum_row(
     edit: &mut FieldEditContext<'_>,
 ) {
     let mut selected = current.unwrap_or(-1);
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_field_row(ui, meta, depth, |ui| {
+
         ui.add_enabled_ui(edit.can_edit(meta), |ui| {
             let selected_label = enum_option_label(options, selected);
             let selected_text = highlighted_widget_text(
@@ -422,7 +438,7 @@ pub(in crate::app) fn draw_foundation_enum_row(
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
                 egui::ComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
-                    .width(240.0)
+                    .width(240.0_f32.min(ui.available_width().max(1.0)))
                     .selected_text(selected_text),
                 |ui| {
                     // `!` options are listed only in expert mode, as Foundation does.

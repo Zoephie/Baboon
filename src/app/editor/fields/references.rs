@@ -223,7 +223,6 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     value_width: f32,
 ) {
     let suffix = "tag reference";
-    let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
     let droppable = edit.can_edit(meta);
@@ -254,10 +253,11 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     {
         rejected = None;
     }
-    let row_response = ui
-        .horizontal(|ui| {
-            ui.add_space(indent);
-            foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    let stacked = stacked_field_row(ui);
+    let row_response = foundation_field_row(ui, meta, depth, |ui| {
+            let value_width = if stacked {
+                (ui.available_width() - 120.0).max(ui.available_width() * 0.55).max(1.0)
+            } else { value_width };
             let editable = droppable;
             let has_ref = target.is_some();
             let icon_group =
@@ -804,9 +804,12 @@ pub(in crate::app) fn draw_foundation_flags_row(
         .filter(|(_, option, _)| !option.advanced || edit.expert_mode)
         .collect::<Vec<_>>();
 
-    let indent = depth as f32 * 12.0;
-    let row_width = ui.available_width().max(620.0);
-    let panel_width = (row_width - indent - FOUNDATION_LABEL_WIDTH - 40.0).clamp(360.0, 760.0);
+    let stacked = stacked_field_row(ui);
+    let indent = (depth as f32 * 12.0).min(if stacked { 24.0 } else { f32::INFINITY });
+    let row_width = ui.available_width();
+    let label_height = if stacked { 28.0 } else { 0.0 };
+    let panel_width = if stacked { (row_width - indent).max(1.0) }
+        else { (row_width - indent - FOUNDATION_LABEL_WIDTH - 40.0).clamp(360.0, 760.0) };
     let flag_row_height = 21.0;
     let panel_height = if display_flags.is_empty() {
         32.0
@@ -814,7 +817,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
         12.0 + flag_row_height * display_flags.len() as f32
             + if edit.expert_mode { 24.0 } else { 0.0 }
     };
-    let total_height = panel_height.max(32.0);
+    let total_height = panel_height.max(32.0) + label_height;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(row_width, total_height), Sense::hover());
     let painter = ui.painter().clone();
 
@@ -831,7 +834,8 @@ pub(in crate::app) fn draw_foundation_flags_row(
     foundation_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
 
     let flags_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x, 0.0),
+        rect.left_top() + Vec2::new(if stacked { indent }
+            else { indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x }, label_height),
         Vec2::new(panel_width, panel_height),
     );
     painter.rect_filled(flags_rect, 0.0, foundation_input());

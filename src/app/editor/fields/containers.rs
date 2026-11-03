@@ -1951,8 +1951,9 @@ pub(in crate::app) fn draw_foundation_block_control(
 
     add_foundation_header_spacing(ui);
     let row_width = ui.available_width();
+    let narrow = row_width < 900.0;
     let row_height = 40.0;
-    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, row_height), Sense::hover());
+    let (mut row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, row_height), Sense::hover());
     let header_fill = foundation_block_bar();
     let header_background = ui.painter().add(egui::Shape::Noop);
 
@@ -1998,8 +1999,8 @@ pub(in crate::app) fn draw_foundation_block_control(
     // Paint controls inside the already-reserved row without changing the
     // parent's cursor; otherwise the 8pt bottom padding is lost.
     let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink(8.0)));
-    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-    header_ui.horizontal_centered(|ui| {
+    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, if narrow { 8.0 } else { 0.0 });
+    header_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(narrow), |ui| {
         ui.add_space(depth as f32 * 5.0);
         let toggle = foundation_header_toggle_cell(ui, state.is_open(), count > 0);
         if toggle.clicked() && count > 0 {
@@ -2027,7 +2028,7 @@ pub(in crate::app) fn draw_foundation_block_control(
         }
         let block_title = foundation_block_title(name);
         let (name_rect, name_label) =
-            ui.allocate_exact_size(Vec2::new(190.0, 20.0), Sense::click());
+            ui.allocate_exact_size(Vec2::new(if narrow { ui.available_width().max(1.0) } else { 190.0 }, 24.0), Sense::click());
         let block_title_font = bold_font(12.5);
         if jump_highlight_strength > 0.0 {
             let galley = ui.painter().layout_no_wrap(
@@ -2057,7 +2058,7 @@ pub(in crate::app) fn draw_foundation_block_control(
             ui,
             name_rect.left_center(),
             Align2::LEFT_CENTER,
-            &block_title,
+            &truncate_for_cell(&block_title, name_rect.width()),
             block_title_font,
             foundation_block_text(),
             FindTargetKind::Block,
@@ -2066,7 +2067,7 @@ pub(in crate::app) fn draw_foundation_block_control(
         // read-only and available for any element collection (including
         // fixed-size arrays); the size/content-changing paste & replace
         // actions are gated behind `allow_structural`.
-        let name_label = name_label.on_hover_text("Right-click for block options");
+        let name_label = name_label.on_hover_text(format!("{block_title}\nRight-click for block options"));
         context_menu(&name_label, |ui| {
             draw_block_header_menu(ui, count, allow_structural, editable, paste_gate, &mut actions);
         });
@@ -2094,7 +2095,8 @@ pub(in crate::app) fn draw_foundation_block_control(
         }
 
         // Instance selector dropdown — built lazily (only when open).
-        let combo_width = foundation_selected_width(row_width);
+        let combo_width = if narrow { (row_width - 80.0).clamp(40.0, 420.0) }
+            else { foundation_selected_width(row_width) };
         {
             // Include the count so changed blocks retire the popup's old sizing.
             let popup_id = ui.make_persistent_id((
@@ -2184,6 +2186,13 @@ pub(in crate::app) fn draw_foundation_block_control(
         });
     });
 
+    // Wrapping can add selector/action rows. Extend the reserved header before
+    // drawing its body so the background, jump targets and scroll extent agree.
+    let bottom = header_ui.min_rect().bottom() + 8.0;
+    if bottom > row_rect.bottom() {
+        ui.add_space(bottom - row_rect.bottom());
+        row_rect.max.y = bottom;
+    }
     if has_sel && selector_active {
         let navigation_delta = ui.input(|input| {
             if input.key_pressed(egui::Key::ArrowUp) {
@@ -3059,9 +3068,8 @@ pub(in crate::app) fn draw_foundation_block_index_row(
         "<none>".to_owned()
     };
 
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_field_row(ui, meta, depth, |ui| {
+        let value_width = 300.0_f32.min((ui.available_width() - 32.0).max(1.0));
 
         if editable {
             let mut new_index: Option<i64> = None;
@@ -3083,7 +3091,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                     usize::MAX
                 },
                 target.len,
-                300.0,
+                value_width,
                 &|index| {
                     let block = block.get_or_init(|| {
                         root.and_then(|root| root.field_path(target_block_path))
@@ -3114,7 +3122,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                 });
             }
         } else {
-            foundation_input_cell(ui, &selected_text, 300.0);
+            foundation_input_cell(ui, &selected_text, value_width);
         }
 
         // "Go to" the referenced element: scroll to the target block and select
