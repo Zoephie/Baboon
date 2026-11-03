@@ -244,6 +244,7 @@ struct RunningFlag {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CeFlagField {
     time: Option<f32>,
+    ticks: super::ce_particles::CeTicks,
     running: Vec<RunningFlag>,
 }
 
@@ -350,8 +351,8 @@ impl RunningFlag {
 
 impl CeFlagField {
     /// The flags brought up to `time`: settled once, as `flag_render` does on
-    /// the first frame, then a `flags_update` each frame, as `widgets_update`
-    /// runs it from `game_frame`. Returns each flag's
+    /// the first frame, then a `flags_update` on each frame ticks ran, by
+    /// them, as `game_frame` runs `widgets_update`. Returns each flag's
     /// first vertex and its vertices as they now stand.
     pub(crate) fn advance(
         &mut self,
@@ -380,9 +381,15 @@ impl CeFlagField {
             // Settled is where the game starts it, so there is nothing to
             // simulate before now.
             self.time = Some(time);
+            self.ticks = Default::default();
         }
         let now = resume_point(self.time.unwrap_or(time), time, 0.0);
         for dt in frame_steps(now, time) {
+            let ticks = self.ticks.run(dt);
+            if ticks == 0 {
+                continue;
+            }
+            let dt = ticks as f32 * super::ce_particles::STEP;
             for (flag, running) in flags.iter().zip(&mut self.running) {
                 running.update(flag, &attached_of(flag), ground, dt);
             }

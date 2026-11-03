@@ -29,10 +29,29 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
 /// A game tick, which is what `effects_update` steps by.
-const STEP: f32 = 1.0 / 30.0;
+pub(super) const STEP: f32 = 1.0 / 30.0;
 const PRE_ROLL: f32 = 4.0;
 /// How far short of a tick the frames' time can fall by rounding alone.
 const TICK_ROUNDING: f32 = 1e-5;
+
+/// The frames' time not yet run as ticks, as `game_time_update` keeps it.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct CeTicks(f32);
+
+impl CeTicks {
+    /// How many ticks a frame `dt` long runs: `game_time_get_elapsed`, which
+    /// `game_frame` runs `particles_update` and `widgets_update` by.
+    pub(super) fn run(&mut self, dt: f32) -> u32 {
+        self.0 += dt;
+        let mut ticks = 0;
+        // A frame of two half ticks owes a whole one, whatever the rounding.
+        while self.0 >= STEP - TICK_ROUNDING {
+            self.0 -= STEP;
+            ticks += 1;
+        }
+        ticks
+    }
+}
 /// `effect_update` runs at most this many events in a tick.
 const MOST_EVENTS_A_TICK: usize = 8;
 /// The game's pool is shared by the whole level.
@@ -974,8 +993,7 @@ pub(crate) struct CeParticleField {
     spawned: Vec<CeEffectAt>,
     /// `game_time_get`.
     tick: u32,
-    /// The frames' time not yet run as ticks, as `game_time_update` keeps it.
-    owed: f32,
+    owed: CeTicks,
     random: Option<Random>,
     system_random: Option<SystemRandom>,
 }
@@ -1065,7 +1083,7 @@ impl CeParticleField {
             self.spawned.clear();
             self.system_random = Some(SystemRandom::seeded(0x5eed_4321));
             self.tick = 0;
-            self.owed = 0.0;
+            self.owed = CeTicks::default();
             self.random = Some(Random(0x1234_5678));
             let mut random = self.random.take().unwrap();
             for (running, effect) in self.effects.iter_mut().zip(effects) {
@@ -1081,13 +1099,11 @@ impl CeParticleField {
         let mut random = self.random.take().unwrap_or(Random(1));
         for dt in frame_steps(now, time) {
             let effects: Vec<CeEffectAt> = effects.iter().chain(&self.spawned).cloned().collect();
-            self.owed += dt;
-            // A frame of two half ticks owes a whole one, whatever the rounding.
-            while self.owed >= STEP - TICK_ROUNDING {
-                self.owed -= STEP;
+            let ticks = self.owed.run(dt);
+            for _ in 0..ticks {
                 self.tick_effects(&effects, &inputs, bones, ground, others, &mut random);
             }
-            self.frame_parts(&effects, ground, dt, others, &mut random);
+            self.frame_parts(&effects, ground, dt, ticks as f32 * STEP, others, &mut random);
             self.forget_spawned(own);
         }
         self.time = Some(time);
@@ -1130,9 +1146,11 @@ impl CeParticleField {
         });
     }
 
-    /// One `game_frame`, `dt` long: `particle_systems_update`, then
-    /// `particles_update` with the effects what they hit and died of make.
-    fn frame_parts(&mut self, effects: &[CeEffectAt], ground: f32, dt: f32, others: usize, random: &mut Random) {
+    /// One `game_frame`, `dt` long, after `ticked` of ticks:
+    /// `particle_systems_update` by the frame, then, only when ticks ran,
+    /// `particles_update` by them, with the effects what they hit and died
+    /// of make. A particle that steps a frame per update steps one per tick.
+    fn frame_parts(&mut self, effects: &[CeEffectAt], ground: f32, dt: f32, ticked: f32, others: usize, random: &mut Random) {
         let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
         // Those with no type in a state go.
         let system_random = self.system_random.get_or_insert_with(|| SystemRandom::seeded(1));
@@ -1142,13 +1160,17 @@ impl CeParticleField {
                 .and_then(|effect| effect.def.systems.get(*def))
                 .is_some_and(|def| update_unattached(def, running, ground, dt, system_random, &mut system_room))
         });
+        // `game_frame` runs `particles_update` only when ticks have.
+        if ticked <= 0.0 {
+            return;
+        }
         let mut made: Vec<CeEffectAt> = Vec::new();
         self.particles.retain_mut(|particle| {
             if particle.undrawn > MOST_UNDRAWN_FRAMES {
                 return false;
             }
             let def = &effects[particle.effect].def.particles[particle.def];
-            let (fate, collided) = update_particle(particle, def, random, ground, dt);
+            let (fate, collided) = update_particle(particle, def, random, ground, ticked);
             // `particle_effect_new` for what it hit, then what it died of.
             if let (Some(scale), Some(effect)) = (collided, &def.collision_effect) {
                 made.extend(spawn_effect(effect, particle, scale));

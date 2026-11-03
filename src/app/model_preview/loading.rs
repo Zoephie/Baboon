@@ -4312,6 +4312,29 @@ mod kit_object_tests {
         assert_eq!(at_open, a_minute_in);
     }
 
+    /// `game_frame` runs `widgets_update`, and so `flags_update`, only on a
+    /// frame ticks ran, by them: at 120 frames a second the flag moves on
+    /// every fourth frame, and holds between.
+    #[test]
+    fn a_flag_moves_only_on_frames_a_tick_runs() {
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let data = kit_preview(&root, GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap");
+        let flags = &data.preview.ce_flags;
+        let mut field = super::super::ce_flags::CeFlagField::default();
+        let mut last = field.advance(flags, None, 0.0, 10.0);
+        let mut moved = Vec::new();
+        for frame in 1..=12 {
+            let now = field.advance(flags, None, 0.0, 10.0 + frame as f32 / 120.0);
+            moved.push(now != last);
+            last = now;
+        }
+        let ticked = [false, false, false, true];
+        assert_eq!(moved, ticked.repeat(3));
+    }
+
     /// `object_set_initial_change_colors` colors every object from its own
     /// tag: the scorpion's turret is not white, and not the hull's colors.
     #[test]
