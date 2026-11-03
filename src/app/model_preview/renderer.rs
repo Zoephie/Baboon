@@ -4783,6 +4783,8 @@ impl ModelGlRenderer {
                 draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
             }
             let first_h3 = frame.preview.ce_lights.len() + frame.preview.h2_flares.len();
+            let viewport = self.h2_scene.as_ref().map_or([1, 1], |scene| scene.size);
+            let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
             for (index, at) in frame.preview.h3_flares.iter().enumerate() {
                 if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
                     continue;
@@ -4796,7 +4798,7 @@ impl ModelGlRenderer {
                     Some(None) => continue,
                     state => state.flatten(),
                 };
-                let occlusion = match at.occlusion_patch(light, values, bones, &view, event_time) {
+                let occlusion = match at.occlusion_patch(light, values, bones, &view, event_time, &pixels) {
                     None => Some(1.0),
                     Some(patch) => ce_flare_occlusion(gl, flares, camera, &view, &patch),
                 };
@@ -7221,6 +7223,19 @@ fn ce_flare_clip(camera: &ModelGpuCamera, point: [f32; 3]) -> [f32; 4] {
         view[1] * camera.depth_scale * camera.depth_map[0] + camera.depth_map[1],
         1.0 + view[1] * camera.perspective,
     ]
+}
+
+/// How many pixels wide plus high a screen-facing sprite of `half` extents
+/// is at `center`: `lens_flare_project_billboard`'s half extents across the
+/// viewport, as Reach's `lens_flare_render_internal` measures them.
+fn ce_flare_pixels(camera: &ModelGpuCamera, viewport: [i32; 2], center: [f32; 3], half: [f32; 2]) -> f32 {
+    let w = ce_flare_clip(camera, center)[3];
+    if w <= 0.0 {
+        return 0.0;
+    }
+    let across = half[0] * camera.scale * camera.clip_scale[0] / w * viewport[0] as f32;
+    let down = half[1] * camera.scale * camera.clip_scale[1] / w * viewport[1] as f32;
+    across + down
 }
 
 /// A sprite's four corners, all at the depth of its center.

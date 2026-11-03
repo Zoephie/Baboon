@@ -412,7 +412,9 @@ pub(crate) struct H3Flare {
     falloff: u8,
     occlusion_offset: f32,
     occlusion_toward_eye: bool,
-    inner_scale: i128,
+    inner: FlareInner,
+    /// Reach's reflection curves; none for Halo 3's bounds.
+    curves: Option<ReachFlareCurves>,
     rotation_offset: f32,
     radius: [f32; 2],
     brightness: [f32; 2],
@@ -435,6 +437,44 @@ pub(crate) struct H3Flare {
     /// `ignore external color`: a light's color does not tint it.
     ignores_external_color: bool,
     bitmap: H3Bitmap,
+}
+
+/// How much of a flare its occlusion patch covers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum FlareInner {
+    /// Halo 3's `occlusion inner radius scale`: an enum, the radius halved
+    /// that many times.
+    Halved(i128),
+    /// Reach's: the fraction of the corona to occlude against, which
+    /// `lens_flare_render_internal` (the 360's 0x826a8ce0) eases back toward
+    /// the whole corona as it shrinks on screen.
+    Fraction(f32),
+}
+
+impl FlareInner {
+    /// The patch's share of `radius`, for a flare `pixels` wide plus high.
+    fn share(self, pixels: f32) -> f32 {
+        match self {
+            Self::Halved(times) => 1.0 / 2f32.powi(times as i32),
+            Self::Fraction(inner) => {
+                let size = (pixels / REACH_OCCLUSION_PIXELS).clamp(0.0, 1.0);
+                inner + (1.0 - inner) * (1.0 - size)
+            }
+        }
+    }
+}
+
+/// The width plus height, in pixels, at which a Reach flare occludes against
+/// its inner fraction alone.
+const REACH_OCCLUSION_PIXELS: f32 = 600.0;
+
+/// Reach's reflection `radius curve` and `brightness curve`: each a function
+/// of the flare's scale, where Halo 3 took the scale across bounds
+/// (`lens_flare_evaluate_parameters`, the 360's 0x826a9978).
+#[derive(Debug, Clone)]
+struct ReachFlareCurves {
+    radius: Arc<TagFunction>,
+    brightness: Arc<TagFunction>,
 }
 
 /// `s_editing_function`: a color curve, and what can drive it off the object.
@@ -485,6 +525,8 @@ pub(crate) struct H3FlareAt {
     forward: [f32; 3],
     only_under: Option<(String, String)>,
     scale_by: String,
+    /// Reach's attachment `secondary scale`, which multiplies the primary.
+    secondary_by: String,
     /// Set for a flare an attached effect draws.
     by_effect: Option<H3EffectScale>,
     /// When its effect's event runs, for a flare an attached effect draws.
@@ -541,6 +583,13 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
     };
     let radius = reflection.read_real_bounds("radius");
     let brightness = reflection.read_fraction_bounds("brightness");
+    let curve = |name: &str| reflection.descend(name).and_then(|curve| tag_function_at(&curve, "function")).map(Arc::new);
+    let curves = curve("radius curve").zip(curve("brightness curve")).map(|(radius, brightness)| ReachFlareCurves { radius, brightness });
+    // Reach's inner scale is a real fraction; Halo 3's an enum.
+    let inner = match curves {
+        Some(_) => FlareInner::Fraction(root.read_real("occlusion inner radius scale").unwrap_or(1.0)),
+        None => FlareInner::Halved(root.read_int_any("occlusion inner radius scale").unwrap_or(0)),
+    };
     let color = reflection.read_rgb("color");
     let fade = |name: &str| root.read_real(name).unwrap_or(0.0);
     Some(H3Flare {
@@ -551,7 +600,8 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         falloff: root.read_int_any("falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
         occlusion_offset: fade("occlusion offset distance"),
         occlusion_toward_eye: root.read_int_any("occlusion offset direction") == Some(OFFSET_TOWARD_EYE),
-        inner_scale: root.read_int_any("occlusion inner radius scale").unwrap_or(0),
+        inner,
+        curves,
         rotation_offset: reflection.read_real("rotation offset").unwrap_or(0.0).to_radians(),
         radius: [radius.lower, radius.upper],
         brightness: [brightness.lower, brightness.upper],
@@ -598,6 +648,7 @@ pub(super) fn read_h3_flares(
                            name: &str,
                            once: bool,
                            scale_by: String,
+                           secondary_by: String,
                            by_effect: Option<H3EffectScale>,
                            event: Option<(Arc<H3EffectTimes>, usize)>,
                            placed: &dyn Fn(MarkerFrame, usize) -> (MarkerFrame, usize)| {
@@ -614,6 +665,7 @@ pub(super) fn read_h3_flares(
                 forward: place.axes[0],
                 only_under: marker.only_under.clone(),
                 scale_by: scale_by.clone(),
+                secondary_by: if flare.curves.is_some() { secondary_by.clone() } else { String::new() },
                 by_effect,
                 event: event.clone(),
                 flare: Arc::clone(&flare),
@@ -628,7 +680,9 @@ pub(super) fn read_h3_flares(
         if group == flare_group && !path.is_empty() {
             let name = marker_name(attachment, "marker");
             let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
-            place_flare(&path, &name, false, scale_by, None, None, &|place, node| (place, node));
+            // Reach's `render_object_attachments` (0x8274f128) scales by both.
+            let secondary_by = attachment.read_string_id("secondary scale").unwrap_or_default();
+            place_flare(&path, &name, false, scale_by, secondary_by, None, None, &|place, node| (place, node));
         }
     }
     for_each_attached_part(source, object, |part| {
@@ -636,7 +690,8 @@ pub(super) fn read_h3_flares(
             let by_effect = Some(H3EffectScale { scaled: part.scaled });
             let event = Some((Arc::clone(&part.times), part.event));
             let placed = |place, node| part.placed(place, node);
-            place_flare(&part.path, &part.marker, part.effect.once, part.effect.scale_by.clone(), by_effect, event, &placed);
+            let scale_by = part.effect.scale_by.clone();
+            place_flare(&part.path, &part.marker, part.effect.once, scale_by, String::new(), by_effect, event, &placed);
         }
     });
     flares
@@ -654,6 +709,7 @@ pub(super) fn light_flares(lights: &[H3Light]) -> Vec<H3FlareAt> {
             forward: light.forward,
             only_under: light.only_under.clone(),
             scale_by: light.scale_by.clone(),
+            secondary_by: String::new(),
             by_effect: None,
             event: None,
             flare: Arc::clone(light.flare.as_ref()?),
@@ -754,14 +810,20 @@ impl H3FlareAt {
             },
             None => 1.0,
         };
+        let named = |name: &str| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
+        let secondary = if self.secondary_by.is_empty() { 1.0 } else { named(&self.secondary_by) };
         if self.scale_by.is_empty() {
-            return aged;
+            return aged * secondary;
         }
-        let value = values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0);
-        aged * self.by_effect.map_or(value, |scale| scale.of(value))
+        let value = named(&self.scale_by);
+        aged * self.by_effect.map_or(value, |scale| scale.of(value)) * secondary
     }
 
     fn radius(&self, scale: f32) -> f32 {
+        // Reach: the marker's matrix scale (the object's, 1) times the curve.
+        if let Some(curves) = &self.flare.curves {
+            return curves.radius.evaluate(scale, 0.0);
+        }
         let [lower, upper] = self.flare.radius;
         // `lens_flares_create` takes the marker matrix's scale, which is the
         // object's. The marker's own `scale` is its `radius`, and many are 0.
@@ -769,7 +831,9 @@ impl H3FlareAt {
     }
 
     /// `lens_flare_render_occlusion`'s patch, or none for a flare without one.
-    /// `light` is its light's `state`, for a light's own flare.
+    /// `light` is its light's `state`, for a light's own flare. `pixels` is
+    /// how many pixels wide plus high a flare of a radius is at a point.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn occlusion_patch(
         &self,
         light: Option<([f32; 3], f32)>,
@@ -777,6 +841,7 @@ impl H3FlareAt {
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
+        pixels: &dyn Fn([f32; 3], [f32; 2]) -> f32,
     ) -> Option<CeSprite> {
         let flare = &*self.flare;
         let (scale, _) = self.scale_and_tint(light, values, time);
@@ -786,7 +851,9 @@ impl H3FlareAt {
         let (position, forward) = posed_on(self.node, self.position, self.forward, bones);
         let toward_eye = view.forward.map(|axis| -axis);
         let offset = if flare.occlusion_toward_eye { toward_eye } else { forward };
-        let radius = self.radius(scale) / 2f32.powi(flare.inner_scale as i32);
+        let radius = self.radius(scale);
+        let across = pixels(position, [radius * flare.aspect[0], radius * flare.aspect[1]]);
+        let radius = radius * flare.inner.share(across);
         Some(CeSprite {
             center: std::array::from_fn(|axis| position[axis] + offset[axis] * flare.occlusion_offset),
             extent: [radius; 2],
@@ -850,8 +917,13 @@ impl H3FlareAt {
         if let Some(function) = &flare.age_brightness {
             corona *= function.evaluate(age, 0.0);
         }
-        let [lower, upper] = flare.brightness;
-        let brightness = ((upper - lower) * scale + lower).clamp(0.0, 1.0) * corona;
+        let brightness = match &flare.curves {
+            Some(curves) => curves.brightness.evaluate(scale, 0.0) * corona,
+            None => {
+                let [lower, upper] = flare.brightness;
+                ((upper - lower) * scale + lower).clamp(0.0, 1.0) * corona
+            }
+        };
         let mut radius = self.radius(scale);
         if flare.radius_by_occlusion {
             radius *= ((1.0 + occlusion) * 0.5).clamp(0.0, 1.0);
@@ -912,6 +984,42 @@ mod tests {
         assert_eq!(occlusion_fraction(0, true, 0.5), 0.5, "linear takes no table");
         assert_eq!(occlusion_fraction(0, true, MINIMUM_VISIBLE), 0.0, "too little to draw");
         assert_eq!(occlusion_fraction(0, false, 0.02), 0.02, "only a tested share has a floor");
+    }
+
+    #[test]
+    fn a_reach_flare_occludes_against_its_inner_share_only_once_it_is_large() {
+        let reach = FlareInner::Fraction(0.25);
+        assert_eq!(reach.share(0.0), 1.0, "a speck tests its whole self");
+        assert_eq!(reach.share(300.0), 0.625);
+        assert_eq!(reach.share(600.0), 0.25);
+        assert_eq!(reach.share(5000.0), 0.25);
+        assert_eq!(FlareInner::Halved(2).share(5000.0), 0.25, "Halo 3's ignores its size");
+        assert_eq!(FlareInner::Halved(2).share(0.0), 0.25);
+    }
+
+    /// `BLAM_TEST_HREK` and `BLAM_TEST_H3EK`: the kits' tags folders.
+    #[test]
+    fn reach_flares_read_their_curves_and_halo_3s_their_bounds() {
+        let source = |var: &str, game| {
+            let root = std::env::var(var).ok()?;
+            Some(TagSource::LooseFolder {
+                root: root.into(),
+                game: Some(game),
+                definitions_root: crate::core::bundled::locate_definitions_root(),
+            })
+        };
+        if let Some(reach) = source("BLAM_TEST_HREK", crate::core::game::GameId::HaloReach) {
+            let path = "objects\\props\\human\\unsc\\light_fixture_telescoping\\fx\\wide_flare";
+            let flare = read_h3_flare(&reach, path).unwrap();
+            assert!(flare.curves.is_some());
+            assert!(matches!(flare.inner, FlareInner::Fraction(_)), "{:?}", flare.inner);
+        }
+        if let Some(halo3) = source("BLAM_TEST_H3EK", crate::core::game::GameId::Halo3) {
+            let path = "objects\\vehicles\\warthog\\fx\\running\\headlights";
+            let flare = read_h3_flare(&halo3, path).unwrap();
+            assert!(flare.curves.is_none());
+            assert!(matches!(flare.inner, FlareInner::Halved(_)), "{:?}", flare.inner);
+        }
     }
 
     #[test]

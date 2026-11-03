@@ -442,6 +442,10 @@ fn load_tag_preview(
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            feature_into(&mut notes, "its flares", preview, |preview| {
+                read_reach_object_features(source, model_tag, preview);
+            });
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
@@ -758,18 +762,23 @@ fn read_ce_object_features(
     }
 }
 
+/// Where a marker of the opened object puts what is attached to it.
+fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::MarkerFrame, usize) {
+    let place = super::attachment::MarkerFrame { axes: marker.axes, position: marker.position, node: marker.node_index };
+    (place, marker.node_index.max(0) as usize)
+}
+
+/// What a Reach object brings so far: its flares. Its lights, light
+/// volumes and effects read differently, and wait on their own readers.
+fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, preview: &mut RenderModelPreview) {
+    preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, own_marker_frame);
+}
+
 /// A Halo 3 or ODST object's own shield, lights, flares, light volumes,
 /// particles, strips, screen effects, antennas, cloth, extension weapons and
 /// leaves; `model` is its `.model`.
 fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagFile, preview: &mut RenderModelPreview) {
-    let frame = |marker: &RenderModelPreviewMarker| {
-        let place = super::attachment::MarkerFrame {
-            axes: marker.axes,
-            position: marker.position,
-            node: marker.node_index,
-        };
-        (place, marker.node_index.max(0) as usize)
-    };
+    let frame = own_marker_frame;
     preview.h3_shield = model
         .root()
         .read_tag_ref_path("shield impact parameter override")
