@@ -91,6 +91,7 @@ pub(in crate::app) enum ButtonIcon {
     Loop,
     Markers,
     MarkersLookup,
+    MaterialsLookup,
     Model,
     JumpTo,
     JumpUp,
@@ -192,6 +193,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Loop => include_root_str!("assets/Button Icons/Loop.svg"),
         ButtonIcon::Markers => include_root_str!("assets/tag icons/markers.svg"),
         ButtonIcon::MarkersLookup => include_root_str!("assets/Button Icons/Markers.svg"),
+        ButtonIcon::MaterialsLookup => include_root_str!("assets/tag icons/material_effects.svg"),
         ButtonIcon::Model => include_root_str!("assets/Button Icons/Model.svg"),
         ButtonIcon::JumpTo => include_root_str!("assets/Button Icons/Jump To.svg"),
         ButtonIcon::JumpUp => include_root_str!("assets/Button Icons/Jump Up.svg"),
@@ -461,10 +463,10 @@ fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
         return button_icon_svg(icon).to_owned();
     }
     let color = svg_color(color);
-    let source = if icon == ButtonIcon::AddWorkspace {
-        button_icon_svg(icon).replace("#7EEB47", "currentColor")
-    } else {
-        button_icon_svg(icon).to_owned()
+    let source = match icon {
+        ButtonIcon::AddWorkspace => button_icon_svg(icon).replace("#7EEB47", "currentColor"),
+        ButtonIcon::MaterialsLookup => button_icon_svg(icon).replace("#60DF20", "currentColor"),
+        _ => button_icon_svg(icon).to_owned(),
     };
     source
         .replace("currentColor", &color)
@@ -999,6 +1001,7 @@ mod tests {
             ButtonIcon::Loop,
             ButtonIcon::Markers,
             ButtonIcon::MarkersLookup,
+            ButtonIcon::MaterialsLookup,
             ButtonIcon::ListDropdownLeft,
             ButtonIcon::ListDropdownRight,
             ButtonIcon::Move,
@@ -1039,11 +1042,12 @@ mod tests {
 
     #[test]
     fn colorized_icon_replaces_current_color() {
-        for icon in [ButtonIcon::Open, ButtonIcon::MarkersLookup] {
+        for icon in [ButtonIcon::Open, ButtonIcon::MarkersLookup, ButtonIcon::MaterialsLookup] {
             let svg = colorized_icon_svg(icon, Color32::from_rgb(1, 2, 3));
             assert!(svg.contains("#010203"));
             assert!(!svg.contains("currentColor"));
             assert!(!svg.contains("#00B2FF"));
+            assert!(!svg.contains("#60DF20"));
         }
     }
 

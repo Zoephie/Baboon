@@ -2,7 +2,7 @@
 use super::*;
 use std::sync::Arc;
 
-pub(in crate::app) const INPUT_CORNER_RADIUS: egui::CornerRadius = egui::CornerRadius::same(4);
+pub(in crate::app) const INPUT_CORNER_RADIUS: egui::CornerRadius = egui::CornerRadius::same(2);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) enum InputState {

@@ -842,10 +842,10 @@ pub(in crate::app) fn draw_foundation_flags_row(
             else { FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x }, label_height),
         Vec2::new(panel_width, panel_height),
     );
-    painter.rect_filled(flags_rect, 0.0, foundation_input());
+    painter.rect_filled(flags_rect, INPUT_CORNER_RADIUS, foundation_input());
     painter.rect_stroke(
         flags_rect,
-        0.0,
+        INPUT_CORNER_RADIUS,
         Stroke::new(1.0_f32, foundation_input_edge()),
         egui::StrokeKind::Middle,
     );

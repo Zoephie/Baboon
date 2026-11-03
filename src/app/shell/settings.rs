@@ -2201,7 +2201,7 @@ mod tests {
             _ => None,
         }).collect();
         assert_eq!(borders.len(), 1, "the error highlights its field, not the entire form");
-        assert_eq!(borders[0].corner_radius, egui::CornerRadius::same(4));
+        assert_eq!(borders[0].corner_radius, egui::CornerRadius::same(2));
         draft.error = None;
         draft.icon_warning = Some("Image dimensions differ from the recommendation".to_owned());
         assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Icon), InputState::Warning);

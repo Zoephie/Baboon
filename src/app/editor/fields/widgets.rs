@@ -1142,7 +1142,7 @@ mod tests {
                         _ => None,
                     }).expect("input has a visible border");
                     for rect in [standard_rect, tag_rect] {
-                        assert_eq!(border(rect).corner_radius, egui::CornerRadius::same(4));
+                        assert_eq!(border(rect).corner_radius, egui::CornerRadius::same(2));
                         assert_eq!(border(rect).stroke, expected_stroke, "validation border survives focus");
                     }
                     let fill = |rect| output.shapes.iter().find_map(|shape| match &shape.shape {

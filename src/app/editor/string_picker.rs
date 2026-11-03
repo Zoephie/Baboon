@@ -52,6 +52,7 @@ pub(super) fn caption(editor: &str, original: &str) -> String {
 
 pub(super) fn image(ui: &Ui, editor: &str) -> Option<egui::Image<'static>> {
     let icon = match editor {
+        "material" => ButtonIcon::MaterialsLookup,
         "object_function" | "object_function_no_own" | "object_function_panel" => {
             ButtonIcon::Function
         }
