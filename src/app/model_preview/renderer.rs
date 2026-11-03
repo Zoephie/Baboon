@@ -174,6 +174,11 @@ pub(super) fn draw_model_viewport(
         Stroke::new(1.0_f32, foundation_input_edge()),
         egui::StrokeKind::Middle,
     );
+    if let Some(message) = model_gl_failure(data.geometry_id) {
+        let note = format!("Drawing this crashed: {message}");
+        let color = ui.visuals().error_fg_color;
+        painter.text(rect.center(), Align2::CENTER_CENTER, note, FontId::proportional(12.0), color);
+    }
 
     if state.show_errors {
         draw_model_errors(
@@ -1270,6 +1275,14 @@ thread_local! {
 struct CachedModelGlRenderer {
     context_id: usize,
     renderer: Result<ModelGlRenderer, String>,
+    /// Geometry whose drawing panicked, with what the panic said: it is not
+    /// drawn again, and the panel says why.
+    failed: HashMap<u64, String>,
+}
+
+/// Why drawing `geometry_id` stopped, if it panicked.
+pub(super) fn model_gl_failure(geometry_id: u64) -> Option<String> {
+    MODEL_GL_RENDERER.with(|cell| cell.borrow().as_ref()?.failed.get(&geometry_id).cloned())
 }
 
 fn paint_model_gl(
@@ -1314,12 +1327,29 @@ fn paint_model_gl(
             *cached = Some(CachedModelGlRenderer {
                 context_id,
                 renderer: created,
+                failed: HashMap::new(),
             });
         }
-        let Some(Ok(renderer)) = cached.as_mut().map(|cached| &mut cached.renderer) else {
+        let Some(CachedModelGlRenderer { renderer: Ok(renderer), failed, .. }) = cached.as_mut() else {
             return;
         };
-        unsafe { renderer.paint(gl, frame) };
+        if failed.contains_key(&frame.geometry_id) {
+            return;
+        }
+        // A panic part way through leaves the scene target bound; what the
+        // frame drew into goes back, so the rest of the window still draws.
+        let state = unsafe { H2FramebufferState::capture(gl) };
+        let painted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { renderer.paint(gl, frame) }));
+        if let Err(panic) = painted {
+            unsafe {
+                state.restore(gl);
+                gl.use_program(None);
+                gl.bind_vertex_array(None);
+            }
+            let message = crate::app::shell::worker::panic_detail(panic.as_ref()).to_owned();
+            eprintln!("model preview: drawing crashed: {message}");
+            failed.insert(frame.geometry_id, message);
+        }
     });
 }
 
@@ -2774,7 +2804,8 @@ fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones:
     };
     let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
     let ground = lowest.fold(0.0, f32::min);
-    uploaded.ce_particles.advance(&frame.preview.ce_effects, inputs, bones, ground, frame.time);
+    let others = uploaded.ce_pctl.particle_count();
+    uploaded.ce_particles.advance(&frame.preview.ce_effects, inputs, bones, ground, frame.time, others);
 }
 
 /// A Halo CE sprite through the `effect` shader: its map, framebuffer blend
@@ -2945,7 +2976,8 @@ fn ce_groups(
                 state.map_or([[1.0; 3]; 4], |state| state.change_colors),
             )
         };
-        uploaded.ce_pctl.advance(systems, inputs, bones, ground, frame.time);
+        let others = uploaded.ce_particles.system_particle_count();
+        uploaded.ce_pctl.advance(systems, inputs, bones, ground, frame.time, others);
         let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
         for quad in uploaded.ce_pctl.quads(systems, view, pixel) {
             let texture = uploaded.ce_pctl_textures.get(quad.system).and_then(|sheets| sheets.get(quad.sheet)).and_then(|images| images.get(quad.image)).copied().flatten();
@@ -3021,7 +3053,7 @@ fn ce_groups(
 #[allow(clippy::too_many_arguments)]
 unsafe fn draw_ce_group(
     gl: &glow::Context,
-    effect_gl: &mut Option<CeEffectGl>,
+    effect_gl: &mut Option<Option<CeEffectGl>>,
     main: glow::NativeProgram,
     flares: &CeFlareGl,
     uploaded: &mut ModelGpuSlot,
@@ -3039,10 +3071,7 @@ unsafe fn draw_ce_group(
         gl.active_texture(glow::TEXTURE0);
         match group.draw {
             CeGroupDraw::Sprites(sprites) => {
-                if effect_gl.is_none() {
-                    *effect_gl = ce_effect_gl(gl, main);
-                }
-                if let Some(effect_gl) = effect_gl.as_ref() {
+                if let Some(effect_gl) = effect_gl.get_or_insert_with(|| ce_effect_gl(gl, main)).as_ref() {
                     draw_ce_sprites(gl, effect_gl, uploaded, camera, sprites);
                 }
             }
@@ -3668,12 +3697,15 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
 }
 
 struct ModelGlRenderer {
-    ce_flares: Option<CeFlareGl>,
+    /// As `h2_bloom`.
+    ce_flares: Option<Option<CeFlareGl>>,
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
     ce_points_now: Option<Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>>,
-    ce_effect_gl: Option<CeEffectGl>,
-    h3_particle_gl: Option<H3ParticleGl>,
+    /// As `h2_bloom`.
+    ce_effect_gl: Option<Option<CeEffectGl>>,
+    /// As `h2_bloom`.
+    h3_particle_gl: Option<Option<H3ParticleGl>>,
     /// How far through the frame's sorted sprites the draws have got.
     h3_sprite_cursor: usize,
     /// Particles step once a frame, however many calls draw them.
@@ -4245,9 +4277,7 @@ impl ModelGlRenderer {
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             let mut groups = Vec::new();
             if self.draws_object_sprites(frame) && ce_has_groups(&frame.preview) {
-                if self.ce_flares.is_none() {
-                    self.ce_flares = ce_flare_gl(gl, self.program);
-                }
+                self.ce_flares.get_or_insert_with(|| ce_flare_gl(gl, self.program));
                 let uploaded = &mut self.slots[slot];
                 uploaded.sync_sprite_textures(gl, frame);
                 groups = ce_groups(gl, uploaded, frame, bones, &view);
@@ -4279,7 +4309,7 @@ impl ModelGlRenderer {
                         self.draw_h2_passes(gl, frame, slot, &[index], H2Layer::Transparent, None);
                     }
                     Transparent::Group(group) => {
-                        let Some(flares) = self.ce_flares.as_ref() else {
+                        let Some(flares) = self.ce_flares.as_ref().and_then(Option::as_ref) else {
                             continue;
                         };
                         let uploaded = &mut self.slots[slot];
@@ -4319,20 +4349,16 @@ impl ModelGlRenderer {
     ) {
         unsafe {
             let h3 = self.h3_draws(frame);
-            if self.ce_flares.is_none() {
-                self.ce_flares = ce_flare_gl(gl, self.program);
-            }
-            let Some(flares) = self.ce_flares.as_mut() else {
+            let Some(flares) = self.ce_flares.get_or_insert_with(|| ce_flare_gl(gl, self.program)).as_mut() else {
                 return;
             };
-            if self.h3_particle_gl.is_none()
-                && !(frame.preview.h3_particles.is_empty()
-                    && frame.preview.h3_strips.is_empty()
-                    && frame.preview.h3_leaves.is_empty())
+            if !(frame.preview.h3_particles.is_empty()
+                && frame.preview.h3_strips.is_empty()
+                && frame.preview.h3_leaves.is_empty())
             {
-                self.h3_particle_gl = h3_particle_gl(gl, self.program);
+                self.h3_particle_gl.get_or_insert_with(|| h3_particle_gl(gl, self.program));
             }
-            let particle_gl = &self.h3_particle_gl;
+            let particle_gl = self.h3_particle_gl.as_ref().and_then(Option::as_ref);
             let no_map = self.h3_no_bloom;
             let uploaded = &mut self.slots[slot];
             uploaded.sync_sprite_textures(gl, frame);
@@ -7234,6 +7260,9 @@ unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<C
 }
 
 unsafe fn upload_h2_image(gl: &glow::Context, image: &H2Image) -> Option<glow::NativeTexture> {
+    if !image.whole() {
+        return None;
+    }
     let texture_parameters = |target| unsafe {
         gl.generate_mipmap(target);
         gl.tex_parameter_i32(target, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
@@ -7395,7 +7424,7 @@ unsafe fn upload_solid_volume(gl: &glow::Context, target: u32, color: [u8; 4]) -
 }
 
 unsafe fn upload_texture(gl: &glow::Context, image: &TextureImage) -> Option<glow::NativeTexture> {
-    if image.width == 0 || image.height == 0 {
+    if image.width == 0 || image.height == 0 || !image.whole() {
         return None;
     }
     unsafe {

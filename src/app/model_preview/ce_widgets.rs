@@ -815,7 +815,8 @@ impl RunningGlow {
 
     /// `glow_update`'s first pass: each marker's next is the one its forward
     /// points at most, and the chain is read back from the one with none.
-    fn initialize(&mut self, glow: &CeGlow, markers: &[PosedMarker]) {
+    /// No more than `room` particles are made, as the shared array allows.
+    fn initialize(&mut self, glow: &CeGlow, markers: &[PosedMarker], room: usize) {
         let count = markers.len();
         let mut next = [None; 5];
         for (at, marker) in markers.iter().enumerate() {
@@ -854,7 +855,7 @@ impl RunningGlow {
         }
         // `glow_particles_initialize`.
         let mut forward = true;
-        for index in 0..glow.particle_count {
+        for index in 0..glow.particle_count.min(room) {
             let mut particle = self.normal_particle(glow, index);
             if glow.flags & GLOW_REVERSE != 0 {
                 particle.reverse = true;
@@ -1010,6 +1011,9 @@ impl CeGlow {
     }
 }
 
+/// `glow_initialize`'s `glow particles` array, which every glow shares.
+const MOST_GLOW_PARTICLES: usize = 512;
+
 impl CeGlowField {
     /// `glow_update` for each glow, up to `time`.
     pub(crate) fn advance(&mut self, glows: &[CeGlow], outputs_of: impl Fn(u8) -> [f32; 4], bones: Option<&[[f32; 4]]>, time: f32) {
@@ -1024,6 +1028,8 @@ impl CeGlowField {
         // `game_time_get_elapsed`, in ticks.
         let ticks = ((time * 30.0).floor() - (last * 30.0).floor()).max(0.0) as i32;
         self.time = Some(time);
+        // `glow_initialize`'s array, shared by every glow's particles.
+        let mut used: usize = self.running.iter().map(|running| running.particles.len()).sum();
         for (glow, running) in glows.iter().zip(&mut self.running) {
             let outputs = &outputs_of(glow.object);
             let markers = glow.posed(bones);
@@ -1031,11 +1037,12 @@ impl CeGlowField {
             if (2..4).contains(&count) {
                 continue;
             }
+            used -= running.particles.len();
             // The game orders the markers and makes the particles on one
             // update, draws them unplaced, and places them on the next; here
             // they are placed at once.
             if !running.initialized && count > 1 {
-                running.initialize(glow, &markers);
+                running.initialize(glow, &markers, MOST_GLOW_PARTICLES.saturating_sub(used));
             }
             let mut velocity = 0.0;
             let mut rotation = 0.0;
@@ -1078,11 +1085,14 @@ impl CeGlowField {
             if glow.generation > 0.01 && ticks > 0 {
                 let period = (30.0 / glow.generation).max(1.0);
                 while running.accumulated_ticks as f32 > period {
-                    let particle = running.trailing_particle(glow, &markers);
-                    running.particles.push(particle);
+                    if used + running.particles.len() < MOST_GLOW_PARTICLES {
+                        let particle = running.trailing_particle(glow, &markers);
+                        running.particles.push(particle);
+                    }
                     running.accumulated_ticks -= period as i32;
                 }
             }
+            used += running.particles.len();
         }
     }
 

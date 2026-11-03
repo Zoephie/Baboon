@@ -1341,21 +1341,30 @@ fn append_collision_bsp_triangles(bsp: &TagStruct<'_>, triples: &mut Vec<([f32; 
     ) else {
         return;
     };
+    // The later games keep these in 16 bits that index past 32767 (Reach's
+    // edges run to `UNSIGNED_SHORT_MAX`); only 0xFFFF is none.
+    let index = |entry: &TagStruct<'_>, name: &str| -> i128 {
+        match entry.field(name).and_then(|field| field.value()) {
+            Some(TagFieldData::ShortInteger(-1)) | None => -1,
+            Some(TagFieldData::ShortInteger(value)) => i128::from(value as u16),
+            _ => entry.read_int_any(name).unwrap_or(-1),
+        }
+    };
     type EdgeRow = (i128, i128, i128, i128, i128, i128);
-    let read_edge = |index: i128| -> Option<EdgeRow> {
-        let edge = edges.element(usize::try_from(index).ok()?)?;
+    let read_edge = |at: i128| -> Option<EdgeRow> {
+        let edge = edges.element(usize::try_from(at).ok()?)?;
         Some((
-            edge.read_int_any("start vertex").unwrap_or(-1),
-            edge.read_int_any("end vertex").unwrap_or(-1),
-            edge.read_int_any("forward edge").unwrap_or(-1),
-            edge.read_int_any("reverse edge").unwrap_or(-1),
-            edge.read_int_any("left surface").unwrap_or(-1),
-            edge.read_int_any("right surface").unwrap_or(-1),
+            index(&edge, "start vertex"),
+            index(&edge, "end vertex"),
+            index(&edge, "forward edge"),
+            index(&edge, "reverse edge"),
+            index(&edge, "left surface"),
+            index(&edge, "right surface"),
         ))
     };
     for surface_index in 0..surfaces.len() {
         let surface = surfaces.element(surface_index).unwrap();
-        let first_edge = surface.read_int_any("first edge").unwrap_or(-1);
+        let first_edge = index(&surface, "first edge");
         if first_edge < 0 {
             continue;
         }
@@ -1729,6 +1738,26 @@ mod tests {
     use blam_tags::{
         AssInstance, AssMaterial, AssObject, AssVertex, JmsMaterial, JmsNode, JmsTriangle, JmsVertex,
     };
+
+    /// Sidewinder's collision has 54,540 edges, indexed in 16 bits past
+    /// 32767: every surface still closes its ring of edges into triangles.
+    #[test]
+    fn a_collision_bsp_past_32767_edges_keeps_every_surface() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let path = std::path::Path::new(&root).join("levels/dlc/sidewinder/sidewinder.scenario_structure_bsp");
+        let tag = blam_tags::TagFile::read(&path).unwrap();
+        let block = tag.root().field_path("resource interface/raw_resources[0]/raw_items/collision bsp");
+        let bsp = block.and_then(|field| field.as_block()).and_then(|block| block.element(0)).unwrap();
+        let edges = bsp.field_path("edges").and_then(|field| field.as_block()).unwrap().len();
+        let surfaces = bsp.field_path("surfaces").and_then(|field| field.as_block()).unwrap().len();
+        assert!(edges > 32768, "{edges} edges");
+        let mut triples = Vec::new();
+        append_collision_bsp_triangles(&bsp, &mut triples);
+        assert!(triples.len() / 3 >= surfaces, "{} triangles for {surfaces} surfaces", triples.len() / 3);
+    }
 
     // The derived-preview builders' non-drawing halves: JMS/ASS scenes into
     // preview geometry, physics primitives into meshes, and the merge/rename

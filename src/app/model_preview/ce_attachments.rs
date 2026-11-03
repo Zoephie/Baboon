@@ -596,6 +596,16 @@ mod tests {
         assert!((distance(&hand, &shoulder) - 2.0 * LONGEST_REACH).abs() < 1e-5);
     }
 
+    /// Bad data gives an arm whose joints sit together: it stays as it was.
+    #[test]
+    fn an_arm_with_no_length_is_left_alone() {
+        let (mut shoulder, mut elbow, mut hand) = (at(1.0, 0.0, 0.0), at(1.0, 0.0, 0.0), at(1.0, 0.0, 0.0));
+        reach_with_arm(at(3.0, 0.0, 0.0), &mut shoulder, &mut elbow, &mut hand);
+        let all = [shoulder, elbow, hand].map(|matrix| matrix.m.into_iter().flatten().all(f32::is_finite));
+        assert_eq!(all, [true; 3]);
+        assert_eq!(distance(&hand, &at(1.0, 0.0, 0.0)), 0.0);
+    }
+
     #[test]
     fn the_inverse_of_a_rigid_transform_undoes_it() {
         let matrix = matrix_of(turned().axes, [1.0, 2.0, 3.0]);

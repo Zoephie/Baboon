@@ -717,12 +717,16 @@ pub(in crate::app) fn spawn_export<J>(
 
 /// A panic payload as text, for a message saying the job crashed.
 pub(in crate::app) fn panic_text(panic: &(dyn std::any::Any + Send)) -> String {
-    let detail = panic
+    format!("the worker crashed: {}", panic_detail(panic))
+}
+
+/// What a panic said.
+pub(in crate::app) fn panic_detail(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
         .downcast_ref::<String>()
         .map(String::as_str)
         .or_else(|| panic.downcast_ref::<&'static str>().copied())
-        .unwrap_or("no message");
-    format!("the worker crashed: {detail}")
+        .unwrap_or("no message")
 }
 
 #[cfg(test)]

@@ -26,6 +26,9 @@ const STEP: f32 = 1.0 / 30.0;
 const PRE_ROLL: f32 = 4.0;
 /// `particle_system_new_particles` makes at most this many a call.
 const MOST_A_CALL: usize = 128;
+/// `particle_systems_initialize`'s `particle system particles` array, which
+/// every system shares, attached or made by an effect.
+pub(crate) const MOST_SYSTEM_PARTICLES: usize = 512;
 /// `object_get_marker_by_name` finds at most this many.
 const MOST_MARKERS: usize = 8;
 
@@ -367,6 +370,13 @@ pub(crate) struct CeRunningSystem {
     first: bool,
 }
 
+impl CeRunningSystem {
+    /// How many particles it holds.
+    pub(crate) fn particle_count(&self) -> usize {
+        self.types.iter().map(|run| run.particles.len()).sum()
+    }
+}
+
 pub(crate) struct Random(u32);
 
 impl Random {
@@ -458,7 +468,14 @@ fn next_state(state: usize, forward: &mut bool, count: usize, looping: bool, bou
 }
 
 impl CeParticleSystemField {
-    /// Step every system to `time`, by ticks.
+    /// How many particles its systems hold.
+    pub(crate) fn particle_count(&self) -> usize {
+        self.systems.iter().map(CeRunningSystem::particle_count).sum()
+    }
+
+    /// Step every system to `time`, by ticks; `others` particles of the
+    /// shared array are in effects' systems.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn advance(
         &mut self,
         systems: &[CeParticleSystemAt],
@@ -466,6 +483,7 @@ impl CeParticleSystemField {
         bones: Option<&[[f32; 4]]>,
         ground: f32,
         time: f32,
+        others: usize,
     ) {
         if self.systems.len() != systems.len() || self.time.is_none_or(|last| time < last) {
             let mut random = Random(0x5eed_1234);
@@ -479,10 +497,12 @@ impl CeParticleSystemField {
         let mut random = self.random.take().unwrap_or(Random(1));
         while now + STEP <= time {
             now += STEP;
+            let mut room = MOST_SYSTEM_PARTICLES.saturating_sub(self.particle_count() + others);
             for (system, running) in systems.iter().zip(&mut self.systems) {
                 let (outputs, active, change_colors) = inputs(system.object);
                 let dt = if running.first { 0.001 } else { STEP };
-                update_system(system, running, &outputs, &active, &change_colors, bones, ground, dt, &mut random);
+                let inputs = (&outputs, &active, &change_colors);
+                update_system(system, running, inputs, bones, ground, dt, &mut random, &mut room);
                 running.first = false;
             }
         }
@@ -736,6 +756,7 @@ fn new_system(def: &CePctlDef, attached: bool, random: &mut Random) -> CeRunning
 /// point, going, tinted and scaled as the effect says, lit by what
 /// `light_particle` finds below it, which in a preview is nothing: grey.
 /// `particle_system_initialize` steps it a thousandth of a second at once.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn new_unattached(
     def: &CePctlDef,
     position: [f32; 3],
@@ -744,6 +765,7 @@ pub(crate) fn new_unattached(
     scale: f32,
     ground: f32,
     random: &mut Random,
+    room: &mut usize,
 ) -> CeRunningSystem {
     let mut running = new_system(def, false, random);
     running.position = position;
@@ -752,21 +774,29 @@ pub(crate) fn new_unattached(
     running.scale = scale;
     // `light_particle` with no structure under it: `global_real_rgb_grey`.
     running.lighting = [0.5; 3];
-    update_unattached(def, &mut running, ground, 0.001, random);
+    update_unattached(def, &mut running, ground, 0.001, random, room);
     running.first = false;
     running
 }
 
 /// `particle_system_update` for a system on no object: its own point physics
 /// moves it, and it makes particles where it is. False once no type is in
-/// a state, when `particle_system_delete` takes it.
-pub(crate) fn update_unattached(def: &CePctlDef, running: &mut CeRunningSystem, ground: f32, dt: f32, random: &mut Random) -> bool {
+/// a state, when `particle_system_delete` takes it. It makes no more than
+/// `room` particles, which it takes from.
+pub(crate) fn update_unattached(
+    def: &CePctlDef,
+    running: &mut CeRunningSystem,
+    ground: f32,
+    dt: f32,
+    random: &mut Random,
+    room: &mut usize,
+) -> bool {
     // `particle_system_update_default`, which explosion uses too.
     if let Some(physics) = def.physics {
         physics.step(&mut running.position, &mut running.velocity, 1.0, ground, dt);
     }
     let markers = [(running.position, [0.0; 3])];
-    step_types(def, running, &markers, ground, dt, random)
+    step_types(def, running, &markers, ground, dt, random, room)
 }
 
 /// `particle_system_render` for a system on no object.
@@ -784,17 +814,20 @@ pub(crate) fn unattached_quads(
     quads
 }
 
+/// What an object's functions give its systems: its outputs, which are on,
+/// and its change colors.
+type SystemInputs<'a> = (&'a [f32; 4], &'a [bool; 4], &'a [[f32; 3]; 4]);
+
 #[allow(clippy::too_many_arguments)]
 fn update_system(
     system: &CeParticleSystemAt,
     running: &mut CeRunningSystem,
-    outputs: &[f32; 4],
-    active: &[bool; 4],
-    change_colors: &[[f32; 3]; 4],
+    (outputs, active, change_colors): SystemInputs<'_>,
     bones: Option<&[[f32; 4]]>,
     ground: f32,
     dt: f32,
     random: &mut Random,
+    room: &mut usize,
 ) {
     // `object_get_function_value`: none is on at one.
     (running.scale, running.on) = match system.primary {
@@ -810,7 +843,7 @@ fn update_system(
         .iter()
         .map(|&(node, position, forward)| posed_on(node, position, forward, bones))
         .collect();
-    step_types(&system.def, running, &markers, ground, dt, random);
+    step_types(&system.def, running, &markers, ground, dt, random, room);
 }
 
 /// The types of a system through their states, making and moving their
@@ -822,6 +855,7 @@ fn step_types(
     ground: f32,
     dt: f32,
     random: &mut Random,
+    room: &mut usize,
 ) -> bool {
     let mut active = false;
     let (velocity, attached) = (running.velocity, running.attached);
@@ -885,7 +919,7 @@ fn step_types(
             }
         }
         if running.on {
-            new_particles(kind, run, running.first, scale, markers, velocity, dt, random);
+            new_particles(kind, run, running.first, scale, markers, velocity, dt, random, room);
         }
         update_particles(kind, run, ground, dt, random);
         active = true;
@@ -906,6 +940,7 @@ fn new_particles(
     system_velocity: [f32; 3],
     dt: f32,
     random: &mut Random,
+    room: &mut usize,
 ) {
     let Some(state) = run.state else {
         return;
@@ -929,8 +964,9 @@ fn new_particles(
     };
     let physics = if first { kind.initial_physics } else { kind.states[state].creation_physics };
     let mut made = 0;
-    while (run.particles.len() as i32) < wanted && !markers.is_empty() && made < MOST_A_CALL {
+    while (run.particles.len() as i32) < wanted && !markers.is_empty() && made < MOST_A_CALL && *room > 0 {
         made += 1;
+        *room -= 1;
         let rotation = random.range(0.0, std::f32::consts::TAU);
         let (position, forward) = markers[random.index(markers.len())];
         let (position, mut velocity, axis) = match physics {

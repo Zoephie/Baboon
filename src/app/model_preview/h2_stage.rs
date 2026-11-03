@@ -147,9 +147,10 @@ const CE_TRANSPARENT: &str = "v_tc0.xy = vec2(row(0, uv), row(1, uv));
     v_color1 = vec4(vec3(face), 1.0 - face) * u_texture_rows[8].x;";
 
 impl H2VertexStage {
-    /// From a pass's `vertex shader` reference.
+    /// From a pass's `vertex shader` reference, which ignores case as every
+    /// tag reference does.
     pub(in crate::app) fn from_path(path: &str) -> Option<Self> {
-        match path.rsplit(['\\', '/']).next()? {
+        match path.rsplit(['\\', '/']).next()?.to_ascii_lowercase().as_str() {
             "transparent_generic_default" | "transparent_generic_default_sky" => Some(Self::Default),
             "transparent_generic_reflection" | "transparent_generic_reflection_sky" => {
                 Some(Self::Reflection)
@@ -705,6 +706,7 @@ mod tests {
             assert_eq!(H2VertexStage::from_path(&format!("{dir}{name}")), Some(stage));
         }
         assert_eq!(H2VertexStage::from_path("rasterizer\\unknown"), None);
+        assert_eq!(H2VertexStage::from_path("Rasterizer\\Hologram"), Some(H2VertexStage::Hologram));
     }
 
     /// Stages must link with what the translator produces, so a varying

@@ -111,6 +111,19 @@ pub(crate) struct TextureImage {
     pub scale: [f32; 2],
 }
 
+impl TextureImage {
+    /// Whether its pixels fill its size, which is how much GL reads.
+    pub(crate) fn whole(&self) -> bool {
+        rgba_fills(&self.rgba, &[self.width, self.height])
+    }
+}
+
+/// Whether `rgba` holds four bytes for every texel of `dimensions`.
+pub(crate) fn rgba_fills(rgba: &[u8], dimensions: &[usize]) -> bool {
+    let texels = dimensions.iter().try_fold(4usize, |bytes, side| bytes.checked_mul(*side));
+    texels.is_some_and(|bytes| rgba.len() >= bytes)
+}
+
 /// How a material's detail map combines with its base map.
 ///
 /// `LinearBiasedMultiply` is the preview's long-standing Halo 3 / Reach

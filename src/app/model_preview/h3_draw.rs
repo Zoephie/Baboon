@@ -1781,6 +1781,11 @@ pub(super) unsafe fn upload_h2_image_linear(
     mips: &[H2Image],
     sampler: Option<H3Sampler>,
 ) -> Option<glow::NativeTexture> {
+    // GL reads as much as the size says, whatever the slice holds.
+    if !image.whole() {
+        return None;
+    }
+    let mips = if mips.iter().all(H2Image::whole) { mips } else { &[] };
     let (format, kind) = match texels {
         H3Texels::Linear => (glow::RGBA8, glow::UNSIGNED_BYTE),
         H3Texels::Srgb => (glow::SRGB8_ALPHA8, glow::UNSIGNED_BYTE),

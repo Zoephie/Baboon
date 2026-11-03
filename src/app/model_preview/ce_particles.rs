@@ -12,8 +12,8 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 use super::ce_attachments::{elements, has_flag, object_block};
 use super::ce_lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
 use super::ce_particle_systems::{
-    CePctlDef, CePctlQuad, CeRunningSystem, Random as SystemRandom, new_unattached, read_pctl_def, unattached_quads,
-    update_unattached,
+    CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,
+    unattached_quads, update_unattached,
 };
 use super::ce_passes::{CeMapAnimation, argb, read_effect_map_animation};
 use super::h2_passes::{H2Image, ce_color_interpolate};
@@ -1028,6 +1028,13 @@ fn turn_by_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
 
 impl CeParticleField {
     /// Step every effect and particle to `time`, by ticks.
+    /// How many particles the systems its effects made hold.
+    pub(crate) fn system_particle_count(&self) -> usize {
+        self.systems.iter().map(|(_, _, running)| running.particle_count()).sum()
+    }
+
+    /// Step every effect to `time`, by ticks; `others` particles of the
+    /// systems' shared array are in the object's attached systems.
     pub(crate) fn advance(
         &mut self,
         effects: &[CeEffectAt],
@@ -1035,6 +1042,7 @@ impl CeParticleField {
         bones: Option<&[[f32; 4]]>,
         ground: f32,
         time: f32,
+        others: usize,
     ) {
         let own = effects.len();
         if self.effects.len() != own + self.spawned.len() || self.time.is_none_or(|last| time < last) {
@@ -1062,6 +1070,7 @@ impl CeParticleField {
             self.tick += 1;
             let effects: Vec<CeEffectAt> = effects.iter().chain(&self.spawned).cloned().collect();
             let effects = effects.as_slice();
+            let mut system_room = MOST_SYSTEM_PARTICLES.saturating_sub(self.system_particle_count() + others);
             for (index, effect) in effects.iter().enumerate() {
                 let state = inputs(effect.object);
                 let running = &mut self.effects[index];
@@ -1071,6 +1080,7 @@ impl CeParticleField {
                     lights: &mut self.lights,
                     systems: &mut self.systems,
                     system_random,
+                    system_room: &mut system_room,
                     ground,
                     tick: self.tick,
                 };
@@ -1082,7 +1092,7 @@ impl CeParticleField {
                 effects
                     .get(*effect)
                     .and_then(|effect| effect.def.systems.get(*def))
-                    .is_some_and(|def| update_unattached(def, running, ground, STEP, system_random))
+                    .is_some_and(|def| update_unattached(def, running, ground, STEP, system_random, &mut system_room))
             });
             // `lights_preprocess_scene` lets go of those past their duration.
             let tick = self.tick;
@@ -1428,6 +1438,8 @@ struct Made<'a> {
     lights: &'a mut Vec<CeRunningLight>,
     systems: &'a mut Vec<(usize, usize, CeRunningSystem)>,
     system_random: &'a mut SystemRandom,
+    /// What is left of the particle systems' shared particles.
+    system_room: &'a mut usize,
     ground: f32,
     tick: u32,
 }
@@ -1494,6 +1506,7 @@ fn generate_systems(
     systems: &mut Vec<(usize, usize, CeRunningSystem)>,
     random: &mut Random,
     system_random: &mut SystemRandom,
+    room: &mut usize,
     bones: Option<&[[f32; 4]]>,
     ground: f32,
 ) {
@@ -1533,7 +1546,7 @@ fn generate_systems(
             let inherited = effect.spawn.map_or([0.0; 3], |spawn| spawn.velocity);
             let velocity: [f32; 3] = std::array::from_fn(|axis| direction[axis] * speed + inherited[axis]);
             let [red, green, blue] = running.color;
-            let made = new_unattached(def, point, velocity, [1.0, red, green, blue], scale, ground, system_random);
+            let made = new_unattached(def, point, velocity, [1.0, red, green, blue], scale, ground, system_random, room);
             systems.push((index, part.system, made));
         }
     }
@@ -1649,7 +1662,7 @@ fn run_events(
     bones: Option<&[[f32; 4]]>,
     dt: f32,
 ) {
-    let Made { particles, lights, systems, system_random, ground, tick } = made;
+    let Made { particles, lights, systems, system_random, system_room, ground, tick } = made;
     let def = &effect.def;
     let mut dt = dt;
     for _ in 0..MOST_EVENTS_A_TICK {
@@ -1697,7 +1710,7 @@ fn run_events(
                 })
                 .collect();
             generate_parts(index, running, effect, lights, tick);
-            generate_systems(index, running, effect, systems, random, system_random, bones, ground);
+            generate_systems(index, running, effect, systems, random, system_random, system_room, bones, ground);
         }
     }
 }

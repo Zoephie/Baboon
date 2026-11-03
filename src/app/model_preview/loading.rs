@@ -4083,5 +4083,27 @@ mod kit_object_tests {
         let data = kit_preview(&h3, GameId::Halo3, chief, "biped", b"bipd");
         assert!(data.preview.batches.iter().all(|batch| batch.sort_position.is_none()));
     }
+
+    /// Particle systems share `particle system particles`: with most of it
+    /// taken by effects' systems, the steam jets make only what is left.
+    #[test]
+    fn particle_systems_make_only_what_the_shared_array_has_room_for() {
+        use super::super::ce_particle_systems::{CeParticleSystemField, MOST_SYSTEM_PARTICLES};
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let data = kit_preview(&root, GameId::HaloCe, "scenery\\emitters\\steam jets\\steam jets", "scenery", b"scen");
+        let systems = &data.preview.ce_particle_systems;
+        let on = |_: u8| ([1.0; 4], [true; 4], [[1.0; 3]; 4]);
+        let made = |others: usize| {
+            let mut field = CeParticleSystemField::default();
+            field.advance(systems, on, None, 0.0, 10.0, others);
+            field.particle_count()
+        };
+        let left = 10;
+        assert!(made(0) > left, "on its own it makes more than {left}");
+        assert!(made(MOST_SYSTEM_PARTICLES - left) <= left);
+    }
 }
 

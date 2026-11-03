@@ -105,6 +105,10 @@ pub(super) fn reach_with_arm(desired: Matrix4, shoulder: &mut Matrix4, elbow: &m
     let bend = cross(side, toward);
     let mut goal = desired;
     let longest = (upper + fore) * LONGEST_REACH;
+    // An arm with no length has nothing to bend.
+    if longest < 0.0001 {
+        return;
+    }
     if longest < reach {
         reach = longest;
         let place = added(start, scaled(toward, reach));
