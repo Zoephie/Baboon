@@ -697,6 +697,26 @@ fn view_matrix(frame: &ModelGpuFrame) -> [f32; 16] {
     matrix
 }
 
+/// Reach's `Camera_To_World`: right, up, backward and the eye in its
+/// columns, rowed for HLSL, which reads `Camera_Position` and the camera's
+/// axes out of it (`hlsl_constant_global_list`).
+pub(super) fn camera_to_world(frame: &ModelGpuFrame) -> [f32; 16] {
+    let (yaw, pitch) = (frame.camera.yaw, frame.camera.pitch);
+    let right = unrotate_view_vector(yaw, pitch, [1.0, 0.0, 0.0]);
+    let up = unrotate_view_vector(yaw, pitch, [0.0, 0.0, 1.0]);
+    let backward = unrotate_view_vector(yaw, pitch, [0.0, -1.0, 0.0]);
+    let eye = h2_eye_position(&frame.camera);
+    let mut matrix = [0.0; 16];
+    for row in 0..3 {
+        matrix[row * 4] = right[row];
+        matrix[row * 4 + 1] = up[row];
+        matrix[row * 4 + 2] = backward[row];
+        matrix[row * 4 + 3] = eye[row];
+    }
+    matrix[15] = 1.0;
+    matrix
+}
+
 /// A translated uniform's value, by its type.
 pub(super) unsafe fn set_uniform_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
     unsafe { set_value(gl, location, ty, value) }
@@ -893,6 +913,10 @@ impl ModelGlRenderer {
                     }
                     "View" => {
                         gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &view_matrix(frame));
+                        continue;
+                    }
+                    "Camera_To_World" => {
+                        gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &camera_to_world(frame));
                         continue;
                     }
                     "Nodes" => {
