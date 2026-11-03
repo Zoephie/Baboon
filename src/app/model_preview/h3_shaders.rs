@@ -801,6 +801,10 @@ pub(crate) enum H3Clock {
     /// An ODST screen shader (`sub_14096D0E0`): `time` and `render_time` are
     /// the clock as well.
     OdstScreen,
+    /// Reach (MCC `sub_140816D50`, the 360's `evaluate_function`
+    /// 0x826d8ce0): `unique_id` is the object's index times 1.37317, which
+    /// only a periodic function adds to the clock; any other holds it still.
+    Reach,
 }
 
 impl H3Clock {
@@ -811,7 +815,7 @@ impl H3Clock {
         let owner = f32::from(owner);
         match (self, input) {
             (Self::Halo3, "unique_id") => Some(owner),
-            (Self::Odst | Self::OdstScreen, "unique_id") => Some(owner * 1.37317),
+            (Self::Odst | Self::OdstScreen | Self::Reach, "unique_id") => Some(owner * 1.37317),
             (Self::OdstScreen, "time" | "render_time") => Some(0.0),
             _ => None,
         }
@@ -834,12 +838,12 @@ impl H3Animation {
         if phase.is_none() && (!self.input.is_empty() || !self.range.is_empty()) {
             return (named(&self.input), named(&self.range));
         }
-        let input = (time + phase.unwrap_or(0.0)) / self.period;
-        if self.function.function_type() == FunctionType::Periodic {
-            (input, 0.0)
-        } else {
-            (input.rem_euclid(1.0), 0.0)
-        }
+        let periodic = self.function.function_type() == FunctionType::Periodic;
+        let input = match (self.clock, phase) {
+            (H3Clock::Reach, Some(phase)) if self.input == "unique_id" && !periodic => phase,
+            _ => (time + phase.unwrap_or(0.0)) / self.period,
+        };
+        if periodic { (input, 0.0) } else { (input.rem_euclid(1.0), 0.0) }
     }
 
     /// Write this into `value`, the constant as it stands.
@@ -918,6 +922,18 @@ mod texel_tests {
         assert_eq!(unique.sample(1.0, 2, None), (0.75, 0.0), "Halo 3: time plus the object's index");
         unique.clock = H3Clock::Odst;
         assert_eq!(unique.sample(1.0, 2, None).0, (1.0 + 2.0 * 1.37317) / 4.0);
+    }
+
+    #[test]
+    fn reachs_unique_id_holds_still_unless_the_function_is_periodic() {
+        let mut unique = animation("unique_id", "");
+        unique.period = 4.0;
+        unique.clock = H3Clock::Reach;
+        let held = (2.0f32 * 1.37317).rem_euclid(1.0);
+        assert_eq!(unique.sample(1.0, 2, None), (held, 0.0));
+        assert_eq!(unique.sample(3.0, 2, None), (held, 0.0), "no time in it");
+        unique.clock = H3Clock::Odst;
+        assert_ne!(unique.sample(1.0, 2, None), unique.sample(3.0, 2, None), "ODST's runs on");
     }
 
     #[test]

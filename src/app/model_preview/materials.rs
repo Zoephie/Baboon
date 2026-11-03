@@ -740,6 +740,7 @@ fn prepare_h3_material(
     let clock = match (source.game(), definition.name == "screen") {
         (Some(GameId::Halo3Odst), true) => H3Clock::OdstScreen,
         (Some(GameId::Halo3Odst), false) => H3Clock::Odst,
+        (Some(GameId::HaloReach), _) => H3Clock::Reach,
         _ => H3Clock::Halo3,
     };
     for parameter in &method.parameters {

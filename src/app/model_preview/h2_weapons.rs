@@ -596,7 +596,10 @@ fn fold_attached(
     let frame = |marker: &RenderModelPreviewMarker| {
         (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
     };
-    if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
+    // `Game::of` calls Reach `Halo3` too; its attachments, lights and held
+    // weapons read differently, and wait on their own readers.
+    if source.game() == Some(GameId::HaloReach) {
+    } else if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
         read_h3_attached_features(source, object, owner, &attached.markers, &frame, Some(name), preview);
         read_extension_weapons(source, object, owner, &attached.markers, &frame, preview, Some(name));
     } else {

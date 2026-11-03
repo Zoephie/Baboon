@@ -436,6 +436,13 @@ fn load_tag_preview(
                 read_h3_object_features(source, model_tag, model, preview);
             });
         }
+        // Reach's attachments, lights and effects read differently, and wait
+        // on their own readers; what the object's shaders read does not.
+        if matches!(source, TagSource::LooseFolder { game: Some(GameId::HaloReach), .. }) {
+            data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+            let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
+            data.h2_object_functions = feature(&mut notes, "its functions", functions);
+        }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
@@ -675,7 +682,10 @@ fn load_tag_preview(
     // reaches here for its `.model` and attaches them once it has read its own.
     let opened = entry.group_tag == u32::from_be_bytes(*b"hlmt");
     let source = source.filter(|source| {
-        matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst), .. })
+        matches!(
+            source,
+            TagSource::LooseFolder { game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach), .. }
+        )
     });
     if let Some(source) = source.filter(|_| opened) {
         let preview = std::sync::Arc::make_mut(&mut data.preview);
