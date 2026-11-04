@@ -10,7 +10,7 @@ use super::*;
 use crate::app::model_preview::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::Program;
-use crate::app::model_preview::h4_submit::H4Submit;
+use crate::app::model_preview::h4_submit::{H4HologramPost, H4ScreenMaterial, H4Submit};
 use blam_tags::material::{Material, MaterialShader, bake, shader_flags};
 
 /// Entry points (`entry_point_enum`) the passes are taken from.
@@ -105,6 +105,79 @@ impl H4Shader {
     }
 }
 
+/// A full-screen triangle for an explicit shader's pass, its texcoord running
+/// up the picture as GL's targets do: v is GL's t. The hologram's screen
+/// rectangles are handed over in the same terms (see `h4_holograms.rs`).
+const SCREEN_VERTEX: &str = "#version 410 core
+out vec2 v_TEXCOORD0;
+void main() {
+    vec2 corner = vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4.0 - 1.0;
+    gl_Position = vec4(corner, 0.0, 1.0);
+    v_TEXCOORD0 = corner * 0.5 + 0.5;
+}
+";
+
+/// One of `rasterizer_globals`' explicit shaders that is a `material`, baked
+/// as any material is, its one pass (`screen`) over the picture.
+fn screen_material(source: &TagSource, path: &str, caches: &mut ResolveCaches) -> Result<H4ScreenMaterial, String> {
+    let tag = load_referenced_tag_from_source(source, path, "material", b"mat ").map_err(|error| error.to_string())?;
+    let material = Material::from_tag(&tag);
+    let shader = match caches.h4_shaders.remove(&material.shader) {
+        Some(known) => known.map_err(|error| error.to_string()),
+        None => read_shader(source, &material.shader),
+    }?;
+    let pixel = translate_pass(&shader.program, "", "screen", Stage::Pixel);
+    let baked = {
+        let lookup = std::cell::RefCell::new(|path: &str| bitmap_kind(source, path, caches));
+        bake(&material, &shader.shader, &|path: &str| (lookup.borrow_mut())(path))
+    };
+    caches.h4_shaders.insert(material.shader.clone(), Ok(shader));
+    let pixel = pixel?;
+    let pass = Arc::new(H3Pass {
+        fullscreen: true,
+        vertex: SCREEN_VERTEX.to_owned(),
+        pixel: pixel.source,
+        uniforms: pixel.uniforms,
+        textures: pixel.textures,
+    });
+    let mut textures: Vec<H3Texture> = Vec::new();
+    for texture in &baked.textures {
+        let Some((uniform, _)) = texture_uniform(&pass.textures, &texture.parameter) else { continue };
+        if textures.iter().any(|known| known.uniform == uniform) {
+            continue;
+        }
+        let Some((image, texels, mips)) = h3_image(source, &texture.bitmap, 0, SamplerKind::Texture2D, caches) else { continue };
+        let sampler = H3Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
+        textures.push(H3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
+    }
+    // `set_explicit_shaders` (X360 0x82AA4FC8) submits for every phase.
+    let submit = H4Submit::new(baked, 0, 0, None);
+    Ok(H4ScreenMaterial { values: submit.baked_values(), pass, submit, textures })
+}
+
+/// `rasterizer_globals`' explicit shaders 22 ("postprocess hologram") and 24
+/// ("hologram composite"), whose pixel shaders are `material`s, read once.
+fn hologram_post(source: &TagSource, caches: &mut ResolveCaches) -> Option<Arc<H4HologramPost>> {
+    const POSTPROCESS_HOLOGRAM: usize = 22;
+    const HOLOGRAM_COMPOSITE: usize = 24;
+    if let Some(known) = &caches.h4_hologram_post {
+        return known.clone();
+    }
+    let post = (|| {
+        let globals =
+            load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+        let explicit = elements(globals.root(), "explicit shaders");
+        let path = |index: usize| explicit.get(index)?.read_tag_ref_path("explicit pixel shader").filter(|path| !path.is_empty());
+        let (combine, composite) = (path(POSTPROCESS_HOLOGRAM)?, path(HOLOGRAM_COMPOSITE)?);
+        Some(Arc::new(H4HologramPost {
+            combine: screen_material(source, &combine, caches).ok()?,
+            composite: screen_material(source, &composite, caches).ok()?,
+        }))
+    })();
+    caches.h4_hologram_post = Some(post.clone());
+    post
+}
+
 /// The pass's sampler for a parameter. Parameter names are string ids, which
 /// hold lowercase; the source spells the sampler as it likes
 /// (`control_map_SpGlRf`) and GLSL names are exact, so the pass's spelling
@@ -171,7 +244,8 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
         Some((lit, lit_entry)) => {
             // `handle_object_part` clips a blended hologram below full alpha.
             let clip = (hologram || blended_hologram).then_some(if blended_hologram { 1.0 } else { 0.0 });
-            let submit = H4Submit::new(baked.clone(), ENTRY_ALBEDO, lit_entry, clip);
+            let post = clip.and_then(|_| hologram_post(source, caches));
+            let submit = H4Submit::new(baked.clone(), ENTRY_ALBEDO, lit_entry, clip).with_post(post);
             let mut h3 = H3Material {
                 dialect: H3Dialect::Halo4,
                 albedo: albedo.filter(|_| opaque),

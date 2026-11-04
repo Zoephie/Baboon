@@ -183,6 +183,9 @@ pub(crate) struct RenderModelPreview {
     /// Halo 4's final composite colour grading: the default camera fx
     /// settings' 16-cube lookup.
     pub h4_color_grading: Option<materials::H3Bitmap>,
+    /// A Halo 4 object's `bounding offset` (in its node 0's frame) and
+    /// `bounding radius`, which its holograms frame their screen effects by.
+    pub h4_bounding_sphere: Option<([f32; 3], f32)>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,

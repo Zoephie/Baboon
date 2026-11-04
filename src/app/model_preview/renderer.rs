@@ -999,7 +999,10 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let h3 = owned.iter().filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
     let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
     let h4 = owned.iter().filter_map(|texture| texture.h3.as_ref()).filter_map(|material| material.h4.as_ref());
-    let h3 = h3.chain(h4.flat_map(|submit| submit.inputs()));
+    // A hologram's screen materials read its object's functions too.
+    let post = h4.clone().filter_map(|submit| submit.post());
+    let post = post.flat_map(|post| post.combine.submit.inputs().chain(post.composite.submit.inputs()));
+    let h3 = h3.chain(h4.flat_map(|submit| submit.inputs())).chain(post);
     let flares = flares
         .chain(h3)
         .chain(h3_lights.flat_map(|light| light.inputs()))
@@ -1465,6 +1468,8 @@ pub(super) use reach_lighting::{
 mod reach_bloom;
 #[path = "h4_bloom.rs"]
 mod h4_bloom;
+#[path = "h4_holograms.rs"]
+mod h4_holograms;
 #[path = "reach_shadow_pass.rs"]
 mod reach_shadow_pass;
 #[path = "reach_light_pass.rs"]
@@ -4083,6 +4088,10 @@ struct ModelGlRenderer {
     h3_bloom: Option<h3_bloom::H3Bloom>,
     reach_bloom: Option<reach_bloom::ReachBloom>,
     h4_bloom: Option<h4_bloom::H4Bloom>,
+    /// Halo 4's hologram surfaces and the screen materials' bitmaps.
+    h4_holograms: Option<h4_holograms::H4Holograms>,
+    /// Drawing a hologram's second, blended pass, which clips nothing.
+    h4_hologram_blend_pass: bool,
     /// Reach's self shadow: its map and mask, and the apply.
     reach_shadow: Option<reach_shadow_pass::ReachShadowTargets>,
     reach_shadow_program: Option<glow::NativeProgram>,
@@ -4243,6 +4252,8 @@ impl ModelGlRenderer {
                 h3_bloom: None,
                 reach_bloom: None,
                 h4_bloom: None,
+                h4_holograms: None,
+                h4_hologram_blend_pass: false,
                 reach_shadow: None,
                 reach_shadow_program: None,
                 reach_view_projection: None,

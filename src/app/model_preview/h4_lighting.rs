@@ -27,9 +27,65 @@ fn default_sh() -> Vec<[f32; 4]> {
     sh
 }
 
-/// `c_camera_fx_values::get_render_exposure` at the default settings' 0
-/// stops: 2^0, scaled by 1.0 / 1.4938016 (MCC `xmmword_1424A1488` +0x2C).
-pub(super) const H4_EXPOSURE: f32 = 1.0 / 1.493_801_6;
+/// MCC's scale on the render exposure (`xmmword_1424A1488` +0x2C):
+/// `get_render_exposure` (X360 0x82B97C98) divides `2^stops` by it.
+const EXPOSURE_SCALE: f32 = 1.493_801_6;
+
+/// The camera fx the preview frames Halo 4 objects with, its own choice (user
+/// decision, 2026-11-04). `globals\defaults\default.camera_fx_settings` is
+/// like no level (bloom 0.3, no self-illumination bloom or exposure, no tone
+/// curve), so the preview takes one real level's instead:
+/// `environments\solo\m80_delta\m80_cam_fx_global`, the set Cortana's
+/// mission and her m81, m82 and m91 cinematics share (13 kit tags), without
+/// its colour grading so nothing is tinted. Its exposure auto-adjusts, and
+/// against a dark picture climbs to its `maximum`, +1, which is also the
+/// maximum of 70 of the kit's 110 auto-exposed camera fx.
+pub(super) const H4_PREVIEW_STOPS: f32 = 1.0;
+
+/// The preview camera fx's `self_illum_preferred` (+1.5) and
+/// `self_illum_scale` "exposure change" (0): self-illumination, and the
+/// hologram composite, hold +1.5 stops whatever the scene's exposure.
+const SELF_ILLUM_PREFERRED: f32 = 1.5;
+const SELF_ILLUM_CHANGE: f32 = 0.0;
+
+/// The preview camera fx's `filmic_tone_curve` (enabled): shoulder strength,
+/// linear strength, linear angle, toe strength, toe numerator, toe
+/// denominator, linear white point. Every one of the kit's 125 enabled
+/// curves is this one.
+pub(super) const H4_FILMIC_CURVE: [f32; 7] = [0.2, 0.3, 0.2, 0.2, 0.01, 0.4, 4.0];
+
+/// `SetFilmicToneCurveParameters` (X360 0x83AFD0A0): the five constants
+/// `ApplyFilmicToneCurve` and `InverseFilmicToneCurve` read, each a splat.
+/// A field within 1e-4 of zero makes the curve identity, whose constants
+/// differ for the inverse.
+pub(super) fn h4_filmic_params(curve: [f32; 7], inverse: bool) -> [f32; 5] {
+    let [a, b, c, d, e, f, w] = curve;
+    if curve.iter().any(|field| field.abs() < 1e-4) {
+        return if inverse { [1.0, 0.0, 0.0, 1.0, 0.0] } else { [0.0, 1.0, 0.0, 0.0, 1.0] };
+    }
+    let white = 1.0 / ((w * (a * w + c * b) + d * e) / (w * (a * w + b) + d * f) - e / f);
+    [white * (a * f - a * e), white * (b * c * f - b * e), a * f, b * f, d * f * f]
+}
+
+/// `ApplyFilmicToneCurve`: `x(x·p0 + p1) / (x(x·p2 + p3) + p4)`.
+#[cfg(test)]
+fn apply_filmic(params: [f32; 5], x: f32) -> f32 {
+    x * (x * params[0] + params[1]) / (x * (x * params[2] + params[3]) + params[4])
+}
+
+/// `c_camera_fx_values::get_render_exposure`: `2^stops / 1.4938016`.
+pub(super) fn h4_exposure(stops: f32) -> f32 {
+    stops.exp2() / EXPOSURE_SCALE
+}
+
+/// `get_illum_render_scale` (X360 0x829A1D50): `2^(v87 - stops)`, with
+/// `update` (0x83A963A0) leaving `v87 = (stops - preferred) · change +
+/// preferred`. Self-illumination, and the hologram composite, follow the
+/// scene's exposure only by `change`.
+pub(super) fn h4_illum_scale(stops: f32) -> f32 {
+    let illum_stops = (stops - SELF_ILLUM_PREFERRED) * SELF_ILLUM_CHANGE + SELF_ILLUM_PREFERRED;
+    (illum_stops - stops).exp2()
+}
 
 /// `c_camera_fx_values::g_HDR_target_stops` (X360 0x86E3C54C): the HDR
 /// target holds light three stops down.
@@ -77,11 +133,15 @@ pub(super) fn h4_frame_value(name: &str) -> Option<H3Value> {
         // `setup_render_target_globals_with_exposure`: (e / 2^Y, 2^Y, e,
         // alpha), and the self-illumination scale (1 at defaults) times the
         // same. `.w` of the latter is the alpha the lerp keeps [inferred].
+        // `restore_render_target_globals_with_exposure` (X360 0x82A23838):
+        // the self-illumination one is `(illum, illum · e / 2^Y)`.
         "ps_view_exposure" | "vs_view_exposure" => {
-            floats([H4_EXPOSURE / H4_DARK_MULTIPLIER, H4_DARK_MULTIPLIER, H4_EXPOSURE, 1.0])
+            let exposure = h4_exposure(H4_PREVIEW_STOPS);
+            floats([exposure / H4_DARK_MULTIPLIER, H4_DARK_MULTIPLIER, exposure, 1.0])
         }
         "ps_view_self_illum_exposure" | "vs_view_self_illum_exposure" => {
-            floats([1.0, H4_EXPOSURE / H4_DARK_MULTIPLIER, 0.0, 1.0])
+            let illum = h4_illum_scale(H4_PREVIEW_STOPS);
+            floats([illum, illum * h4_exposure(H4_PREVIEW_STOPS) / H4_DARK_MULTIPLIER, 0.0, 1.0])
         }
         // Uncompressed: the preview's vertices are already in model units.
         "vs_mesh_position_compression_scale" => floats([1.0, 1.0, 1.0, 0.0]),
@@ -162,18 +222,62 @@ mod tests {
 
     #[test]
     fn exposure_at_zero_stops_is_the_settings_scale() {
-        assert!((H4_EXPOSURE - 0.669_433).abs() < 1e-6);
+        assert!((h4_exposure(0.0) - 0.669_433).abs() < 1e-6);
+        assert!((h4_exposure(1.0) - 2.0 * 0.669_433).abs() < 1e-5);
         let Some(H3Value::Floats(exposure)) = h4_frame_value("ps_view_exposure") else { panic!() };
         assert_eq!(exposure[1], 8.0);
-        assert!((exposure[0] * exposure[1] - H4_EXPOSURE).abs() < 1e-6, "the dark target times its multiplier is the exposure");
+        let expected = h4_exposure(H4_PREVIEW_STOPS);
+        assert!((exposure[0] * exposure[1] - expected).abs() < 1e-6, "the dark target times its multiplier is the exposure");
+    }
+
+    /// With no exposure change, self-illumination holds its preferred stops
+    /// whatever the scene's: `illum · e` is `2^1.5 / 1.4938` at any stops.
+    #[test]
+    fn self_illumination_holds_its_preferred_exposure() {
+        let held = 1.5f32.exp2() * h4_exposure(0.0);
+        for stops in [-2.0, 0.0, 1.0, 2.0] {
+            let self_illum = h4_illum_scale(stops) * h4_exposure(stops);
+            assert!((self_illum - held).abs() < 1e-5, "{stops}: {self_illum}");
+        }
+        assert!(h4_illum_scale(2.0) < h4_illum_scale(0.0), "it takes back what the scene's exposure adds");
+    }
+
+    /// The curve maps its white point to 1 and darkens the toe; with a field
+    /// at zero it is identity, both ways.
+    #[test]
+    fn the_filmic_curve_reaches_one_at_its_white_point() {
+        let params = h4_filmic_params(H4_FILMIC_CURVE, false);
+        assert!((apply_filmic(params, 4.0) - 1.0).abs() < 1e-5);
+        assert!(apply_filmic(params, 0.1) < 0.1, "the toe is darker");
+        let identity = h4_filmic_params([0.0, 0.3, 0.2, 0.2, 0.01, 0.4, 4.0], false);
+        assert_eq!(apply_filmic(identity, 0.37), 0.37);
+        assert_eq!(h4_filmic_params([0.0; 7], true), [1.0, 0.0, 0.0, 1.0, 0.0]);
+    }
+
+    /// With `BLAM_TEST_H4EK`: the preview's camera fx is
+    /// `m80_cam_fx_global`'s, as its doc says.
+    #[test]
+    fn the_preview_camera_fx_is_m80s() {
+        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+            return;
+        };
+        let path = std::path::Path::new(&root).join("environments/solo/m80_delta/m80_cam_fx_global.camera_fx_settings");
+        let tag = blam_tags::TagFile::read(path).unwrap();
+        let root = tag.root();
+        let real = |name: &str| root.descend(name.rsplit_once('/').unwrap().0).and_then(|holder| holder.read_real(name.rsplit_once('/').unwrap().1)).unwrap();
+        assert_eq!(real("exposure/maximum"), H4_PREVIEW_STOPS);
+        assert_eq!(real("self_illum_preferred/preferred exposure"), SELF_ILLUM_PREFERRED);
+        assert_eq!(real("self_illum_scale/exposure change"), SELF_ILLUM_CHANGE);
+        let curve = ["shoulder strength", "linear strength", "linear angle", "toe strength", "toe numerator", "toe denominator", "linear white point"];
+        assert_eq!(curve.map(|field| real(&format!("filmic_tone_curve/{field}"))), H4_FILMIC_CURVE);
     }
 }
 
 /// `final_composite` (`postprocess/final_composite_shared.fxh`), at the
-/// default camera fx: the HDR target brought back up (`× (8, 8, 8, 32)`) and
-/// the bloom added unscaled; hue, saturation and contrast are off; the filmic
-/// curve is identity (the default tag predates it and its upgrade leaves it
-/// disabled); then `sqrt` and `apply_color_grading` with one lookup, which is
+/// preview's camera fx: the HDR target brought back up (`× (8, 8, 8, 32)`)
+/// and the bloom added unscaled; hue, saturation and contrast are off (not
+/// on PC); the filmic curve ([`h4_filmic_params`]); then `sqrt` and
+/// `apply_color_grading` with one lookup, which is
 /// what reaches the screen. The lookup is uploaded as its bytes stand, so
 /// that its output is the displayed value [inferred: the back buffer's
 /// format, O7, decides whether the game's view decodes it, and either way
@@ -188,6 +292,7 @@ uniform vec3 grading_scale;
 uniform vec3 grading_offset;
 uniform float dark_multiplier;
 uniform float view_scale;
+uniform float filmic[5];
 out vec4 color;
 void main() {
     vec2 place = gl_FragCoord.xy / vec2(textureSize(accumulation, 0));
@@ -197,6 +302,7 @@ void main() {
         accumulated = vec4(0.0);
     }
     vec3 combined = max(accumulated.rgb, vec3(0.0)) * dark_multiplier + texture(bloom, place).rgb;
+    combined = combined * (combined * filmic[0] + filmic[1]) / (combined * (combined * filmic[2] + filmic[3]) + filmic[4]);
     vec3 encoded = sqrt(max(combined, vec3(0.0)));
     color.rgb = texture(grading, encoded * grading_scale + grading_offset).rgb;
     bool drawn = texture(scene_depth, place).r < 1.0;

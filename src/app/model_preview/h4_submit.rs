@@ -9,7 +9,9 @@ use blam_tags::material::{
     update_constants,
 };
 
-use super::h3_shaders::H3Value;
+use std::sync::Arc;
+
+use super::h3_shaders::{H3Pass, H3Texture, H3Value};
 
 /// `e_material_extern`s 35 to 41: a hologram's key, fill and rim light
 /// directions (odd) and the scalars beside them (even).
@@ -28,6 +30,28 @@ pub(crate) struct H4Submit {
     lit_phases: u8,
     /// For a hologram, the alpha its pass 0 clips below: 1 for a blended one.
     hologram: Option<f32>,
+    /// For a hologram, the screen materials its picture goes through.
+    post: Option<Arc<H4HologramPost>>,
+}
+
+/// One of `rasterizer_globals`' explicit shaders that is a `material`: its
+/// screen pass, its per-draw state, and its bitmaps.
+#[derive(Debug)]
+pub(crate) struct H4ScreenMaterial {
+    pub(crate) pass: Arc<H3Pass>,
+    pub(crate) submit: H4Submit,
+    pub(crate) values: HashMap<String, H3Value>,
+    pub(crate) textures: Vec<H3Texture>,
+}
+
+/// What a hologram's picture goes through (`RenderHolograms`, X360
+/// 0x829B63C8; `docs/h4-preview-research/holograms.md`): explicit shader 22,
+/// `globals\materials\final_combine_hologram`, onto its own surface, then 24,
+/// `globals\materials\hologram_composite`, into the scene's light.
+#[derive(Debug)]
+pub(crate) struct H4HologramPost {
+    pub(crate) combine: H4ScreenMaterial,
+    pub(crate) composite: H4ScreenMaterial,
 }
 
 /// The drawn object, as a material's functions read it.
@@ -63,7 +87,29 @@ impl H4Submit {
             albedo_phases: blam_tags::material::entry_point_phase_mask(albedo_entry),
             lit_phases: blam_tags::material::entry_point_phase_mask(lit_entry),
             hologram,
+            post: None,
         }
+    }
+
+    /// A hologram's, with the screen materials its picture goes through.
+    pub(crate) fn with_post(mut self, post: Option<Arc<H4HologramPost>>) -> Self {
+        self.post = post;
+        self
+    }
+
+    /// Whether this draws through `RenderHolograms` rather than with the scene.
+    pub(crate) fn is_hologram(&self) -> bool {
+        self.hologram.is_some()
+    }
+
+    /// A blended hologram (`is_blended_hologram`): drawn again in the blend
+    /// pass, and clipped below full alpha in the first.
+    pub(crate) fn is_blended_hologram(&self) -> bool {
+        self.hologram == Some(1.0)
+    }
+
+    pub(crate) fn post(&self) -> Option<&Arc<H4HologramPost>> {
+        self.post.as_ref()
     }
 
     /// Whether anything here changes per draw.
@@ -116,11 +162,13 @@ impl H4Submit {
     /// (MCC 0x1408CA980), each only when the bake queued functions of its
     /// kind, and a hologram's rig. `node` is the hologram's node matrix (see
     /// [`hologram_rows`]).
+    /// `blend_pass` is a hologram's second pass, which clips nothing.
     pub(crate) fn draw_values(
         &self,
         albedo: bool,
         object: &DrawnObject<'_>,
         node: [[f32; 4]; 3],
+        blend_pass: bool,
     ) -> HashMap<String, H3Value> {
         let baked = &self.baked;
         let phases = if albedo { self.albedo_phases } else { self.lit_phases };
@@ -142,6 +190,8 @@ impl H4Submit {
             values.insert("ps_material_shader_transforms".to_owned(), H3Value::FloatArray(xforms));
         }
         if let Some(clip) = self.hologram {
+            // `handle_object_part` sets the threshold in pass 0 alone.
+            let clip = if blend_pass { 0.0 } else { clip };
             // `handle_object_part` runs every phase's functions for its rig.
             let mut pixel = registers(&baked.real_vectors, PIXEL_REGISTERS.1);
             if queued(postprocess_flags::PIXEL_CONSTANT_FUNCTIONS) {
@@ -267,7 +317,7 @@ mod tests {
             eprintln!("NOTE input {name} = {:?}", values.get(name));
         }
         let object = DrawnObject { values: Some(&values), time: 0.0, owner: 0 };
-        let drawn = submit.draw_values(false, &object, IDENTITY);
+        let drawn = submit.draw_values(false, &object, IDENTITY, false);
         for function in &submit.baked.functions {
             let register = function.register_index;
             let name = if function.vertex { format!("user_vertex_parameter_{register}") } else { format!("user_parameter_{register}") };

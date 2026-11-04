@@ -458,6 +458,7 @@ fn load_tag_preview(
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
+            std::sync::Arc::make_mut(&mut data.preview).h4_bounding_sphere = read_h4_bounding_sphere(model_tag);
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
@@ -784,6 +785,18 @@ fn read_ce_object_features(
 fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::MarkerFrame, usize) {
     let place = super::attachment::MarkerFrame { axes: marker.axes, position: marker.position, node: marker.node_index };
     (place, marker.node_index.max(0) as usize)
+}
+
+/// A Halo 4 object's `bounding offset` and `bounding radius`
+/// (`object_compute_bounding_sphere_recursive`, X360 0x84A489C0, reads both).
+fn read_h4_bounding_sphere(object: &TagFile) -> Option<([f32; 3], f32)> {
+    let holder = super::ce_attachments::object_block(object, "bounding radius")?;
+    let radius = holder.read_real("bounding radius")?;
+    let offset = match holder.field("bounding offset").and_then(|field| field.value()) {
+        Some(blam_tags::TagFieldData::RealPoint3d(point)) => [point.x, point.y, point.z],
+        _ => [0.0; 3],
+    };
+    (radius > 0.0).then_some((offset, radius))
 }
 
 /// What a Reach object brings so far: its flares and lights. Its light

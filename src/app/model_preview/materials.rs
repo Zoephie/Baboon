@@ -210,6 +210,8 @@ struct ResolveCaches {
     h4_shaders: HashMap<String, Result<h4::H4Shader, Arc<str>>>,
     /// Halo 4's bitmaps by path: whether each exists, and is a cube.
     h4_bitmap_kinds: HashMap<String, Option<bool>>,
+    /// `rasterizer_globals`' two hologram screen materials, read once.
+    h4_hologram_post: Option<Option<Arc<crate::app::model_preview::h4_submit::H4HologramPost>>>,
     h3_shield: Option<Option<Arc<H3Shield>>>,
     h3_sources: Option<H3Sources>,
     /// Images decoded for Halo 3 passes, with whether each is sRGB.

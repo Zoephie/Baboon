@@ -13,16 +13,85 @@ use eframe::glow::{self, HasContext};
 
 use super::h3_draw::screen_program;
 
-/// `globals\defaults\default.camera_fx_settings`: `bloom_highlight`,
-/// `bloom_inherent`, `bloom_intensity` and the three colours. The tag
-/// predates `bloom_self_illum`, which reads 0 [inferred: zero fill].
-const HIGHLIGHT: f32 = 0.1;
-const INHERENT: f32 = 0.0;
-const SELF_ILLUM: f32 = 0.0;
-const INTENSITY: f32 = 0.3;
-const LARGE_COLOR: [f32; 3] = [0.0; 3];
-const MEDIUM_COLOR: [f32; 3] = [0.240_627_5; 3];
-const SMALL_COLOR: [f32; 3] = [1.0; 3];
+/// What a chain runs on: a camera fx's bloom fields.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct H4BloomSettings {
+    highlight: f32,
+    inherent: f32,
+    self_illum: f32,
+    intensity: f32,
+    large: [f32; 3],
+    medium: [f32; 3],
+    small: [f32; 3],
+    /// `GenerateBloomSource`'s entry 4, "no color grading, no self-illum,
+    /// with alpha preservation (used for Hologram)": intensity by luminance,
+    /// the source's alpha kept, and the chain's output read before its last
+    /// `kernel_5` (MCC hands the final composite surface 19, which then holds
+    /// `blur_11_horizontal` of the result; `holograms.md` §3).
+    hologram: bool,
+}
+
+/// The preview camera fx's bloom (`h4_lighting::H4_PREVIEW_STOPS` says
+/// whose): `bloom_highlight`, `bloom_inherent`, `bloom_self_illum`,
+/// `bloom_intensity` and the three colours of `m80_cam_fx_global`.
+pub(super) const VIEW_BLOOM: H4BloomSettings = H4BloomSettings {
+    highlight: 0.05,
+    inherent: 0.0,
+    self_illum: 5.0,
+    intensity: 3.0,
+    large: [1.0; 3],
+    medium: [1.0; 3],
+    small: [1.0; 3],
+    hologram: false,
+};
+
+/// `rasterizer_globals`' `Hologram Camera FX`,
+/// `globals\defaults\hologram.camera_fx_settings`.
+const HOLOGRAM_BLOOM: H4BloomSettings = H4BloomSettings {
+    highlight: 0.1,
+    inherent: 0.0,
+    self_illum: 0.0,
+    intensity: 0.7,
+    large: [0.0; 3],
+    medium: [0.1, 0.2, 0.3],
+    small: [0.1, 0.2, 0.3],
+    hologram: true,
+};
+
+impl H4BloomSettings {
+    /// A camera fx tag's bloom fields, to check the constants against.
+    #[cfg(test)]
+    pub(super) fn read(root: blam_tags::TagStruct<'_>) -> Self {
+        let real = |holder: &str, name: &str| root.descend(holder).and_then(|holder| holder.read_real(name)).unwrap_or(0.0);
+        let color = |holder: &str, name: &str| {
+            let color = root.descend(holder).and_then(|holder| holder.field(name)).and_then(|field| field.value());
+            match color {
+                Some(blam_tags::TagFieldData::RealRgbColor(color)) => [color.red, color.green, color.blue],
+                _ => [0.0; 3],
+            }
+        };
+        Self {
+            highlight: real("bloom_highlight", "highlight bloom"),
+            inherent: real("bloom_inherent", "inherent bloom"),
+            self_illum: real("bloom_self_illum", "self-illum bloom bloom"),
+            intensity: real("bloom_intensity", "bloom intensity"),
+            large: color("bloom_large_color", "large color"),
+            medium: color("bloom_medium_color", "medium color"),
+            small: color("bloom_small_color", "small color"),
+            hologram: false,
+        }
+    }
+
+    /// The hologram chain, its highlight and inherent bloom scaled by
+    /// `GetHologramBloomIntensityScale` (`RenderHolograms`, X360 0x829B63C8).
+    pub(super) fn hologram(distance_scale: f32) -> Self {
+        Self {
+            highlight: HOLOGRAM_BLOOM.highlight * distance_scale,
+            inherent: HOLOGRAM_BLOOM.inherent * distance_scale,
+            ..HOLOGRAM_BLOOM
+        }
+    }
+}
 
 /// One explicit shader of the chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +121,7 @@ uniform sampler2D source;
 uniform sampler2D added;
 uniform sampler3D grading;
 uniform bool graded;
+uniform bool keeps_alpha;
 uniform vec3 grading_scale;
 uniform vec3 grading_offset;
 uniform int pass;
@@ -77,7 +147,7 @@ void main() {
             ? texture(grading, s.rgb * grading_scale + grading_offset).a
             : dot(s.rgb, vec3(0.3086, 0.6094, 0.0820));
         float bloom = scale.x * intensity + scale.z * s.a + scale.y;
-        color = vec4(s.rgb * bloom, intensity);
+        color = vec4(s.rgb * bloom, keeps_alpha ? s.a : intensity);
     } else if (pass == 2) {
         vec4 a = vec4(0.00000001);
         for (int y = -3; y <= 3; y += 2) {
@@ -167,8 +237,8 @@ fn resolution_scale([width, height]: [i32; 2]) -> f32 {
 
 /// A colour scaled by the intensity and the resolution, as the chain hands
 /// its passes.
-fn scaled(color: [f32; 3], frame: [i32; 2]) -> [f32; 4] {
-    let factor = INTENSITY * resolution_scale(frame);
+fn scaled(color: [f32; 3], intensity: f32, frame: [i32; 2]) -> [f32; 4] {
+    let factor = intensity * resolution_scale(frame);
     [color[0] * factor, color[1] * factor, color[2] * factor, 1.0]
 }
 
@@ -211,6 +281,10 @@ pub(super) struct H4Bloom {
     program: glow::NativeProgram,
     surfaces: Option<Surfaces>,
     nothing: Option<glow::NativeTexture>,
+    /// Bound for the grading lookup when there is none: an empty 3D unit is
+    /// "unloadable" to a sampler the program declares even where it never
+    /// reads it (Apple's GL warns once).
+    no_volume: Option<glow::NativeTexture>,
 }
 
 /// The colour grading lookup shader 159 reads its intensity from, and how.
@@ -221,8 +295,12 @@ pub(super) struct H4BloomGrading {
 }
 
 impl H4Bloom {
-    pub(super) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
-        unsafe { Some(Self { program: screen_program(gl, FRAGMENT)?, surfaces: None, nothing }) }
+    pub(super) unsafe fn new(
+        gl: &glow::Context,
+        nothing: Option<glow::NativeTexture>,
+        no_volume: Option<glow::NativeTexture>,
+    ) -> Option<Self> {
+        unsafe { Some(Self { program: screen_program(gl, FRAGMENT)?, surfaces: None, nothing, no_volume }) }
     }
 
     unsafe fn step(
@@ -259,8 +337,10 @@ impl H4Bloom {
         }
     }
 
-    /// What the final composite adds. Leaves `scene` bound, and the viewport
-    /// and scissor as they were.
+    /// What the final composite adds: the bloom of `accumulation` by
+    /// `settings`. Leaves `scene` bound, and the viewport and scissor as they
+    /// were. A hologram's chain reads no grading.
+    #[allow(clippy::too_many_arguments)]
     pub(super) unsafe fn build(
         &mut self,
         gl: &glow::Context,
@@ -269,7 +349,9 @@ impl H4Bloom {
         accumulation: glow::NativeTexture,
         frame: [i32; 2],
         grading: Option<&H4BloomGrading>,
+        settings: &H4BloomSettings,
     ) -> Option<glow::NativeTexture> {
+        let grading = grading.filter(|_| !settings.hologram);
         unsafe {
             if self.surfaces.as_ref().is_none_or(|surfaces| surfaces.frame != frame) {
                 if let Some(old) = self.surfaces.take() {
@@ -292,9 +374,10 @@ impl H4Bloom {
             gl.uniform_1_i32(uniform("added").as_ref(), 1);
             gl.uniform_1_i32(uniform("grading").as_ref(), 2);
             gl.active_texture(glow::TEXTURE2);
-            gl.bind_texture(glow::TEXTURE_3D, grading.map(|grading| grading.texture));
+            gl.bind_texture(glow::TEXTURE_3D, grading.map(|grading| grading.texture).or(self.no_volume));
             gl.active_texture(glow::TEXTURE0);
             gl.uniform_1_i32(uniform("graded").as_ref(), i32::from(grading.is_some()));
+            gl.uniform_1_i32(uniform("keeps_alpha").as_ref(), i32::from(settings.hologram));
             if let Some(grading) = grading {
                 gl.uniform_3_f32_slice(uniform("grading_scale").as_ref(), &grading.scale);
                 gl.uniform_3_f32_slice(uniform("grading_offset").as_ref(), &grading.offset);
@@ -312,13 +395,17 @@ impl H4Bloom {
             let [mini, mini2] = &surfaces.mini;
             self.step(gl, &surfaces.temp, Pass::Downsample2x2, (accumulation, frame), None, [1.0, 1.0, 0.0, 0.0]);
             let temp = (surfaces.temp.color, surfaces.temp.size);
-            self.step(gl, small, Pass::BloomCurve, temp, None, [HIGHLIGHT, INHERENT, SELF_ILLUM, 1.0]);
+            let curve = [settings.highlight, settings.inherent, settings.self_illum, 1.0];
+            self.step(gl, small, Pass::BloomCurve, temp, None, curve);
             self.step(gl, tiny, Pass::Gaussian4x4, (small.color, small.size), None, ones);
             self.step(gl, mini, Pass::Gaussian4x4, (tiny.color, tiny.size), None, ones);
-            self.blur(gl, mini, mini2, scaled(LARGE_COLOR, frame));
-            self.step(gl, tiny2, Pass::AddAlpha1, (tiny.color, tiny.size), Some(mini.color), scaled(MEDIUM_COLOR, frame));
+            let intensity = settings.intensity;
+            self.blur(gl, mini, mini2, scaled(settings.large, intensity, frame));
+            let medium = scaled(settings.medium, intensity, frame);
+            self.step(gl, tiny2, Pass::AddAlpha1, (tiny.color, tiny.size), Some(mini.color), medium);
             self.blur(gl, tiny2, tiny, ones);
-            self.step(gl, small2, Pass::Add, (small.color, small.size), Some(tiny2.color), scaled(SMALL_COLOR, frame));
+            let small_color = scaled(settings.small, intensity, frame);
+            self.step(gl, small2, Pass::Add, (small.color, small.size), Some(tiny2.color), small_color);
             self.blur(gl, small2, small, ones);
 
             gl.active_texture(glow::TEXTURE2);
@@ -336,7 +423,8 @@ impl H4Bloom {
             if scissored {
                 gl.enable(glow::SCISSOR_TEST);
             }
-            Some(small2.color)
+            // `small` holds `blur_11_horizontal` of the result.
+            Some(if settings.hologram { small.color } else { small2.color })
         }
     }
 }
@@ -350,9 +438,9 @@ mod tests {
         assert_eq!(resolution_scale([1280, 720]), 1.0);
         assert!((resolution_scale([1920, 1080]) - 0.444_444).abs() < 1e-5);
         assert_eq!(resolution_scale([1300, 400]), 1.0, "past 1280 wide but under 921,600 texels");
-        assert_eq!(scaled(LARGE_COLOR, [1000, 700]), [0.0, 0.0, 0.0, 1.0]);
-        assert!((scaled(MEDIUM_COLOR, [1000, 700])[0] - 0.072_188_25).abs() < 1e-7);
-        assert!((scaled(SMALL_COLOR, [1920, 1080])[0] - 0.133_333).abs() < 1e-5);
+        assert_eq!(scaled([0.0; 3], 3.0, [1000, 700]), [0.0, 0.0, 0.0, 1.0]);
+        assert!((scaled([0.25; 3], 0.3, [1000, 700])[0] - 0.075).abs() < 1e-7);
+        assert!((scaled([1.0; 3], 0.3, [1920, 1080])[0] - 0.133_333).abs() < 1e-5);
     }
 
     #[test]
@@ -360,5 +448,30 @@ mod tests {
         assert_eq!(divided([1000, 700], 2.0), [500, 350]);
         assert_eq!(divided([1000, 700], 64.0), [16, 11]);
         assert_eq!(divided([10, 10], 64.0), [1, 1], "never empty");
+    }
+
+    /// The hologram's chain scales only highlight and inherent bloom by its
+    /// distance, and keeps its own camera fx's intensity and colours.
+    #[test]
+    fn a_hologram_scales_highlight_and_inherent_bloom_by_distance() {
+        let far = H4BloomSettings::hologram(3.0);
+        assert!((far.highlight - 0.3).abs() < 1e-6);
+        assert_eq!(far.inherent, 0.0);
+        assert_eq!((far.intensity, far.small), (0.7, [0.1, 0.2, 0.3]));
+        assert!(far.hologram && !VIEW_BLOOM.hologram);
+    }
+
+    /// With `BLAM_TEST_H4EK`: the view's bloom is `m80_cam_fx_global`'s and the
+    /// hologram's is the hologram camera fx's.
+    #[test]
+    fn the_bloom_settings_are_their_tags() {
+        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+            return;
+        };
+        let read = |path: &str| blam_tags::TagFile::read(std::path::Path::new(&root).join(path)).unwrap();
+        let m80 = read("environments/solo/m80_delta/m80_cam_fx_global.camera_fx_settings");
+        assert_eq!(H4BloomSettings::read(m80.root()), VIEW_BLOOM);
+        let hologram = read("globals/defaults/hologram.camera_fx_settings");
+        assert_eq!(H4BloomSettings { hologram: true, ..H4BloomSettings::read(hologram.root()) }, HOLOGRAM_BLOOM);
     }
 }

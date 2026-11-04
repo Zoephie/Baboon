@@ -303,7 +303,7 @@ pub(super) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Optio
     }
 }
 
-unsafe fn target_texture(gl: &glow::Context, size: [i32; 2], format: u32) -> Option<glow::NativeTexture> {
+pub(super) unsafe fn target_texture(gl: &glow::Context, size: [i32; 2], format: u32) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
@@ -649,7 +649,7 @@ pub(super) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
 
 /// What the rasterizer's globals hold for an object here, by uniform name.
 /// `stops` is what Reach's area screen effects come to this frame.
-fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
+pub(super) fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
     let [width, height] = size.map(|side| side as f32);
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     // Halo 4's engine constants have names of their own.
@@ -783,7 +783,7 @@ pub(super) unsafe fn set_uniform_value(gl: &glow::Context, location: Option<&glo
     unsafe { set_value(gl, location, ty, value) }
 }
 
-unsafe fn set_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
+pub(super) unsafe fn set_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
     unsafe {
         match (ty, value) {
             (Type::Scalar(Scalar::Float), H3Value::Floats(v)) => gl.uniform_1_f32(location, v[0]),
@@ -980,7 +980,7 @@ impl ModelGlRenderer {
                 let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                 let drawn = super::h4_submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
                 let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
-                submit.draw_values(albedo, &drawn, h4_hologram_node(frame))
+                submit.draw_values(albedo, &drawn, h4_hologram_node(frame), self.h4_hologram_blend_pass)
             });
             for (name, ty) in &pass.uniforms {
                 let location = program.location(gl, name);
@@ -1241,6 +1241,9 @@ impl ModelGlRenderer {
                     Some((batch.clone(), Arc::clone(material)))
                 })
                 .collect();
+            // Halo 4's holograms draw apart from the scene (`RenderHolograms`).
+            let (holograms, batches): (Vec<_>, Vec<_>) =
+                batches.into_iter().partition(|(_, material)| super::h4_holograms::draws_as_hologram(material));
             // A model's materials are all of one game.
             let reach = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Reach);
             let halo4 = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Halo4);
@@ -1300,6 +1303,13 @@ impl ModelGlRenderer {
             gl.color_mask(true, true, true, true);
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.disable(glow::BLEND);
+            // `RenderHolograms`' generate pass: after the albedo and its
+            // decals, before the lights.
+            let hologram = if holograms.is_empty() {
+                None
+            } else {
+                self.h4_generate_holograms(gl, frame, slot, &holograms, albedo_target, size)
+            };
             // `render_fullscreen_shadow_buffer`: Reach's mask, between the
             // albedo and the static lighting that reads it.
             let reach_mask =
@@ -1407,7 +1417,16 @@ impl ModelGlRenderer {
                 .map(|(batch, material)| (h3_layered_distance(material.sort_layer, batch_distance(frame, batch)), batch, material))
                 .collect();
             blended.sort_by(|(a, ..), (b, ..)| b.total_cmp(a));
+            // `QueueHologramApply`: the holograms' composite is one more
+            // transparent, at their sphere.
+            let mut hologram = hologram;
+            let mut composite_hologram = |this: &mut Self, nearer_than: f32| {
+                if let Some(picture) = hologram.take_if(|picture| h3_layered_distance(2, picture.distance) > nearer_than) {
+                    this.h4_composite_holograms(gl, frame, slot, &picture, size);
+                }
+            };
             for (distance, batch, material) in blended {
+                composite_hologram(self, distance);
                 if sprites {
                     self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(distance));
                 }
@@ -1425,6 +1444,7 @@ impl ModelGlRenderer {
                 self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
                 gl.disable(glow::POLYGON_OFFSET_FILL);
             }
+            composite_hologram(self, f32::NEG_INFINITY);
             if sprites {
                 self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                 if self.h3_distorted {
@@ -1612,9 +1632,10 @@ impl ModelGlRenderer {
             if let Some(frame) = halo4 {
                 let grading = self.h4_grading_texture(gl, frame);
                 if self.h4_bloom.is_none() {
-                    self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom);
+                    self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom, self.h2_white_volume);
                 }
-                return self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref());
+                let settings = &super::h4_bloom::VIEW_BLOOM;
+                return self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref(), settings);
             }
             if reach {
                 if self.reach_bloom.is_none() {
@@ -1766,6 +1787,8 @@ impl ModelGlRenderer {
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_scale").as_ref(), &scale);
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_offset").as_ref(), &offset);
             gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), H4_DARK_MULTIPLIER);
+            let filmic = super::super::h4_lighting::h4_filmic_params(super::super::h4_lighting::H4_FILMIC_CURVE, false);
+            gl.uniform_1_f32_slice(gl.get_uniform_location(program, "filmic").as_ref(), &filmic);
             gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
             gl.disable(glow::DEPTH_TEST);
             gl.enable(glow::BLEND);
