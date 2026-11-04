@@ -628,6 +628,11 @@ fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     // Halo 4's engine constants have names of their own.
     if dialect == H3Dialect::Halo4 {
+        if name == "ps_lighting_constants" && frame.light_follows_camera {
+            let camera = camera_to_world(frame);
+            let backward = [camera[2], camera[6], camera[10]];
+            return Some(H3Value::FloatArray(super::h4_lighting::h4_turned_vmf(backward).to_vec()));
+        }
         return super::h4_lighting::h4_frame_value(name);
     }
     if dialect == H3Dialect::Reach {

@@ -35,6 +35,39 @@ pub(super) const H4_EXPOSURE: f32 = 1.0 / 1.493_801_6;
 /// target holds light three stops down.
 pub(super) const H4_DARK_MULTIPLIER: f32 = 8.0;
 
+/// Light Follows Camera, the preview's own: the default lobes turned as one,
+/// by the shortest rotation that takes straight up to halfway between up and
+/// `to_camera` (unit, from the object toward the eye). The bright lobe then
+/// comes from above the viewer's shoulder and the dim one from opposite it;
+/// their colours and the energy stay the game's. Halo 4's lobes are both
+/// vertical, so the turn about the vertical that Halo 3 and Reach use would
+/// change nothing.
+pub(super) fn h4_turned_vmf(to_camera: [f32; 3]) -> [[f32; 4]; 4] {
+    let up = [0.0, 0.0, 1.0];
+    let half = [to_camera[0], to_camera[1], to_camera[2] + 1.0];
+    let length = (half[0] * half[0] + half[1] * half[1] + half[2] * half[2]).sqrt();
+    // Looking straight up from below leaves nothing to lean toward.
+    if length < 1e-4 {
+        return H4_DEFAULT_VMF;
+    }
+    let target = half.map(|axis| axis / length);
+    // Rodrigues' rotation from `up` to `target`.
+    let cos = target[2];
+    let axis = [up[1] * target[2] - up[2] * target[1], up[2] * target[0] - up[0] * target[2], 0.0];
+    let turn = |v: [f32; 4]| -> [f32; 4] {
+        let k = axis;
+        let cross = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
+        let dot = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+        let factor = if cos > -1.0 + 1e-6 { 1.0 / (1.0 + cos) } else { 0.0 };
+        let rotated: [f32; 3] = std::array::from_fn(|i| v[i] * cos + cross[i] + k[i] * dot * factor);
+        [rotated[0], rotated[1], rotated[2], v[3]]
+    };
+    let mut lobes = H4_DEFAULT_VMF;
+    lobes[0] = turn(lobes[0]);
+    lobes[2] = turn(lobes[2]);
+    lobes
+}
+
 /// A Halo 4 engine constant's value for an object here, by name.
 pub(super) fn h4_frame_value(name: &str) -> Option<H3Value> {
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
@@ -105,6 +138,26 @@ mod tests {
         assert!(close(default_irradiance([1.0, 0.0, 0.0]), [0.1410, 0.1354, 0.1354]), "{:?}", default_irradiance([1.0, 0.0, 0.0]));
         // Not Reach's: its default probe lights the side far more.
         assert!(default_irradiance([1.0, 0.0, 0.0])[0] < 0.2);
+    }
+
+    #[test]
+    fn following_the_camera_leans_the_light_toward_it_and_keeps_its_strength() {
+        let length = |v: [f32; 4]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        // A camera off to +x, level with the object.
+        let turned = h4_turned_vmf([1.0, 0.0, 0.0]);
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        assert!((turned[0][0] - half).abs() < 1e-5 && (turned[0][2] - half).abs() < 1e-5, "{:?}", turned[0]);
+        assert!((length(turned[0]) - 1.0).abs() < 1e-5);
+        assert!((length(turned[2]) - 0.8).abs() < 1e-5, "the dim lobe keeps its size");
+        assert!(turned[2][0] < 0.0 && turned[2][2] < 0.0, "and turns opposite: {:?}", turned[2]);
+        assert_eq!(turned[1], H4_DEFAULT_VMF[1]);
+        assert_eq!(turned[3], H4_DEFAULT_VMF[3]);
+        // From straight above there is nothing to turn.
+        let above = h4_turned_vmf([0.0, 0.0, 1.0]);
+        assert!(above.iter().zip(H4_DEFAULT_VMF).all(|(a, b)| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6)));
+        // Whatever faces the camera now takes more light than it did.
+        let facing = |lobes: &[[f32; 4]; 4]| 0.325_735 * lobes[0][0] + 0.282_094_8 * lobes[0][3];
+        assert!(facing(&turned) > facing(&H4_DEFAULT_VMF));
     }
 
     #[test]
