@@ -1211,9 +1211,9 @@ impl ModelGlRenderer {
             let reach = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Reach);
             let halo4 = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Halo4);
             // Reach shadows into a mask ahead of the lights, which is not
-            // built, so its self shadow does not run. Halo 4's bloom and
-            // shadow are not built yet.
-            let (bloomed, self_shadow) = (frame.bloom && !halo4, frame.self_shadow && !reach && !halo4);
+            // built, so its self shadow does not run. Halo 4's shadow is not
+            // built yet.
+            let (bloomed, self_shadow) = (frame.bloom, frame.self_shadow && !reach && !halo4);
             // `screen_effect_sample`, ahead of the scene: Reach's
             // `c_player_view::render` hands its exposure stops to
             // `setup_camera_fx_parameters` before anything draws.
@@ -1418,7 +1418,7 @@ impl ModelGlRenderer {
                             self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
                         }
                     }
-                    bloom = self.h3_built_bloom(gl, accumulation_target, accumulation, size, reach);
+                    bloom = self.h3_built_bloom(gl, accumulation_target, accumulation, size, reach, halo4.then_some(frame));
                     gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
                     gl.enable(glow::DEPTH_TEST);
                     gl.enable(glow::BLEND);
@@ -1463,7 +1463,7 @@ impl ModelGlRenderer {
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             if bloomed && bloom.is_none() {
-                bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size, reach);
+                bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size, reach, halo4.then_some(frame));
             }
             if reach || halo4 {
                 // The object's depth, which tells the composite what it covers.
@@ -1566,9 +1566,17 @@ impl ModelGlRenderer {
         accumulation: glow::NativeTexture,
         size: [i32; 2],
         reach: bool,
+        halo4: Option<&ModelGpuFrame>,
     ) -> Option<glow::NativeTexture> {
         unsafe {
             let vertices = self.h3_empty_array(gl);
+            if let Some(frame) = halo4 {
+                let grading = self.h4_grading_texture(gl, frame);
+                if self.h4_bloom.is_none() {
+                    self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom);
+                }
+                return self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref());
+            }
             if reach {
                 if self.reach_bloom.is_none() {
                     self.reach_bloom = super::reach_bloom::ReachBloom::new(gl, self.h3_no_bloom);
@@ -1661,6 +1669,30 @@ impl ModelGlRenderer {
         }
     }
 
+    /// Halo 4's colour grading lookup, uploaded once per preview, and how a
+    /// pass reads its texel centres (`SetColorGradingParameters`).
+    unsafe fn h4_grading_texture(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) -> Option<super::h4_bloom::H4BloomGrading> {
+        unsafe {
+            let grading = frame.preview.h4_color_grading.as_ref();
+            let key = grading.map(|(image, ..)| Arc::as_ptr(image) as usize);
+            if self.h4_grading.map(|(known, _)| Some(known)) != Some(key) {
+                if let Some((_, texture)) = self.h4_grading.take() {
+                    gl.delete_texture(texture);
+                }
+                // Sampler 8: bilinear, clamped.
+                let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
+                let uploaded = grading.and_then(|(image, _, _)| upload_h2_image_linear(gl, image, H3Texels::Linear, &[], Some(sampler)));
+                self.h4_grading = key.zip(uploaded);
+            }
+            let size = match grading.map(|(image, ..)| &**image) {
+                Some(H2Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
+                _ => return None,
+            };
+            let (scale, offset) = super::super::h4_lighting::h4_grading_scale_offset(size);
+            self.h4_grading.map(|(_, texture)| super::h4_bloom::H4BloomGrading { texture, scale, offset })
+        }
+    }
+
     /// Halo 4's `final_composite`: see `h4_lighting::H4_COMPOSITE_FRAGMENT`.
     unsafe fn h4_composite(
         &mut self,
@@ -1671,23 +1703,9 @@ impl ModelGlRenderer {
         depth: Option<glow::NativeTexture>,
         screen: h3_screen_effects::H3ScreenSettings,
     ) {
-        use super::super::h4_lighting::{H4_COMPOSITE_FRAGMENT, H4_DARK_MULTIPLIER, h4_grading_scale_offset};
+        use super::super::h4_lighting::{H4_COMPOSITE_FRAGMENT, H4_DARK_MULTIPLIER};
         unsafe {
-            let grading = frame.preview.h4_color_grading.as_ref();
-            let key = grading.map(|(image, ..)| Arc::as_ptr(image) as usize);
-            if self.h4_grading.map(|(known, _)| Some(known)) != Some(key) {
-                if let Some((_, texture)) = self.h4_grading.take() {
-                    gl.delete_texture(texture);
-                }
-                // Sampler 8: bilinear, clamped (`SetColorGradingParameters`).
-                let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
-                let uploaded = grading.and_then(|(image, _, _)| upload_h2_image_linear(gl, image, H3Texels::Linear, &[], Some(sampler)));
-                self.h4_grading = key.zip(uploaded);
-            }
-            let size = match grading.map(|(image, ..)| &**image) {
-                Some(H2Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
-                _ => [1, 1, 1],
-            };
+            let grading = self.h4_grading_texture(gl, frame);
             if self.h4_composite_program.is_none() {
                 self.h4_composite_program = screen_program(gl, H4_COMPOSITE_FRAGMENT);
             }
@@ -1703,9 +1721,9 @@ impl ModelGlRenderer {
             bind(0, glow::TEXTURE_2D, Some(accumulation), "accumulation");
             bind(1, glow::TEXTURE_2D, bloom.or(self.h3_no_bloom), "bloom");
             bind(2, glow::TEXTURE_2D, depth, "scene_depth");
-            bind(3, glow::TEXTURE_3D, self.h4_grading.map(|(_, texture)| texture).or(self.h2_white_volume), "grading");
+            bind(3, glow::TEXTURE_3D, grading.as_ref().map(|grading| grading.texture).or(self.h2_white_volume), "grading");
             gl.active_texture(glow::TEXTURE0);
-            let (scale, offset) = h4_grading_scale_offset(size);
+            let (scale, offset) = grading.as_ref().map_or(([1.0; 3], [0.0; 3]), |grading| (grading.scale, grading.offset));
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_scale").as_ref(), &scale);
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_offset").as_ref(), &offset);
             gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), H4_DARK_MULTIPLIER);

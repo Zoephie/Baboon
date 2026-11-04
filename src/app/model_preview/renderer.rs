@@ -1460,6 +1460,8 @@ pub(super) use reach_lighting::{
 };
 #[path = "reach_bloom.rs"]
 mod reach_bloom;
+#[path = "h4_bloom.rs"]
+mod h4_bloom;
 #[path = "reach_shadow_pass.rs"]
 mod reach_shadow_pass;
 #[path = "reach_light_pass.rs"]
@@ -4077,6 +4079,7 @@ struct ModelGlRenderer {
     h3_screen_alpha: Option<f32>,
     h3_bloom: Option<h3_bloom::H3Bloom>,
     reach_bloom: Option<reach_bloom::ReachBloom>,
+    h4_bloom: Option<h4_bloom::H4Bloom>,
     /// Reach's self shadow: its map and mask, and the apply.
     reach_shadow: Option<reach_shadow_pass::ReachShadowTargets>,
     reach_shadow_program: Option<glow::NativeProgram>,
@@ -4236,6 +4239,7 @@ impl ModelGlRenderer {
                 h3_screen_alpha: None,
                 h3_bloom: None,
                 reach_bloom: None,
+                h4_bloom: None,
                 reach_shadow: None,
                 reach_shadow_program: None,
                 reach_view_projection: None,
