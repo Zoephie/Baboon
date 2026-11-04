@@ -23,6 +23,52 @@ const DEFAULT_DUAL_VMF: [[f32; 4]; 4] = [
 const DEFAULT_LIGHT_DIRECTION: [f32; 3] = [-0.122788, -0.696364, 0.707107];
 const DEFAULT_LIGHT_COLOR: [f32; 3] = [4.659558, 3.947189, 3.600812];
 
+/// `effect_lightprobe_setup_lighting_constants` (the 360's 0x82ED2E90, MCC
+/// sub_1405CE3C0) of the default sample, which
+/// `effect_lightprobe_get_geometry_sample` returns with no level: what a lit
+/// particle's `v_lighting_constant_0..3` and `p_lighting_constant_0..3` hold.
+/// Effects sample the probe, so the preview's turning of the object's light
+/// does not reach them [inferred: with no level, the default sample unturned].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ReachParticleLight {
+    /// `get_bright_direction` (0x8273F890): the analytical light's direction.
+    pub(crate) direction: [f32; 3],
+    /// `get_bright_color` (0x8273F8C0): `(c1·c1.w + c3 + c2.w²·L) / π`.
+    pub(crate) bright: [f32; 3],
+    /// `get_dark_color` (0x8273FA00): `(c3 + c1·(1 − c1.w)) / π`.
+    pub(crate) dark: [f32; 3],
+    /// `convert_to_ambient(…, true)` (0x8273FAF8): `(c1 + c3 + c2.w·L) · 0.5 / π`.
+    pub(crate) ambient: [f32; 3],
+}
+
+/// The default sample's [`ReachParticleLight`], from its dual vMF's colours
+/// (`c1`, `c3`), their masks and the analytical light's colour `L`.
+pub(crate) fn reach_particle_light() -> ReachParticleLight {
+    use std::f32::consts::PI;
+    let [_, first, second, third] = DEFAULT_DUAL_VMF;
+    let light = DEFAULT_LIGHT_COLOR;
+    ReachParticleLight {
+        direction: DEFAULT_LIGHT_DIRECTION,
+        bright: std::array::from_fn(|at| {
+            (first[at] * first[3] + third[at] + second[3] * second[3] * light[at]) / PI
+        }),
+        dark: std::array::from_fn(|at| (third[at] + first[at] * (1.0 - first[3])) / PI),
+        ambient: std::array::from_fn(|at| (first[at] + third[at] + second[3] * light[at]) * 0.5 / PI),
+    }
+}
+
+/// `effect_lightprobe_get_lightmap_tint_rgbe` (the 360's 0x82ED2F38, MCC
+/// sub_1405CE1B0) of the default sample, as `tint from lightmap` comes out
+/// in `default_vs`: the ambient over its exponent in 255ths of a stop (of at
+/// most one), back up by it as `initial.rgb · exp2(initial.w)`. The colour
+/// goes out as an `argb_color`, so it holds at most 1 [inferred].
+pub(crate) fn reach_lightmap_tint() -> [f32; 3] {
+    let ambient = reach_particle_light().ambient;
+    let brightest = ambient[0].max(ambient[1]).max(ambient[2]).max(1e-4);
+    let exponent = (brightest.log2().clamp(0.0, 1.0) * 255.0).floor() / 255.0;
+    ambient.map(|channel| (channel * 2f32.powf(-exponent)).min(1.0) * 2f32.powf(exponent))
+}
+
 /// `c_camera_fx_values::g_HDR_target_stops`: the lit target holds light this
 /// many stops down, and the final composite brings it back.
 const HDR_TARGET_STOPS: f32 = 3.0;
@@ -34,6 +80,21 @@ pub(super) const REACH_HDR_DIVISOR: f32 = 8.0;
 /// white point of 1 (the 360's 0x8272B0F8; MCC's not located).
 pub(super) const REACH_EXPOSURE: f32 = 1.0;
 use REACH_EXPOSURE as EXPOSURE;
+
+/// `restore_render_target_globals_with_exposure` (the 360's 0x82666F08):
+/// `g_exposure`, and the vertex shaders' `v_exposure` alike. Exposure brought
+/// down by the target's stops, the stops' factor, exposure, alpha.
+pub(crate) fn reach_exposure() -> [f32; 4] {
+    let dark = 2f32.powf(HDR_TARGET_STOPS);
+    [EXPOSURE / dark, dark, EXPOSURE, 1.0]
+}
+
+/// The same's `g_alt_exposure` and `v_alt_exposure`: self-illumination's
+/// scale at no stops, and it under the same.
+pub(crate) fn reach_alt_exposure() -> [f32; 4] {
+    let dark = 2f32.powf(HDR_TARGET_STOPS);
+    [1.0, EXPOSURE / dark, EXPOSURE, 0.0]
+}
 
 /// What `setup_object_lighting_for_pass` (the 360's 0x826DD650) gives an
 /// object's static lighting pass.
@@ -148,7 +209,6 @@ pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str) -> Option<H3V
     if let Some(index) = name.strip_prefix("p_lighting_constant_").and_then(|index| index.parse::<usize>().ok()) {
         return lighting().dual_vmf.get(index).copied().map(H3Value::Floats);
     }
-    let dark = 2f32.powf(HDR_TARGET_STOPS);
     match name {
         "k_ps_analytical_light_direction" | "v_analytical_light_direction" => {
             let [x, y, z] = lighting().direction;
@@ -170,11 +230,8 @@ pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str) -> Option<H3V
         // the cube maps' levels, and the object's cube map sample, at its
         // defaults, weighs the first map whole.
         "dynamic_environment_blend" => floats([0.0, 0.0, 0.0, 1.0]),
-        // `restore_render_target_globals_with_exposure`: exposure brought down
-        // by the target's stops, the stops' factor, exposure, alpha.
-        "g_exposure" => floats([EXPOSURE / dark, dark, EXPOSURE, 1.0]),
-        // Self-illumination's scale at no stops, and it under the same.
-        "g_alt_exposure" => floats([1.0, EXPOSURE / dark, EXPOSURE, 0.0]),
+        "g_exposure" => floats(reach_exposure()),
+        "g_alt_exposure" => floats(reach_alt_exposure()),
         "object_velocity" | "antialias_scalars" => floats([0.0; 4]),
         _ => None,
     }
@@ -260,6 +317,27 @@ mod tests {
         assert!(close(turned.direction, [-still.direction[1], still.direction[0], still.direction[2]]), "{:?}", turned.direction);
         assert!(close(turned.intensity, still.intensity));
         assert_eq!(turned.dual_vmf[1], still.dual_vmf[1]);
+    }
+
+    /// The numbers the default sample works out to by hand.
+    #[test]
+    fn a_lit_particle_takes_the_default_samples_bright_dark_and_ambient() {
+        let light = reach_particle_light();
+        assert!(close(light.direction, [-0.122788, -0.696364, 0.707107]), "{:?}", light.direction);
+        assert!(close(light.bright, [1.739811, 1.439954, 1.336653]), "{:?}", light.bright);
+        assert!(close(light.dark, [0.486346, 0.385685, 0.456724]), "{:?}", light.dark);
+        assert!(close(light.ambient, [1.066938, 0.893373, 0.896688]), "{:?}", light.ambient);
+        let objects = reach_object_lighting(0.0).direction;
+        assert!(!close(light.direction, objects), "the light as sampled, not as objects get it");
+    }
+
+    /// e = 23/255: red, over one, holds at one under it, and the rest come back
+    /// as they were.
+    #[test]
+    fn a_lightmap_tint_keeps_its_exponent_in_255ths_and_its_colour_under_one() {
+        let tint = reach_lightmap_tint();
+        assert!(close(tint, [1.064515, 0.893373, 0.896688]), "{tint:?}");
+        assert!(tint[0] < reach_particle_light().ambient[0], "clamped before the exponent comes back");
     }
 
     #[test]

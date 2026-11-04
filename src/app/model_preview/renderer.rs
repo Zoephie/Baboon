@@ -1440,7 +1440,9 @@ pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
 mod h3_draw;
 #[path = "reach_lighting.rs"]
 mod reach_lighting;
-pub(super) use reach_lighting::REACH_DARK_MULTIPLIER;
+pub(super) use reach_lighting::{
+    REACH_DARK_MULTIPLIER, reach_alt_exposure, reach_exposure, reach_lightmap_tint, reach_particle_light,
+};
 #[path = "reach_bloom.rs"]
 mod reach_bloom;
 #[path = "reach_shadow_pass.rs"]
@@ -3444,12 +3446,20 @@ uniform float u_fade;
 uniform vec4 u_depth;
 uniform sampler2D u_scene_depth;
 uniform vec4 u_screen;
+uniform bool u_smooth;
+uniform vec3 u_reach_light[3];
+uniform vec2 u_contrast;
+uniform float u_sphere_warp;
+uniform float u_palette_shift;
+uniform bool u_plasma_second_sprite;
 out vec4 out_color;
 float view_depth(float window) {
     float ndc = window * 2.0 - 1.0;
     return (ndc - u_depth.y) / (u_depth.x - ndc * u_depth.z);
 }
-vec4 albedo(vec2 sprite, float external_alpha) {
+// `other` is the second sprite texcoord, which only Reach's plasmas read.
+vec4 albedo(vec2 sprite, vec2 other, float particle_alpha, float depth_fade) {
+    float external_alpha = particle_alpha * depth_fade;
     if (u_albedo == 6) {
         vec4 diffuse = texture(u_base, sprite);
         float brightness = dot(diffuse.rgb, diffuse.rgb) / sqrt(3.0);
@@ -3461,10 +3471,18 @@ vec4 albedo(vec2 sprite, float external_alpha) {
         float glow = v_extra.y * ramp;
         return vec4(clamp(u_tint * glow * pow(2.0, glow * 6.0), 0.0, 1.0), ramp);
     }
-    if (u_albedo == 8) {
+    if (u_albedo == 8 || u_albedo == 12) {
+        vec2 second = u_plasma_second_sprite ? other : sprite;
         float noise_a = texture(u_base, sprite * u_base_xform.xy + u_base_xform.zw).r;
-        float noise_b = texture(u_base2, sprite * u_base2_xform.xy + u_base2_xform.zw).r;
+        float noise_b = texture(u_base2, second * u_base2_xform.xy + u_base2_xform.zw).r;
         float alpha = texture(u_alpha, v_billboard).a;
+        if (u_albedo == 12) {
+            // Reach's `palettized_2d_plasma`: no alpha term but the palette
+            // shift's, and the depth fade picks the palette's row.
+            float index = clamp(abs(noise_a - noise_b), 0.0, 1.0);
+            index = clamp(index + (1.0 - alpha * particle_alpha) * u_palette_shift, 0.0, 1.0);
+            return vec4(texture(u_palette, vec2(index, depth_fade)).rgb, alpha);
+        }
         float index = clamp(abs(noise_a - noise_b) + (1.0 - alpha * external_alpha) * u_modulation.y, 0.0, 1.0);
         return vec4(texture(u_palette, vec2(index, v_extra.y)).rgb, alpha);
     }
@@ -3473,7 +3491,10 @@ vec4 albedo(vec2 sprite, float external_alpha) {
     float row = v_extra.y;
     // The palette options; Halo 2's tints read the base map alone.
     if (u_albedo >= 3 && u_albedo <= 5) {
-        tone = texture(u_palette, vec2(base.r, row));
+        // Reach's `palette_shift` moves the index by what has faded.
+        float shifted = clamp(base.r + (1.0 - depth_fade * particle_alpha) * u_palette_shift, 0.0, 1.0);
+        float index = u_palette_shift == 0.0 ? base.r : shifted;
+        tone = texture(u_palette, vec2(index, row));
     }
     if (u_albedo == 1 || u_albedo == 4) {
         tone.a = texture(u_alpha, v_billboard).a;
@@ -3506,8 +3527,16 @@ void main() {
         float behind = (view_depth(scene) - view_depth(gl_FragCoord.z)) / u_depth.w;
         depth_fade = clamp(behind / u_fade, 0.0, 1.0);
     }
-    float external_alpha = v_color.a * depth_fade;
-    vec4 color = mix(albedo(v_sprite, external_alpha), albedo(v_next_sprite, external_alpha), v_extra.x);
+    // Reach's `calc_warp` `sphere`: both sprites pushed out toward the rim.
+    vec2 rim = v_billboard * 2.0 - 1.0;
+    vec2 warp = u_sphere_warp == 0.0 ? vec2(0.0) : rim * dot(rim, rim) * dot(rim, rim) * u_sphere_warp;
+    vec2 sprite = v_sprite + warp;
+    vec2 next_sprite = v_next_sprite + warp;
+    vec4 color = mix(
+        albedo(sprite, next_sprite, v_color.a, depth_fade),
+        albedo(next_sprite, sprite, v_color.a, depth_fade),
+        v_extra.x
+    );
     if (u_distortion != 0.0) {
         // `compute_normalized_distortion`, in the frame's own widths and heights.
         vec2 map = u_unsigned ? (color.xy * 255.0 - 128.0) / 127.0 : color.xy;
@@ -3550,6 +3579,12 @@ void main() {
         vec3 third = vec3(dot(b, u_lighting[7]), dot(b, u_lighting[8]), dot(b, u_lighting[9]));
         vec3 full = ambient - 2.0 * 0.511664 * first - 2.0 * 0.429043 * second - 0.429043 * third;
         color.rgb *= mix(ambient, full, color.a) / 3.1415926535;
+    }
+    if (u_smooth) {
+        // Reach's `per_pixel_smooth`: from the probe's dark to its bright.
+        float cosine = dot(normalize(v_normal), u_reach_light[0]);
+        float toward = pow(clamp(cosine * u_contrast.x + u_contrast.y, 0.0, 1.0), 3.0);
+        color.rgb *= mix(u_reach_light[2], u_reach_light[1], toward);
     }
     if (u_multiply) {
         color.rgb = mix(vec3(1.0), color.rgb, color.a);
@@ -3620,6 +3655,12 @@ struct H3ParticleGl {
     fade: Option<glow::NativeUniformLocation>,
     depth: Option<glow::NativeUniformLocation>,
     screen: Option<glow::NativeUniformLocation>,
+    smooth: Option<glow::NativeUniformLocation>,
+    reach_light: Option<glow::NativeUniformLocation>,
+    contrast: Option<glow::NativeUniformLocation>,
+    sphere_warp: Option<glow::NativeUniformLocation>,
+    palette_shift: Option<glow::NativeUniformLocation>,
+    plasma_second_sprite: Option<glow::NativeUniformLocation>,
 }
 
 impl H3ParticleGl {
@@ -3675,6 +3716,17 @@ impl H3ParticleGl {
             gl.uniform_3_f32_slice(self.add.as_ref(), &look.add);
             gl.uniform_1_f32(self.distortion.as_ref(), look.distortion.unwrap_or(0.0));
             gl.uniform_1_i32(self.lit.as_ref(), i32::from(look.lit_pixels));
+            let contrast = look.smooth_contrast();
+            gl.uniform_1_i32(self.smooth.as_ref(), i32::from(contrast.is_some()));
+            if let Some([scale, offset]) = contrast {
+                let light = reach_particle_light();
+                let rows = [light.direction, light.bright, light.dark];
+                gl.uniform_3_f32_slice(self.reach_light.as_ref(), rows.as_flattened());
+                gl.uniform_2_f32(self.contrast.as_ref(), scale, offset);
+            }
+            gl.uniform_1_f32(self.sphere_warp.as_ref(), look.sphere_warp.unwrap_or(0.0));
+            gl.uniform_1_f32(self.palette_shift.as_ref(), look.palette_shift.unwrap_or(0.0));
+            gl.uniform_1_i32(self.plasma_second_sprite.as_ref(), i32::from(look.plasma_second_sprite));
             let premultiplied = look.blend == H3Blend::PreMultiplied;
             gl.uniform_1_i32(self.premultiplied.as_ref(), i32::from(premultiplied));
             gl.uniform_1_i32(self.alpha_test.as_ref(), i32::from(look.alpha_test));
@@ -3786,6 +3838,12 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             fade: gl.get_uniform_location(program, "u_fade"),
             depth: gl.get_uniform_location(program, "u_depth"),
             screen: gl.get_uniform_location(program, "u_screen"),
+            smooth: gl.get_uniform_location(program, "u_smooth"),
+            reach_light: gl.get_uniform_location(program, "u_reach_light"),
+            contrast: gl.get_uniform_location(program, "u_contrast"),
+            sphere_warp: gl.get_uniform_location(program, "u_sphere_warp"),
+            palette_shift: gl.get_uniform_location(program, "u_palette_shift"),
+            plasma_second_sprite: gl.get_uniform_location(program, "u_plasma_second_sprite"),
         })
     }
 }
@@ -6217,6 +6275,25 @@ mod tests {
                     String::from_utf8_lossy(&output.stdout)
                 );
             }
+        }
+    }
+
+    /// The particle program is linked on first use, so a compile error would
+    /// only show as effects that draw nothing. Without `glslangValidator`,
+    /// skip by name.
+    #[test]
+    fn the_particle_program_compiles_under_glslang() {
+        if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+            eprintln!("skipping: glslangValidator is not on PATH (brew install glslang)");
+            return;
+        }
+        let dir = crate::core::test_kits::unique_temp_dir("model_preview_particle_glsl");
+        for (stage, source) in [("vert", PARTICLE_VERTEX), ("frag", PARTICLE_FRAGMENT)] {
+            let path = dir.join(format!("particle.{stage}"));
+            std::fs::write(&path, source).expect("write shader");
+            let output = std::process::Command::new("glslangValidator").arg(&path).output().expect("run glslangValidator");
+            let printed = String::from_utf8_lossy(&output.stdout);
+            assert!(output.status.success(), "particle {stage} does not compile:\n{printed}");
         }
     }
 
