@@ -934,7 +934,6 @@ pub(in crate::app) fn draw_foundation_flags_row(
         }
     }
 
-    ui.add_space(4.0);
 }
 
 #[cfg(test)]

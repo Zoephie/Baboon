@@ -147,6 +147,8 @@ pub(in crate::app) fn draw_fields_with_docs(
     edit: &mut FieldEditContext<'_>,
     skip_field: Option<&str>,
 ) {
+    let previous_row_gap = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 4.0;
     let entries: &[DefEntry] = edit
         .docs
         .map(|docs| docs.entries_for_struct(tag_struct))
@@ -266,6 +268,7 @@ pub(in crate::app) fn draw_fields_with_docs(
             );
         }
     }
+    ui.spacing_mut().item_spacing.y = previous_row_gap;
 }
 
 /// The value rows a structure-locked tag can't change. Blocks are held back at
@@ -825,7 +828,7 @@ pub(in crate::app) fn draw_foundation_group(
 /// explanations, and section bars share the same affordance.
 fn add_foundation_header_spacing(ui: &mut Ui) {
     // egui has already advanced by `item_spacing.y` after the previous item.
-    // Add only the remainder so adjacent header bars have an 8pt visual gap.
+    // Add only the remainder so headings and blocks have an 8pt gap before them.
     ui.add_space((8.0 - ui.spacing().item_spacing.y).max(0.0));
 }
 
@@ -854,7 +857,7 @@ fn foundation_body_rounding() -> egui::CornerRadius {
 }
 
 fn foundation_body_margin() -> egui::Margin {
-    egui::Margin { left: 14, right: 8, top: 8, bottom: 8 }
+    egui::Margin { left: 16, right: 16, top: 8, bottom: 8 }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -982,8 +985,7 @@ fn draw_foundation_collapsing_header_inner(
     let layer = ui.layer_id();
     let body_start = ui.ctx().graphics_mut(|g| g.entry(layer).next_idx());
     let body_response = if open {
-        // Widget allocation leaves the normal inter-item gap after the header.
-        // Retract it so the body begins flush against the header bar.
+        // Join the body to the heading; text padding belongs inside the body.
         ui.add_space(-ui.spacing().item_spacing.y);
         state.show_body_unindented(ui, add_contents)
     } else {
@@ -2011,7 +2013,7 @@ pub(in crate::app) fn draw_foundation_block_control(
     let mut controls_rect = row_rect.shrink(8.0);
     if !narrow { controls_rect.max.x -= jump_space; }
     let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(controls_rect));
-    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, if narrow { 8.0 } else { 0.0 });
+    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, if narrow { 4.0 } else { 0.0 });
     header_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(narrow), |ui| {
         let mut title_row = |ui: &mut Ui| {
         // The containing block body already supplies the nesting indent.

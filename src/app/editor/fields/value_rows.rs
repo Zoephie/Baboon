@@ -35,7 +35,9 @@ fn foundation_field_row_inner<R>(
             ui.horizontal(|ui| {
                 foundation_stacked_label_cell(ui, &meta.label, meta.help.as_deref());
             });
-            ui.add_space(-2.0);
+            // Keep the stacked label close to its own input even when the
+            // outer field rows use a larger vertical gap.
+            ui.add_space(1.0 - ui.spacing().item_spacing.y);
             ui.horizontal_wrapped(|ui| {
                 ui.add_space(FOUNDATION_LABEL_INSET);
                 controls(ui)
