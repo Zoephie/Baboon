@@ -20,7 +20,7 @@ use eframe::glow::{self, HasContext};
 use super::h3_draw::{frame_value, h3_set_cull, set_value, target_texture, upload_h2_image_linear};
 use super::h3_shaders::{H3Dialect, H3Material, H3Pass, H3Value};
 use super::h4_bloom::H4BloomSettings;
-use super::h4_submit::{DrawnObject, H4HologramPost, H4ScreenMaterial};
+use super::h4_submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
 use super::*;
 
 /// `g_hologramBoundsScale` and `g_hologramBoundsExpand`'s defaults.
@@ -323,22 +323,24 @@ impl ModelGlRenderer {
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
             h3_set_cull(gl, frame);
+            self.h4_draw = Some(H4Draw::HologramOpaque);
             for (batch, material) in holograms.iter().filter(|(_, material)| !post_bloom(material)) {
                 self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
+            self.h4_draw = None;
             // Mode 1 (`g_disableHologramOrderIndependentTransparency`, the
             // default) then draws pass 2, "hologram blend": blended holograms
             // alone, tested but not written, through `alpha_blend_max`.
             gl.enable(glow::BLEND);
             set_alpha_blend_max(gl);
             gl.depth_mask(false);
-            self.h4_hologram_blend_pass = true;
+            self.h4_draw = Some(H4Draw::HologramBlend);
             for (batch, material) in holograms.iter().filter(|(_, material)| {
                 !post_bloom(material) && material.h4.as_ref().is_some_and(|submit| submit.is_blended_hologram())
             }) {
                 self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
-            self.h4_hologram_blend_pass = false;
+            self.h4_draw = None;
             gl.blend_equation(glow::FUNC_ADD);
             gl.disable(glow::BLEND);
             gl.disable(glow::SCISSOR_TEST);
@@ -470,7 +472,7 @@ impl ModelGlRenderer {
             gl.use_program(Some(program.program));
             let drawn = DrawnObject { values: frame.h2_values_of_object(owner), time: frame.time, owner };
             let node = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
-            let functions = material.submit.draw_values(false, &drawn, node, false);
+            let functions = material.submit.draw_values(H4Draw::Lit, &drawn, node);
             for (name, ty) in &pass.uniforms {
                 let location = program.location(gl, name);
                 if location.is_none() {

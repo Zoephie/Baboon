@@ -239,6 +239,13 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
     } else {
         (None, single_pass(&mut shader).or_else(|| shader.pass("albedo").map(|pass| (pass, ENTRY_ALBEDO))))
     };
+    // `opaque_alpha_blend` (23) also draws in the transparent pass, through a
+    // single-pass entry under `alpha_blend` (`material_submit_volatile_per_shader`,
+    // X360 0x83B08008), for the edges its opaque pass clipped away.
+    const OPAQUE_ALPHA_BLEND: u8 = 23;
+    let fringe = (baked.alpha_blend_mode == OPAQUE_ALPHA_BLEND && albedo.is_some() && !hologram && !blended_hologram)
+        .then(|| shader.pass("single_pass_single_probe"))
+        .flatten();
     let mut textures = MaterialTextures::default();
     let result = match lit {
         Some((lit, lit_entry)) => {
@@ -250,6 +257,7 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                 dialect: H3Dialect::Halo4,
                 albedo: albedo.filter(|_| opaque),
                 lit: Arc::clone(&lit),
+                fringe,
                 screen_maps: Vec::new(),
                 decal,
                 decal_modulates_specular: false,
@@ -265,9 +273,9 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                 change_colors: Vec::new(),
                 animations: Vec::new(),
                 shield: None,
-                h4: submit.is_dynamic().then(|| Arc::new(submit)),
+                h4: Some(Arc::new(submit)),
             };
-            let passes = [h3.albedo.as_ref(), Some(&lit)];
+            let passes = [h3.albedo.as_ref(), Some(&lit), h3.fringe.as_ref()];
             let wanted: Vec<(String, TextureKind)> =
                 passes.into_iter().flatten().flat_map(|pass| pass.textures.iter().cloned()).collect();
             for texture in &baked.textures {

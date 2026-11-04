@@ -20,6 +20,41 @@ const HOLOGRAM_EXTERNS: std::ops::RangeInclusive<u8> = 35..=41;
 /// A transform the bake left no constant for: no scale, no offset.
 const IDENTITY_TRANSFORM: [f32; 4] = [1.0, 1.0, 0.0, 0.0];
 
+/// Which of a material's draws this is: it decides the phases its functions
+/// run for, a hologram's clip, and the blend state the game sets, which
+/// `ps_material_blend_constant` follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum H4Draw {
+    Albedo,
+    /// The material's own pass, under its own blend mode.
+    #[default]
+    Lit,
+    /// `opaque_alpha_blend`'s transparent half: `single_pass_single_probe`
+    /// under `alpha_blend` (`material_submit_volatile_per_shader`, X360
+    /// 0x83B08008).
+    Fringe,
+    /// `handle_object_part`'s pass 0, blending off.
+    HologramOpaque,
+    /// Its pass 2, `alpha_blend_max`.
+    HologramBlend,
+}
+
+/// `alpha_blend` and `alpha_blend_additive_transparent`, the modes under
+/// which the blend constant's w is −1.
+const FLIPPED_CLIP_MODES: [u8; 2] = [3, 24];
+/// `multiply`, `double_multiply` and `multiply_add`, under which its z is 1.
+const MULTIPLY_MODES: [u8; 3] = [2, 4, 7];
+
+/// `SetAlphaBlendShaderConstants` (X360 0x82BC890C) with no atmosphere:
+/// `(0, 1, z, w)`. Alpha-clipped shaders (`srf_char_hair`) clip below
+/// near-white under w = 1 and above it under w = −1, so one material's
+/// opaque and blended halves meet.
+pub(crate) fn blend_constant(state_mode: u8) -> [f32; 4] {
+    let z = if MULTIPLY_MODES.contains(&state_mode) { 1.0 } else { 0.0 };
+    let w = if FLIPPED_CLIP_MODES.contains(&state_mode) { -1.0 } else { 1.0 };
+    [0.0, 1.0, z, w]
+}
+
 /// A Halo 4 material's per-draw state.
 #[derive(Debug)]
 pub(crate) struct H4Submit {
@@ -28,6 +63,8 @@ pub(crate) struct H4Submit {
     /// pass's.
     albedo_phases: u8,
     lit_phases: u8,
+    /// `alpha_blend_mode` as baked, the state its own pass draws under.
+    alpha_blend_mode: u8,
     /// For a hologram, the alpha its pass 0 clips below: 1 for a blended one.
     hologram: Option<f32>,
     /// For a hologram, the screen materials its picture goes through.
@@ -83,6 +120,7 @@ impl H4Submit {
     /// taken from; `hologram` the clip alpha of a hologram's pass 0.
     pub(crate) fn new(baked: BakedMaterial, albedo_entry: usize, lit_entry: usize, hologram: Option<f32>) -> Self {
         Self {
+            alpha_blend_mode: baked.alpha_blend_mode,
             baked,
             albedo_phases: blam_tags::material::entry_point_phase_mask(albedo_entry),
             lit_phases: blam_tags::material::entry_point_phase_mask(lit_entry),
@@ -110,11 +148,6 @@ impl H4Submit {
 
     pub(crate) fn post(&self) -> Option<&Arc<H4HologramPost>> {
         self.post.as_ref()
-    }
-
-    /// Whether anything here changes per draw.
-    pub(crate) fn is_dynamic(&self) -> bool {
-        self.hologram.is_some() || !self.baked.functions.is_empty()
     }
 
     /// Whether a function runs on the clock: one whose input has no name
@@ -162,17 +195,19 @@ impl H4Submit {
     /// (MCC 0x1408CA980), each only when the bake queued functions of its
     /// kind, and a hologram's rig. `node` is the hologram's node matrix (see
     /// [`hologram_rows`]).
-    /// `blend_pass` is a hologram's second pass, which clips nothing.
-    pub(crate) fn draw_values(
-        &self,
-        albedo: bool,
-        object: &DrawnObject<'_>,
-        node: [[f32; 4]; 3],
-        blend_pass: bool,
-    ) -> HashMap<String, H3Value> {
+    pub(crate) fn draw_values(&self, draw: H4Draw, object: &DrawnObject<'_>, node: [[f32; 4]; 3]) -> HashMap<String, H3Value> {
+        /// `single_pass_single_probe`, the fringe's entry.
+        const ENTRY_SINGLE_PASS_SINGLE_PROBE: usize = 23;
         let baked = &self.baked;
-        let phases = if albedo { self.albedo_phases } else { self.lit_phases };
+        let (phases, state) = match draw {
+            H4Draw::Albedo => (self.albedo_phases, self.alpha_blend_mode),
+            H4Draw::Lit => (self.lit_phases, self.alpha_blend_mode),
+            H4Draw::Fringe => (blam_tags::material::entry_point_phase_mask(ENTRY_SINGLE_PASS_SINGLE_PROBE), 3),
+            H4Draw::HologramOpaque => (self.lit_phases, 0),
+            H4Draw::HologramBlend => (self.lit_phases, 22),
+        };
         let mut values = HashMap::new();
+        values.insert("ps_material_blend_constant".to_owned(), H3Value::Floats(blend_constant(state)));
         let queued = |flag: u16| baked.flags & flag != 0;
         if queued(postprocess_flags::VERTEX_CONSTANT_FUNCTIONS) {
             let mut vertex = registers(&baked.real_vertex_vectors, VERTEX_REGISTERS.1);
@@ -191,7 +226,7 @@ impl H4Submit {
         }
         if let Some(clip) = self.hologram {
             // `handle_object_part` sets the threshold in pass 0 alone.
-            let clip = if blend_pass { 0.0 } else { clip };
+            let clip = if draw == H4Draw::HologramBlend { 0.0 } else { clip };
             // `handle_object_part` runs every phase's functions for its rig.
             let mut pixel = registers(&baked.real_vectors, PIXEL_REGISTERS.1);
             if queued(postprocess_flags::PIXEL_CONSTANT_FUNCTIONS) {
@@ -317,7 +352,7 @@ mod tests {
             eprintln!("NOTE input {name} = {:?}", values.get(name));
         }
         let object = DrawnObject { values: Some(&values), time: 0.0, owner: 0 };
-        let drawn = submit.draw_values(false, &object, IDENTITY, false);
+        let drawn = submit.draw_values(H4Draw::Lit, &object, IDENTITY);
         for function in &submit.baked.functions {
             let register = function.register_index;
             let name = if function.vertex { format!("user_vertex_parameter_{register}") } else { format!("user_parameter_{register}") };
@@ -352,5 +387,17 @@ mod tests {
         assert!(submit("globals/materials/final_combine_hologram.material").moves());
         let helmet = "objects/characters/storm_masterchief/materials/storm_masterchief_default/storm_masterchief_default_armor_helm.material";
         assert!(!submit(helmet).moves());
+    }
+
+    /// The hair's halves: its own `opaque_alpha_blend` state keeps w = 1
+    /// (clip below near-white), the fringe's `alpha_blend` flips it, and the
+    /// multiplies set z.
+    #[test]
+    fn the_blend_constant_follows_the_state_drawn() {
+        assert_eq!(blend_constant(23), [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(blend_constant(3), [0.0, 1.0, 0.0, -1.0]);
+        assert_eq!(blend_constant(24), [0.0, 1.0, 0.0, -1.0]);
+        assert_eq!(blend_constant(2), [0.0, 1.0, 1.0, 1.0]);
+        assert_eq!(blend_constant(0), [0.0, 1.0, 0.0, 1.0]);
     }
 }

@@ -831,6 +831,9 @@ pub(crate) struct H3Material {
     pub(crate) dialect: H3Dialect,
     pub(crate) albedo: Option<Arc<H3Pass>>,
     pub(crate) lit: Arc<H3Pass>,
+    /// Halo 4's `opaque_alpha_blend` draws twice: `lit` with the opaque
+    /// objects, then this, blended among the transparents.
+    pub(crate) fringe: Option<Arc<H3Pass>>,
     /// ODST's maps bound to the picture itself, by extern mode.
     pub(crate) screen_maps: Vec<String>,
     /// A decal family: `lit` is its `default`, drawn into the albedo target

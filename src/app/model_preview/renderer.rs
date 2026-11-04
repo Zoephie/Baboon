@@ -4090,8 +4090,9 @@ struct ModelGlRenderer {
     h4_bloom: Option<h4_bloom::H4Bloom>,
     /// Halo 4's hologram surfaces and the screen materials' bitmaps.
     h4_holograms: Option<h4_holograms::H4Holograms>,
-    /// Drawing a hologram's second, blended pass, which clips nothing.
-    h4_hologram_blend_pass: bool,
+    /// Which draw of a Halo 4 material is under way, when not its albedo or
+    /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
+    h4_draw: Option<h4_submit::H4Draw>,
     /// Reach's self shadow: its map and mask, and the apply.
     reach_shadow: Option<reach_shadow_pass::ReachShadowTargets>,
     reach_shadow_program: Option<glow::NativeProgram>,
@@ -4253,7 +4254,7 @@ impl ModelGlRenderer {
                 reach_bloom: None,
                 h4_bloom: None,
                 h4_holograms: None,
-                h4_hologram_blend_pass: false,
+                h4_draw: None,
                 reach_shadow: None,
                 reach_shadow_program: None,
                 reach_view_projection: None,

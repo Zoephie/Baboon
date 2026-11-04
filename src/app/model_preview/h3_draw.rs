@@ -980,7 +980,14 @@ impl ModelGlRenderer {
                 let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                 let drawn = super::h4_submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
                 let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
-                submit.draw_values(albedo, &drawn, h4_hologram_node(frame), self.h4_hologram_blend_pass)
+                let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
+                let draw = match self.h4_draw {
+                    Some(draw) => draw,
+                    None if albedo => super::h4_submit::H4Draw::Albedo,
+                    None if fringe => super::h4_submit::H4Draw::Fringe,
+                    None => super::h4_submit::H4Draw::Lit,
+                };
+                submit.draw_values(draw, &drawn, h4_hologram_node(frame))
             });
             for (name, ty) in &pass.uniforms {
                 let location = program.location(gl, name);
@@ -1412,9 +1419,19 @@ impl ModelGlRenderer {
                     }
                 }
             }
+            // Each with the pass it draws and the blend it draws under: its
+            // own, or the alpha blend of an `opaque_alpha_blend` fringe.
+            let fringes = batches.iter().filter_map(|(batch, material)| {
+                let fringe = material.fringe.as_ref()?;
+                Some((batch, material, fringe, H3Blend::AlphaBlend))
+            });
             let mut blended: Vec<_> = blended
                 .into_iter()
-                .map(|(batch, material)| (h3_layered_distance(material.sort_layer, batch_distance(frame, batch)), batch, material))
+                .map(|(batch, material)| (batch, material, &material.lit, material.blend))
+                .chain(fringes)
+                .map(|(batch, material, pass, blend)| {
+                    (h3_layered_distance(material.sort_layer, batch_distance(frame, batch)), batch, material, pass, blend)
+                })
                 .collect();
             blended.sort_by(|(a, ..), (b, ..)| b.total_cmp(a));
             // `QueueHologramApply`: the holograms' composite is one more
@@ -1425,7 +1442,7 @@ impl ModelGlRenderer {
                     this.h4_composite_holograms(gl, frame, slot, &picture, size);
                 }
             };
-            for (distance, batch, material) in blended {
+            for (distance, batch, material, pass, blend) in blended {
                 composite_hologram(self, distance);
                 if sprites {
                     self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(distance));
@@ -1436,12 +1453,12 @@ impl ModelGlRenderer {
                 h3_set_cull(gl, frame);
                 gl.color_mask(true, true, true, true);
                 gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-                h3_set_blend(gl, material.blend);
+                h3_set_blend(gl, blend);
                 if material.decal {
                     gl.enable(glow::POLYGON_OFFSET_FILL);
                     gl.polygon_offset(DECAL_SLOPE_BIAS, DECAL_DEPTH_BIAS * DEPTH_UNITS);
                 }
-                self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
                 gl.disable(glow::POLYGON_OFFSET_FILL);
             }
             composite_hologram(self, f32::NEG_INFINITY);
@@ -2413,6 +2430,7 @@ mod tests {
             animations: Vec::new(),
             shield: None,
             h4: None,
+            fringe: None,
         };
         let foliage = Some(u32::from_be_bytes(*b"rmfl"));
         let reach = material(H3Dialect::Reach);

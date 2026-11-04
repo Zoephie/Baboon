@@ -812,6 +812,7 @@ fn prepare_h3_material(
         animations: Vec::new(),
         shield: None,
         h4: None,
+        fringe: None,
     };
     if opaque {
         material.shield = h3_shield(source, caches);
