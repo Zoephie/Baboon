@@ -129,6 +129,12 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 "contrails" => preview.h2_contrails.clear(),
                 "prt" => preview.h3_prt = None,
                 "shield" => preview.reach_shield = None,
+                "antennas" => preview.h2_antennas.clear(),
+                // The sheet's own batches go with it; its vertices stay, unused.
+                "cloth" => {
+                    preview.h3_cloth.clear();
+                    preview.batches.retain(|batch| batch.permutation_name != "cloth");
+                }
                 "reach_lights" => {
                     preview.reach_lights.clear();
                     preview.reach_cheap_lights.clear();
