@@ -101,10 +101,43 @@ enum FunctionRules {
     Gen3,
 }
 
+/// One of Halo 4's `function switches`: an export that answers with whichever
+/// of its functions the switch function's value falls between the bounds of.
+/// The 360's `ObjectFunctionSwitchDefinition::Evaluate` 0x84af0220.
+#[derive(Debug, Clone)]
+struct FunctionSwitch {
+    switch: String,
+    export: String,
+    /// `selection bounds`, inclusive at both ends, and the function picked.
+    cases: Vec<([f32; 2], String)>,
+}
+
+impl FunctionSwitch {
+    /// The first case whose bounds hold the switch's value answers; with
+    /// none, the export is 0 and off.
+    fn evaluate(
+        &self,
+        owner: &H2ObjectFunctions,
+        inputs: &H2FunctionValues,
+        scripted: &H2FunctionValues,
+        clock: Clock,
+        depth: usize,
+    ) -> (f32, bool) {
+        let (switch, _) = owner.value(&self.switch, inputs, scripted, clock, depth + 1);
+        let picked = self.cases.iter().find(|([lower, upper], _)| *lower <= switch && switch <= *upper);
+        match picked {
+            Some((_, function)) => owner.value(function, inputs, scripted, clock, depth + 1),
+            None => (0.0, false),
+        }
+    }
+}
+
 /// An object's `functions` block, and what its type exports to it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct H2ObjectFunctions {
     functions: Vec<H2ObjectFunction>,
+    /// Halo 4's `function switches`; empty for every earlier game.
+    switches: Vec<FunctionSwitch>,
     rules: FunctionRules,
     /// None for an object whose exporters are not known (Halo 3 and ODST),
     /// which reads [`object_input`] instead.
@@ -426,13 +459,33 @@ impl H2ObjectFunctions {
     /// Whether a function here makes `name` for what reads it: one of that
     /// name, and none of the type's exporters claiming it first.
     fn makes(&self, name: &str) -> bool {
-        !self.type_exports(name) && self.functions.iter().any(|function| function.export == name)
+        !self.type_exports(name) && self.exports_named().any(|export| export == name)
+    }
+
+    /// Every name a function or switch here exports.
+    fn exports_named(&self) -> impl Iterator<Item = &str> {
+        let functions = self.functions.iter().map(|function| function.export.as_str());
+        functions.chain(self.switches.iter().map(|switch| switch.export.as_str()))
+    }
+
+    /// What `name` is made from here: a function's import, scale and
+    /// `turn off with`, or a switch's switch function and cases.
+    fn sources_of<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        let functions = self.functions.iter().filter(move |function| function.export == name);
+        let functions = functions.flat_map(|function| [&function.import, &function.scale_by, &function.turn_off_with]);
+        let switches = self.switches.iter().filter(move |switch| switch.export == name);
+        let switches = switches.flat_map(|switch| {
+            std::iter::once(&switch.switch).chain(switch.cases.iter().map(|(_, function)| function))
+        });
+        functions.chain(switches).map(String::as_str).filter(|source| !source.is_empty())
     }
 
     /// `object_get_function_value`: a script's value first
     /// (`object_set_function_variable`, read by Halo 2's `sub_8E7890`), then
     /// nothing named reads full, then what the object's type exports, then
     /// its functions: by [`FunctionRules`], the last or the first of a name.
+    /// Halo 4 (the 360's 0x82a92870) asks its switches only when no function
+    /// has the name, and every switch of the name runs, so the last stands.
     fn value(
         &self,
         name: &str,
@@ -458,8 +511,11 @@ impl H2ObjectFunctions {
             FunctionRules::Halo2 => self.functions.iter().rev().find(named),
             FunctionRules::Gen3 => self.functions.iter().find(named),
         };
-        match answers {
-            Some(function) => function.evaluate(self, inputs, scripted, clock, depth),
+        if let Some(function) = answers {
+            return function.evaluate(self, inputs, scripted, clock, depth);
+        }
+        match self.switches.iter().rev().find(|switch| switch.export == name) {
+            Some(switch) => switch.evaluate(self, inputs, scripted, clock, depth),
             None => self.exported(name, inputs),
         }
     }
@@ -468,10 +524,9 @@ impl H2ObjectFunctions {
     /// turns it off, unless another function here makes that.
     fn imports(&self) -> Vec<&str> {
         let mut names: Vec<&str> = Vec::new();
-        for function in &self.functions {
-            let read = [&function.import, &function.scale_by, &function.turn_off_with];
-            for name in read.map(String::as_str) {
-                if !name.is_empty() && !self.makes(name) && !names.contains(&name) {
+        for export in self.exports_named() {
+            for name in self.sources_of(export) {
+                if !self.makes(name) && !names.contains(&name) {
                     names.push(name);
                 }
             }
@@ -485,11 +540,9 @@ impl H2ObjectFunctions {
         let mut next = 0;
         while let Some(name) = reached.get(next).cloned() {
             next += 1;
-            for function in self.functions.iter().filter(|function| function.export == name) {
-                for source in [&function.import, &function.scale_by, &function.turn_off_with] {
-                    if !source.is_empty() && !reached.contains(source) {
-                        reached.push(source.clone());
-                    }
+            for source in self.sources_of(&name) {
+                if !reached.iter().any(|reached| reached == source) {
+                    reached.push(source.to_owned());
                 }
             }
         }
@@ -522,17 +575,16 @@ impl H2ObjectFunctions {
         }
         // What the panel sets of a name a function makes is a script's value.
         let scripted: H2FunctionValues = self
-            .functions
-            .iter()
-            .filter_map(|function| {
-                let value = inputs.get(&(geometry_id, function.export.clone()))?;
-                Some((function.export.clone(), *value))
+            .exports_named()
+            .filter_map(|export| {
+                let value = inputs.get(&(geometry_id, export.to_owned()))?;
+                Some((export.to_owned(), *value))
             })
             .collect();
         let mut values = set.clone();
-        for function in &self.functions {
-            let (value, _) = self.value(&function.export, &set, &scripted, clock, 0);
-            values.insert(function.export.clone(), value);
+        for export in self.exports_named() {
+            let (value, _) = self.value(export, &set, &scripted, clock, 0);
+            values.insert(export.to_owned(), value);
         }
         values
     }
@@ -564,7 +616,34 @@ pub(crate) fn read_h2_object_functions(object: &TagFile, model: Option<&TagFile>
         blam_tags::game::Game::Halo2 => FunctionRules::Halo2,
         _ => FunctionRules::Gen3,
     };
-    Some(H2ObjectFunctions { functions, rules, exports: TypeExports::of(object, model) })
+    let switches = object_block(object, "function switches")
+        .map(|block| read_function_switches(block, &name))
+        .unwrap_or_default();
+    Some(H2ObjectFunctions { functions, switches, rules, exports: TypeExports::of(object, model) })
+}
+
+/// Halo 4's `function switches`. A case that picks its own switch's export is
+/// a loop the game turns to `zero` as it loads (the 360's
+/// `ObjectFunctionSwitchDefinition::Postprocess` 0x84af07a8).
+fn read_function_switches(block: TagStruct<'_>, name: &impl Fn(TagStruct<'_>, &str) -> String) -> Vec<FunctionSwitch> {
+    elements(block, "function switches")
+        .iter()
+        .map(|entry| {
+            let export = name(*entry, "export name");
+            let cases = elements(*entry, "switched functions")
+                .iter()
+                .map(|case| {
+                    let bounds = match case.field("selection bounds").and_then(|field| field.value()) {
+                        Some(blam_tags::TagFieldData::RealBounds(bounds)) => [bounds.lower, bounds.upper],
+                        _ => [0.0; 2],
+                    };
+                    let function = name(*case, "function name");
+                    (bounds, if function == export { "zero".to_owned() } else { function })
+                })
+                .collect();
+            FunctionSwitch { switch: name(*entry, "switch function name"), export, cases }
+        })
+        .collect()
 }
 
 /// A button for each effect an event would play. An effect starts when its
@@ -741,6 +820,82 @@ mod tests {
         assert_eq!(functions.value("effects", &none, &by_import, Clock::default(), 0).0, 0.75, "the import's script value, unmapped");
     }
 
+    fn switch(switch: &str, export: &str, cases: &[([f32; 2], &str)]) -> FunctionSwitch {
+        let cases = cases.iter().map(|(bounds, function)| (*bounds, (*function).to_owned())).collect();
+        FunctionSwitch { switch: switch.to_owned(), export: export.to_owned(), cases }
+    }
+
+    fn switched(functions: Vec<H2ObjectFunction>, switches: Vec<FunctionSwitch>, inputs: &[(&str, f32)]) -> H2FunctionValues {
+        let functions = H2ObjectFunctions { functions, switches, rules: FunctionRules::Gen3, exports: None };
+        let inputs: H2FunctionInputs = inputs.iter().map(|(name, value)| ((0, (*name).to_owned()), *value)).collect();
+        functions.values(&inputs, 0, &[], 0.0, 0)
+    }
+
+    /// `ObjectFunctionSwitchDefinition::Evaluate`: the first case holding the
+    /// switch's value, bounds included, else 0.
+    #[test]
+    fn a_switch_answers_with_the_first_case_its_value_falls_in() {
+        let functions = vec![function("red", "red_out"), function("blue", "blue_out")];
+        let cases = [([0.0, 0.5], "red_out"), ([0.5, 1.0], "blue_out")];
+        let switches = vec![switch("pick", "color", &cases)];
+        let at = |pick: f32| switched(functions.clone(), switches.clone(), &[("pick", pick), ("red", 0.25), ("blue", 0.75)])["color"];
+        assert_eq!(at(0.0), 0.25);
+        assert_eq!(at(0.5), 0.25, "both ends are in, and the first case wins");
+        assert_eq!(at(0.8), 0.75);
+        let gap = vec![switch("pick", "color", &[([0.0, 0.25], "red_out")])];
+        assert_eq!(switched(functions.clone(), gap, &[("pick", 0.5), ("red", 0.25)])["color"], 0.0);
+    }
+
+    /// Halo 4's `object_get_function_value` asks a switch only when no
+    /// function has the name, and the last switch of a name stands.
+    #[test]
+    fn a_function_beats_a_switch_and_the_last_switch_stands() {
+        let functions = vec![function("red", "color"), function("blue", "blue_out"), function("red", "red_out")];
+        let switches = vec![switch("", "color", &[([0.0, 1.0], "blue_out")])];
+        assert_eq!(switched(functions.clone(), switches, &[("red", 0.25), ("blue", 0.75)])["color"], 0.25);
+        let switches = vec![
+            switch("", "shade", &[([0.0, 1.0], "red_out")]),
+            switch("", "shade", &[([0.0, 1.0], "blue_out")]),
+        ];
+        assert_eq!(switched(functions, switches, &[("red", 0.25), ("blue", 0.75)])["shade"], 0.75);
+    }
+
+    /// The panel offers what a switch reads, and not what it makes.
+    #[test]
+    fn a_switch_reads_its_switch_function_and_makes_its_export() {
+        let functions = H2ObjectFunctions {
+            functions: vec![function("red", "red_out")],
+            switches: vec![switch("pick", "color", &[([0.0, 1.0], "red_out")])],
+            ..Default::default()
+        };
+        let imports = functions.imports();
+        assert!(imports.contains(&"pick") && imports.contains(&"red"), "{imports:?}");
+        assert!(functions.makes("color"));
+        let reached = functions.reaching(&["color".to_owned()]);
+        for name in ["pick", "red_out", "red"] {
+            assert!(reached.iter().any(|known| known == name), "{name}");
+        }
+    }
+
+    /// With `BLAM_TEST_H4EK`: Cortana's hologram colors come from switches.
+    #[test]
+    fn halo_4_cortana_reads_her_function_switches() {
+        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+            return;
+        };
+        let path = std::path::Path::new(&root).join("objects/characters/storm_cortana/storm_cortana.biped");
+        let tag = TagFile::read(&path).unwrap();
+        let functions = read_h2_object_functions(&tag, None).unwrap();
+        assert!(!functions.switches.is_empty());
+        for switch in &functions.switches {
+            assert!(!switch.export.is_empty() && !switch.switch.is_empty(), "{switch:?}");
+            assert!(switch.cases.iter().all(|(_, function)| !function.is_empty()), "{switch:?}");
+            assert!(functions.makes(&switch.export), "{}", switch.export);
+        }
+        let values = functions.values(&H2FunctionInputs::new(), 0, &[], 0.0, 0);
+        assert!(functions.switches.iter().all(|switch| values.contains_key(&switch.export)));
+    }
+
     #[test]
     fn an_output_follows_what_it_imports() {
         assert_eq!(value(vec![function("speed", "glow")], "glow", &[("speed", 0.5)]), 0.5);
@@ -816,7 +971,7 @@ mod tests {
 
     fn gen3(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> (f32, bool) {
         let inputs = inputs.iter().map(|(name, value)| ((*name).to_owned(), *value)).collect();
-        let functions = H2ObjectFunctions { functions, rules: FunctionRules::Gen3, exports: None };
+        let functions = H2ObjectFunctions { functions, rules: FunctionRules::Gen3, ..Default::default() };
         functions.value(name, &inputs, &H2FunctionValues::new(), Clock::default(), 0)
     }
 

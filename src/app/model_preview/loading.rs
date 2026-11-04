@@ -452,6 +452,13 @@ fn load_tag_preview(
                 read_reach_object_features(source, model_tag, model, preview);
             });
         }
+        // Halo 4's functions and switches feed its materials' functions; its
+        // attachments, lights and effects wait on their own readers.
+        if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo4), .. }) {
+            data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+            let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
+            data.h2_object_functions = feature(&mut notes, "its functions", functions);
+        }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
@@ -688,7 +695,9 @@ fn load_tag_preview(
     // physics shapes froze the frame every time a toggle rebuilt the merge.
     // `maybe_request_model_overlays` builds them once on a worker after this
     // load lands, and the toggles are draw-time filters from then on.
-    let reach = source.is_some_and(|source| source.game() == Some(GameId::HaloReach));
+    // Halo 4 shows every instance for a NONE group as Reach does (the 360's
+    // 0x8325C1B8).
+    let reach = source.is_some_and(|source| matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4)));
     preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names, reach);
     let mut data = model_preview_data(render_entry.key, normalized, preview, read_model_variants(model_tag));
     // The `.model` opened itself lists what its variants attach. An object
