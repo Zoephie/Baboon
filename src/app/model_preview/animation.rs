@@ -319,7 +319,10 @@ pub(super) fn pose_for_shot(
     clip: &str,
 ) {
     let list = list_model_animations(source, entry).unwrap();
-    let index = list.iter().position(|animation| animation.name == clip).unwrap();
+    let index = list.iter().position(|animation| animation.name == clip).unwrap_or_else(|| {
+        let names: Vec<&str> = list.iter().map(|animation| animation.name.as_str()).collect();
+        panic!("H2_SHOT_CLIP: no clip {clip:?}; these are: {names:?}")
+    });
     let layers = h2_held_layers(&list, index, data, state);
     let decoded = decode_held_animation(source, entry, index, &layers).unwrap();
     let at = std::env::var("H2_SHOT_FRAME").map_or(0, |frame| frame.parse().unwrap());
