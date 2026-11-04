@@ -37,10 +37,11 @@ struct H3EventTime {
 }
 
 impl H3EventTime {
-    fn read(event: TagStruct<'_>) -> Self {
+    fn read(event: TagStruct<'_>, baked: bool) -> Self {
         let delay = event.read_real_bounds("delay bounds");
         let duration = event.read_real_bounds("duration bounds");
-        Self::of([delay.lower, delay.upper], [duration.lower, duration.upper])
+        let (delay, duration) = ([delay.lower, delay.upper], [duration.lower, duration.upper]);
+        if baked { Self::of(delay, duration) } else { Self::unbaked(delay, duration) }
     }
 
     /// The bake: a duration that can be 0 is a tick, which also flattens a
@@ -51,6 +52,14 @@ impl H3EventTime {
             delay: (delay[0] + delay[1]) * 0.5,
             duration: if baked { ONE_TICK } else { (duration[0] + duration[1]) * 0.5 },
         }
+    }
+
+    /// Reach's `fix_events` (the 360's 0x830844c8) is an empty loop: a
+    /// duration rolls as authored, and one of 0 ends in the update it began,
+    /// the tick it stands for here.
+    fn unbaked(delay: [f32; 2], duration: [f32; 2]) -> Self {
+        let duration = (duration[0] + duration[1]) * 0.5;
+        Self { delay: (delay[0] + delay[1]) * 0.5, duration: if duration > 0.0 { duration } else { ONE_TICK } }
     }
 
     fn length(self) -> f32 {
@@ -84,8 +93,12 @@ pub(super) struct H3EffectTimes {
 impl H3EffectTimes {
     pub(super) fn read(effect: TagStruct<'_>) -> Self {
         let flags = effect.read_flag_names("flags").unwrap_or_default();
+        // Reach's effect gathers its looping sound into `looping sounds`, which
+        // Halo 3's and ODST's lack; only Reach's postprocess leaves durations
+        // as authored.
+        let baked = effect.field("looping sounds").is_none();
         Self {
-            events: elements(effect, "events").iter().map(|event| H3EventTime::read(*event)).collect(),
+            events: elements(effect, "events").iter().map(|event| H3EventTime::read(*event, baked)).collect(),
             loop_start: usize::try_from(effect.read_block_index("loop start event")).unwrap_or(0),
             parallel: flags.iter().any(|(_, name)| name == PARALLEL),
             once: false,
@@ -697,6 +710,36 @@ mod tests {
     #[test]
     fn an_events_effect_is_named_by_its_field_and_tag() {
         assert_eq!(event_function_name("firing effect", "objects\\weapons\\fx\\firing"), "firing effect: firing");
+    }
+
+    /// With `BLAM_TEST_HREK` and `BLAM_TEST_H3EK`: Reach's effects are told
+    /// from Halo 3's by `looping sounds`.
+    #[test]
+    fn only_reach_effects_keep_their_durations() {
+        use crate::app::export::geometry::load_referenced_tag_from_source;
+        use crate::core::game::GameId;
+        for (env, game, path, baked) in [
+            ("BLAM_TEST_HREK", GameId::HaloReach, "objects\\equipment\\armor_lockup\\fx\\looping", false),
+            ("BLAM_TEST_H3EK", GameId::Halo3, "objects\\weapons\\support_low\\brute_shot\\fx\\detonation", true),
+        ] {
+            let Ok(root) = std::env::var(env) else {
+                continue;
+            };
+            let source = TagSource::LooseFolder {
+                root: root.into(),
+                game: Some(game),
+                definitions_root: crate::core::bundled::locate_definitions_root(),
+            };
+            let effect = load_referenced_tag_from_source(&source, path, "effect", b"effe").unwrap();
+            assert_eq!(effect.root().field("looping sounds").is_none(), baked, "{env}");
+        }
+    }
+
+    #[test]
+    fn reach_rolls_a_duration_that_can_be_zero_as_authored() {
+        assert_eq!(H3EventTime::unbaked([0.0; 2], [0.0, 3.0]).duration, 1.5);
+        assert_eq!(H3EventTime::unbaked([0.0; 2], [0.0, 0.0]).duration, ONE_TICK, "an instant is an update");
+        assert_eq!(H3EventTime::of([0.0; 2], [0.0, 3.0]).duration, ONE_TICK, "Halo 3 bakes it");
     }
 
     #[test]
