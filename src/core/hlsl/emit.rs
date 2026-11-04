@@ -236,6 +236,18 @@ struct Emitter<'a> {
 }
 
 pub(crate) fn translate(program: &Program, entry: &str, stage: Stage) -> Result<Translated, String> {
+    translate_with(program, entry, stage, &[])
+}
+
+/// [`translate`] for an effect pass that compiles `entry` with `arguments`:
+/// its `uniform` parameters take them in order, as fxc binds them. With
+/// none, they are left as [`translate`] leaves them, unset.
+pub(crate) fn translate_with(
+    program: &Program,
+    entry: &str,
+    stage: Stage,
+    arguments: &[Expression],
+) -> Result<Translated, String> {
     let index = program
         .functions
         .iter()
@@ -261,7 +273,7 @@ pub(crate) fn translate(program: &Program, entry: &str, stage: Stage) -> Result<
         returns: Type::Void,
     };
     let name = emitter.function(index).map_err(|error| format!("{entry}: {error}"))?;
-    let (attributes, main) = emitter.main_function(&program.functions[index], &name)?;
+    let (attributes, main) = emitter.main_function(&program.functions[index], &name, arguments)?;
     emitter.global_lines.sort_by_key(|(at, _)| *at);
     emitter.global_inits.sort_by_key(|(at, _)| *at);
     let mut source = String::from("#version 410 core\n");
@@ -1641,17 +1653,26 @@ impl Emitter<'_> {
         &mut self,
         function: &Function,
         symbol: &str,
+        arguments: &[Expression],
     ) -> Result<(Vec<Interface>, String), String> {
         let mut header = String::new();
         let mut body = String::from("    hlsl_init_globals();\n");
         let mut attributes = Vec::new();
         let mut call = Vec::new();
         let mut after = String::new();
+        let binds = !arguments.is_empty();
+        let mut arguments = arguments.iter();
         for (at, parameter) in function.parameters.iter().enumerate() {
             let ty = self.resolved(&parameter.variable)?;
             let local = format!("hlsl_p{at}");
             body.push_str(&format!("    {};\n", declaration(&ty, &local)));
             call.push(local.clone());
+            if binds && parameter.uniform {
+                let argument = arguments.next().ok_or_else(|| format!("{symbol}: no argument for {}", parameter.variable.name))?;
+                let value = self.convert_init(argument, &ty)?;
+                body.push_str(&format!("    {local} = {};\n", value.text));
+                continue;
+            }
             if parameter.direction != Direction::In {
                 self.wire_output(&ty, parameter.variable.semantic.as_deref(), &local, &mut header, &mut after)?;
             }
@@ -1665,6 +1686,9 @@ impl Emitter<'_> {
                     &mut attributes,
                 )?;
             }
+        }
+        if arguments.next().is_some() {
+            return Err(format!("{symbol}: more arguments than uniform parameters"));
         }
         let call = format!("{symbol}({})", call.join(", "));
         if function.returns == Type::Void {
@@ -1852,6 +1876,27 @@ mod tests {
     fn a_wider_value_truncates_on_assignment() {
         let source = pixel("float4 main_ps(float4 a : TEXCOORD0) : SV_Target { float3 b = a; return b.xyzz; }");
         assert!(source.contains("vec3 l_b = l_a.xyz;"), "{source}");
+    }
+
+    /// An effect pass's `f(true, 2)` reaches `f`'s `uniform` parameters in
+    /// order, around the varyings; too few or too many arguments fail.
+    #[test]
+    fn a_pass_binds_its_arguments_to_the_uniform_parameters() {
+        let source = "float4 main_ps(in float4 p : SV_Position, uniform bool lit, uniform float scale) : SV_Target { return lit ? p * scale : 0; }\n\
+                      technique11 t { pass p { SetPixelShader(CompileShader(ps_5_0, main_ps(true, 2))); } }\n";
+        let mut include = |_: &str, _: &str| None;
+        let tokens = Preprocessor::new(&[], &mut include).run(source).unwrap();
+        let program = parse(&tokens).unwrap();
+        let arguments = &program.pass_function("t", "p", "ps").unwrap().arguments;
+        let text = translate_with(&program, "main_ps", Stage::Pixel, arguments).unwrap().source;
+        assert!(text.contains("hlsl_p0 = gl_FragCoord;"), "{text}");
+        assert!(text.contains("hlsl_p1 = true;"), "{text}");
+        assert!(text.contains("hlsl_p2 = 2.0;"), "{text}");
+        assert!(translate_with(&program, "main_ps", Stage::Pixel, &arguments[..1]).is_err());
+        let extra = [arguments.clone(), arguments[..1].to_vec()].concat();
+        assert!(translate_with(&program, "main_ps", Stage::Pixel, &extra).is_err());
+        let unbound = translate(&program, "main_ps", Stage::Pixel).unwrap().source;
+        assert!(!unbound.contains("hlsl_p1 = true;"), "no arguments leaves them unset: {unbound}");
     }
 
     #[test]

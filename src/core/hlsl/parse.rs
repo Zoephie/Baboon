@@ -58,6 +58,9 @@ pub(crate) enum Direction {
 #[derive(Debug, Clone)]
 pub(crate) struct Parameter {
     pub(crate) direction: Direction,
+    /// `uniform`: an entry point's parameter the effect pass compiles in, from
+    /// its literal arguments in order.
+    pub(crate) uniform: bool,
     pub(crate) variable: Variable,
 }
 
@@ -666,8 +669,11 @@ impl Parser<'_> {
 
     fn parameter(&mut self) -> Result<Parameter, String> {
         let mut direction = Direction::In;
+        let mut uniform = false;
         loop {
-            if self.eat("in") {
+            if self.eat("uniform") {
+                uniform = true;
+            } else if self.eat("in") {
             } else if self.eat("out") {
                 direction = Direction::Out;
             } else if self.eat("inout") {
@@ -677,7 +683,7 @@ impl Parser<'_> {
             }
         }
         let ty = self.type_name()?;
-        Ok(Parameter { direction, variable: self.declarator(ty)? })
+        Ok(Parameter { direction, uniform, variable: self.declarator(ty)? })
     }
 
     fn block(&mut self) -> Result<Vec<Statement>, String> {

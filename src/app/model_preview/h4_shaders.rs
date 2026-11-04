@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use super::ce_attachments::elements;
 use crate::app::export::geometry::load_referenced_tag_from_source;
-use crate::core::hlsl::emit::{Stage, Translated, translate};
+use crate::core::hlsl::emit::{Stage, Translated, translate_with};
 use crate::core::hlsl::parse::{Program, parse};
 use crate::core::hlsl::pre::{Preprocessor, Token};
 use crate::core::source::TagSource;
@@ -106,10 +106,21 @@ pub(crate) fn translate_pass(program: &Program, technique: &str, pass: &str, sta
     let shader = program
         .pass_function(technique, pass, stage_name)
         .ok_or_else(|| format!("no {stage_name} in {technique}/{pass}"))?;
-    if !shader.arguments.is_empty() {
-        return Err(format!("{technique}/{pass} passes arguments to {}", shader.function));
-    }
-    translate(program, &shader.function, stage)
+    translate_with(program, &shader.function, stage, &shader.arguments)
+}
+
+/// One stage of the `index`th technique's `pass`, for an explicit shader
+/// whose techniques go unnamed and are picked by their place
+/// (`MAKE_SS_LIGHT_TECHNIQUE`'s sixteen, entry `flags`).
+pub(crate) fn translate_technique(program: &Program, index: usize, pass: &str, stage: Stage) -> Result<Translated, String> {
+    let stage_name = match stage {
+        Stage::Vertex => "vs",
+        Stage::Pixel => "ps",
+    };
+    let technique = program.techniques.get(index).ok_or_else(|| format!("no technique {index}"))?;
+    let (_, shaders) = technique.passes.iter().find(|(name, _)| &**name == pass).ok_or_else(|| format!("no pass {pass} in technique {index}"))?;
+    let shader = shaders.iter().find(|shader| &*shader.stage == stage_name).ok_or_else(|| format!("no {stage_name} in technique {index}/{pass}"))?;
+    translate_with(program, &shader.function, stage, &shader.arguments)
 }
 
 #[cfg(test)]
@@ -175,6 +186,40 @@ mod tests {
         }
         assert!(failures.is_empty(), "{} failures, first: {:?}", failures.len(), &failures[..failures.len().min(5)]);
         assert!(passes > 1500, "translated passes: {passes}");
+    }
+
+    /// The screen-space light shaders (`rasterizer_globals` explicit 187 and
+    /// 204) compile their sixteen techniques from `default_ps`'s uniform
+    /// switches; each translates, and the switches reach the GLSL as
+    /// constants. A shader whose technique asks no switch (`write_depth`,
+    /// explicit 17) still translates, and one past the last does not.
+    #[test]
+    fn the_screen_space_light_techniques_translate_with_their_switches() {
+        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        if !root.join("shaders/material_shaders/explicit_shaders/lighting").is_dir() {
+            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
+            return;
+        }
+        let source = TagSource::LooseFolder {
+            root,
+            game: Some(GameId::Halo4),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
+        };
+        for path in ["gobo_specular", "pointphysicallycorrect"] {
+            let path = format!("shaders\\material_shaders\\explicit_shaders\\lighting\\{path}");
+            let program = H4ShaderSource::read(&source, &path).unwrap().program(&H4_DEFINES).unwrap();
+            assert_eq!(program.techniques.len(), 16, "{path}");
+            for index in 0..16 {
+                let pixel = translate_technique(&program, index, "tiny_position", Stage::Pixel)
+                    .unwrap_or_else(|error| panic!("{path} {index}: {error}"));
+                // `useGobo` is the first switch.
+                let gobo = if index & 1 != 0 { "true" } else { "false" };
+                assert!(pixel.source.contains(&format!("hlsl_p1 = {gobo};")), "{path} {index}:\n{}", pixel.source);
+                translate_technique(&program, index, "tiny_position", Stage::Vertex)
+                    .unwrap_or_else(|error| panic!("{path} {index} vertex: {error}"));
+            }
+            assert!(translate_technique(&program, 16, "tiny_position", Stage::Pixel).is_err());
+        }
     }
 
     #[test]
