@@ -26,6 +26,9 @@ const SMALLEST_WEIGHT: f32 = 1e-4;
 pub(crate) enum ReachIkHolder {
     /// The unit's own.
     Unit,
+    /// The object the unit rides in (Halo 4's IK sets); the preview places
+    /// none.
+    Parent,
     /// Its primary weapon's (owner 1) or its secondary's (owner 2).
     Weapon(u8),
 }
@@ -359,7 +362,7 @@ fn below(nodes: &[RenderModelPreviewNode], node: usize) -> Vec<usize> {
 /// `render_model_apply_two_bone_ik` with `g_enable_new_ik_method`: the
 /// effector's parent and grandparent turned so it reaches `desired`, taking
 /// its turn, then what hangs off each moved along with it.
-fn two_bone_ik(
+pub(crate) fn two_bone_ik(
     nodes: &[RenderModelPreviewNode],
     worlds: &mut [Matrix4],
     effector: usize,

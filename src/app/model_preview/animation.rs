@@ -61,6 +61,8 @@ pub(crate) struct DecodedAnimationPose {
     pub loop_frame: usize,
     /// Reach: what its IK chains reach for, frame by frame.
     pub reach_ik: Vec<super::reach_ik::ReachIkTrack>,
+    /// Halo 4: the clip's IK set, solved before the chains.
+    pub h4_ik_set: Vec<super::h4_ik::H4IkPoint>,
 }
 
 impl DecodedAnimationPose {
@@ -68,6 +70,7 @@ impl DecodedAnimationPose {
         Self {
             loop_frame,
             reach_ik: Vec::new(),
+            h4_ik_set: Vec::new(),
             skeleton_names: skeleton
                 .nodes
                 .iter()
@@ -103,6 +106,8 @@ pub(crate) struct PreviewAnimationPose {
     pub loop_frame: usize,
     /// Reach's IK chain targets, solved after each sampled pose.
     pub reach_ik: std::sync::Arc<Vec<super::reach_ik::ReachIkTrack>>,
+    /// Halo 4's IK set for the clip, solved before the chains.
+    pub h4_ik_set: std::sync::Arc<Vec<super::h4_ik::H4IkPoint>>,
 }
 
 impl PreviewAnimationPose {
@@ -114,6 +119,7 @@ impl PreviewAnimationPose {
             reach,
             loop_frame: 0,
             reach_ik: std::sync::Arc::default(),
+            h4_ik_set: std::sync::Arc::default(),
         }
     }
 }
@@ -304,6 +310,9 @@ pub(super) fn animation_skinning_rows(
         inverse_binds.push(inverse_bind_matrix(node));
     }
     apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
+    // `biped_postprocess_node_matrices` (X360 0x84B1A738): the IK set, then
+    // the chains.
+    super::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, &data.preview.reach_ik_markers, nodes, &inverse_binds, &mut matrices);
     super::reach_ik::apply_reach_ik(
         &pose.reach_ik,
         &data.preview.reach_ik_markers,
@@ -384,6 +393,7 @@ pub(super) fn pose_for_shot(
         .collect();
     state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
         reach_ik: std::sync::Arc::new(reach_ik),
+        h4_ik_set: std::sync::Arc::new(decoded.h4_ik_set),
         ..PreviewAnimationPose::new(index, vec![frame])
     }));
 }
@@ -497,6 +507,7 @@ pub(super) fn armature_node_positions(
         if let Some(pose) = state.animation.pose.as_ref() {
             let frames = self::sampled_frames(&state.animation, pose.frames.len());
             let markers = &data.preview.reach_ik_markers;
+            super::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, markers, nodes, &inverse_binds, &mut matrices);
             super::reach_ik::apply_reach_ik(&pose.reach_ik, markers, nodes, &inverse_binds, &mut matrices, frames);
         }
     }
@@ -1741,6 +1752,7 @@ impl Baboon {
                 state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
                     loop_frame: decoded.loop_frame,
                     reach_ik: std::sync::Arc::new(decoded.reach_ik),
+                    h4_ik_set: std::sync::Arc::new(decoded.h4_ik_set),
                     ..PreviewAnimationPose::new(animation_index, frames)
                 }));
                 state.animation.time = 0.0;
@@ -2062,6 +2074,7 @@ fn decode_held_animation(
     let graphs: Vec<&TagFile> = chain[graph..].iter().collect();
     Ok(DecodedAnimationPose {
         reach_ik: super::reach_ik::read_reach_ik_tracks(&graphs, group),
+        h4_ik_set: graphs.first().map_or_else(Vec::new, |graph| super::h4_ik::read_h4_ik_set(graph, group.index)),
         ..DecodedAnimationPose::new(&skeleton, &pose, loop_frame)
     })
 }

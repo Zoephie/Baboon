@@ -861,3 +861,83 @@ fn h4_kit_sweep() {
     let _ = std::fs::remove_file(&out);
     eprintln!("NOTE KIT {} models: good {good}, failed {}", models.len().min(limit), failed.len());
 }
+
+/// The Chief biped, with the AR, posed at `clip`, from the kit at `root`.
+fn h4_chief_with_rifle(root: &str, clip: &str) -> (ModelPreviewData, ModelPreviewState) {
+    let source = TagSource::LooseFolder {
+        root: root.clone().into(),
+        game: Some(GameId::Halo4),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let TagSource::LooseFolder { definitions_root, .. } = &source else { unreachable!() };
+    let names = TagNameIndex::load_game(definitions_root, GameId::Halo4).unwrap();
+    let path = "objects\\characters\\storm_masterchief\\storm_masterchief";
+    let tag = load_referenced_tag_from_source(&source, path, "biped", b"bipd").unwrap();
+    let file = std::path::Path::new(&root).join("objects/characters/storm_masterchief/storm_masterchief.biped");
+    let entry = TagEntry {
+        key: format!("{path}.biped"),
+        display_path: format!("{path}.biped"),
+        group_tag: u32::from_be_bytes(*b"bipd"),
+        group_name: Some("biped".to_owned()),
+        location: TagEntryLocation::LooseFile(file),
+    };
+    let weapon = "objects\\weapons\\rifle\\storm_assault_rifle\\storm_assault_rifle".to_owned();
+    let settings = PreviewLoadSettings { weapon: Some(weapon.clone()), ..Default::default() };
+    let mut data = load_model_preview(&tag, &entry, &names, Some(&source), &settings).unwrap();
+    let mut state = ModelPreviewState::default();
+    reset_model_preview_selection(&mut state, &data, default_variant_index(&data));
+    state.weapon = Some(weapon);
+    animation::pose_for_shot(&source, &entry, &mut data, &mut state, clip);
+    (data, state)
+}
+
+/// With `BLAM_TEST_H4EK` (the kit's tags): the Chief holding the AR in
+/// `combat:rifle:idle` puts each IK set point's marker on the weapon's, the
+/// left hand on `left_hand_spartan`, within a millimetre.
+#[test]
+fn h4_chief_left_hand_holds_the_assault_rifle() {
+    let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+        return;
+    };
+    let (data, mut state) = h4_chief_with_rifle(&root, "combat:rifle:idle");
+    let points = state.animation.pose.as_ref().unwrap().h4_ik_set.clone();
+    assert!(!points.is_empty(), "the clip's IK set");
+    let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
+    let posed = |marker: &super::reach_ik::ReachIkMarker| {
+        let skin = &rows[marker.node * 3..marker.node * 3 + 3];
+        let at = [marker.bind.m[0][3], marker.bind.m[1][3], marker.bind.m[2][3]];
+        std::array::from_fn::<f32, 3, _>(|row| skin[row][0] * at[0] + skin[row][1] * at[1] + skin[row][2] * at[2] + skin[row][3])
+    };
+    let markers = &data.preview.reach_ik_markers;
+    let find = |holder, name: &str| markers.iter().find(|marker| marker.holder == holder && marker.name.eq_ignore_ascii_case(name));
+    let mut solved = 0;
+    for point in points.iter() {
+        let (Some(source), Some(destination)) =
+            (find(super::reach_ik::ReachIkHolder::Unit, &point.source), find(point.holder, &point.destination))
+        else {
+            continue;
+        };
+        let (from, to) = (posed(source), posed(destination));
+        let apart = (0..3).map(|axis| (from[axis] - to[axis]).powi(2)).sum::<f32>().sqrt();
+        eprintln!("NOTE IK {} -> {} apart {apart}", point.source, point.destination);
+        // A millimetre is 1/3048 of a world unit.
+        assert!(apart < 1.0 / 3048.0, "{} misses {} by {apart}", point.source, point.destination);
+        solved += 1;
+    }
+    assert!(solved > 0, "no point found both markers: {points:?}");
+    // Without the set the animation alone leaves the hand off the grip.
+    let mut pose = (**state.animation.pose.as_ref().unwrap()).clone();
+    pose.h4_ik_set = Arc::default();
+    state.animation.pose = Some(Arc::new(pose));
+    let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
+    let posed = |marker: &super::reach_ik::ReachIkMarker| {
+        let skin = &rows[marker.node * 3..marker.node * 3 + 3];
+        let at = [marker.bind.m[0][3], marker.bind.m[1][3], marker.bind.m[2][3]];
+        std::array::from_fn::<f32, 3, _>(|row| skin[row][0] * at[0] + skin[row][1] * at[1] + skin[row][2] * at[2] + skin[row][3])
+    };
+    let point = &points[0];
+    let (from, to) = (posed(find(super::reach_ik::ReachIkHolder::Unit, &point.source).unwrap()), posed(find(point.holder, &point.destination).unwrap()));
+    let apart = (0..3).map(|axis| (from[axis] - to[axis]).powi(2)).sum::<f32>().sqrt();
+    eprintln!("NOTE IK off: apart {apart}");
+    assert!(apart > 1.0 / 3048.0, "the clip alone already reaches the grip ({apart}), so this proves nothing");
+}

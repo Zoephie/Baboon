@@ -461,6 +461,9 @@ fn load_tag_preview(
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             preview.h4_bounding_sphere = read_h4_bounding_sphere(model_tag);
             preview.h4_change_color_count = read_h4_change_color_count(model_tag);
+            // The unit's markers its IK sets and chains place.
+            let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
+            preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
@@ -474,10 +477,14 @@ fn load_tag_preview(
         let weapons_family = matches!(
             source,
             TagSource::LooseFolder {
-                game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach),
+                game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
                 ..
             }
         );
+        // Halo 4's kit graphs all use data-driven animation, which places the
+        // hands by IK sets and chains (`biped_postprocess_node_matrices`,
+        // X360 0x84B1A738), never the legacy `weapon ik`.
+        let legacy_weapon_ik = source.game() != Some(GameId::Halo4);
         if weapons_family {
             let known = settings.h2_equippable.as_deref();
             let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
@@ -493,7 +500,7 @@ fn load_tag_preview(
                         continue;
                     };
                     // `unit_apply_ik` leaves two weapons in their own hands.
-                    let ik = (secondary.is_none()).then_some(&weapons);
+                    let ik = (secondary.is_none() && legacy_weapon_ik).then_some(&weapons);
                     let attach = |preview: &mut RenderModelPreview| {
                         super::h2_weapons::attach_h2_weapon(source, model_tag, path, left, owner, ik, preview)
                     };
