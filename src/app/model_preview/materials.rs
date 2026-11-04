@@ -514,6 +514,22 @@ fn alpha_only(image: &mut H2Image) {
     }
 }
 
+/// What an R8_UNORM texel samples as: (r, 0, 0, 1).
+fn red_only(image: &mut H2Image) {
+    let keep_red = |rgba: &mut Vec<u8>| {
+        rgba.chunks_exact_mut(4).for_each(|texel| {
+            texel[1] = 0;
+            texel[2] = 0;
+            texel[3] = 255;
+        })
+    };
+    match image {
+        H2Image::Flat(flat) => keep_red(&mut flat.rgba),
+        H2Image::Cube { faces, .. } => faces.iter_mut().for_each(keep_red),
+        H2Image::Volume { rgba, .. } => keep_red(rgba),
+    }
+}
+
 pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: SamplerKind) -> Option<H3Bitmap> {
     let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok();
     // `render_method_submit`: an index past the last image takes the last.
@@ -528,7 +544,11 @@ pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: S
         let format = tag.as_ref().and_then(|tag| {
             blam_tags::bitmap::Bitmap::new(tag).ok()?.image(index.max(0) as usize)?.format().ok()
         });
+        let halo4 = source.game() == Some(crate::core::game::GameId::Halo4);
         let texels = format.map_or(H3Texels::Linear, |format| {
+            if halo4 {
+                return H3Texels::of_halo4(format, curve.unwrap_or(0));
+            }
             let srgb = if matches!(curve, None | Some(0)) {
                 H3Texels::default_srgb(format)
             } else {
@@ -539,6 +559,11 @@ pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: S
         let mut mips = tag.as_ref().and_then(|tag| h3_stored_mips(tag, index.max(0) as usize, &image)).unwrap_or_default();
         if format == Some(blam_tags::bitmap::BitmapFormat::A8) {
             std::iter::once(&mut image).chain(&mut mips).for_each(alpha_only);
+        }
+        // Halo 4 uploads `y8` and `ay8` as R8_UNORM (`halo4_tag_test`
+        // 0x141B7E080), and DirectX 11 views have no swizzle.
+        if halo4 && matches!(format, Some(blam_tags::bitmap::BitmapFormat::Y8 | blam_tags::bitmap::BitmapFormat::Ay8)) {
+            std::iter::once(&mut image).chain(&mut mips).for_each(red_only);
         }
         (Arc::new(image), texels, Arc::new(mips))
     })

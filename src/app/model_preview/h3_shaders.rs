@@ -743,6 +743,30 @@ impl H3Texels {
         }
     }
 
+    /// Halo 4's MCC upload (`halo4_tag_test` 0x1408D93B0, sRGB views
+    /// 0x1408D9510). Only the five formats with an sRGB twin can read
+    /// sRGB, when the curve is xRGB, sRGB or unknown; `dxn` is BC5_SNORM.
+    pub(crate) fn of_halo4(format: BitmapFormat, curve: i128) -> Self {
+        match format {
+            BitmapFormat::Dxn
+            | BitmapFormat::DxnSnorm
+            | BitmapFormat::V8u8
+            | BitmapFormat::Q8w8v8u8
+            | BitmapFormat::V16u16
+            | BitmapFormat::Signedr16g16b16a16 => Self::Signed,
+            BitmapFormat::X8r8g8b8
+            | BitmapFormat::A8r8g8b8
+            | BitmapFormat::Dxt1
+            | BitmapFormat::Dxt3
+            | BitmapFormat::Dxt5
+                if matches!(curve, 0 | 1 | 5) =>
+            {
+                Self::Srgb
+            }
+            _ => Self::Linear,
+        }
+    }
+
     /// `bitmap_format_is_default_srgb`, for a bitmap whose curve is unknown.
     pub(crate) fn default_srgb(format: BitmapFormat) -> bool {
         !matches!(
@@ -1005,6 +1029,19 @@ mod texel_tests {
         assert_eq!(H3Texels::of(BitmapFormat::A8r8g8b8, true), H3Texels::Srgb);
         assert_eq!(H3Texels::of(BitmapFormat::A8r8g8b8, false), H3Texels::Linear);
         assert_eq!(H3Texels::of(BitmapFormat::Dxn, false), H3Texels::Linear);
+    }
+
+    #[test]
+    fn halo4_reads_srgb_only_through_formats_with_an_srgb_twin() {
+        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxt1, 5), H3Texels::Srgb);
+        assert_eq!(H3Texels::of_halo4(BitmapFormat::A8r8g8b8, 0), H3Texels::Srgb, "unknown curve, colour format");
+        // Halo 3's rule would read these sRGB; Halo 4 has no sRGB view for them.
+        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxt5a, 5), H3Texels::Linear);
+        assert_eq!(H3Texels::of_halo4(BitmapFormat::A4r4g4b4, 1), H3Texels::Linear);
+        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxt5, 2), H3Texels::Linear, "gamma 2.0 is never sRGB");
+        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxt5, 3), H3Texels::Linear, "nor linear");
+        assert_eq!(H3Texels::of_halo4(BitmapFormat::Dxn, 0), H3Texels::Signed, "dxn is BC5_SNORM");
+        assert_eq!(H3Texels::of(BitmapFormat::Dxn, false), H3Texels::Linear, "Halo 3 reads its `dxn` differently");
     }
 
     #[test]
