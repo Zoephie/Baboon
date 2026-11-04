@@ -226,13 +226,21 @@ pub(super) fn reach_frame_lighting(frame: &ModelGpuFrame) -> ReachObjectLighting
     reach_object_lighting(y.atan2(x) - light_heading())
 }
 
+/// Which of the object's dual vMF a uniform reads. `set_lightmap_vmf_constants`
+/// (X360 0x826DD8D0) writes the same four to the pixel stage's c1 and the
+/// vertex stage's c240, which foliage lights its vertices by.
+fn reach_vmf_index(name: &str) -> Option<usize> {
+    let index = name.strip_prefix("p_lighting_constant_").or_else(|| name.strip_prefix("v_lighting_constant_"))?;
+    index.parse().ok()
+}
+
 /// What Reach's rasterizer globals hold for an object here, by uniform name,
 /// at the area screen effects' exposure `stops`. Anything not named falls to
 /// what Reach shares with Halo 3.
 pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str, stops: f32) -> Option<H3Value> {
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     let lighting = || reach_frame_lighting(frame);
-    if let Some(index) = name.strip_prefix("p_lighting_constant_").and_then(|index| index.parse::<usize>().ok()) {
+    if let Some(index) = reach_vmf_index(name) {
         return lighting().dual_vmf.get(index).copied().map(H3Value::Floats);
     }
     match name {
@@ -333,6 +341,14 @@ void main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Foliage reads the vMF in its vertex stage; both stages name the same four.
+    #[test]
+    fn both_stages_read_the_objects_vmf() {
+        assert_eq!(reach_vmf_index("p_lighting_constant_2"), Some(2));
+        assert_eq!(reach_vmf_index("v_lighting_constant_3"), Some(3));
+        assert_eq!(reach_vmf_index("v_analytical_light_direction"), None);
+    }
 
     fn close(a: [f32; 3], b: [f32; 3]) -> bool {
         a.iter().zip(&b).all(|(a, b)| (a - b).abs() < 1e-4)
