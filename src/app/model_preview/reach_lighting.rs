@@ -190,6 +190,7 @@ pub(crate) const REACH_DARK_MULTIPLIER: f32 = 8.0;
 pub(super) const REACH_COMPOSITE_FRAGMENT: &str = "#version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
+uniform sampler2D scene_depth;
 uniform mat4 hue_saturation;
 uniform float dark_multiplier;
 uniform float view_scale;
@@ -204,7 +205,10 @@ void main() {
     vec3 combined = (accumulated.rgb + texture(bloom, place).rgb) * dark_multiplier;
     combined = sqrt(max(combined, vec3(0.0)));
     color.rgb = clamp((vec4(combined, 1.0) * hue_saturation).rgb, 0.0, 1.0);
-    color.a = accumulated.a;
+    // Reach's lit target keeps its anti-aliasing blur in alpha, not cover:
+    // what the object drew covers what lies behind it.
+    bool drawn = texture(scene_depth, place).r < 1.0;
+    color.a = drawn ? 1.0 : accumulated.a;
 }
 ";
 

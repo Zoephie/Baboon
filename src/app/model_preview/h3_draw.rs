@@ -1391,7 +1391,17 @@ impl ModelGlRenderer {
             let (screen, shaders) =
                 h3_screen_effects::h3_screen_settings(effects, values, &mut uploaded.h3_onsets, bones, &view, frame.time);
             if reach {
-                self.reach_composite(gl, accumulation, bloom, screen);
+                // The object's depth, which tells the composite what it covers.
+                let depth = self.h3_targets.as_ref().map(|targets| {
+                    let [width, height] = targets.size;
+                    gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
+                    gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
+                    let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
+                    gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+                    gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+                    targets.depth_copy
+                });
+                self.reach_composite(gl, accumulation, bloom, depth, screen);
             } else {
                 self.h3_composite(gl, accumulation, bloom, screen);
             }
@@ -1576,6 +1586,7 @@ impl ModelGlRenderer {
         gl: &glow::Context,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
+        depth: Option<glow::NativeTexture>,
         screen: h3_screen_effects::H3ScreenSettings,
     ) {
         unsafe {
@@ -1592,6 +1603,9 @@ impl ModelGlRenderer {
             gl.active_texture(glow::TEXTURE1);
             gl.bind_texture(glow::TEXTURE_2D, bloom.or(self.h3_no_bloom));
             gl.uniform_1_i32(gl.get_uniform_location(program, "bloom").as_ref(), 1);
+            gl.active_texture(glow::TEXTURE2);
+            gl.bind_texture(glow::TEXTURE_2D, depth);
+            gl.uniform_1_i32(gl.get_uniform_location(program, "scene_depth").as_ref(), 2);
             gl.active_texture(glow::TEXTURE0);
             let matrix = screen.color_matrix();
             let columns: [f32; 16] = std::array::from_fn(|at| matrix[at % 4][at / 4]);

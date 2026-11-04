@@ -191,9 +191,14 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         shield_batches,
         camera: camera.gpu_uniforms(),
         render_mode,
-        background: preview_background(&egui::Visuals::dark()),
+        // `H2_SHOT_LIGHT` takes the light theme's backdrop.
+        background: preview_background(&if std::env::var_os("H2_SHOT_LIGHT").is_some() {
+            egui::Visuals::light()
+        } else {
+            egui::Visuals::dark()
+        }),
         show_backfaces: state.show_backfaces,
-        show_grid: false,
+        show_grid: std::env::var_os("H2_SHOT_GRID").is_some(),
         textures: render_mode.uses_textures().then(|| data.textures.clone()).flatten(),
         bones: animation_skinning_rows(&data, &state).map(Arc::new),
         game_shaders: state.h2_game_shaders,
