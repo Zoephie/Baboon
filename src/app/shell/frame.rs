@@ -5115,6 +5115,8 @@ mod tests {
     #[test]
     fn view_menu_toggles_keep_it_open_and_an_action_closes_it() {
         let mut h = Harness::new();
+        let kit = h.app.model.active_kit_id();
+        h.app.views[kit].terminal.work_dir = Some(std::env::temp_dir());
         idle(&mut h);
         assert!(!view_menu_open(&h));
         h.click("View", 0);
@@ -5133,9 +5135,12 @@ mod tests {
         assert_eq!(h.app.model.prefs.expert_mode, !expert);
         assert!(view_menu_open(&h), "so does a second one");
 
-        h.click("Tag Groups", 0);
+        assert!(!h.painted.iter().any(|text| text == "Folders" || text == "Tag Groups"
+            || text.starts_with("Sort by:") || text == "Scroll wheel cycles dropdowns"),
+            "browser controls stay in the browser toolbar and wheel cycling lives in Settings");
+        h.click("Terminal", 0);
         idle(&mut h);
-        assert_eq!(h.app.views[h.app.model.kits[h.app.model.active].id].browser.mode, BrowserMode::Groups);
+        assert!(h.app.views[kit].terminal.open);
         assert!(!view_menu_open(&h), "an action closes it");
     }
 
