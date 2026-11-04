@@ -826,7 +826,15 @@ impl RunningContrail {
         // `normalize3d`: what is too short to have a direction has no length.
         let (total, direction) =
             if total < EPSILON { (0.0, [0.0; 3]) } else { (total, moved.map(|axis| axis / total)) };
-        if self.initialized && total <= EPSILON {
+        // `event_initialize_contrail_system` (Halo 3 X360 0x829F9BA0, Reach's
+        // by name) pulses a new system once with no time and its flag set,
+        // which `c_contrail::pulse` turns into a permanent profile where it
+        // starts; `pulse_all` then pulses with the flag clear.
+        if !self.initialized {
+            self.extend(contrail, look, state, false, direction, total);
+            return;
+        }
+        if total <= EPSILON {
             return;
         }
         let mut remaining = total;
@@ -841,7 +849,7 @@ impl RunningContrail {
                 self.accumulator -= 1.0;
             }
         }
-        if !self.initialized || remaining > EPSILON {
+        if remaining > EPSILON {
             self.extend(contrail, look, state, true, direction, remaining);
         }
     }
@@ -1258,6 +1266,22 @@ mod tests {
         assert!(!property.vector(&state)[2].is_finite());
         property.ends = [[0.0, 0.0, 0.2], [0.0; 3]];
         assert!((property.vector(&state)[2] - 0.2 * std::f32::consts::FRAC_PI_4.sin()).abs() < 1e-5);
+    }
+
+    /// A new system's first pulse lays a permanent profile where it starts,
+    /// so moving on extends from there instead of replacing it.
+    #[test]
+    fn a_new_contrail_is_anchored_where_it_starts() {
+        let (contrail, look) = (contrail(20.0, 10.0), look(None));
+        let state = StripState::default();
+        let mut running = RunningContrail { previous: [2.0, 0.0, 0.0], ..Default::default() };
+        running.pulse(&contrail, &look, &state, [2.0, 0.0, 0.0], 0.1);
+        assert_eq!(running.profiles.len(), 1);
+        assert!(!running.profiles[0].temporary, "the start is permanent");
+        assert!(running.initialized);
+        running.pulse(&contrail, &look, &state, [2.01, 0.0, 0.0], 0.001);
+        assert_eq!(running.profiles[0].place, [2.0, 0.0, 0.0], "the start stays put");
+        assert!(running.profiles.last().unwrap().temporary, "the far end is the tip");
     }
 
     #[test]
