@@ -726,6 +726,18 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
     let (lights, cheap) = super::reach_lights::read_reach_lights(source, object, owner, markers, frame);
     preview.reach_lights.extend(named!(lights, name));
     preview.reach_cheap_lights.extend(named!(cheap, name));
+    let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    preview.h3_light_volumes.extend(named!(volumes, name));
+    let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
+    let carried = super::h3_particles::carried_strips(&particles);
+    preview.h3_particles.extend(particles);
+    preview.h3_strips.extend(carried);
+    let strips = super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
+    preview.h3_strips.extend(named!(strips, name).map(Arc::new));
+    let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
+    preview.h3_screen_effects.extend(screens);
+    super::h3_screen_effects::add_screen_shader_materials(preview);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
     let lit = !(preview.reach_lights.is_empty() && preview.reach_cheap_lights.is_empty());
     if lit && preview.reach_light_passes.is_empty() {
