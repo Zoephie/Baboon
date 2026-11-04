@@ -448,15 +448,15 @@ pub(in crate::app) fn draw_tabbed_window_header(
             let active = egui::Rect::from_min_max(tab.min, egui::pos2(tab.right(), background.bottom()));
             painter.rect_filled(active, rounding, ui.visuals().window_fill);
         } else if response.hovered() { painter.rect_filled(tab, rounding, ui.visuals().widgets.hovered.weak_bg_fill); }
-        paint_button_icon_at(ui, *icon, egui::Rect::from_center_size(egui::pos2(tab.left() + PADDING + ICON_SIZE * 0.5, tab.center().y), Vec2::splat(ICON_SIZE)), color);
-        painter.galley(egui::pos2(tab.left() + PADDING + ICON_SIZE + GAP, tab.center().y - galley.size().y * 0.5), galley, color);
+        paint_button_icon_at(ui, *icon, egui::Rect::from_center_size(egui::pos2(tab.left() + PADDING + ICON_SIZE * 0.5, background.center().y), Vec2::splat(ICON_SIZE)), color);
+        painter.galley(egui::pos2(tab.left() + PADDING + ICON_SIZE + GAP, background.center().y - galley.size().y * 0.5), galley, color);
         if response.clicked() { *selected = index; }
         left = tab.right();
     }
-    let close_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 10.0, rect.center().y), Vec2::splat(20.0));
+    let close_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 10.0, background.center().y), Vec2::splat(20.0));
     let mut help_clicked = false;
     if let Some((tooltip, id)) = help {
-        let help_rect = egui::Rect::from_center_size(egui::pos2(close_rect.left() - 14.0, rect.center().y), Vec2::splat(20.0));
+        let help_rect = egui::Rect::from_center_size(egui::pos2(close_rect.left() - 14.0, background.center().y), Vec2::splat(20.0));
         let response = ui.interact(help_rect, id, Sense::click()).on_hover_text(tooltip);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tooltip));
         paint_button_icon_at(ui, ButtonIcon::About, help_rect.shrink(2.0),
@@ -464,7 +464,10 @@ pub(in crate::app) fn draw_tabbed_window_header(
         help_clicked = response.clicked();
     }
     let close = ui.interact(close_rect, ui.id().with("window_header_close"), Sense::click()).on_hover_text("Close window");
-    paint_close_control(ui, &close);
+    let cross = close_rect.shrink(5.0);
+    let stroke = Stroke::new(1.5_f32, ui.style().interact(&close).fg_stroke.color);
+    painter.line_segment([cross.left_top(), cross.right_bottom()], stroke);
+    painter.line_segment([cross.right_top(), cross.left_bottom()], stroke);
     if close.clicked() { *open = false; }
     help_clicked
 }
@@ -517,7 +520,7 @@ fn draw_icon_window_header_impl(
     let icon_rect = egui::Rect::from_min_size(
         egui::pos2(
             rect.center().x - group_width * 0.5,
-            rect.center().y - TITLE_ICON_SIZE * 0.5,
+            background.center().y - TITLE_ICON_SIZE * 0.5,
         ),
         Vec2::splat(TITLE_ICON_SIZE),
     );
@@ -525,7 +528,7 @@ fn draw_icon_window_header_impl(
     ui.painter().galley(
         egui::pos2(
             icon_rect.right() + TITLE_GAP,
-            rect.center().y - galley.size().y * 0.5,
+            background.center().y - galley.size().y * 0.5,
         ),
         galley,
         text_dark(),
@@ -533,7 +536,7 @@ fn draw_icon_window_header_impl(
 
     if let Some(open) = open {
         let close_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 10.0, rect.center().y),
+            egui::pos2(rect.right() - 10.0, background.center().y),
             Vec2::splat(20.0),
         );
         let close = ui
@@ -543,7 +546,10 @@ fn draw_icon_window_header_impl(
                 Sense::click(),
             )
             .on_hover_text(format!("Close {title}"));
-        paint_close_control(ui, &close);
+        let cross = close_rect.shrink(5.0);
+        let stroke = Stroke::new(1.5_f32, ui.style().interact(&close).fg_stroke.color);
+        ui.painter().line_segment([cross.left_top(), cross.right_bottom()], stroke);
+        ui.painter().line_segment([cross.right_top(), cross.left_bottom()], stroke);
         if close.clicked() {
             *open = false;
         }

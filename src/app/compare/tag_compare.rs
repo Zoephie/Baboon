@@ -1054,7 +1054,7 @@ impl Dialog for TagDiffState {
                     ButtonIcon::Compare,
                     &mut open,
                 );
-                ui.separator();
+                ui.add_space(8.0);
                 let label_width = ui
                     .painter()
                     .layout_no_wrap(

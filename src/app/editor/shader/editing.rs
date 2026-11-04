@@ -1012,7 +1012,7 @@ fn draw_shader_grid_row_inner(
             *color_popup = row.value_cell.color.clone();
         }
         if !editable && let Some([r, g, b, _]) = parse_shader_rgba(&row_edit.current) {
-            paint_shader_color_preview(ui, preview_rect, Color32::from_rgb(
+            paint_color_preview(ui, preview_rect, Color32::from_rgb(
                 float_channel_to_u8(r), float_channel_to_u8(g), float_channel_to_u8(b),
             ));
         }
@@ -2898,12 +2898,6 @@ pub(super) fn shader_color_swatch_rect(rect: egui::Rect) -> egui::Rect {
     )
 }
 
-pub(in crate::app) fn paint_shader_color_preview(ui: &Ui, rect: egui::Rect, color: Color32) {
-    ui.painter().rect_filled(rect, 3.0, material_input());
-    ui.painter().rect_filled(rect.shrink(3.0), 0.0, Color32::from_rgb(color.r(), color.g(), color.b()));
-    ui.painter().rect_stroke(rect, 3.0, Stroke::new(1.0, material_input_edge()), egui::StrokeKind::Inside);
-}
-
 fn draw_shader_color_value(
     ui: &mut Ui,
     rect: egui::Rect,
@@ -2912,7 +2906,7 @@ fn draw_shader_color_value(
     label: bool,
 ) {
     if preview {
-        paint_shader_color_preview(ui, rect, color);
+        paint_color_preview(ui, rect, color);
     } else {
         draw_shader_color_swatch(ui, rect, color);
         if label {

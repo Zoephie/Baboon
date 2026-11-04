@@ -1,4 +1,4 @@
-//! Shared close artwork for tabs and custom window headers.
+//! Custom close artwork for tabs.
 use super::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -64,19 +64,6 @@ pub(in crate::app) fn paint_close_control(ui: &Ui, response: &egui::Response) {
             Color32::from_white_alpha(128)
         })
         .paint_at(ui, rect);
-}
-
-pub(in crate::app) fn close_button(ui: &mut Ui, tooltip: &str) -> egui::Response {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-    let response = ui
-        .interact(rect, ui.auto_id_with("close"), Sense::click())
-        .on_hover_cursor(egui::CursorIcon::Default)
-        .on_hover_text(tooltip);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
-    });
-    paint_close_control(ui, &response);
-    response
 }
 
 #[cfg(test)]

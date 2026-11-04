@@ -81,6 +81,45 @@ pub(in crate::app) fn paint_frame_band(
     });
 }
 
+/// A popup's bottom action band, matching its header and reaching the window
+/// frame while retaining padded, normally laid out controls.
+pub(in crate::app) fn popup_footer<R>(
+    ui: &mut Ui,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let margin = ui.spacing().window_margin;
+    // The band includes the window's side and bottom margins. Count those
+    // toward the padding rather than adding them a second time below buttons.
+    let padding = 8.max(margin.left).max(margin.right).max(margin.bottom);
+    let inset = egui::Margin {
+        left: padding - margin.left,
+        right: padding - margin.right,
+        top: padding,
+        bottom: padding - margin.bottom,
+    };
+    let width = ui.available_width().max(ui.min_rect().right() - ui.next_widget_position().x);
+    let fill = ui.painter().add(egui::Shape::Noop);
+    let footer = egui::Frame::NONE
+        .inner_margin(inset)
+        .show(ui, |ui| {
+            ui.set_min_width((width - inset.sum().x).max(0.0));
+            contents(ui)
+        });
+    let mut band = footer.response.rect;
+    band.min.x -= f32::from(margin.left);
+    band.max.x += f32::from(margin.right);
+    band.max.y += f32::from(margin.bottom);
+    // The content clip normally excludes the window's padding. Only the
+    // background painter reaches into it, leaving control clipping intact.
+    let mut background_ui = ui.new_child(egui::UiBuilder::new().max_rect(footer.response.rect));
+    let extra = f32::from(margin.left.max(margin.right).max(margin.bottom))
+        + ui.visuals().window_stroke.width;
+    background_ui.set_clip_rect(ui.clip_rect().expand(extra).intersect(ui.ctx().content_rect()));
+    paint_frame_band(&background_ui, fill, band, ui.visuals().window_corner_radius,
+        ui.visuals().window_stroke, foundation_block_bar(), false);
+    footer
+}
+
 pub(in crate::app) fn paint_alpha_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
     let tile = ALPHA_CHECKER_TILE_SIZE as f32;
     painter.rect_filled(rect, 0.0, editor_bg());
@@ -904,6 +943,38 @@ pub(in crate::app) fn material_delete_text() -> Color32 {
     } else {
         Color32::DARK_RED
     }
+}
+
+/// Shared framed color preview for shader parameters and ordinary tag fields.
+pub(in crate::app) fn paint_color_preview(ui: &Ui, rect: egui::Rect, color: Color32) {
+    // Shader cells own their click responses. Resolve the same button palette
+    // without creating a competing interaction or changing the cell's width.
+    let hovered = ui.is_enabled() && ui.rect_contains_pointer(rect);
+    let visuals = if hovered && ui.input(|input| input.pointer.primary_down()) {
+        &ui.visuals().widgets.active
+    } else if hovered {
+        &ui.visuals().widgets.hovered
+    } else {
+        &ui.visuals().widgets.inactive
+    };
+    let frame = rect.expand(visuals.expansion);
+    ui.painter().rect_filled(frame, visuals.corner_radius, visuals.weak_bg_fill);
+    ui.painter().rect_stroke(frame, visuals.corner_radius, visuals.bg_stroke, egui::StrokeKind::Inside);
+    paint_color_preview_fill(ui, rect, color);
+}
+
+fn paint_color_preview_fill(ui: &Ui, rect: egui::Rect, color: Color32) {
+    let inner = rect.shrink(3.0);
+    ui.painter().rect_filled(inner, 0.0, Color32::from_rgb(color.r(), color.g(), color.b()));
+    ui.painter().rect_stroke(inner, 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Inside);
+}
+
+/// A color swatch with the standard button frame, including themed hover,
+/// focus and pressed borders and corner radii.
+pub(in crate::app) fn color_preview_button(ui: &mut Ui, size: Vec2, color: Color32) -> egui::Response {
+    let response = ui.add_sized(size, egui::Button::new(""));
+    paint_color_preview_fill(ui, response.rect, color);
+    response
 }
 
 pub(in crate::app) fn material_color_swatch_edge(color: Color32) -> Color32 {

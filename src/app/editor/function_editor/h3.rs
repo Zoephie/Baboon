@@ -790,7 +790,7 @@ fn draw_foundation_right_rail(
                         Sense::hover()
                     },
                 );
-                paint_shader_color_preview(ui, rect, color);
+                paint_color_preview(ui, rect, color);
                 if response.clicked() {
                     *color_popup = Some(
                         MaterialColorPopup::new(

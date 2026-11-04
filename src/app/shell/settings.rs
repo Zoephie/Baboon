@@ -334,6 +334,7 @@ fn draw_editing_kit_form(
     texture: Option<&egui::TextureHandle>,
 ) -> EditingKitFormActions {
     let mut actions = EditingKitFormActions::default();
+    egui::Frame::NONE.inner_margin(ui.spacing().window_margin).show(ui, |ui| {
     let title = if draft.name.trim().is_empty() {
         "Editing Kit"
     } else {
@@ -532,8 +533,9 @@ fn draw_editing_kit_form(
     if let Some(error) = &draft.error {
         ui.label(RichText::new(error).color(material_delete_text()));
     }
+    });
     ui.add_space(8.0);
-    ui.separator();
+    popup_footer(ui, |ui| {
     ui.allocate_ui_with_layout(
         Vec2::new(ui.available_width(), BUTTON_HEIGHT),
         egui::Layout::right_to_left(egui::Align::Center),
@@ -545,6 +547,7 @@ fn draw_editing_kit_form(
             actions.save = ui.button("Save").clicked();
         },
     );
+    });
     actions
 }
 
@@ -685,7 +688,7 @@ fn settings_window_body(
     // after drawing adds that height at the current cursor, doubling the body.
     ui.set_min_height(ui.available_height());
     crate::app::search::draw_icon_window_header(ui, "Settings", ButtonIcon::Settings, open);
-    ui.separator();
+    ui.add_space(8.0);
     ScrollArea::horizontal()
         .id_salt("settings_tabs_scroll")
         .max_height(BUTTON_ICON_SIZE + 20.0)
@@ -1885,12 +1888,8 @@ impl Dialog for CustomEditingKitDraft {
             .scroll([false, true])
             .show(ctx, |ui| {
                 crate::app::search::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
-                ui.separator();
-                egui::Frame::NONE
-                    .inner_margin(ui.spacing().window_margin)
-                    .show(ui, |ui| {
-                        actions = draw_editing_kit_form(ui, self, texture.as_ref());
-                    });
+                ui.add_space(8.0);
+                actions = draw_editing_kit_form(ui, self, texture.as_ref());
             });
         let EditingKitFormActions {
             save,
