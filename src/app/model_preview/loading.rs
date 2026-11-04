@@ -684,7 +684,8 @@ fn load_tag_preview(
     // physics shapes froze the frame every time a toggle rebuilt the merge.
     // `maybe_request_model_overlays` builds them once on a worker after this
     // load lands, and the toggles are draw-time filters from then on.
-    preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names);
+    let reach = source.is_some_and(|source| source.game() == Some(GameId::HaloReach));
+    preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names, reach);
     let mut data = model_preview_data(render_entry.key, normalized, preview, read_model_variants(model_tag));
     // The `.model` opened itself lists what its variants attach. An object
     // reaches here for its `.model` and attaches them once it has read its own.

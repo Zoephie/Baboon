@@ -59,6 +59,21 @@ mod tests {
         assert_eq!(instance_group_mask(&groups, 9, &placements, 0), 0);
     }
 
+    /// A Reach variant with no instance group leaves every placement to its
+    /// permutations; Halo 3's takes none; one with a group takes its choice.
+    #[test]
+    fn a_reach_variant_without_an_instance_group_allows_every_instance() {
+        let placements: Vec<_> = ["%shoulder", "%knife"].map(str::to_owned).into();
+        let groups = [InstanceGroup {
+            choose_all: true,
+            members: vec![InstanceGroupMember { subgroup: None, instances: "knife".to_owned(), probability: 0.0 }],
+        }];
+        assert_eq!(variant_instance_mask(&groups, None, &placements, true), u128::MAX);
+        assert_eq!(variant_instance_mask(&groups, None, &placements, false), 0, "Halo 3 chooses none");
+        assert_eq!(variant_instance_mask(&groups, Some(0), &placements, true), 0b10);
+        assert_eq!(variant_instance_mask(&groups, Some(0), &placements, false), 0b10);
+    }
+
     #[test]
     fn the_likeliest_entry_wins_and_the_first_breaks_a_tie() {
         let entries = [entry(Some("a"), 1.0), entry(Some("b"), 2.0), entry(Some("c"), 2.0)];
@@ -336,8 +351,21 @@ fn instance_group_mask(groups: &[InstanceGroup], group: usize, placements: &[Str
     })
 }
 
+/// What a variant's instance group chooses. With none, Reach's
+/// `model_instance_group_choose_instances` (X360 0x8320E3A8) sets every bit,
+/// leaving the permutations' masks to decide
+/// (`model_compute_instance_bitfield_visible`); Halo 3's
+/// `model_select_initial_instances` (March 2007 X360 0x82BE8720) leaves none.
+fn variant_instance_mask(groups: &[InstanceGroup], group: Option<usize>, placements: &[String], reach: bool) -> u128 {
+    match group {
+        Some(group) => instance_group_mask(groups, group, placements, 0),
+        None if reach => u128::MAX,
+        None => 0,
+    }
+}
+
 /// What each variant chooses of `placements`, in the tag's order.
-pub(super) fn read_variant_instances(tag: &TagFile, placements: &[String]) -> Vec<u128> {
+pub(super) fn read_variant_instances(tag: &TagFile, placements: &[String], reach: bool) -> Vec<u128> {
     let root = tag.root();
     let Some(variants) = root.field_path("variants").and_then(|field| field.as_block()) else {
         return Vec::new();
@@ -360,7 +388,7 @@ pub(super) fn read_variant_instances(tag: &TagFile, placements: &[String]) -> Ve
         .map(|index| {
             let group = variants.element(index).and_then(|variant| variant.read_int_any("instance group"));
             let group = group.and_then(|group| usize::try_from(group).ok());
-            group.map_or(0, |group| instance_group_mask(&groups, group, placements, 0))
+            variant_instance_mask(&groups, group, placements, reach)
         })
         .collect()
 }
