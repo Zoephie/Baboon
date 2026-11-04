@@ -694,54 +694,11 @@ fn draw_tools_menu(cx: &Ctx, ui: &mut Ui) {
 /// the terminal.
 fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView) {
     style_list_menu(ui);
-    // The browser view belongs to a workspace, so this
-    // menu shows and sets the focused kit's — matching the
-    // Folders/Groups buttons in that kit's own toolbar.
-    if ui
-        .selectable_label(view.browser.mode == BrowserMode::Folders, "Folders")
-        .clicked()
-    {
-        view.browser.mode = BrowserMode::Folders;
-        close_menu(ui);
-    }
-    if ui
-        .selectable_label(view.browser.mode == BrowserMode::Groups, "Tag Groups")
-        .clicked()
-    {
-        view.browser.mode = BrowserMode::Groups;
-        close_menu(ui);
-    }
-    ui.separator();
-    let selected_sort = right_opening_menu_button(
-        ui,
-        format!("Sort by: {}", view.browser.sort.label()),
-        220.0,
-        |ui| {
-            style_list_menu(ui);
-            for option in BrowserSort::ALL {
-                if ui
-                    .selectable_label(view.browser.sort == option, option.label())
-                    .clicked()
-                {
-                    return Some(option);
-                }
-            }
-            None
-        },
-    )
-    .inner
-    .flatten();
-    if let Some(option) = selected_sort {
-        view.browser.sort = option;
-        close_menu(ui);
-    }
-    ui.separator();
     // Toggles on copies of the preferences, sent as a change once drawn.
     let prefs = &cx.model.prefs;
     let mut show_browser_prefixes = prefs.show_browser_prefixes;
     let mut show_block_sizes = prefs.show_block_sizes;
     let mut angles_in_degrees = prefs.angles_in_degrees;
-    let mut scroll_to_cycle_dropdowns = prefs.scroll_to_cycle_dropdowns;
     let mut expert_mode = prefs.expert_mode;
     ui.baboon_checkbox(&mut show_browser_prefixes, "Show [tag]/[folder]");
     ui.baboon_checkbox(&mut show_block_sizes, "Show block sizes");
@@ -751,14 +708,12 @@ fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView) {
              tools show them in degrees, and so does Baboon — turn this off to \
              read and type the stored radians instead.",
         );
-    ui.baboon_checkbox(&mut scroll_to_cycle_dropdowns, "Scroll wheel cycles dropdowns");
     ui.baboon_checkbox(&mut expert_mode, "Expert mode");
-    if (show_browser_prefixes, show_block_sizes, angles_in_degrees, scroll_to_cycle_dropdowns, expert_mode)
+    if (show_browser_prefixes, show_block_sizes, angles_in_degrees, expert_mode)
         != (
             prefs.show_browser_prefixes,
             prefs.show_block_sizes,
             prefs.angles_in_degrees,
-            prefs.scroll_to_cycle_dropdowns,
             prefs.expert_mode,
         )
     {
@@ -766,7 +721,6 @@ fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView) {
             prefs.show_browser_prefixes = show_browser_prefixes;
             prefs.show_block_sizes = show_block_sizes;
             prefs.angles_in_degrees = angles_in_degrees;
-            prefs.scroll_to_cycle_dropdowns = scroll_to_cycle_dropdowns;
             prefs.expert_mode = expert_mode;
         });
     }

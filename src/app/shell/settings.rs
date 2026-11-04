@@ -1994,6 +1994,12 @@ fn draw_settings_interface_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     );
     draw_settings_browser_section(ui, s);
     settings_section(ui, "Tag Editor");
+    settings_toggle(
+        ui,
+        "Scroll wheel cycles dropdowns",
+        "Scrolling over a closed dropdown changes its selected value. Turn this off to scroll the page instead.",
+        &mut s.prefs.scroll_to_cycle_dropdowns,
+    );
     settings_row(
         ui,
         "Display Angles as",
