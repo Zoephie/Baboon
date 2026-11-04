@@ -550,8 +550,8 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     // from the loaded layout (the schema `definition`), with a hardcoded
     // fallback for the few explanations whose text isn't in the definition.
     //
-    // Rendered like Foundation's explanation panel: a collapsible (default-open)
-    // bold header bar with a wrapped monospace body — not the previous tiny text.
+    // Section titles use an underline; explanations add a subtly tinted,
+    // wrapped body beneath the same collapsible heading.
     let title = clean_field_name(name);
     let body = body
         .map(str::to_owned)
@@ -567,7 +567,6 @@ pub(in crate::app) fn draw_foundation_explanation_row(
         title
     };
     ui.scope(|ui| {
-        // Full-width header bar (see draw_foundation_group), matching Foundation.
         draw_foundation_collapsing_header(
             ui,
             header,
@@ -583,7 +582,6 @@ pub(in crate::app) fn draw_foundation_explanation_row(
                 if has_body {
                     Frame::NONE
                         .fill(foundation_documentation_bg())
-                        .corner_radius(foundation_body_rounding())
                         .inner_margin(egui::Margin::same(20))
                         .show(ui, |ui| {
                             // The box spans the full parent width (Foundation's
@@ -900,6 +898,7 @@ fn draw_foundation_collapsing_header_inner(
     clip_body: bool,
     add_contents: impl FnOnce(&mut Ui),
 ) -> bool {
+    let documentation = find_kind == FindTargetKind::Documentation;
     let id = ui.make_persistent_id(("foundation_collapsing_header", id_salt));
     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
@@ -912,16 +911,26 @@ fn draw_foundation_collapsing_header_inner(
 
     add_foundation_header_spacing(ui);
     let row_width = ui.available_width();
-    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, 40.0), Sense::hover());
+    let header_height = if documentation { 32.0 } else { 40.0 };
+    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, header_height), Sense::hover());
     let header_background = ui.painter().add(egui::Shape::Noop);
     // This child paints into the reserved row without advancing the parent
     // cursor. `allocate_new_ui` would advance it to the child's 24pt content
     // boundary, effectively discarding the row's bottom padding.
-    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink(8.0)));
+    let header_inset = Vec2::new(8.0, (header_height - ICON_BUTTON_SIZE.y) * 0.5);
+    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink2(header_inset)));
     header_ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
     header_ui.horizontal_centered(|ui| {
         if collapsible {
-            let toggle = foundation_header_toggle_cell(ui, state.is_open(), true);
+            let toggle = if documentation {
+                ui.scope(|ui| {
+                    ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
+                    ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                    foundation_header_toggle_cell(ui, state.is_open(), true)
+                }).inner
+            } else {
+                foundation_header_toggle_cell(ui, state.is_open(), true)
+            };
             if toggle.clicked() {
                 state.toggle(ui);
             }
@@ -986,7 +995,7 @@ fn draw_foundation_collapsing_header_inner(
         egui::Shape::rect_filled(
             row_rect,
             foundation_header_rounding(joined_to_body),
-            bar_fill,
+            if documentation { Color32::TRANSPARENT } else { bar_fill },
         ),
     );
     let container_rect = body_response.map_or(row_rect, |body| {
@@ -1025,12 +1034,17 @@ fn draw_foundation_collapsing_header_inner(
             }
         });
     }
-    ui.painter().rect_stroke(
-        container_rect,
-        FOUNDATION_CONTAINER_RADIUS,
-        Stroke::new(1.0_f32, foundation_block_edge()),
-        if clip_body { egui::StrokeKind::Inside } else { egui::StrokeKind::Middle },
-    );
+    if documentation {
+        ui.painter().hline(row_rect.x_range(), row_rect.bottom(),
+            Stroke::new(1.0, foundation_block_edge()));
+    } else {
+        ui.painter().rect_stroke(
+            container_rect,
+            FOUNDATION_CONTAINER_RADIUS,
+            Stroke::new(1.0_f32, foundation_block_edge()),
+            if clip_body { egui::StrokeKind::Inside } else { egui::StrokeKind::Middle },
+        );
+    }
     open
 }
 
