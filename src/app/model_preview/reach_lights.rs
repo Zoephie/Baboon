@@ -65,7 +65,7 @@ impl ReachChannel {
 
 /// `object_get_function_value_simple`: no name reads full, and a name the
 /// object does not answer, nothing.
-fn object_value(values: Option<&H2FunctionValues>, name: &str) -> f32 {
+pub(super) fn object_value(values: Option<&H2FunctionValues>, name: &str) -> f32 {
     if name.is_empty() || name == "one" {
         return 1.0;
     }

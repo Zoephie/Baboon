@@ -150,6 +150,7 @@ pub(super) fn draw_model_viewport(
         h3_volumes_shown: h3_volumes_shown(&data.preview, state),
         h3_systems_shown: h3_systems_shown(&data.preview, state),
         h3_strips_shown: h3_strips_shown(&data.preview, state),
+        reach_cheap_shown: reach_cheap_shown(&data.preview, state),
         h2_flares_shown: h2_flares_shown(&data.preview, state),
         h2_shown: H2Shown::of(&data.preview, state),
         ce_points: Vec::new(),
@@ -391,6 +392,12 @@ fn h3_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> V
 fn h3_volumes_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
     preview.h3_light_volumes.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+}
+
+/// The same of Reach's cheap particle emitters.
+fn reach_cheap_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+    let shown = |only| marker_active(only, &state.region_selections);
+    preview.reach_cheap_emitters.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Halo 3's beams and contrails.
@@ -918,6 +925,7 @@ struct ModelGpuFrame {
     h3_volumes_shown: Vec<bool>,
     h3_systems_shown: Vec<bool>,
     h3_strips_shown: Vec<bool>,
+    reach_cheap_shown: Vec<bool>,
     h2_flares_shown: Vec<bool>,
     /// The rest of Halo 2's lights and effects, by whether their marker is
     /// under what is selected.
@@ -980,6 +988,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == object);
     let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == object);
     let h3_strips = data.preview.h3_strips.iter().filter(|at| at.object == object);
+    let reach_emitters = data.preview.reach_cheap_emitters.iter().filter(|at| at.object == object);
     let h3_screens = data.preview.h3_screen_effects.iter().filter(|at| at.object == object);
     let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == object);
     let h2_volumes = data.preview.h2_light_volumes.iter().filter(|at| at.object == object).map(|at| at.scale_name());
@@ -996,6 +1005,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
         .chain(h3_volumes.flat_map(|at| at.scale_names()))
         .chain(h3_systems.flat_map(|at| at.scale_names()))
         .chain(h3_strips.flat_map(|at| at.scale_names()))
+        .chain(reach_emitters.flat_map(|at| at.scale_names()))
         .chain(h3_screens.clone().map(|at| at.scale_name()))
         .chain(h3_screens.flat_map(|at| at.object_inputs()))
         .chain(lights.map(|light| light.scale_name()))
@@ -1078,6 +1088,7 @@ pub(super) fn object_moves(
         || data.preview.h3_flares.iter().any(|at| at.animates())
         || data.preview.h3_light_volumes.iter().any(|at| at.animates())
         || !data.preview.h3_particles.is_empty()
+        || !data.preview.reach_cheap_emitters.is_empty()
         || !data.preview.h3_strips.is_empty()
         || !data.preview.h3_screen_effects.is_empty()
         || !data.preview.h3_cloth.is_empty()
@@ -1127,6 +1138,7 @@ pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
         && preview.h3_flares.is_empty()
         && preview.h3_light_volumes.is_empty()
         && preview.h3_particles.is_empty()
+        && preview.reach_cheap_emitters.is_empty()
         && preview.h3_strips.is_empty()
         && preview.h3_leaves.is_empty()
         && preview.h3_cloth.is_empty()
@@ -2012,6 +2024,9 @@ struct ModelGpuSlot {
     h2_liquid_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     h2_contrails: h2_contrails::H2ContrailField,
     h3_particles: h3_particles::H3ParticleField,
+    /// Reach's cheap particles, and their library's render texture array.
+    reach_cheap: reach_cheap_particles::ReachCheapField,
+    reach_cheap_texture: Option<glow::NativeTexture>,
     /// Halo CE effect particles, and their images by effect, particle and image.
     ce_particles: ce_particles::CeParticleField,
     /// By [`ce_particles::def_key`], particle, then image.
@@ -2092,6 +2107,8 @@ impl ModelGpuSlot {
                 h2_liquid_textures: Vec::new(),
                 h2_contrails: Default::default(),
                 h3_particles: Default::default(),
+                reach_cheap: Default::default(),
+                reach_cheap_texture: None,
                 ce_particles: Default::default(),
                 ce_particle_textures: HashMap::new(),
                 ce_contrails: Default::default(),
@@ -2250,6 +2267,11 @@ impl ModelGpuSlot {
                 frame.preview.h3_particles.iter().map(|system| maps(&system.look.shader)).collect();
             self.strip_textures = frame.preview.h3_strips.iter().map(|strip| maps(strip.shader())).collect();
             self.leaf_textures = frame.preview.h3_leaves.iter().map(|leaves| maps(leaves.shader())).collect();
+            if let Some(texture) = self.reach_cheap_texture.take() {
+                gl.delete_texture(texture);
+            }
+            let render = frame.preview.reach_cheap_emitters.first().and_then(|at| at.library().render_texture());
+            self.reach_cheap_texture = render.and_then(|render| upload_cheap_render_texture(gl, render));
             for texture in self.flare_textures.drain(..).flatten().flatten() {
                 gl.delete_texture(texture);
             }
@@ -2424,6 +2446,7 @@ impl ModelGpuSlot {
     fn restart_simulations(&mut self) {
         self.h2_contrails = Default::default();
         self.h3_particles = Default::default();
+        self.reach_cheap = Default::default();
         self.h3_strips = Default::default();
         self.h3_leaves = Default::default();
         self.h3_cloth = Default::default();
@@ -3834,6 +3857,103 @@ unsafe fn copy_frame(gl: &glow::Context, copy: &mut Option<FrameCopy>) -> Option
     }
 }
 
+/// A cheap particle vertex: clip position, texcoord and layer, colour.
+const CHEAP_FLOATS: usize = 11;
+
+/// Reach's cheap particle program and its stream.
+struct ReachCheapGl {
+    program: glow::NativeProgram,
+    vertex_array: glow::NativeVertexArray,
+    buffer: glow::NativeBuffer,
+    exposure: Option<glow::NativeUniformLocation>,
+}
+
+impl ReachCheapGl {
+    /// `render_particles` (the 360's 0x82DB3B58): `set_alpha_blend_mode(5)`,
+    /// ONE and INVSRCALPHA, tested and not written against depth, at
+    /// `g_exposure.x` for the area screen effects' `stops`. The game writes
+    /// colour alone (`set_color_write_enable(0, 7)`); here alpha is what
+    /// covers the preview's background, so it is written as the other
+    /// premultiplied sprites write it.
+    unsafe fn draw(&self, gl: &glow::Context, vertices: &[[f32; CHEAP_FLOATS]], texture: glow::NativeTexture, stops: f32) {
+        unsafe {
+            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(self.vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.buffer));
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(vertices), glow::STREAM_DRAW);
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(texture));
+            gl.uniform_1_f32(self.exposure.as_ref(), reach_exposure(stops)[0]);
+            gl.enable(glow::DEPTH_TEST);
+            gl.depth_func(glow::LEQUAL);
+            gl.depth_mask(false);
+            h3_draw::h3_set_blend(gl, H3Blend::PreMultiplied);
+            gl.draw_arrays(glow::TRIANGLES, 0, vertices.len() as i32);
+            gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
+            gl.color_mask(true, true, true, false);
+        }
+    }
+}
+
+unsafe fn reach_cheap_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<ReachCheapGl> {
+    use reach_cheap_particles::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
+    unsafe {
+        let program = link_h2_program(gl, main, CHEAP_PARTICLE_VERTEX, CHEAP_PARTICLE_FRAGMENT)
+            .map_err(|error| eprintln!("model preview: {error}"))
+            .ok()?;
+        let vertex_array = gl.create_vertex_array().ok()?;
+        let buffer = gl.create_buffer().ok()?;
+        gl.bind_vertex_array(Some(vertex_array));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+        let stride = (CHEAP_FLOATS * size_of::<f32>()) as i32;
+        let mut offset = 0;
+        for (attribute, size) in [4, 3, 4].into_iter().enumerate() {
+            gl.enable_vertex_attrib_array(attribute as u32);
+            gl.vertex_attrib_pointer_f32(attribute as u32, size, glow::FLOAT, false, stride, offset);
+            offset += size * size_of::<f32>() as i32;
+        }
+        gl.use_program(Some(program));
+        gl.uniform_1_i32(gl.get_uniform_location(program, "u_render").as_ref(), 0);
+        Some(ReachCheapGl { program, vertex_array, buffer, exposure: gl.get_uniform_location(program, "u_exposure") })
+    }
+}
+
+/// The render texture array, every level: sampler 0 at address mode 1,
+/// clamped (`shader_setup_type_library`, the 360's 0x82DB2B50) [inferred: by
+/// the tag enum's order, as Baboon reads sampler modes elsewhere], linear
+/// within a layer and between levels, and GL never filters across layers.
+unsafe fn upload_cheap_render_texture(
+    gl: &glow::Context,
+    render: &reach_cheap_particles::CheapRenderTexture,
+) -> Option<glow::NativeTexture> {
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(texture));
+        for (level, rgba) in render.levels.iter().enumerate() {
+            let (width, height) = ((render.width >> level).max(1), (render.height >> level).max(1));
+            if rgba.len() != width * height * render.layers * 4 {
+                gl.delete_texture(texture);
+                return None;
+            }
+            let data = glow::PixelUnpackData::Slice(Some(rgba));
+            let [width, height, layers] = [width, height, render.layers].map(|size| size as i32);
+            gl.tex_image_3d(glow::TEXTURE_2D_ARRAY, level as i32, glow::RGBA8 as i32, width, height, layers, 0, glow::RGBA, glow::UNSIGNED_BYTE, data);
+        }
+        let last = render.levels.len().saturating_sub(1) as i32;
+        for (name, value) in [
+            (glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32),
+            (glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32),
+            (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32),
+            (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32),
+            (glow::TEXTURE_MAX_LEVEL, last),
+        ] {
+            gl.tex_parameter_i32(glow::TEXTURE_2D_ARRAY, name, value);
+        }
+        gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
+        Some(texture)
+    }
+}
+
 unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<H3ParticleGl> {
     unsafe {
         let program = link_h2_program(gl, main, PARTICLE_VERTEX, PARTICLE_FRAGMENT)
@@ -3896,6 +4016,8 @@ struct ModelGlRenderer {
     ce_effect_gl: Option<Option<CeEffectGl>>,
     /// As `h2_bloom`.
     h3_particle_gl: Option<Option<H3ParticleGl>>,
+    /// As `h2_bloom`.
+    reach_cheap_gl: Option<Option<ReachCheapGl>>,
     /// How far through the frame's sorted sprites the draws have got.
     h3_sprite_cursor: usize,
     /// Particles step once a frame, however many calls draw them.
@@ -4070,6 +4192,7 @@ impl ModelGlRenderer {
                 h2_black_cube: upload_black_cube(gl),
                 h3_no_bloom: upload_black_flat(gl),
                 h3_particle_gl: None,
+                reach_cheap_gl: None,
                 h3_sprite_cursor: 0,
                 ce_points_now: None,
                 h3_sprites_advanced: false,
@@ -4483,6 +4606,7 @@ impl ModelGlRenderer {
                 && preview.h2_contrails.is_empty()
                 && preview.h2_liquids.is_empty()
                 && preview.h3_particles.is_empty()
+                && preview.reach_cheap_emitters.is_empty()
                 && preview.h3_strips.is_empty()
                 && preview.h3_leaves.is_empty())
     }
@@ -4751,6 +4875,11 @@ impl ModelGlRenderer {
             if !cursor_advanced {
                 uploaded.h3_leaves.advance(&frame.preview.h3_leaves, frame.time);
             }
+            if !cursor_advanced && !frame.preview.reach_cheap_emitters.is_empty() {
+                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                let (emitters, shown) = (&frame.preview.reach_cheap_emitters, &frame.reach_cheap_shown);
+                uploaded.reach_cheap.advance(emitters, shown, values, &mut uploaded.h3_onsets, bones, view.eye, frame.time);
+            }
             if !cursor_advanced && !frame.preview.h3_strips.is_empty() {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
                 let (systems, particles) = (&frame.preview.h3_particles, &uploaded.h3_particles);
@@ -4918,6 +5047,26 @@ impl ModelGlRenderer {
             }
             if distorting {
                 self.h3_distorted = distorted > 0;
+            }
+            // `s_cheap_particle_system::render`: after every other
+            // transparent, in one batch, in ring-slot order.
+            if matches!(stage, SpriteStage::Rest)
+                && let (Some(first), Some(texture)) = (frame.preview.reach_cheap_emitters.first(), uploaded.reach_cheap_texture)
+            {
+                let drawn = uploaded.reach_cheap.vertices(first.library(), &view);
+                if !drawn.is_empty()
+                    && let Some(cheap) = self.reach_cheap_gl.get_or_insert_with(|| reach_cheap_gl(gl, self.program)).as_ref()
+                {
+                    let vertices: Vec<[f32; CHEAP_FLOATS]> = drawn
+                        .iter()
+                        .map(|vertex| {
+                            let [a, b, c, d] = ce_flare_clip(camera, vertex.place);
+                            let ([e, f, g], [h, i, j, k]) = (vertex.texcoord, vertex.color);
+                            [a, b, c, d, e, f, g, h, i, j, k]
+                        })
+                        .collect();
+                    cheap.draw(gl, &vertices, texture, stops);
+                }
             }
             if matches!(stage, SpriteStage::FartherThan(_) | SpriteStage::Distortions) {
                 gl.blend_equation(glow::FUNC_ADD);
@@ -6357,6 +6506,14 @@ mod tests {
     #[test]
     fn the_particle_program_compiles_under_glslang() {
         assert_compiles_under_glslang("particle", &[("vert", PARTICLE_VERTEX), ("frag", PARTICLE_FRAGMENT)]);
+    }
+
+    /// Reach's cheap particle program, sampling its layers, as the particle
+    /// program is checked.
+    #[test]
+    fn the_cheap_particle_program_compiles_under_glslang() {
+        use super::reach_cheap_particles::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
+        assert_compiles_under_glslang("cheap_particle", &[("vert", CHEAP_PARTICLE_VERTEX), ("frag", CHEAP_PARTICLE_FRAGMENT)]);
     }
 
     /// The flare program, which Reach's light volumes' disc and depth fade

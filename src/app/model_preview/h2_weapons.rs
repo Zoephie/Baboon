@@ -711,7 +711,8 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
 
 /// What hangs on a Reach object brought into the preview, or on the one
 /// opened (`name` none): its flares, lights and cheap lights, and the
-/// `light_apply` passes they are drawn with.
+/// `light_apply` passes they are drawn with, and its effects' volumes,
+/// particles, cheap particles, strips and screen effects.
 pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
     object: &TagFile,
@@ -728,6 +729,8 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
     preview.reach_cheap_lights.extend(named!(cheap, name));
     let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
+    let cheap = super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
+    preview.reach_cheap_emitters.extend(named!(cheap, name));
     let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
     let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
     let carried = super::h3_particles::carried_strips(&particles);

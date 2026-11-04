@@ -58,6 +58,7 @@ mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod reach_ik;
+mod reach_cheap_particles;
 mod reach_lights;
 mod reach_blend_screens;
 mod reach_camo;
@@ -147,6 +148,8 @@ pub(crate) struct RenderModelPreview {
     /// Reach's attached `light`s and `cheap_light`s.
     pub reach_lights: Vec<reach_lights::ReachLight>,
     pub reach_cheap_lights: Vec<reach_lights::ReachCheapLight>,
+    /// Reach's cheap particle emitters, on its attached effects' parts.
+    pub reach_cheap_emitters: Vec<reach_cheap_particles::ReachCheapEmitterAt>,
     /// `light_apply`, `_frustum`, `_specular` and `_frustum_specular`, by
     /// `combo` (frustum 1, specular 2), for its screen-space lights.
     pub reach_light_passes: Vec<Option<Arc<h3_shaders::H3Pass>>>,

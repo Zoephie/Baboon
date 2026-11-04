@@ -27,7 +27,7 @@ use crate::core::game::GameId;
 use crate::core::source::TagSource;
 
 /// Seconds run before the first frame, so a held pose has its particles.
-const PRE_ROLL: f32 = 6.0;
+pub(super) const PRE_ROLL: f32 = 6.0;
 /// `s_sprite_frame_list`'s room.
 const MOST_FRAMES: usize = 15;
 
@@ -492,7 +492,7 @@ const REACH_GAME_TIME_WRAP: f32 = 7200.0;
 /// (`s_render_time::update`, the 360's 0x827477A8, MCC sub_14084E170), the
 /// frames' seconds summed whole; MCC converts its counter as a signed int, so
 /// it runs to 7200 s and comes round from -7200 s.
-fn particle_game_time(reach: bool, time: f32) -> f32 {
+pub(super) fn particle_game_time(reach: bool, time: f32) -> f32 {
     if reach {
         (time + REACH_GAME_TIME_WRAP).rem_euclid(2.0 * REACH_GAME_TIME_WRAP) - REACH_GAME_TIME_WRAP
     } else {
@@ -2557,15 +2557,20 @@ pub(super) fn read_h3_particles(
 
 /// `real_internal_random_range`'s generator, seeded so a preview repeats.
 #[derive(Debug, Clone, Copy)]
-struct Random(u32);
+pub(super) struct Random(pub(super) u32);
 
 impl Random {
-    fn next(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.0 >> 16) as f32 / 65_535.0
+    pub(super) fn next(&mut self) -> f32 {
+        self.bits() as f32 / 65_535.0
     }
 
-    fn range(&mut self, low: f32, high: f32) -> f32 {
+    /// `_random`: the next state's high 16 bits, which [`Self::next`] scales.
+    pub(super) fn bits(&mut self) -> u32 {
+        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.0 >> 16
+    }
+
+    pub(super) fn range(&mut self, low: f32, high: f32) -> f32 {
         low + (high - low) * self.next()
     }
 

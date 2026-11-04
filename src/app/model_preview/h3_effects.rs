@@ -167,6 +167,16 @@ impl H3EffectTimes {
         }
     }
 
+    /// Events of these `(delay, duration)` bounds, one after another, as
+    /// Reach's postprocess leaves them (`reach`) or Halo 3's.
+    #[cfg(test)]
+    pub(super) fn of_events(events: &[([f32; 2], [f32; 2])], reach: bool) -> Self {
+        let time = |&(delay, duration): &([f32; 2], [f32; 2])| {
+            if reach { H3EventTime::unbaked(delay, duration) } else { H3EventTime::of(delay, duration) }
+        };
+        Self { events: events.iter().map(time).collect(), loop_start: 0, parallel: false, once: false }
+    }
+
     #[cfg(test)]
     pub(super) fn read_nothing() -> Self {
         Self {
@@ -286,11 +296,29 @@ fn part_runs(part: TagStruct<'_>) -> bool {
 pub(super) fn part_runs_by(part: TagStruct<'_>, environment: &str, violence: &str) -> bool {
     let named = |field: &str| part.read_enum_name(field).unwrap_or_default();
     let environment = named(environment);
-    let disabled = part.read_flag_names("flags").unwrap_or_default();
     matches!(environment.as_str(), "" | ANYWHERE | AIR)
         && named(violence) != ONLY_NONVIOLENT
         && named("camera mode") != ONLY_FIRST_PERSON
-        && !disabled.iter().any(|(_, name)| name.starts_with(DISABLED))
+        && !part_disabled(part)
+}
+
+/// `disabled for debugging`, which the cache build's `s_effect_scrubber::scrub`
+/// drops.
+fn part_disabled(part: TagStruct<'_>) -> bool {
+    let flags = part.read_flag_names("flags").unwrap_or_default();
+    flags.iter().any(|(_, name)| name.starts_with(DISABLED))
+}
+
+/// A `cheap_particle_emitter` part's group.
+pub(super) const CHEAP_PARTICLE_EMITTER: u32 = u32::from_be_bytes(*b"cpem");
+
+/// Whether a part of `group` is made, given whether it passes `part_runs`
+/// (`generated`: environment, violence, camera and the scrub) and whether it
+/// is `disabled`. Reach's `effects_submit_cheap_attachments` (the 360's
+/// 0x82EA9570) submits a cheap particle part on its location and tag alone,
+/// so only the scrubber's drop keeps one out.
+fn part_made(group: u32, generated: bool, disabled: bool) -> bool {
+    if group == CHEAP_PARTICLE_EMITTER { !disabled } else { generated }
 }
 
 /// Every part of every effect `object` attaches, with its effect held open.
@@ -313,7 +341,8 @@ pub(super) fn for_each_attached_part(
                 };
                 let location = usize::try_from(part.read_block_index("location")).ok();
                 let location = location.and_then(|location| locations.get(location));
-                let (false, Some(location), true) = (path.is_empty(), location, part_runs(part)) else {
+                let made = part_made(group, part_runs(part), part_disabled(part));
+                let (false, Some(location), true) = (path.is_empty(), location, made) else {
                     continue;
                 };
                 let marker = object_effect.marker_of(*location);
@@ -656,6 +685,18 @@ mod tests {
         assert_eq!(two.begins_within(1, 0.05, 0.1), None);
         assert_eq!(two.begins_within(0, -0.01, 0.05), Some(ONE_TICK * 0.5));
         assert_eq!(two.begins_within(0, 0.0, 0.05), None, "already begun");
+    }
+
+    /// A cheap particle part is made out of the environment, violence and
+    /// camera it asks for, and kept out only when disabled; any other part
+    /// keeps all four tests.
+    #[test]
+    fn a_cheap_particle_part_skips_all_but_the_disabled_test() {
+        let volume = u32::from_be_bytes(*b"ltvl");
+        assert!(part_made(CHEAP_PARTICLE_EMITTER, false, false), "under water, first person: still made");
+        assert!(!part_made(volume, false, false), "another part is not");
+        assert!(!part_made(CHEAP_PARTICLE_EMITTER, true, true), "disabled for debugging");
+        assert!(part_made(volume, true, false));
     }
 
     #[test]
