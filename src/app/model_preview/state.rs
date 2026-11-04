@@ -576,4 +576,7 @@ pub(in crate::app) struct ModelVariantPreview {
     /// a tag leaves one undrawn. A region in neither map is not this variant's
     /// to choose, and takes an ordinary permutation.
     pub(in crate::app) hidden_regions: std::collections::HashSet<String>,
+    /// Halo 4's `muted nodes`: each, and everything under it, held at its
+    /// bind pose while an animation plays.
+    pub(in crate::app) muted_nodes: Vec<String>,
 }

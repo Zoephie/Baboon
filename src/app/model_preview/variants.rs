@@ -15,6 +15,7 @@ mod tests {
         RawVariant {
             name: String::new(),
             regions: vec![(region.to_owned(), RawVariantRegion { entries, parent })],
+            muted_nodes: Vec::new(),
         }
     }
 
@@ -87,6 +88,7 @@ mod tests {
             name: name.to_owned(),
             regions: HashMap::new(),
             hidden_regions: Default::default(),
+            muted_nodes: Vec::new(),
         };
         let mut data = model_preview_data(
             String::new(),
@@ -126,6 +128,7 @@ mod tests {
                 name: name.to_owned(),
                 regions: HashMap::new(),
                 hidden_regions: Default::default(),
+                muted_nodes: Vec::new(),
             })
             .collect::<Vec<_>>();
         let frame = |events| {
@@ -276,7 +279,19 @@ pub(super) fn read_model_variants(tag: &TagFile) -> Vec<ModelVariantPreview> {
                 regions.push((region_name, RawVariantRegion { entries, parent }));
             }
         }
-        raw.push(RawVariant { name, regions });
+        // Halo 4's; no earlier game has the block.
+        let muted_nodes = variant
+            .field("muted nodes")
+            .and_then(|field| field.as_block())
+            .map(|block| {
+                (0..block.len())
+                    .filter_map(|index| block.element(index))
+                    .filter_map(|entry| entry.read_string_id("node name"))
+                    .filter(|name| !name.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        raw.push(RawVariant { name, regions, muted_nodes });
     }
     // Pass 2: resolve each region through the parent chain into a flat map.
     let mut out = Vec::with_capacity(raw.len());
@@ -300,6 +315,7 @@ pub(super) fn read_model_variants(tag: &TagFile) -> Vec<ModelVariantPreview> {
             name: raw[vi].name.clone(),
             regions,
             hidden_regions,
+            muted_nodes: raw[vi].muted_nodes.clone(),
         });
     }
     out

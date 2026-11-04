@@ -2734,6 +2734,7 @@ pub(super) struct RawVariantRegion {
 pub(super) struct RawVariant {
     pub(super) name: String,
     pub(super) regions: Vec<(String, RawVariantRegion)>,
+    pub(super) muted_nodes: Vec<String>,
 }
 
 #[cfg(test)]

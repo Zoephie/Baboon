@@ -232,6 +232,26 @@ fn sampled_frames(playback: &PreviewAnimationPlayback, frame_count: usize) -> (u
     (a, b, position - a as f32)
 }
 
+/// Which nodes a variant's `muted nodes` hold: each named node and its whole
+/// subtree (`model_postprocess_muted_nodes`, X360 0x82D96890, through
+/// `model_set_muted_flag_subtree`). Nodes come parents first.
+pub(super) fn muted_nodes(nodes: &[RenderModelPreviewNode], names: &[String]) -> Vec<bool> {
+    let mut muted = vec![false; nodes.len()];
+    for (index, node) in nodes.iter().enumerate() {
+        let parent_muted = usize::try_from(node.parent).ok().and_then(|parent| muted.get(parent)).copied().unwrap_or(false);
+        muted[index] = parent_muted || names.iter().any(|name| *name == node.name);
+    }
+    muted
+}
+
+/// A muted node's local transform (`object_handle_muted_nodes`, X360
+/// 0x84A476D0): the render model node's default rotation and translation,
+/// scale 1.
+fn bind_transform(node: &RenderModelPreviewNode) -> (RealQuaternion, RealVector3d, f32) {
+    // With no frame either side, the blend is the bind pose.
+    blend_transforms(None, None, 0.0, node)
+}
+
 /// Sample the playback state into skinning-matrix rows for this draw frame —
 /// three vec4 rows per preview node, `world × inverse_bind`, so an
 /// unanimated node lands exactly on its bind pose. `None` draws the plain
@@ -253,11 +273,19 @@ pub(super) fn animation_skinning_rows(
     let (frame_a, frame_b, blend) = sampled_frames(playback, pose.frames.len());
     let (frame_a, frame_b) = (&pose.frames[frame_a], &pose.frames[frame_b]);
 
+    let muted = state
+        .selected_variant
+        .and_then(|index| data.variants.get(index))
+        .map_or_else(|| vec![false; nodes.len()], |variant| muted_nodes(nodes, &variant.muted_nodes));
     let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
     let mut matrices: Vec<Matrix4> = Vec::with_capacity(nodes.len());
     let mut inverse_binds: Vec<Matrix4> = Vec::with_capacity(nodes.len());
     for (index, node) in nodes.iter().enumerate() {
-        let local = blend_transforms(frame_a.get(index), frame_b.get(index), blend, node);
+        let local = if muted[index] {
+            bind_transform(node)
+        } else {
+            blend_transforms(frame_a.get(index), frame_b.get(index), blend, node)
+        };
         let (rotation, translation, scale) = if node.parent >= 0 {
             let (parent_rotation, parent_translation, parent_scale) = world
                 .get(node.parent as usize)
@@ -525,6 +553,46 @@ mod tests {
     use super::*;
     use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
     use blam_tags::render_model::Node;
+
+    fn preview_node(name: &str, parent: i16) -> RenderModelPreviewNode {
+        RenderModelPreviewNode {
+            name: name.to_owned(),
+            parent,
+            bind_rotation: [0.0, 0.0, 0.0, 1.0],
+            bind_translation: [0.0; 3],
+            inverse_bind: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+        }
+    }
+
+    /// A muted node takes its whole subtree; its parent and siblings play on.
+    #[test]
+    fn a_muted_node_holds_its_subtree() {
+        let nodes = [
+            preview_node("root", -1),
+            preview_node("b_bay_door", 0),
+            preview_node("b_bay_door_hinge", 1),
+            preview_node("b_hinge_tip", 2),
+            preview_node("b_l_prop", 0),
+        ];
+        let muted = muted_nodes(&nodes, &["b_bay_door".to_owned()]);
+        assert_eq!(muted, [false, true, true, true, false]);
+        assert_eq!(muted_nodes(&nodes, &[]), [false; 5]);
+    }
+
+    /// With `BLAM_TEST_H4EK`: the Pelican's `m70_gunship_opaque_cockpit` holds
+    /// its cockpit, bay door, caches and props.
+    #[test]
+    fn halo_4_pelican_variant_reads_its_muted_nodes() {
+        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+            return;
+        };
+        let path = std::path::Path::new(&root).join("objects/vehicles/human/storm_pelican/storm_pelican.model");
+        let variants = super::super::variants::read_model_variants(&blam_tags::TagFile::read(path).unwrap());
+        let cockpit = variants.iter().find(|variant| variant.name == "m70_gunship_opaque_cockpit").unwrap();
+        assert_eq!(cockpit.muted_nodes.len(), 10);
+        assert!(cockpit.muted_nodes.iter().any(|name| name == "b_bay_door"));
+        assert!(variants.iter().find(|variant| variant.name == "default").unwrap().muted_nodes.is_empty());
+    }
 
     fn raw_node(name: &str, parent: i16, translation: RealPoint3d, rotation: RealQuaternion) -> Node {
         Node {
