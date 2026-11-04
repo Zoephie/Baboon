@@ -1242,7 +1242,6 @@ impl ModelGlRenderer {
             gl.depth_mask(false);
             gl.enable(glow::POLYGON_OFFSET_FILL);
             gl.polygon_offset(DECAL_SLOPE_BIAS, DECAL_DEPTH_BIAS * DEPTH_UNITS);
-            gl.color_mask_draw_buffer(1, false, false, false, false);
             for (batch, material) in
                 batches.iter().filter(|(_, material)| material.decal && !material.after_lighting)
             {
@@ -1254,6 +1253,12 @@ impl ModelGlRenderer {
                 // the colour blend's].
                 let keeps_mask = material.dialect == H3Dialect::Reach && !material.decal_modulates_specular;
                 gl.color_mask_draw_buffer(0, true, true, true, !keeps_mask);
+                // The blend's mask opens every target, so the normals'
+                // is set after it. Halo 4's normal decals (`DECAL_OUTPUT_NORMAL`)
+                // write the encoded normal's two channels, z and w masked
+                // (`decals.fxh`); nothing else here writes normals.
+                let normals = material.dialect == H3Dialect::Halo4 && material.lit.pixel.contains("o_target1");
+                gl.color_mask_draw_buffer(1, normals, normals, false, false);
                 self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
             gl.blend_equation(glow::FUNC_ADD);
