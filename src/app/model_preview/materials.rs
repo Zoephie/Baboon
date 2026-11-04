@@ -379,7 +379,8 @@ fn resolve_one_material(
     if let Some(definition) = &definition
         && source.game() == Some(GameId::HaloReach)
     {
-        let reference = reach_reference(source, &render_method, &material.shader_path, &mut caches.references);
+        reach_version_update(&mut render_method, definition);
+        let reference = reach_reference(source, &render_method, &material.shader_path, definition, &mut caches.references);
         render_method.apply_reference_shader(definition, reference.as_deref());
     }
     let resolved = definition.map(|definition| {
@@ -530,10 +531,21 @@ pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: S
 /// The template a Reach shader names as its `reference`, which Reach's tool
 /// (`postprocess_as_child`, 0x141166270) lays under it before the bake. A
 /// shader naming itself has none, as tool refuses it.
+/// `c_render_method_shader::version_update`, which Reach runs on every
+/// `shader` it loads: older tags' options and parameters as the game draws
+/// them. Old Spartan helmets keep a `misc` option that would otherwise turn
+/// every map on them by a radian.
+fn reach_version_update(method: &mut RenderMethod, definition: &RenderMethodDefinition) {
+    if method.class == blam_tags::render_method::RenderMethodClass::Shader {
+        method.version_update(definition);
+    }
+}
+
 fn reach_reference(
     source: &TagSource,
     method: &RenderMethod,
     own_path: &str,
+    definition: &RenderMethodDefinition,
     cache: &mut HashMap<String, Option<Arc<RenderMethod>>>,
 ) -> Option<Arc<RenderMethod>> {
     let (group, path) = method.reference.as_ref()?;
@@ -545,7 +557,9 @@ fn reach_reference(
         .or_insert_with(|| {
             let extension = blam_tags::paths::group_tag_to_extension(*group)?;
             let tag = load_referenced_tag_from_source(source, path, extension, &group.to_be_bytes()).ok()?;
-            RenderMethod::from_tag(&tag).ok().map(Arc::new)
+            let mut reference = RenderMethod::from_tag(&tag).ok()?;
+            reach_version_update(&mut reference, definition);
+            Some(Arc::new(reference))
         })
         .clone()
 }
@@ -555,7 +569,7 @@ pub(super) fn resolve_embedded_method(source: &TagSource, shader: TagStruct<'_>)
     let mut method = RenderMethod::from_struct(&shader).ok()?;
     let definition = cached_render_method_definition(source, &method.definition_path, &mut HashMap::new())?;
     if source.game() == Some(GameId::HaloReach) {
-        let reference = reach_reference(source, &method, "", &mut HashMap::new());
+        let reference = reach_reference(source, &method, "", &definition, &mut HashMap::new());
         method.apply_reference_shader(&definition, reference.as_deref());
     }
     let mut options = HashMap::new();
