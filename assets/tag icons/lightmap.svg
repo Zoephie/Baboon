@@ -1,0 +1,16 @@
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_46_803)">
+<path opacity="0.5" d="M6.10254 0C5.79046 0.305723 5.50757 0.640672 5.25684 1H1V15H15V10.7432C15.3593 10.4924 15.6943 10.2095 16 9.89746V16H0V0H6.10254ZM16 0.101562C15.9663 0.0671962 15.9318 0.0336692 15.8975 0H16V0.101562Z" fill="#F8BE00"/>
+<path opacity="0.25" d="M1 3.5H3.5M3.5 3.5H6.5M3.5 3.5V6.5M3.5 3.5V1M6.5 3.5H9.5M6.5 3.5V1M6.5 3.5V6.5M9.5 3.5H12.5M9.5 3.5V6.5M9.5 3.5V1M12.5 3.5H15M12.5 3.5V1M12.5 3.5V6.5M1 6.5H3.5M3.5 6.5H6.5M3.5 6.5V9.5M6.5 6.5H9.5M6.5 6.5V9.5M9.5 6.5H12.5M9.5 6.5V9.5M12.5 6.5H15M12.5 6.5V9.5M1 9.5H3.5M3.5 9.5H6.5M3.5 9.5V12.5M6.5 9.5H9.5M6.5 9.5V12.5M9.5 9.5H12.5M9.5 9.5V12.5M12.5 9.5H15M12.5 9.5V12.5M1 12.5H3.5M3.5 12.5H6.5M3.5 12.5V15M6.5 12.5H9.5M6.5 12.5V15M9.5 12.5H12.5M9.5 12.5V15M12.5 12.5H15M12.5 12.5V15" stroke="#F8BE00"/>
+<circle opacity="0.25" cx="11" cy="5" r="10" fill="#F8BE00"/>
+<circle opacity="0.5" cx="11" cy="5" r="8" fill="#F8BE00"/>
+<circle opacity="0.5" cx="11" cy="5" r="6" fill="#F8BE00"/>
+<circle cx="11" cy="5" r="4" fill="#F8BE00"/>
+<circle cx="11" cy="5" r="2" fill="white"/>
+</g>
+<defs>
+<clipPath id="clip0_46_803">
+<rect width="16" height="16" fill="white"/>
+</clipPath>
+</defs>
+</svg>

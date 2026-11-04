@@ -16,7 +16,7 @@ macro_rules! tag_icon {
             name: $name,
             svg: include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/assets/icons/",
+                "/assets/tag icons/",
                 $name,
                 ".svg"
             )),
@@ -37,6 +37,64 @@ const SHADER_ICON: TagIcon = tag_icon!("shader");
 type IconGroup = (&'static [u8; 4], &'static str);
 
 const GROUP_ICONS: &[(TagIcon, &[IconGroup])] = &[
+    (
+        tag_icon!("light_volume"),
+        &[
+            (b"mgs2", "light_volume"),
+            (b"MGS2", "light_volume"),
+            (b"ltvl", "light_volume_system"),
+        ],
+    ),
+    (tag_icon!("sound_looping"), &[(b"lsnd", "sound_looping")]),
+    (tag_icon!("sound_mix"), &[(b"snmx", "sound_mix")]),
+    (tag_icon!("lightmap"), &[(b"sLdT", "scenario_lightmap")]),
+    (tag_icon!("giant"), &[(b"gint", "giant")]),
+    (tag_icon!("cinematic"), &[(b"cine", "cinematic")]),
+    (tag_icon!("creature"), &[(b"crea", "creature")]),
+    (tag_icon!("flock"), &[(b"flck", "flock")]),
+    (tag_icon!("sound_scenery"), &[(b"ssce", "sound_scenery")]),
+    (tag_icon!("antenna"), &[(b"ant!", "antenna")]),
+    (tag_icon!("cloth"), &[(b"clwd", "cloth")]),
+    (
+        tag_icon!("Collision Damage"),
+        &[(b"cddf", "collision_damage")],
+    ),
+    (
+        tag_icon!("contrail"),
+        &[(b"cont", "contrail"), (b"cntl", "contrail_system")],
+    ),
+    (
+        tag_icon!("decal"),
+        &[(b"deca", "decal"), (b"decs", "decal_system")],
+    ),
+    (tag_icon!("flag"), &[(b"flag", "flag")]),
+    (tag_icon!("imposter_model"), &[(b"impo", "imposter_model")]),
+    (tag_icon!("liquid"), &[(b"tdtl", "liquid")]),
+    (
+        tag_icon!("material_effects"),
+        &[(b"foot", "material_effects")],
+    ),
+    (
+        tag_icon!("particle"),
+        &[(b"part", "particle"), (b"prt3", "particle")],
+    ),
+    (
+        tag_icon!("particle_model"),
+        &[(b"PRTM", "particle_model"), (b"pmdf", "particle_model")],
+    ),
+    (
+        tag_icon!("particle_physics"),
+        &[(b"pmov", "particle_physics")],
+    ),
+    (
+        tag_icon!("screen_effect"),
+        &[(b"egor", "screen_effect"), (b"sefc", "area_screen_effect")],
+    ),
+    (tag_icon!("skeleton_model"), &[(b"skel", "skeleton_model")]),
+    (
+        tag_icon!("structure_bsp"),
+        &[(b"sbsp", "scenario_structure_bsp")],
+    ),
     (tag_icon!("actor"), &[(b"actr", "actor")]),
     (tag_icon!("actor_variant"), &[(b"actv", "actor_variant")]),
     (
@@ -67,7 +125,10 @@ const GROUP_ICONS: &[(TagIcon, &[IconGroup])] = &[
     ),
     (tag_icon!("crate"), &[(b"bloc", "crate")]),
     (tag_icon!("damage_effect"), &[(b"jpt!", "damage_effect")]),
-    (tag_icon!("default_globals"), &[(b"matg", "globals")]),
+    (
+        tag_icon!("default_globals"),
+        &[(b"matg", "globals"), (b"chgd", "chud_globals_definition")],
+    ),
     (tag_icon!("device_control"), &[(b"ctrl", "device_control")]),
     (tag_icon!("device_machine"), &[(b"mach", "device_machine")]),
     (tag_icon!("dialogue"), &[(b"udlg", "dialogue")]),
@@ -80,7 +141,6 @@ const GROUP_ICONS: &[(TagIcon, &[IconGroup])] = &[
             (b"hudg", "hud_globals"),
             (b"nhdt", "new_hud_definition"),
             (b"chdt", "chud_definition"),
-            (b"chgd", "chud_globals_definition"),
         ],
     ),
     (tag_icon!("lens_flare"), &[(b"lens", "lens_flare")]),
@@ -99,6 +159,43 @@ const GROUP_ICONS: &[(TagIcon, &[IconGroup])] = &[
         &[(b"phys", "physics"), (b"phmo", "physics_model")],
     ),
     (tag_icon!("projectile"), &[(b"proj", "projectile")]),
+    (
+        tag_icon!("default_resource"),
+        &[
+            (b"ai**", "scenario_ai_resource"),
+            (b"*ipd", "scenario_bipeds_resource"),
+            (b"cin*", "scenario_cinematics_resource"),
+            (b"clu*", "scenario_cluster_data_resource"),
+            (b"/**/", "scenario_comments_resource"),
+            (b"*rea", "scenario_creature_resource"),
+            (b"cub*", "scenario_cubemap_resource"),
+            (b"dec*", "scenario_decals_resource"),
+            (b"dc*s", "scenario_decorators_resource"),
+            (b"dgr*", "scenario_devices_resource"),
+            (b"dmp*", "scenario_dumplings_resource"),
+            (b"*fsc", "scenario_effect_scenery_resource"),
+            (b"*qip", "scenario_equipment_resource"),
+            (b"*igh", "scenario_lights_resource"),
+            (b"prf*", "scenario_performances_resource"),
+            (b"sdzg", "scenario_required_resource"),
+            (b"*cen", "scenario_scenery_resource"),
+            (b"sky*", "scenario_sky_references_resource"),
+            (b"*sce", "scenario_sound_scenery_resource"),
+            (b"sslt", "scenario_structure_lighting_resource"),
+            (b"trg*", "scenario_trigger_volumes_resource"),
+            (b"*ehi", "scenario_vehicles_resource"),
+            (b"*eap", "scenario_weapons_resource"),
+        ],
+    ),
+    (
+        tag_icon!("scenario_hs_source_file"),
+        &[
+            (b"hsc*", "hsc"),
+            (b"hsc*", "scenario_hs_source_file"),
+            (b"hsdt", "script"),
+            (b"hscn", "script_container"),
+        ],
+    ),
     (tag_icon!("scenario"), &[(b"scnr", "scenario")]),
     (tag_icon!("scenery"), &[(b"scen", "scenery")]),
     (tag_icon!("shader_pass"), &[(b"spas", "shader_pass")]),
@@ -122,7 +219,8 @@ const GROUP_ICONS: &[(TagIcon, &[IconGroup])] = &[
 
 /// The icon for `group_tag` in `game`, read from that game's definitions:
 /// the group's own icon where it has one, the shader icon for every kind of
-/// shader, otherwise the default. Without a game (or a group) nothing says
+/// shader, and the globals icon for otherwise-unassigned globals types.
+/// Without a game (or a group) nothing says
 /// what a FOURCC means, so it is the default.
 pub(in crate::app) fn tag_icon(group_tag: Option<u32>, game: Option<GameId>) -> TagIcon {
     let (Some(group_tag), Some(game)) = (group_tag, game) else {
@@ -142,6 +240,9 @@ pub(in crate::app) fn tag_icon(group_tag: Option<u32>, game: Option<GameId>) -> 
     }
     if is_shader_group(&groups, group_tag, name) {
         return SHADER_ICON;
+    }
+    if name.contains("globals") {
+        return tag_icon!("default_globals");
     }
     DEFAULT_ICON
 }
@@ -176,16 +277,25 @@ pub(in crate::app) fn tag_icon_image(
     let uri = tag_icon_uri_for_pixels_per_point_and_size(icon.name, ctx.pixels_per_point(), size);
     if icon.svg.contains("currentColor") {
         let [r, g, b, _] = text_dark().to_array();
-        let color = format!("#{r:02x}{g:02x}{b:02x}");
         return egui::Image::from_bytes(
-            format!("{}-rgb{r:02x}{g:02x}{b:02x}.svg", uri.trim_end_matches(".svg")),
-            icon.svg.replace("currentColor", &color).into_bytes(),
+            format!(
+                "{}-rgb{r:02x}{g:02x}{b:02x}.svg",
+                uri.trim_end_matches(".svg")
+            ),
+            themed_tag_icon_bytes(icon, [r, g, b]),
         );
     }
-    egui::Image::from_bytes(
-        uri,
-        icon.svg.as_bytes(),
-    )
+    egui::Image::from_bytes(uri, icon.svg.as_bytes())
+}
+
+fn themed_tag_icon_bytes(icon: TagIcon, rgb: [u8; 3]) -> std::sync::Arc<[u8]> {
+    thread_local! {
+        static SVGS: std::cell::RefCell<std::collections::HashMap<(&'static str, [u8; 3]), std::sync::Arc<[u8]>>> = Default::default();
+    }
+    SVGS.with(|cache| cache.borrow_mut().entry((icon.name, rgb)).or_insert_with(|| {
+        let [r, g, b] = rgb;
+        icon.svg.replace("currentColor", &format!("#{r:02x}{g:02x}{b:02x}")).into_bytes().into()
+    }).clone())
 }
 
 #[cfg(test)]
@@ -302,6 +412,89 @@ mod tests {
         assert_eq!(icon(b"spas", GameId::Halo2), "shader_pass");
     }
 
+    #[test]
+    fn halo_script_source_files_use_the_script_icon_across_games() {
+        for game in [
+            GameId::Halo2,
+            GameId::Halo3,
+            GameId::Halo3Odst,
+            GameId::HaloReach,
+            GameId::CampaignEvolved,
+            GameId::Halo2Amp,
+            GameId::Halo4,
+        ] {
+            assert_eq!(icon(b"hsc*", game), "scenario_hs_source_file", "{game:?}");
+        }
+    }
+
+    #[test]
+    fn globals_fallback_preserves_specific_icons() {
+        let mut checked = 0;
+        for game in GameId::ALL {
+            let groups = crate::app::help::bundled_group_hierarchy(Some(game));
+            for name in [
+                "ai_dialogue_globals",
+                "ai_globals",
+                "rasterizer_globals",
+                "multiplayer_globals",
+                "sound_globals",
+            ] {
+                if let Some(group) = groups.group_named(name) {
+                    assert_eq!(
+                        tag_icon(Some(group), Some(game)).name,
+                        "default_globals",
+                        "{game:?} {name}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0);
+        assert_eq!(
+            icon(b"hudg", GameId::HaloCe),
+            "hud_definition",
+            "keep the dedicated HUD globals icon"
+        );
+        assert_eq!(icon(b"bitm", GameId::Halo3), "bitmap");
+    }
+
+    #[test]
+    fn particle_and_imposter_icons_stay_on_the_requested_types() {
+        let mut checked = 0;
+        for game in GameId::ALL {
+            let groups = crate::app::help::bundled_group_hierarchy(Some(game));
+            for name in [
+                "instance_imposter_definition",
+                "particle_system",
+                "weather_particle_system",
+                "cheap_particle_emitter",
+                "particleman",
+            ] {
+                if let Some(group) = groups.group_named(name) {
+                    checked += 1;
+                    assert_eq!(
+                        tag_icon(Some(group), Some(game)).name,
+                        "default_tag",
+                        "{game:?} {name}"
+                    );
+                }
+            }
+        }
+        assert!(checked > 0, "the definitions must contain the tested groups");
+    }
+
+    #[test]
+    fn current_color_icons_reuse_bytes_for_each_theme_color() {
+        let icon = tag_icon!("default_tag");
+        let dark = themed_tag_icon_bytes(icon, [255; 3]);
+        assert!(std::sync::Arc::ptr_eq(&dark, &themed_tag_icon_bytes(icon, [255; 3])));
+        let light = themed_tag_icon_bytes(icon, [0; 3]);
+        assert!(!std::sync::Arc::ptr_eq(&dark, &light));
+        assert!(std::str::from_utf8(&dark).unwrap().contains("#ffffff"));
+        assert!(std::str::from_utf8(&light).unwrap().contains("#000000"));
+        assert!(!std::str::from_utf8(&dark).unwrap().contains("currentColor"));
+    }
+
     /// Every group the icon table names exists, with that name, in some
     /// game: an entry that matches nothing is a typo or a renamed group.
     #[test]
@@ -309,11 +502,21 @@ mod tests {
         for (icon, members) in GROUP_ICONS {
             for (fourcc, name) in *members {
                 let group_tag = u32::from_be_bytes(**fourcc);
+                let mut found = false;
+                for game in GameId::ALL {
+                    if crate::app::help::bundled_group_hierarchy(Some(game)).name(group_tag)
+                        == Some(*name)
+                    {
+                        found = true;
+                        assert_eq!(
+                            tag_icon(Some(group_tag), Some(game)).name,
+                            icon.name,
+                            "{game:?} {name} must use its assigned icon"
+                        );
+                    }
+                }
                 assert!(
-                    GameId::ALL.into_iter().any(|game| {
-                        crate::app::help::bundled_group_hierarchy(Some(game)).name(group_tag)
-                            == Some(*name)
-                    }),
+                    found,
                     "{} {:?} {name}",
                     icon.name,
                     String::from_utf8_lossy(*fourcc)
@@ -323,14 +526,19 @@ mod tests {
     }
 
     #[test]
-    fn themed_unicode_icon_loads_as_an_svg() {
+    fn themed_tag_icons_load_as_svg() {
         let ctx = egui::Context::default();
         egui_extras::install_image_loaders(&ctx);
-        let icon = tag_icon_image(&ctx, tag_icon!("unicode_string_list"), 16.0);
-        match icon.load_for_size(&ctx, Vec2::splat(16.0)) {
-            Ok(egui::load::TexturePoll::Ready { .. }) => {}
-            Ok(_) => panic!("embedded SVG should load immediately"),
-            Err(error) => panic!("icon failed to load: {error}"),
+        for asset in [DEFAULT_ICON, SHADER_ICON]
+            .into_iter()
+            .chain(GROUP_ICONS.iter().map(|(icon, _)| *icon))
+        {
+            let icon = tag_icon_image(&ctx, asset, 16.0);
+            match icon.load_for_size(&ctx, Vec2::splat(16.0)) {
+                Ok(egui::load::TexturePoll::Ready { .. }) => {}
+                Ok(_) => panic!("embedded SVG should load immediately"),
+                Err(error) => panic!("icon {} failed to load: {error}", asset.name),
+            }
         }
     }
 

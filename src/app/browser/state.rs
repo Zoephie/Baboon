@@ -147,6 +147,7 @@ pub(in crate::app) enum BrowserAction {
 
 /// Per-tab state for a docked browser rooted at one folder.
 pub(in crate::app) struct FolderBrowserState {
+    pub(in crate::app) selected_tag: Option<String>,
     pub(in crate::app) rel_path: PathBuf,
     pub(in crate::app) label: String,
     pub(in crate::app) filter: String,

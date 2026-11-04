@@ -620,9 +620,9 @@ pub(in crate::app) fn draw_tag_diff_list(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 icon_text_dropdown_button(ui, ButtonIcon::Filter, "Filter", |ui| {
-                    ui.checkbox(&mut filters.both, "Both versions");
-                    ui.checkbox(&mut filters.current_only, "Before only");
-                    ui.checkbox(&mut filters.comparison_only, "After only");
+                    ui.baboon_checkbox(&mut filters.both, "Both versions");
+                    ui.baboon_checkbox(&mut filters.current_only, "Before only");
+                    ui.baboon_checkbox(&mut filters.comparison_only, "After only");
                 });
                 if icon_text_button(ui, ButtonIcon::Swap, "Swap", true)
                     .on_hover_text("Swap the two sides of the comparison")
@@ -1054,7 +1054,7 @@ impl Dialog for TagDiffState {
                     ButtonIcon::Compare,
                     &mut open,
                 );
-                ui.separator();
+                ui.add_space(8.0);
                 let label_width = ui
                     .painter()
                     .layout_no_wrap(
@@ -1093,7 +1093,7 @@ impl Dialog for TagDiffState {
                             TagCompareSource::GitHead => "Git HEAD",
                             TagCompareSource::GitHistory => "Git History…",
                         };
-                        egui::ComboBox::from_id_salt("tag_compare_source")
+                        crate::app::ui_kit::ValueComboBox::from_id_salt("tag_compare_source")
                             .selected_text(source_name)
                             .width(field_width)
                             .truncate()
@@ -1202,7 +1202,7 @@ impl Dialog for TagDiffState {
                                             },
                                         )
                                     });
-                                egui::ComboBox::from_id_salt("tag_diff_open_tag")
+                                crate::app::ui_kit::ValueComboBox::from_id_salt("tag_diff_open_tag")
                                     .selected_text(
                                         selected.as_deref().unwrap_or("Select an open tag"),
                                     )
@@ -1237,7 +1237,7 @@ impl Dialog for TagDiffState {
                                                     egui::TextStyle::Body.resolve(ui.style()),
                                                 );
                                                 if ui
-                                                    .selectable_label(selected, shown)
+                                                    .selectable_label_with_search(selected, shown, label)
                                                     .on_hover_text(label)
                                                     .clicked()
                                                 {
@@ -1275,7 +1275,7 @@ impl Dialog for TagDiffState {
                                         .as_ref()
                                         .is_some_and(|root| same_recent_path(root, &kit.tags))
                                 });
-                                egui::ComboBox::from_id_salt("tag_compare_kit")
+                                crate::app::ui_kit::ValueComboBox::from_id_salt("tag_compare_kit")
                                     .selected_text(
                                         chosen
                                             .map(|kit| kit.name.as_str())
@@ -1338,7 +1338,7 @@ impl Dialog for TagDiffState {
                                     })
                                     .map(commit_text)
                                     .unwrap_or_else(|| "Select a commit".to_owned());
-                                egui::ComboBox::from_id_salt("tag_compare_git_history")
+                                crate::app::ui_kit::ValueComboBox::from_id_salt("tag_compare_git_history")
                                     .selected_text(selected)
                                     .width(field_width)
                                     .truncate()
@@ -1360,7 +1360,7 @@ impl Dialog for TagDiffState {
                                                         .x
                                                 });
                                             if ui
-                                                .selectable_label(selected, shown)
+                                                .selectable_label_with_search(selected, shown, &label)
                                                 .on_hover_text(format!("{label}\n{}", commit.hash))
                                                 .clicked()
                                             {
@@ -1466,7 +1466,7 @@ impl Dialog for TagDiffState {
                         ui.horizontal(|ui| {
                             icon_text_dropdown_button(ui, ButtonIcon::Filter, "Filter", |ui| {
                                 let history = state.source == TagCompareSource::GitHistory;
-                                ui.checkbox(
+                                ui.baboon_checkbox(
                                     &mut state.filters.both,
                                     if history {
                                         "Both versions"
@@ -1474,7 +1474,7 @@ impl Dialog for TagDiffState {
                                         "Both tags"
                                     },
                                 );
-                                ui.checkbox(
+                                ui.baboon_checkbox(
                                     &mut state.filters.current_only,
                                     if history {
                                         "Before only"
@@ -1482,7 +1482,7 @@ impl Dialog for TagDiffState {
                                         "Current tag only"
                                     },
                                 );
-                                ui.checkbox(
+                                ui.baboon_checkbox(
                                     &mut state.filters.comparison_only,
                                     if history {
                                         "After only"

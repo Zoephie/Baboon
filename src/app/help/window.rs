@@ -94,7 +94,7 @@ fn draw_script_doc_tab(ui: &mut Ui, docs: &mut ScriptDocsUiState) {
     let old_network_filter = docs.network_filter;
     ui.horizontal(|ui| {
         ui.label(RichText::new("Game").color(subtle_dark()));
-        egui::ComboBox::from_id_salt("script_docs_game")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("script_docs_game")
             .selected_text(
                 script_doc_games()
                     .find(|game| game.as_str() == docs.game)
@@ -128,7 +128,7 @@ fn draw_script_doc_tab(ui: &mut Ui, docs: &mut ScriptDocsUiState) {
         if docs.category == ScriptDocCategory::Functions {
             ui.separator();
             ui.label(RichText::new("Network safe").color(subtle_dark()));
-            egui::ComboBox::from_id_salt("script_docs_network_safe")
+            crate::app::ui_kit::ValueComboBox::from_id_salt("script_docs_network_safe")
                 .selected_text(match docs.network_filter {
                     ScriptDocNetworkFilter::All => "All",
                     ScriptDocNetworkFilter::Yes => "Yes",
@@ -318,7 +318,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
     let mut request = None;
     ui.horizontal(|ui| {
         let current = state.pairs[state.pair].label();
-        egui::ComboBox::from_id_salt("tag_compat_pair")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("tag_compat_pair")
             .selected_text(current)
             .show_ui(ui, |ui| {
                 for (index, pair) in state.pairs.iter().enumerate() {
@@ -326,7 +326,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
                 }
             });
         ui.separator();
-        ui.checkbox(&mut state.losses_only, "Only what is lost")
+        ui.baboon_checkbox(&mut state.losses_only, "Only what is lost")
             .on_hover_text(
                 "Hide every field that transfers unchanged. There are tens of thousands                  of those, and they are not what you came to find out.",
             );
@@ -360,7 +360,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
                     .color(subtle_dark())
                     .small(),
             );
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt("tag_compat_group_list")
                 .show(ui, |ui| {
                     for row in &state.groups {
@@ -405,7 +405,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
             );
             return;
         }
-        egui::ScrollArea::both()
+        crate::app::ScrollArea::both()
             .id_salt("tag_compat_fields")
             .show(ui, |ui| {
                 egui::Grid::new("tag_compat_field_grid")

@@ -165,7 +165,7 @@ impl Dialog for NewTagDialog {
                         let games = crate::app::documents::saving::available_definition_games();
                         let (_, wheel_delta) = combo_box_with_scroll(
                             ui,
-                            egui::ComboBox::from_id_salt("new_tag_game")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("new_tag_game")
                                 .selected_text(&self.game)
                                 .width(ui.available_width()),
                             |ui| {

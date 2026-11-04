@@ -115,7 +115,7 @@ impl Dialog for LooseFolderRenameState {
                                 ))
                                 .color(text_dark()),
                             );
-                            egui::ScrollArea::vertical()
+                            crate::app::ScrollArea::vertical()
                                 .id_salt("loose_folder_rename_referrers")
                                 .max_height(200.0)
                                 .show(ui, |ui| {

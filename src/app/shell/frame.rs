@@ -147,6 +147,100 @@ pub(in crate::app) fn browser_favorites_divider(ui: &mut Ui, favorites_visible: 
     }
 }
 
+/// A tab connected to the surface below it: round above, open along the bottom.
+pub(in crate::app) fn paint_connected_tab(ui: &Ui, rect: egui::Rect, fill: Color32, active: bool) {
+    let corners = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
+    // Cover the bar's baseline with an opaque area, rather than an
+    // antialiased stroke laid over another stroke at a fractional pixel.
+    let filled = if active { rect.with_max_y(rect.bottom() + 1.0) } else { rect };
+    ui.painter().rect_filled(filled, corners, fill);
+    if active {
+        // An open outline has no bottom edge to bleed through the page join.
+        let r = rect.shrink(0.5);
+        let radius = 3.5;
+        let mut points = vec![r.left_bottom(), egui::pos2(r.left(), r.top() + radius)];
+        for (center, start) in [
+            (egui::pos2(r.left() + radius, r.top() + radius), std::f32::consts::PI),
+            (egui::pos2(r.right() - radius, r.top() + radius), 1.5 * std::f32::consts::PI),
+        ] {
+            for step in 0..=6 {
+                let angle = start + step as f32 * std::f32::consts::FRAC_PI_2 / 6.0;
+                points.push(center + egui::vec2(angle.cos(), angle.sin()) * radius);
+            }
+        }
+        points.push(r.right_bottom());
+        ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, grid_line())));
+    }
+}
+
+/// Leave the active tab's opening out of the page outline entirely.
+pub(in crate::app) fn paint_page_outline(
+    ui: &Ui, rect: egui::Rect, corners: egui::CornerRadius, tab: Option<&egui::Rect>,
+) {
+    let stroke = Stroke::new(1.0, grid_line());
+    let Some(tab) = tab else {
+        ui.painter().rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
+        return;
+    };
+    let opening = egui::Rect::from_min_max(
+        egui::pos2((tab.left() + 1.0).max(rect.left()), rect.top() - 2.0),
+        egui::pos2((tab.right() - 1.0).min(rect.right()), rect.top() + 2.0),
+    );
+    for clip in [
+        rect.with_min_y(opening.bottom()),
+        rect.with_max_x(opening.left()),
+        rect.with_min_x(opening.right()),
+    ] {
+        ui.painter().with_clip_rect(ui.clip_rect().intersect(clip.expand(0.01)))
+            .rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
+    }
+}
+
+/// The tile library owns resizing; this grip only advertises the same handle.
+pub(in crate::app) fn paint_kit_split_grips(ui: &Ui, tree: &egui_tiles::Tree<KitId>) {
+    let root_top = tree.root().and_then(|id| tree.tiles.rect(id)).map(|rect| rect.top());
+    let toolbar_bottom = window_work_area(ui.ctx()).top();
+    for (id, tile) in tree.tiles.iter() {
+        let egui_tiles::Tile::Container(egui_tiles::Container::Linear(linear)) = tile else { continue };
+        let Some(parent) = tree.tiles.rect(*id) else { continue };
+        let rects = linear.children.iter().filter_map(|id| tree.tiles.rect(*id)).collect::<Vec<_>>();
+        for pair in rects.windows(2) {
+            let horizontal = linear.dir == egui_tiles::LinearDir::Horizontal;
+            let center = if horizontal {
+                egui::pos2((pair[0].right() + pair[1].left()) * 0.5, pair[0].center().y)
+            } else {
+                egui::pos2(pair[0].center().x, (pair[0].bottom() + pair[1].top()) * 0.5)
+            };
+            let size = if horizontal { egui::vec2(4.0, 96.0) } else { egui::vec2(96.0, 4.0) };
+            // Match the tile library's full-length resize target, rather than
+            // requiring the pointer to be directly over the visible grip.
+            let hit_size = if horizontal {
+                egui::vec2(2.0 * ui.style().interaction.resize_grab_radius_side, parent.height())
+            } else {
+                egui::vec2(parent.width(), 2.0 * ui.style().interaction.resize_grab_radius_side)
+            };
+            let hovered = ui.rect_contains_pointer(egui::Rect::from_center_size(center, hit_size));
+            if horizontal && root_top.is_some_and(|top| (parent.top() - top).abs() < 0.5)
+                && toolbar_bottom < parent.top()
+            {
+                // The workspace's top inset gives its tabs breathing room;
+                // carry top-row split dividers through that inset to the toolbar.
+                let mut painter = ui.painter().clone();
+                painter.set_clip_rect(ui.clip_rect().with_min_y(toolbar_bottom)
+                    .intersect(ui.ctx().content_rect()));
+                let divider_color = if hovered && ui.input(|input| input.pointer.primary_down()) {
+                    text_dark()
+                } else if hovered { subtle_dark() } else { grid_line() };
+                painter.vline(center.x, toolbar_bottom..=parent.top(), Stroke::new(2.0, divider_color));
+            }
+            let color = if hovered {
+                if is_dark_mode() { Color32::WHITE } else { Color32::BLACK }
+            } else { subtle_dark() };
+            ui.painter().rect_filled(egui::Rect::from_center_size(center, size), 2.0, color);
+        }
+    }
+}
+
 pub(in crate::app) fn pane_header_path_parts(display_path: &str) -> (Vec<(String, PathBuf)>, String) {
     let mut components: Vec<&str> = tag_path::segments(display_path).collect();
     let title = components.pop().unwrap_or_default().to_owned();
@@ -655,16 +749,6 @@ pub(in crate::app) fn is_file_cached(ctx: &egui::Context, path: &std::path::Path
     recheck_cached(ctx, ("is_file", path), || path.is_file())
 }
 
-/// Blend `base` toward `accent` by `t` (0..1). Used for the unsaved-tab tint.
-pub(in crate::app) fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
-    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
-    Color32::from_rgb(
-        lerp(base.r(), accent.r()),
-        lerp(base.g(), accent.g()),
-        lerp(base.b(), accent.b()),
-    )
-}
-
 /// Scenario-header launcher using Baboon's bundled application artwork rather
 /// than the executable icon discovered for the global tools toolbar.
 fn scenario_launcher_button(
@@ -840,9 +924,9 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
             .data_mut(|data| data.get_temp::<String>(draft_id))
             .unwrap_or_default();
         let keyword_field = Frame::NONE
-            .fill(foundation_input())
+            .fill(browser_search_bg())
             .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
-            .inner_margin(egui::Margin::same(2))
+            .inner_margin(egui::Margin { left: 8, right: 2, top: 2, bottom: 2 })
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.spacing_mut().interact_size.y = 20.0;
@@ -1097,7 +1181,7 @@ mod tests {
                 egui::CentralPanel::default().show(ui, |ui| {
                     dropdown_height = combo_box_with_scroll(
                         ui,
-                        egui::ComboBox::from_id_salt("button_height_test").selected_text("0. default"),
+                        crate::app::ui_kit::ValueComboBox::from_id_salt("button_height_test").selected_text("0. default"),
                         |_| {},
                     )
                     .0
@@ -3303,6 +3387,14 @@ mod tests {
 
     fn cases() -> Vec<Case> {
         let mut cases = vec![
+            case(
+                "home_welcome_with_loaded_kit",
+                &["shell.home_open"],
+                &[],
+                memory_kit,
+                |h| { idle(h); let group = home_group(h); h.app.apply_app_action(AppAction::ShowHome { group }, &h.ctx.clone()); },
+                &["Start", "Open a tags folder"],
+            ),
             // --- the shell ---
             case(
                 "kit_browser",
@@ -3908,6 +4000,7 @@ mod tests {
                 welcome,
                 |h| {
                     h.app.dialogs.open(LastOpenedWindowsPrompt {
+                        recents_token: None,
                         kits: vec![crate::app::shell::session::LastOpenedWindowsKit {
                             checked: true,
                             source_kind: crate::app::shell::session::LastSessionSourceKind::LooseFolder,
@@ -5022,6 +5115,8 @@ mod tests {
     #[test]
     fn view_menu_toggles_keep_it_open_and_an_action_closes_it() {
         let mut h = Harness::new();
+        let kit = h.app.model.active_kit_id();
+        h.app.views[kit].terminal.work_dir = Some(std::env::temp_dir());
         idle(&mut h);
         assert!(!view_menu_open(&h));
         h.click("View", 0);
@@ -5040,9 +5135,12 @@ mod tests {
         assert_eq!(h.app.model.prefs.expert_mode, !expert);
         assert!(view_menu_open(&h), "so does a second one");
 
-        h.click("Tag Groups", 0);
+        assert!(!h.painted.iter().any(|text| text == "Folders" || text == "Tag Groups"
+            || text.starts_with("Sort by:") || text == "Scroll wheel cycles dropdowns"),
+            "browser controls stay in the browser toolbar and wheel cycling lives in Settings");
+        h.click("Terminal", 0);
         idle(&mut h);
-        assert_eq!(h.app.views[h.app.model.kits[h.app.model.active].id].browser.mode, BrowserMode::Groups);
+        assert!(h.app.views[kit].terminal.open);
         assert!(!view_menu_open(&h), "an action closes it");
     }
 
@@ -5540,10 +5638,277 @@ mod tests {
         );
     }
 
-    /// Clicking a tab makes its tag the one the file actions act on, as a
-    /// press inside its pane does. It used to only bring the tab forward, so
-    /// Save As on the tag in view offered another open tag's type and saved
-    /// that tag instead.
+    /// Dirty indicators must not resize tabs or shift their neighbors.
+    #[test]
+    fn tab_geometry_stays_fixed_when_a_document_becomes_dirty_and_clean_again() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[h.app.model.active].id;
+        let ids: Vec<_> = keys.iter().map(|key| h.app.views[kit].tag_tree.tiles.iter()
+            .find_map(|(id, tile)| matches!(tile, egui_tiles::Tile::Pane(open) if open == key)
+                .then(|| id.egui_id(crate::app::kits::tag_tree_id(kit)))).unwrap()).collect();
+        let rects = |h: &Harness| ids.iter().map(|id| h.ctx.read_response(*id).expect("tab response").rect).collect::<Vec<_>>();
+        let clean = rects(&h);
+        for key in &keys {
+            h.app.model.kits[h.app.model.active].parsed_tags.get_mut(key).unwrap().dirty.touch();
+            idle(&mut h);
+            assert_eq!(rects(&h), clean, "marking a tab dirty must not move its close button or neighboring tabs");
+            h.app.model.kits[h.app.model.active].parsed_tags.get_mut(key).unwrap().dirty.clear();
+            idle(&mut h);
+            assert_eq!(rects(&h), clean, "clearing the dirty state must not resize tabs");
+        }
+    }
+
+    #[test]
+    fn split_page_gaps_and_browser_edges_remain_resizable() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[0].id;
+        h.app.views[kit].tag_tree = egui_tiles::Tree::new_horizontal(
+            crate::app::kits::tag_tree_id(kit), keys[..2].to_vec());
+        idle(&mut h);
+        let page = |h: &Harness, key: &str| {
+            let tree = &h.app.views[kit].tag_tree;
+            tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(open) if open == key)
+                    .then(|| tree.tiles.rect(*id)).flatten()).unwrap()
+        };
+        let left = page(&h, &keys[0]);
+        let right = page(&h, &keys[1]);
+        assert!((right.left() - left.right() - 5.0).abs() < 0.1);
+        let drag = |h: &mut Harness, from: egui::Pos2, to: egui::Pos2| {
+            for _ in 0..3 { h.frame(vec![egui::Event::PointerMoved(from)]); }
+            h.frame(vec![egui::Event::PointerButton {
+                pos: from, button: egui::PointerButton::Primary, pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            for step in 1..=3 {
+                h.frame(vec![egui::Event::PointerMoved(from.lerp(to, step as f32 / 3.0))]);
+            }
+            h.frame(vec![egui::Event::PointerButton {
+                pos: to, button: egui::PointerButton::Primary, pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            idle(h);
+        };
+        let divider = egui::pos2((left.right() + right.left()) * 0.5, left.center().y);
+        drag(&mut h, divider, divider + egui::vec2(40.0, 0.0));
+        assert!(page(&h, &keys[0]).width() > left.width() + 25.0);
+
+        let browser_id = egui::Id::new(("kit_browser_panel", kit.0));
+        let before = egui::containers::panel::PanelState::load(&h.ctx, browser_id).unwrap().outer_rect;
+        let edge = egui::pos2(before.right(), before.center().y);
+        drag(&mut h, edge, edge + egui::vec2(40.0, 0.0));
+        let after = egui::containers::panel::PanelState::load(&h.ctx, browser_id).unwrap().outer_rect;
+        assert!(after.width() > before.width() + 25.0, "the browser edge resizes alongside its scroll area");
+    }
+
+    #[test]
+    fn dirty_tag_tabs_are_amber_and_inactive_neighbors_have_dividers() {
+        let (mut h, keys) = three_tabs();
+        h.app.model.kits[0].parsed_tags.get_mut(&keys[0]).unwrap().dirty.touch();
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(crate::app::run_ui_test(&h.ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                focused: true,
+                ..Default::default()
+            }, |ui| h.app.run_frame(ui)));
+        }
+        let kit = h.app.model.kits[0].id;
+        let tree = &h.app.views[kit].tag_tree;
+        let pane = tree.tiles.iter().find_map(|(id, tile)|
+            matches!(tile, egui_tiles::Tile::Pane(key) if key == &keys[0]).then_some(*id)).unwrap();
+        let tab = h.ctx.read_response(pane.egui_id(tree.id())).unwrap().rect;
+        let amber = crate::app::browser::modified_text();
+        let shapes = output.unwrap().shapes;
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Circle(circle) if circle.fill == amber && tab.contains(circle.center))), "dirty tabs have an amber dot");
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.fill == amber.gamma_multiply(0.12) && tab.contains_rect(rect.rect))), "dirty tabs have an amber fill");
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { points, stroke } if stroke.color == grid_line()
+                && (points[0].x - (tab.right() - 0.5)).abs() < 0.1
+                && points[0].x == points[1].x && points[0].y > tab.top() && points[1].y < tab.bottom())),
+            "neighboring inactive tabs have a visible divider");
+    }
+
+    #[test]
+    fn tag_content_scrolls_to_the_page_bottom_border() {
+        let (mut h, keys) = three_tabs();
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(crate::app::run_ui_test(&h.ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                focused: true,
+                ..Default::default()
+            }, |ui| h.app.run_frame(ui)));
+        }
+        let kit = h.app.model.kits[0].id;
+        let tree = &h.app.views[kit].tag_tree;
+        let page = tree.tiles.iter().find_map(|(id, tile)|
+            matches!(tile, egui_tiles::Tile::Pane(key) if key == &keys[2]).then(|| tree.tiles.rect(*id)).flatten()).unwrap();
+        let clip = output.unwrap().shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text().starts_with("OBJECT") => Some(shape.clip_rect),
+            _ => None,
+        }).expect("the actual field group was painted");
+        assert!((clip.bottom() - page.bottom()).abs() < 1.0,
+            "scrolling content reaches the page border: clip={clip:?}, page={page:?}");
+    }
+
+    fn home_group(h: &Harness) -> egui_tiles::TileId {
+        let kit = h.app.model.kits[h.app.model.active].id;
+        let pane = h.app.kit_tree.tiles.iter().find_map(|(id, tile)|
+            matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)).unwrap();
+        h.app.kit_tree.tiles.parent_of(pane).unwrap()
+    }
+    #[test]
+    fn regression_home_only_appears_in_the_primary_split() {
+        let (mut h, _) = three_tabs();
+        let left = h.app.model.kits[0].id;
+        let right = h.app.add_kit();
+        fixture::install_kit(&mut h.app, fixture::synthetic_entries(1, 1, 4));
+        fixture::open_document(&mut h.app, "folder_00\\sub_00\\tag_003.biped", fixture::new_tag("biped"));
+        h.app.kit_tree = egui_tiles::Tree::new_horizontal("home_split_regression", vec![left, right]);
+        idle(&mut h);
+        let pane_id = |h: &Harness, kit| h.app.kit_tree.tiles.iter().find_map(|(id, tile)| {
+            matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)
+        }).unwrap();
+        let left_pane = pane_id(&h, left);
+        let right_pane = pane_id(&h, right);
+        let left_group = h.app.kit_tree.tiles.parent_of(left_pane).unwrap();
+        let right_group = h.app.kit_tree.tiles.parent_of(right_pane).unwrap();
+        let left_rect = h.app.kit_tree.tiles.rect(left_group).unwrap();
+        let right_rect = h.app.kit_tree.tiles.rect(right_group).unwrap();
+        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(left_group)).is_some());
+        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(right_group)).is_none(),
+            "only the top-left Editing Kit split has a Home tab");
+        click_point(&mut h, left_rect.min + egui::vec2(16.0, 13.0));
+        idle(&mut h);
+        assert!(h.painted.iter().any(|text| text == "tag_003.biped"),
+            "opening Home on the left must keep the right-hand tag page visible");
+        let right_tab = h.ctx.read_response(right_pane.egui_id(h.app.kit_tree.id())).unwrap().rect;
+        assert!(right_tab.left() >= right_rect.left(), "the other split's kit tabs must not move into the left tab bar");
+        assert_eq!(h.app.kit_tree.tiles.rect(left_group), Some(left_rect));
+        assert_eq!(h.app.kit_tree.tiles.rect(right_group), Some(right_rect));
+    }
+
+    #[test]
+    fn home_tab_preserves_dirty_documents_and_split_layout_and_returns_to_the_kit() {
+        let (mut h, keys) = three_tabs();
+        let kit = h.app.model.kits[h.app.model.active].id;
+        h.app.views[kit].tag_tree = egui_tiles::Tree::new_horizontal(crate::app::kits::tag_tree_id(kit), keys.clone());
+        h.app.model.kits[0].parsed_tags.get_mut(&keys[0]).unwrap().dirty.touch();
+        idle(&mut h);
+        let layout = |h: &Harness| h.app.views[kit].tag_tree.tiles.iter().filter_map(|(id, tile)| {
+            match tile { egui_tiles::Tile::Container(container) => Some((*id, container.children_vec())), _ => None }
+        }).collect::<HashMap<_, _>>();
+        let before = layout(&h);
+        let root = h.app.views[kit].tag_tree.root();
+        let home = h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).unwrap().rect.center();
+        click_point(&mut h, home);
+        idle(&mut h);
+        assert!(h.app.shell.home_open);
+        assert!(h.painted.iter().any(|text| text.contains("Open a tags folder")), "Home draws the welcome page");
+        h.app.views[kit].terminal.open = true;
+        idle(&mut h);
+        assert!(h.painted.iter().any(|text| text == "Terminal"), "the terminal remains visible on Home");
+        h.app.views[kit].terminal.open = false;
+        idle(&mut h);
+        assert_eq!(h.app.model.kits.len(), 1, "Home is not an extra empty editing kit");
+        assert_eq!(open_tabs(&h), keys);
+        assert!(h.app.model.kits[0].parsed_tags[&keys[0]].dirty.is_set());
+        press_key(&mut h, egui::Key::W, egui::Modifiers::COMMAND);
+        idle(&mut h);
+        assert_eq!(open_tabs(&h), keys, "Ctrl+W on Home must not close the hidden tag");
+        assert!(h.app.shell.home_open);
+        let tab_id = h.app.kit_tree.tiles.iter().find_map(|(id, tile)| {
+            matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit).then_some(*id)
+        }).unwrap().egui_id(h.app.kit_tree.id());
+        let tab = h.ctx.read_response(tab_id).unwrap().rect.center();
+        click_point(&mut h, tab);
+        idle(&mut h);
+        assert!(!h.app.shell.home_open);
+        assert_eq!(h.app.views[kit].tag_tree.root(), root);
+        assert_eq!(layout(&h), before);
+        assert_eq!(open_tabs(&h), keys);
+        assert!(h.app.model.kits[0].parsed_tags[&keys[0]].dirty.is_set());
+    }
+
+    #[test]
+    fn add_workspace_tab_follows_the_last_kit_and_opens_the_load_menu() {
+        let mut h = Harness::new();
+        memory_kit(&mut h);
+        h.app.add_kit();
+        memory_kit(&mut h);
+        h.app.focus_kit(0);
+        idle(&mut h);
+        let output = crate::app::run_ui_test(&h.ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            focused: true,
+            ..Default::default()
+        }, |ui| h.app.run_frame(ui));
+        let group = home_group(&h);
+        let add = h.ctx.read_response(egui::Id::new("workspace_add_tab").with(group)).unwrap().rect;
+        let tree = &h.app.kit_tree;
+        let last = match tree.tiles.get(group).unwrap() {
+            egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs)) => *tabs.children.last().unwrap(),
+            _ => panic!("expected tabs"),
+        };
+        let tab = h.ctx.read_response(last.egui_id(tree.id())).unwrap().rect;
+        assert!((add.left() - tab.right()).abs() < 1.0, "Add follows the last kit, rather than the window edge");
+        assert!((add.width() - 32.0).abs() < 1.0);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { points, stroke } if stroke.color == grid_line()
+                && (points[0].x - (add.left() - 0.5)).abs() < 0.1
+                && points[0].x == points[1].x && points[0].y > add.top() && points[1].y < add.bottom())),
+            "the last inactive kit is separated from Add");
+        click_point(&mut h, add.center());
+        idle(&mut h);
+        for label in ["Load Folder...", "Load Tag...", "Load Monolithic blob_index.dat...", "Recent"] {
+            assert!(h.painted.iter().any(|text| text == label), "missing menu entry {label}");
+        }
+        assert_eq!(h.app.model.active, 0, "opening the menu alone does not activate another kit");
+    }
+
+    #[test]
+    fn loading_workspace_activates_its_kit_tab_instead_of_home() {
+        for with_loaded_kit in [false, true] {
+            let mut h = Harness::new();
+            if with_loaded_kit { memory_kit(&mut h); }
+            idle(&mut h);
+            let group = home_group(&h);
+            h.app.apply_app_action(AppAction::ShowHome { group }, &h.ctx.clone());
+            assert!(!h.app.open_kit_for(std::path::Path::new("C:/test-loading-kit")));
+            idle(&mut h);
+            let output = crate::app::run_ui_test(&h.ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                focused: true,
+                ..Default::default()
+            }, |ui| h.app.run_frame(ui));
+            let home = h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).unwrap().rect;
+            let kit = h.app.model.active_kit_id();
+            let tree = &h.app.kit_tree;
+            let pane = tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)).unwrap();
+            let tab = h.ctx.read_response(pane.egui_id(tree.id())).unwrap().rect;
+            let outlined = |rect: egui::Rect| output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Path(path) if path.points.len() > 10
+                    && path.points.iter().all(|point| rect.contains(*point))));
+            assert!(!outlined(home), "Home must not look active while a kit is loading");
+            assert!(tab.width() > 0.0 && outlined(tab), "the loading workspace tab must look active");
+        }
+    }
+
+    #[test]
+    fn the_empty_workspace_has_only_the_icon_home_tab() {
+        let mut h = Harness::new();
+        idle(&mut h);
+        assert!(h.ctx.read_response(egui::Id::new("workspace_home_tab").with(home_group(&h))).is_some());
+        assert!(!h.painted.iter().any(|text| text == "New workspace"));
+        assert!(h.painted.iter().any(|text| text.contains("Open a tags folder")));
+        assert_eq!(h.app.model.kits.len(), 1);
+    }
+
+    /// Clicking a tab also selects its tag for file actions such as Save As.
     #[test]
     fn clicking_a_tab_focuses_its_tag() {
         let (mut h, keys) = three_tabs();

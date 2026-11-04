@@ -3,8 +3,20 @@
 
 use super::recents::{RecentAction, draw_recent_folders_menu};
 use super::*;
-use crate::app::shell::frame::tint_toward;
 use crate::app::shell::frame::wheel_scroll_tab_bar;
+
+
+fn draw_home_tab(ui: &mut Ui, group: egui_tiles::TileId, active: bool) -> egui::Response {
+    let (_, rect) = ui.allocate_space(Vec2::new(32.0, 26.0));
+    let response = ui.interact(rect, egui::Id::new("workspace_home_tab").with(group), Sense::click()).on_hover_text("Home");
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, "Home"));
+    let fill = if active { left_panel() } else if response.hovered() { context_menu_hover() }
+        else { Color32::TRANSPARENT };
+    crate::app::shell::frame::paint_connected_tab(ui, rect, fill, active);
+    paint_button_icon_at(ui, ButtonIcon::Home,
+        egui::Rect::from_center_size(rect.center(), Vec2::splat(18.0)), text_dark());
+    response
+}
 
 /// Which loader the "+" menu on the kit tab bar should start.
 #[derive(Clone, Copy)]
@@ -58,13 +70,47 @@ struct KitPaneBehavior<'a, 'c, 'p> {
     close_requests: Vec<KitId>,
     add_kit: Option<LoadKind>,
     recent_action: Option<RecentAction>,
+    load_target: Option<KitId>,
+    tab_groups: HashMap<egui_tiles::TileId, egui_tiles::TileId>,
+    primary_group: Option<egui_tiles::TileId>,
+    inactive_dividers: HashSet<egui_tiles::TileId>,
 }
 
 impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
+    fn tab_bar_left_ui(
+        &mut self, tiles: &egui_tiles::Tiles<KitId>, ui: &mut Ui,
+        tile_id: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
+    ) {
+        for child in &tabs.children { self.tab_groups.insert(*child, tile_id); }
+        let empty = tabs.active.and_then(|id| tiles.get(id)).is_some_and(|tile| {
+            matches!(tile, egui_tiles::Tile::Pane(kit) if self.cx.model.kit_index(*kit)
+                .is_some_and(|index| self.cx.model.kits[index].can_accept_source_load()))
+        });
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(4.0);
+        // Tile traversal visits the top/left child first, including nested
+        // splits, so the first tab bar is the primary workspace's bar.
+        if *self.primary_group.get_or_insert(tile_id) == tile_id {
+            if draw_home_tab(ui, tile_id, empty || self.parts.shell.home_groups.contains(&tile_id)).clicked() {
+                self.cx.send(AppAction::ShowHome { group: tile_id });
+            }
+        } else {
+            self.parts.shell.home_groups.remove(&tile_id);
+        }
+        // Record neighbors here: the tab container is temporarily removed
+        // from Tiles while its children draw. Home makes every kit inactive.
+        let home = self.parts.shell.home_groups.contains(&tile_id);
+        let visible = tabs.children.iter().copied().filter(|id| tiles.is_visible(*id)).collect::<Vec<_>>();
+        for pair in visible.windows(2) {
+            if home || (!tabs.is_active(pair[0]) && !tabs.is_active(pair[1])) {
+                self.inactive_dividers.insert(pair[0]);
+            }
+        }
+    }
     fn pane_ui(
         &mut self,
         ui: &mut Ui,
-        _tile_id: egui_tiles::TileId,
+        tile_id: egui_tiles::TileId,
         pane: &mut KitId,
     ) -> egui_tiles::UiResponse {
         let kit_id = *pane;
@@ -73,28 +119,22 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
             ui.label(RichText::new("This kit is no longer open").color(subtle_dark()));
             return egui_tiles::UiResponse::None;
         };
-        // Activate on a press inside the pane, not on hover. `active` decides
-        // where deferred work lands — the save prompt, Ctrl+S, an open colour
-        // picker or reference picker — and none of that should retarget just
-        // because the cursor crossed another game's pane on its way somewhere.
-        // Sent before the pane draws, so it lands before anything the pane
-        // sends.
-        if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect())
-        {
-            cx.send(AppAction::FocusKit(kit_id));
+        let group = self.tab_groups.get(&tile_id).copied();
+        let kit = &cx.model.kits[kit_index];
+        let home = kit.is_empty_workspace()
+            || group.is_some_and(|id| self.parts.shell.home_groups.contains(&id));
+        if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) {
+            if home && let Some(group) = group.filter(|id| Some(*id) == self.primary_group) {
+                cx.send(AppAction::ShowHome { group });
+            } else {
+                cx.send(AppAction::FocusKit(kit_id));
+            }
         }
         let parts = &mut self.parts;
-        let kit = &cx.model.kits[kit_index];
-        // An unloaded workspace has no tags to browse or edit, so it offers
-        // ways to open one instead of an empty browser and an empty editor.
-        if kit.is_empty_workspace() {
-            draw_welcome_screen(
-                cx,
-                ui,
-                kit_index,
-                parts.shell,
-                &parts.kit_tools.editing_kit_validation,
-            );
+        if home {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, left_panel());
+            draw_welcome_screen(cx, ui, kit_index, parts.shell,
+                &parts.kit_tools.editing_kit_validation);
             return egui_tiles::UiResponse::None;
         }
         if is_campaign_evolved(kit) && cx.model.prefs.enable_chimp {
@@ -130,8 +170,10 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         // Each workspace carries its own browser, so two games side by side can
         // be browsed independently rather than sharing one panel that
         // retargets as focus moves.
-        egui::Panel::left(egui::Id::new(("kit_browser_panel", kit_id.0)))
+        let browser_id = egui::Id::new(("kit_browser_panel", kit_id.0));
+        let browser_panel = egui::Panel::left(browser_id)
             .resizable(true)
+            .show_separator_line(false)
             .default_size(330.0)
             .frame(Frame::NONE.fill(left_panel()).inner_margin(egui::Margin {
                 left: 8,
@@ -162,10 +204,20 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
                 );
             });
         egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(editor_bg()))
+            .frame(Frame::NONE.fill(left_panel()).inner_margin(egui::Margin {
+                left: 6, right: 6, top: 6, bottom: 6,
+            }))
             .show(ui, |ui| {
                 draw_tag_tiles(ui, cx, parts, self.inputs, kit_index);
             });
+        // Paint after the editor so its background cannot cover the transient
+        // separator. The panel retains its native resize behavior and width.
+        if let Some(handle) = ui.ctx().read_response(browser_id.with("__resize"))
+            && (handle.hovered() || handle.dragged())
+        {
+            ui.painter().vline(browser_panel.response.rect.right(), browser_panel.response.rect.y_range(),
+                Stroke::new(if handle.dragged() { 2.0 } else { 1.0 }, subtle_dark()));
+        }
         egui_tiles::UiResponse::None
     }
 
@@ -174,11 +226,69 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
             return RichText::new("(closed)").color(subtle_dark()).into();
         };
         let kit = &self.cx.model.kits[index];
-        let dirty = kit.has_unwritten_modifications();
         let label = kit_strip_label(kit);
-        let text = if dirty { format!("• {label}") } else { label };
-        RichText::new(text).color(text_dark()).strong().into()
+        RichText::new(label).color(text_dark()).strong().into()
     }
+
+    fn tab_ui(
+        &mut self, tiles: &mut egui_tiles::Tiles<KitId>, ui: &mut Ui,
+        id: egui::Id, tile_id: egui_tiles::TileId, state: &egui_tiles::TabState,
+    ) -> egui::Response {
+        const CLOSE_GAP: f32 = 20.0;
+        if self.cx.model.kits.len() == 1 && matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit))
+            if self.cx.model.kit_index(*kit).is_some_and(|index| self.cx.model.kits[index].can_accept_source_load())) {
+            return ui.allocate_response(Vec2::ZERO, Sense::hover());
+        }
+        let mut state = state.clone();
+        state.active &= !self.tab_groups.get(&tile_id)
+            .is_some_and(|group| self.parts.shell.home_groups.contains(group));
+        let state = &state;
+        let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit))
+            if self.cx.model.kit_index(*kit).is_some_and(|index| self.cx.model.kits[index].has_unwritten_modifications()));
+        let text = self.tab_title_for_tile(tiles, tile_id);
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font);
+        let margin = self.tab_title_spacing(ui.visuals());
+        let close_size = Vec2::splat(self.close_button_outer_size());
+        let width = galley.size().x + margin * 2.0
+            + f32::from(state.closable) * (CLOSE_GAP + close_size.x);
+        let (_, rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
+        let response = ui.interact(rect, id, Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button,
+            ui.is_enabled(), state.active, galley.text()));
+        if ui.is_rect_visible(rect) && !state.is_being_dragged {
+            let fill = if !state.active && response.hovered() { context_menu_hover() }
+                else { self.tab_bg_color(ui.visuals(), tiles, tile_id, state) };
+            crate::app::shell::frame::paint_connected_tab(ui, rect, fill, state.active);
+            if !state.active && self.inactive_dividers.contains(&tile_id) {
+                ui.painter().vline(rect.right() - 0.5, (rect.top() + 5.0)..=(rect.bottom() - 5.0),
+                    Stroke::new(1.0, grid_line()));
+            }
+            let inner = rect.shrink(margin);
+            let text_pos = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), inner).min;
+            ui.painter().galley(text_pos, galley, text_dark());
+            if state.closable {
+                let close_rect = egui::Align2::RIGHT_CENTER.align_size_within_rect(close_size, inner);
+                if dirty {
+                    ui.painter().circle_filled(
+                        egui::pos2(close_rect.left() - CLOSE_GAP * 0.5, close_rect.center().y),
+                        2.0, text_dark(),
+                    );
+                }
+                let close = ui.interact(close_rect, id.with("close"), Sense::click_and_drag())
+                    .on_hover_cursor(egui::CursorIcon::Default);
+                close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
+                paint_close_control(ui, &close);
+                if (close.clicked() || response.middle_clicked()) && self.on_tab_close(tiles, tile_id) {
+                    tiles.remove(tile_id);
+                }
+            }
+        }
+        self.on_tab_button(tiles, tile_id, response)
+    }
+
+    fn close_button_outer_size(&self) -> f32 { 20.0 }
 
     fn is_tab_closable(
         &self,
@@ -218,8 +328,6 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         button_response
     }
 
-    /// The "+" that opens another game, kept on the tab bar where the kit tabs
-    /// themselves are.
     fn top_bar_right_ui(
         &mut self,
         _tiles: &egui_tiles::Tiles<KitId>,
@@ -228,12 +336,46 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         _tabs: &egui_tiles::Tabs,
         scroll_offset: &mut f32,
     ) {
+        let bar = ui.max_rect();
+        ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, grid_line()));
         wheel_scroll_tab_bar(ui, scroll_offset);
+    }
+
+    /// Scroll with the kit tabs, immediately after the last one, like Home's
+    /// icon-only tab rather than a toolbar button pinned to the window edge.
+    fn tab_bar_trailing_ui(
+        &mut self, tiles: &egui_tiles::Tiles<KitId>, ui: &mut Ui,
+        group: egui_tiles::TileId, tabs: &egui_tiles::Tabs,
+    ) {
+        let (_, rect) = ui.allocate_space(Vec2::new(32.0, 26.0));
+        let response = ui.interact(rect, egui::Id::new("workspace_add_tab").with(group), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::Default)
+            .on_hover_text("Add workspace");
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Add workspace"));
+        let config = menu_config();
+        let popup = egui::Popup::menu(&response)
+            .close_behavior(config.close_behavior)
+            .style(config.style.clone())
+            .info(egui::UiStackInfo::new(egui::UiKind::Menu)
+                .with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config));
+        let fill = if response.hovered() || popup.is_open() { context_menu_hover() }
+            else { Color32::TRANSPARENT };
+        crate::app::shell::frame::paint_connected_tab(ui, rect, fill, false);
+        paint_button_icon_at(ui, ButtonIcon::AddWorkspace,
+            egui::Rect::from_center_size(rect.center(), Vec2::splat(18.0)), text_dark());
+        let home = self.parts.shell.home_groups.contains(&group);
+        let hidden_empty_kit = self.cx.model.kits.len() == 1 && self.cx.model.kits[0].can_accept_source_load();
+        if !hidden_empty_kit && tabs.children.iter().rev().find(|id| tiles.is_visible(**id))
+            .is_some_and(|id| home || !tabs.is_active(*id))
+        {
+            ui.painter().vline(rect.left() - 0.5, (rect.top() + 5.0)..=(rect.bottom() - 5.0),
+                Stroke::new(1.0, grid_line()));
+        }
         let recents = &self.cx.model.prefs.recent_folders;
         let menu_margin = Frame::menu(ui.style()).total_margin();
-        let root_popup_width = 320.0 + menu_margin.left + menu_margin.right;
         let recent_popup_width = 240.0 + menu_margin.left + menu_margin.right;
-        right_aligned_menu_button(ui, "+", root_popup_width, |ui| {
+        let had_request = self.add_kit.is_some() || self.recent_action.is_some();
+        popup.show(|ui| {
             style_list_menu(ui);
             ui.set_width(320.0);
             if ui.button("Load Folder...").clicked() {
@@ -266,9 +408,13 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
                 self.recent_action = Some(recent_action);
                 close_menu(ui);
             }
-        })
-        .response
-        .on_hover_text("Open another game in its own workspace");
+        });
+        if !had_request && (self.add_kit.is_some() || self.recent_action.is_some()) {
+            self.load_target = tabs.active.and_then(|id| match tiles.get(id) {
+                Some(egui_tiles::Tile::Pane(kit)) => Some(*kit),
+                _ => None,
+            });
+        }
     }
 
     fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
@@ -282,6 +428,15 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         }
     }
 
+    fn gap_width(&self, _style: &egui::Style) -> f32 { 5.0 }
+
+    fn resize_stroke(&self, _style: &egui::Style, state: egui_tiles::ResizeState) -> Stroke {
+        match state {
+            egui_tiles::ResizeState::Idle => Stroke::new(2.0, grid_line()),
+            egui_tiles::ResizeState::Hovering => Stroke::new(2.0, subtle_dark()),
+            egui_tiles::ResizeState::Dragging => Stroke::new(2.0, text_dark()),
+        }
+    }
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
         row_type()
     }
@@ -289,23 +444,22 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
     fn tab_bg_color(
         &self,
         _visuals: &egui::Visuals,
-        tiles: &egui_tiles::Tiles<KitId>,
-        tile_id: egui_tiles::TileId,
+        _tiles: &egui_tiles::Tiles<KitId>,
+        _tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> Color32 {
-        let base = if state.active {
-            active_tab()
-        } else {
+        if state.active {
             left_panel()
-        };
-        let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit_id))
-            if self.cx.model.kit_index(*kit_id)
-                .is_some_and(|index| self.cx.model.kits[index].has_unwritten_modifications()));
-        if dirty {
-            tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
         } else {
-            base
+            Color32::TRANSPARENT
         }
+    }
+
+    fn tab_outline_stroke(
+        &self, _visuals: &egui::Visuals, _tiles: &egui_tiles::Tiles<KitId>,
+        _tile_id: egui_tiles::TileId, state: &egui_tiles::TabState,
+    ) -> Stroke {
+        if state.active { Stroke::new(1.0, grid_line()) } else { Stroke::NONE }
     }
 
     fn tab_text_color(
@@ -332,24 +486,10 @@ fn is_campaign_evolved(kit: &Kit) -> bool {
 pub(in crate::app) fn draw_kit_tiles(
     ui: &mut Ui,
     cx: &Ctx,
-    mut parts: TileParts,
+    parts: TileParts,
     inputs: &TileInputs,
     kit_tree: &mut egui_tiles::Tree<KitId>,
 ) {
-    // Nothing to tab between: draw the welcome screen directly rather than
-    // wrapping it in a tree whose tab bar would be an empty strip. A
-    // zero-height tab bar still leaves the "+" and the bar's own painting
-    // behind, so the tree is skipped outright.
-    if cx.model.kits.len() == 1 && cx.model.kits[0].is_empty_workspace() {
-        draw_welcome_screen(
-            cx,
-            ui,
-            0,
-            &mut parts.shell,
-            &parts.kit_tools.editing_kit_validation,
-        );
-        return;
-    }
     let mut behavior = KitPaneBehavior {
         cx,
         parts,
@@ -357,18 +497,34 @@ pub(in crate::app) fn draw_kit_tiles(
         close_requests: Vec::new(),
         add_kit: None,
         recent_action: None,
+        load_target: None,
+        tab_groups: HashMap::new(),
+        primary_group: None,
+        inactive_dividers: HashSet::new(),
     };
+    ui.style_mut().interaction.resize_grab_radius_side = 7.0;
     kit_tree.ui(&mut behavior, ui);
+    crate::app::shell::frame::paint_kit_split_grips(ui, kit_tree);
+    behavior.parts.shell.home_groups.retain(|id| matches!(kit_tree.tiles.get(*id),
+        Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(_))))
+        && Some(*id) == behavior.primary_group);
+    let active_kit = cx.model.kits[cx.model.active].id;
+    behavior.parts.shell.home_open = kit_tree.tiles.iter().find_map(|(id, tile)| {
+        matches!(tile, egui_tiles::Tile::Pane(kit) if *kit == active_kit)
+            .then(|| behavior.tab_groups.get(id)).flatten()
+    }).is_some_and(|group| behavior.parts.shell.home_groups.contains(group));
     let KitPaneBehavior {
         close_requests,
         add_kit,
         recent_action,
+        load_target,
         ..
     } = behavior;
 
     for kit_id in close_requests {
         cx.send(AppAction::Close(PendingCloseAction::CloseKit(kit_id)));
     }
+    if let Some(kit) = load_target { cx.send(AppAction::FocusKit(kit)); }
     if let Some(action) = recent_action {
         cx.send(AppAction::Recent(action));
     }
@@ -408,7 +564,7 @@ impl Baboon {
     ///
     /// The kit list is the content store and the tree only references it, so
     /// this only ever repairs the tree — it never creates or removes a kit.
-    fn sync_kit_tree(&mut self) {
+    pub(in crate::app) fn sync_kit_tree(&mut self) {
         let live: Vec<KitId> = self.model.kits.iter().map(|kit| kit.id).collect();
         let laid_out: Vec<(egui_tiles::TileId, KitId)> = self
             .kit_tree
@@ -428,16 +584,29 @@ impl Baboon {
             if laid_out.iter().any(|(_, laid)| *laid == kit_id) {
                 continue;
             }
+            let active_kit = self.model.kits[self.model.active].id;
+            let target = self.kit_tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Pane(kit) if *kit == active_kit).then_some(*id))
+                .or_else(|| self.kit_tree.active_tiles().into_iter().find(|id|
+                    matches!(self.kit_tree.tiles.get(*id), Some(egui_tiles::Tile::Pane(_)))));
             let tile_id = self.kit_tree.tiles.insert_pane(kit_id);
-            match self.kit_tree.root() {
-                Some(root) => {
-                    if let Some(egui_tiles::Tile::Container(container)) =
-                        self.kit_tree.tiles.get_mut(root)
+            match target {
+                Some(target) => {
+                    let parent = self.kit_tree.tiles.parent_of(target);
+                    if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
+                        parent.and_then(|id| self.kit_tree.tiles.get_mut(id))
                     {
-                        container.add_child(tile_id);
+                        tabs.children.push(tile_id);
                     } else {
-                        let tabs = self.kit_tree.tiles.insert_tab_tile(vec![root, tile_id]);
-                        self.kit_tree.root = Some(tabs);
+                        // Wrap a bare pane in place, preserving its split slot.
+                        let tabs = self.kit_tree.tiles.insert_tab_tile(vec![target, tile_id]);
+                        if let Some(egui_tiles::Tile::Container(container)) =
+                            parent.and_then(|id| self.kit_tree.tiles.get_mut(id))
+                        {
+                            let _ = container.replace_child(target, tabs);
+                        } else {
+                            self.kit_tree.root = Some(tabs);
+                        }
                     }
                 }
                 None => self.kit_tree.root = Some(tile_id),
@@ -454,6 +623,38 @@ mod tests {
     //! the cursor passed over one. Two workspaces side by side, driven headless.
 
     use super::*;
+
+    #[test]
+    fn regression_new_kits_join_the_last_active_split() {
+        for wrapped in [false, true] {
+            for focused in [0, 1] {
+                let (mut app, kits) = tabbed_kits(2);
+                app.kit_tree = egui_tiles::Tree::new_horizontal("kit_open_regression", kits.clone());
+                let pane = |app: &Baboon, kit| app.kit_tree.tiles.iter().find_map(|(id, tile)|
+                    matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit).then_some(*id)).unwrap();
+                let root = app.kit_tree.root().unwrap();
+                if wrapped {
+                    for kit in &kits {
+                        let child = pane(&app, *kit);
+                        let tabs = app.kit_tree.tiles.insert_tab_tile(vec![child]);
+                        if let Some(egui_tiles::Tile::Container(container)) = app.kit_tree.tiles.get_mut(root) {
+                            let _ = container.replace_child(child, tabs);
+                        }
+                    }
+                }
+                app.focus_kit(focused);
+                let added = app.add_kit();
+                app.sync_kit_tree();
+                assert_eq!(app.kit_tree.root(), Some(root));
+                let Some(egui_tiles::Tile::Container(container)) = app.kit_tree.tiles.get(root) else { panic!("split disappeared") };
+                assert_eq!(container.children().count(), 2, "opening a kit must not add a third split");
+                assert_eq!(app.kit_tree.tiles.parent_of(pane(&app, added)),
+                    app.kit_tree.tiles.parent_of(pane(&app, kits[focused])),
+                    "the new kit belongs to the last active pane's tab group");
+                assert!(visible_kits(&app).contains(&added));
+            }
+        }
+    }
 
     fn input(time: f64, events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {
@@ -513,6 +714,7 @@ mod tests {
         frame(&mut app, vec![press(over_right, true)]);
         frame(&mut app, vec![press(over_right, false)]);
         assert_eq!(app.model.active, 1);
+        assert!(!app.shell.home_open, "an empty secondary split must not activate primary Home");
     }
 
     /// The kits whose workspaces are on screen.
@@ -555,7 +757,7 @@ mod tests {
             });
         };
         // On the first tab's label, in the tab bar above both panes.
-        let on_first_tab = egui::pos2(40.0, 20.0);
+        let on_first_tab = egui::pos2(90.0, 20.0);
         let press = |pressed| egui::Event::PointerButton {
             pos: on_first_tab,
             button: egui::PointerButton::Primary,
@@ -611,5 +813,20 @@ mod tests {
         let active = app.model.kits[app.model.active].id;
         assert_eq!(active, kits[2], "the kit that slid into the closed one's place");
         assert_eq!(visible_kits(&app), vec![active]);
+    }
+
+    #[test]
+    fn closing_a_kit_preserves_the_home_group() {
+        for home in [false, true] {
+            let (mut app, kits) = tabbed_kits(2);
+            let group = app.kit_tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Container(egui_tiles::Container::Tabs(_))).then_some(*id)).unwrap();
+            if home { app.shell.home_groups.insert(group); }
+            app.shell.home_open = home;
+            app.remove_kit(kits[1]);
+            app.sync_kit_tree();
+            assert_eq!(app.shell.home_open, home);
+            assert_eq!(app.shell.home_groups.contains(&group), home);
+        }
     }
 }

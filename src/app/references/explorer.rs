@@ -104,7 +104,7 @@ impl Dialog for ContentExplorer {
                         // A widely used tag has thousands of referrers: only
                         // the rows in view are drawn.
                         let row_height = cols[0].spacing().interact_size.y;
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("ce_parents")
                             .max_height(380.0)
                             .show_rows(&mut cols[0], row_height, parents.len(), |ui, rows| {
@@ -130,7 +130,7 @@ impl Dialog for ContentExplorer {
                         // A widely used tag has thousands of referrers: only
                         // the rows in view are drawn.
                         let row_height = cols[1].spacing().interact_size.y;
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("ce_children")
                             .max_height(380.0)
                             .show_rows(&mut cols[1], row_height, children.len(), |ui, rows| {

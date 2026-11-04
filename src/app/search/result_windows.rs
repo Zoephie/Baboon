@@ -84,7 +84,7 @@ impl Dialog for QueryResultsWindow {
                             .then(|| occurrences.get(&index).map(Vec::len))
                     });
                     let row_height = ui.spacing().interact_size.y;
-                    egui::ScrollArea::vertical().max_height(460.0).show_rows(
+                    crate::app::ScrollArea::vertical().max_height(460.0).show_rows(
                         ui,
                         row_height,
                         rows.len(),

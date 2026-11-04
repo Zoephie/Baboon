@@ -380,7 +380,7 @@ fn draw_thumbnail_grid<S: ThumbnailSource>(
     // lays out the thirty on screen and queues jobs for those alone.
     let mut action: Option<CellAction> = None;
     let mut wanted: Vec<String> = Vec::new();
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt((S::ID_SALT, kit_index))
         .auto_shrink([false, false])
         .show_rows(ui, row_height, rows, |ui, row_range| {
@@ -540,9 +540,19 @@ pub(in crate::app) fn draw_folder_asset_grid(
         cell,
     );
     let height = cell + CELL_CAPTION + CELL_GAP;
-    ScrollArea::vertical()
-        .id_salt(("folder_assets", pane_key))
-        .auto_shrink([false, false])
+    if browser_navigation_building(ui) {
+        browser_navigation_columns(ui, columns, height + ui.spacing().item_spacing.y);
+        for entry in &visible {
+            register_browser_navigation(ui, &entry.key, browser_asset_navigation_id(ui, &entry.key));
+        }
+    }
+    let mut scroll = ScrollArea::vertical().id_salt(("folder_assets", pane_key)).auto_shrink([false, false]);
+    if let Some((key, _)) = browser_navigation_target(ui)
+        && let Some(index) = visible.iter().position(|entry| entry.key == key)
+    {
+        scroll = scroll.vertical_scroll_offset(asset_grid_scroll_offset(ui, index, columns, height));
+    }
+    scroll
         .show_rows(ui, height, visible.len().div_ceil(columns), |ui, rows| {
             ui.spacing_mut().item_spacing = Vec2::new(CELL_GAP, 0.0);
             for row in rows {
@@ -583,6 +593,11 @@ pub(in crate::app) fn draw_folder_asset_grid(
             action,
         });
     }
+}
+
+/// Match the row stride used by `ScrollArea::show_rows`, including outer spacing.
+fn asset_grid_scroll_offset(ui: &Ui, index: usize, columns: usize, height: f32) -> f32 {
+    (index / columns) as f32 * (height + ui.spacing().item_spacing.y)
 }
 
 /// One grid cell, and whatever the user asked it for.
@@ -638,7 +653,13 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
     // shader bitmap rows and Foundation reference cells already accept it,
     // and a shader slot already checks for the `bitm` group — so dragging a
     // thumbnail onto a reference needs nothing on the drop side.
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    let (rect, response) = if type_badge.is_some() {
+        let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+        (rect, ui.interact(rect, browser_asset_navigation_id(ui, &key), Sense::click_and_drag()))
+    } else {
+        ui.allocate_exact_size(size, Sense::click_and_drag())
+    };
+    let browser_selected = type_badge.is_some() && select_browser_tag(ui, &response, &key);
     response.dnd_set_drag_payload(DraggedTagRef {
         group_tag: entry.group_tag,
         input: entry_reference_input(entry),
@@ -730,6 +751,10 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
             .show(ui.ctx(), |ui| {
                 ui.label(RichText::new(&name).color(text_dark()));
             });
+    }
+
+    if browser_selected {
+        paint_browser_selection_border(ui, rect);
     }
 
     // Double-click, not click: a single click on a grid this dense is far
@@ -1118,6 +1143,7 @@ mod tests {
 
     fn folder_pane() -> FolderBrowserState {
         FolderBrowserState {
+            selected_tag: None,
             rel_path: tag_path::to_relative(r"objects\brute"),
             label: "brute".into(),
             filter: String::new(),
@@ -1147,6 +1173,28 @@ mod tests {
             group_tag: u32::from_be_bytes(*group),
             group_name: path.rsplit_once('.').map(|(_, name)| name.to_owned()),
             location: TagEntryLocation::LooseFile(tag_path::to_relative(path)),
+        }
+    }
+
+    /// Scroll offsets must put their targets in the virtualized row range.
+    #[test]
+    fn asset_grid_scroll_targets_are_drawn_even_far_down_the_folder() {
+        for target in [10, 100, 300, 1000] {
+            let ctx = egui::Context::default();
+            ctx.set_global_style(foundation_style());
+            let mut drawn = false;
+            for _ in 0..3 {
+                crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                    ..Default::default()
+                }, |ui| {
+                    let offset = asset_grid_scroll_offset(ui, target * 4, 4, 66.0);
+                    ScrollArea::vertical().vertical_scroll_offset(offset).show_rows(ui, 66.0, 1200, |_, rows| {
+                        drawn = rows.contains(&target);
+                    });
+                });
+            }
+            assert!(drawn, "target row {target} must enter the virtualized range");
         }
     }
 

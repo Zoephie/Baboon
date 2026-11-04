@@ -32,6 +32,7 @@ pub(in crate::app) fn paint_disclosure_chevron(
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(in crate::app) enum ButtonIcon {
     Add,
+    AddWorkspace,
     About,
     AssetBrowser,
     Browse,
@@ -89,6 +90,8 @@ pub(in crate::app) enum ButtonIcon {
     Json,
     Loop,
     Markers,
+    MarkersLookup,
+    MaterialsLookup,
     Model,
     JumpTo,
     JumpUp,
@@ -104,6 +107,8 @@ pub(in crate::app) enum ButtonIcon {
     Play,
     Remove,
     Refresh,
+    Recent,
+    Home,
     RenderModel,
     Rename,
     Right,
@@ -123,7 +128,7 @@ pub(in crate::app) enum ButtonIcon {
 
 pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
     match icon {
-        ButtonIcon::Add => include_root_str!("assets/Button Icons/Add.svg"),
+        ButtonIcon::Add | ButtonIcon::AddWorkspace => include_root_str!("assets/Button Icons/Add.svg"),
         ButtonIcon::About => include_root_str!("assets/Button Icons/About.svg"),
         ButtonIcon::AssetBrowser => include_root_str!("assets/Button Icons/Asset Browser.svg"),
         ButtonIcon::Browse => include_root_str!("assets/Button Icons/Browse.svg"),
@@ -152,18 +157,20 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Paste => include_root_str!("assets/Button Icons/Paste.svg"),
         ButtonIcon::SelectAll => include_root_str!("assets/Button Icons/Select All.svg"),
         ButtonIcon::Undo => include_root_str!("assets/Button Icons/Undo.svg"),
+        ButtonIcon::Recent => include_root_str!("assets/Button Icons/Recent.svg"),
+        ButtonIcon::Home => include_root_str!("assets/Button Icons/Home.svg"),
         ButtonIcon::Redo => include_root_str!("assets/Button Icons/Redo.svg"),
         ButtonIcon::Compare => include_root_str!("assets/Button Icons/Compare.svg"),
         ButtonIcon::Swap => include_root_str!("assets/Button Icons/Swap.svg"),
         ButtonIcon::Container => include_root_str!("assets/Button Icons/Container.svg"),
-        ButtonIcon::DefaultTag => include_root_str!("assets/icons/default_tag.svg"),
+        ButtonIcon::DefaultTag => include_root_str!("assets/tag icons/default_tag.svg"),
         ButtonIcon::Doc => include_root_str!("assets/Button Icons/Doc.svg"),
-        ButtonIcon::UnicodeStringList => include_root_str!("assets/icons/unicode_string_list.svg"),
+        ButtonIcon::UnicodeStringList => include_root_str!("assets/tag icons/unicode_string_list.svg"),
         ButtonIcon::Localization => include_root_str!("assets/Button Icons/localization.svg"),
         ButtonIcon::Down => include_root_str!("assets/Button Icons/Down.svg"),
         ButtonIcon::Duplicate => include_root_str!("assets/Button Icons/Duplicate.svg"),
-        ButtonIcon::Errors => include_root_str!("assets/icons/errors.svg"),
-        ButtonIcon::Warning => include_root_str!("assets/icons/warning.svg"),
+        ButtonIcon::Errors => include_root_str!("assets/tag icons/errors.svg"),
+        ButtonIcon::Warning => include_root_str!("assets/tag icons/warning.svg"),
         ButtonIcon::Favourite => include_root_str!("assets/Button Icons/Favourite.svg"),
         ButtonIcon::FavouriteFilled => {
             include_root_str!("assets/Button Icons/Favourite Filled.svg")
@@ -184,7 +191,9 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::InsertRowBelow => include_root_str!("assets/Button Icons/Insert Row (below).svg"),
         ButtonIcon::Json => include_root_str!("assets/Button Icons/JSON.svg"),
         ButtonIcon::Loop => include_root_str!("assets/Button Icons/Loop.svg"),
-        ButtonIcon::Markers => include_root_str!("assets/Button Icons/Markers.svg"),
+        ButtonIcon::Markers => include_root_str!("assets/tag icons/markers.svg"),
+        ButtonIcon::MarkersLookup => include_root_str!("assets/Button Icons/Markers.svg"),
+        ButtonIcon::MaterialsLookup => include_root_str!("assets/tag icons/material_effects.svg"),
         ButtonIcon::Model => include_root_str!("assets/Button Icons/Model.svg"),
         ButtonIcon::JumpTo => include_root_str!("assets/Button Icons/Jump To.svg"),
         ButtonIcon::JumpUp => include_root_str!("assets/Button Icons/Jump Up.svg"),
@@ -204,7 +213,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Play => include_root_str!("assets/Button Icons/Play.svg"),
         ButtonIcon::Remove => include_root_str!("assets/Button Icons/Remove.svg"),
         ButtonIcon::Refresh => include_root_str!("assets/Button Icons/Refresh.svg"),
-        ButtonIcon::RenderModel => include_root_str!("assets/icons/render_model.svg"),
+        ButtonIcon::RenderModel => include_root_str!("assets/tag icons/render_model.svg"),
         ButtonIcon::Rename => include_root_str!("assets/Button Icons/Rename.svg"),
         ButtonIcon::Right => include_root_str!("assets/Button Icons/Right.svg"),
         ButtonIcon::Save => include_root_str!("assets/Button Icons/Save.svg"),
@@ -217,9 +226,9 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::View => include_root_str!("assets/Button Icons/View.svg"),
         ButtonIcon::Bitmap => {
             if is_dark_mode() {
-                include_root_str!("assets/icons/bitmap.svg")
+                include_root_str!("assets/tag icons/bitmap.svg")
             } else {
-                include_root_str!("assets/icons/bitmap_lightmode.svg")
+                include_root_str!("assets/tag icons/bitmap_lightmode.svg")
             }
         }
         ButtonIcon::WindowMode => include_root_str!("assets/Button Icons/Window Mode.svg"),
@@ -386,32 +395,18 @@ pub(in crate::app) fn icon_button(
     response.on_hover_text(tooltip)
 }
 
-/// Repaint a native checkbox with its hovered visuals when an adjacent icon
+/// Repaint a themed checkbox with its hovered visuals when an adjacent icon
 /// or label owns the pointer. Icon checkbox rows are assembled from multiple
 /// widgets, while a normal text checkbox has one response spanning the row.
 pub(in crate::app) fn paint_checkbox_row_hover(ui: &Ui, checkbox_rect: egui::Rect, checked: bool) {
     if !ui.is_enabled() {
         return;
     }
-    let visuals = &ui.visuals().widgets.hovered;
-    let (small_icon_rect, big_icon_rect) = ui.spacing().icon_rectangles(checkbox_rect);
-    ui.painter().add(egui::epaint::RectShape::new(
-        big_icon_rect.expand(visuals.expansion),
-        visuals.corner_radius,
-        visuals.bg_fill,
-        visuals.bg_stroke,
-        egui::StrokeKind::Middle,
-    ));
-    if checked {
-        ui.painter().add(egui::Shape::line(
-            vec![
-                egui::pos2(small_icon_rect.left(), small_icon_rect.center().y),
-                egui::pos2(small_icon_rect.center().x, small_icon_rect.bottom()),
-                egui::pos2(small_icon_rect.right(), small_icon_rect.top()),
-            ],
-            visuals.fg_stroke,
-        ));
-    }
+    let glyph = egui::Rect::from_center_size(
+        egui::pos2(checkbox_rect.left() + 8.0, checkbox_rect.center().y),
+        Vec2::splat(16.0),
+    );
+    paint_checkbox_at(ui, glyph, checked, true);
 }
 
 pub(in crate::app) fn icon_for_foundation_button(label: &str) -> Option<ButtonIcon> {
@@ -468,7 +463,12 @@ fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
         return button_icon_svg(icon).to_owned();
     }
     let color = svg_color(color);
-    button_icon_svg(icon)
+    let source = match icon {
+        ButtonIcon::AddWorkspace => button_icon_svg(icon).replace("#7EEB47", "currentColor"),
+        ButtonIcon::MaterialsLookup => button_icon_svg(icon).replace("#60DF20", "currentColor"),
+        _ => button_icon_svg(icon).to_owned(),
+    };
+    source
         .replace("currentColor", &color)
         .replace("#A3C0C2", &color)
         .replace("#5CCC33", &color)
@@ -551,7 +551,7 @@ fn aligned_menu_custom_button<R>(
         });
     // As `egui::containers::menu::MenuButton` opens its menu, in the menu
     // bar's style, but placed by the shifted response.
-    let config = menu_config().style(egui::containers::menu::MenuConfig::find(ui).style);
+    let config = menu_config();
     let inner = egui::Popup::menu(&positioning_response)
         .close_behavior(config.close_behavior)
         .style(config.style.clone())
@@ -570,6 +570,12 @@ fn aligned_menu_custom_button<R>(
 pub(in crate::app) fn menu_config() -> egui::containers::menu::MenuConfig {
     egui::containers::menu::MenuConfig::new()
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .style(|style: &mut egui::Style| {
+            egui::containers::menu::menu_style(style);
+            let fill = context_menu_hover();
+            style.visuals.widgets.hovered.weak_bg_fill = fill;
+            style.visuals.widgets.open.weak_bg_fill = fill;
+        })
 }
 
 /// Close the menu `ui` is in, as egui 0.29's `Ui::close_menu` did; outside a
@@ -589,6 +595,7 @@ pub(in crate::app) fn context_menu(
 ) -> Option<egui::InnerResponse<()>> {
     egui::Popup::context_menu(response)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .style(menu_config().style)
         .show(add_contents)
 }
 
@@ -600,24 +607,6 @@ pub(in crate::app) fn aligned_menu_button<R>(
     let previous_padding = ui.spacing().button_padding.x;
     ui.spacing_mut().button_padding.x = 8.0;
     let menu = aligned_menu_custom_button(ui, egui::Button::new(title), None, add_contents);
-    ui.spacing_mut().button_padding.x = previous_padding;
-    menu
-}
-
-pub(in crate::app) fn right_aligned_menu_button<R>(
-    ui: &mut Ui,
-    title: impl Into<egui::WidgetText>,
-    popup_width: f32,
-    add_contents: impl FnOnce(&mut Ui) -> R,
-) -> egui::InnerResponse<Option<R>> {
-    let previous_padding = ui.spacing().button_padding.x;
-    ui.spacing_mut().button_padding.x = 8.0;
-    let menu = aligned_menu_custom_button(
-        ui,
-        egui::Button::new(title),
-        Some(popup_width),
-        add_contents,
-    );
     ui.spacing_mut().button_padding.x = previous_padding;
     menu
 }
@@ -680,12 +669,14 @@ pub(in crate::app) fn fixed_width_icon_text_dropdown_button<R>(
     icon: ButtonIcon,
     label: &str,
     width: f32,
-    add_contents: impl FnOnce(&mut Ui) -> R,
+    add_contents: impl FnOnce(&mut ValueComboUi<'_>) -> R,
 ) -> egui::InnerResponse<Option<R>> {
     let mut rect = ui.available_rect_before_wrap();
     rect.set_width(width);
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-        icon_text_dropdown_button_sized(ui, icon, label, Some(width), add_contents)
+        icon_text_dropdown_button_sized(ui, icon, label, Some(width), |ui| {
+            value_dropdown_contents(ui, ui.spacing().combo_height, add_contents)
+        })
     }).inner
 }
 
@@ -1011,6 +1002,8 @@ mod tests {
             ButtonIcon::Left,
             ButtonIcon::Loop,
             ButtonIcon::Markers,
+            ButtonIcon::MarkersLookup,
+            ButtonIcon::MaterialsLookup,
             ButtonIcon::ListDropdownLeft,
             ButtonIcon::ListDropdownRight,
             ButtonIcon::Move,
@@ -1022,6 +1015,8 @@ mod tests {
             ButtonIcon::Play,
             ButtonIcon::Remove,
             ButtonIcon::Refresh,
+            ButtonIcon::Recent,
+            ButtonIcon::Home,
             ButtonIcon::Rename,
             ButtonIcon::Right,
             ButtonIcon::Save,
@@ -1042,12 +1037,19 @@ mod tests {
     }
 
     #[test]
+    fn marker_view_icon_keeps_its_blue_color() {
+        let svg = colorized_icon_svg(ButtonIcon::Markers, Color32::from_rgb(1, 2, 3));
+        assert!(svg.contains("#00B2FF"), "View marker artwork must retain its original blue");
+    }
+
+    #[test]
     fn colorized_icon_replaces_current_color() {
-        for icon in [ButtonIcon::Open, ButtonIcon::Markers] {
+        for icon in [ButtonIcon::Open, ButtonIcon::MarkersLookup, ButtonIcon::MaterialsLookup] {
             let svg = colorized_icon_svg(icon, Color32::from_rgb(1, 2, 3));
             assert!(svg.contains("#010203"));
             assert!(!svg.contains("currentColor"));
             assert!(!svg.contains("#00B2FF"));
+            assert!(!svg.contains("#60DF20"));
         }
     }
 

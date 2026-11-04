@@ -75,6 +75,9 @@ struct StringListView {
     descending: bool,
     expanded: BTreeSet<String>,
     scroll_edge: Option<bool>,
+    scroll_page: Option<i32>,
+    scroll_offset: f32,
+    page_height: f32,
     table_layout: Option<Arc<TableLayout>>,
     /// Generated group additions stay below sorted members until renamed.
     new_group_ids: Vec<String>,
@@ -652,6 +655,15 @@ fn draw_strings_frame(
     }
     let active_table = edit.string_list_has_focus && ui.data(|data| data.get_temp::<StringTableFocus>(focus_id)).is_some_and(|focus| focus.pane == pane);
     if active_table && view.group_rename.is_none() && ui.memory(|memory| memory.focused().is_none()) {
+        if let Some(key) = crate::app::ui_kit::scroll::scroll_key(ui) {
+            match key {
+                egui::Key::Home => view.scroll_edge = Some(false),
+                egui::Key::End => view.scroll_edge = Some(true),
+                egui::Key::PageUp => view.scroll_page = Some(-1),
+                _ => view.scroll_page = Some(1),
+            }
+            ui.ctx().request_repaint();
+        }
         if ui.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
             view.selected.extend(cache.visible.iter().copied());
             view.anchor = cache.visible.first().copied();
@@ -771,6 +783,9 @@ fn draw_table_contents(
     table = table.column(Column::remainder().at_least(160.0).clip(true));
     if let Some(row) = scroll_to {
         table = table.scroll_to_row(row, Some(egui::Align::Center));
+    }
+    if let Some(page) = view.scroll_page.take() {
+        table = table.vertical_scroll_offset((view.scroll_offset + page as f32 * view.page_height * 0.9).max(0.0));
     }
     let scroll = table
         .header(HEADER_HEIGHT, |mut header| {
@@ -1285,6 +1300,8 @@ fn draw_table_contents(
     }
     painter.hline(top.x..=scroll.inner_rect.right(), header_bottom, Stroke::new(2.0, foundation_block_edge()));
     let max_offset = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
+    view.scroll_offset = scroll.state.offset.y;
+    view.page_height = scroll.inner_rect.height();
     let can_scroll_up = scroll.state.offset.y > 0.5;
     let can_scroll_down = scroll.state.offset.y < max_offset - 0.5;
     if (view.can_scroll_up, view.can_scroll_down) != (can_scroll_up, can_scroll_down) {
@@ -2313,7 +2330,7 @@ fn draw_completion_list(
                 let mut filter_changed = false;
                 if total > COMPLETION_ROWS {
                     let search = ui.push_id(filter_id, |ui| {
-                        let edit = egui::TextEdit::singleline(&mut completion.filter)
+                        let edit = crate::app::ui_kit::singleline_text_edit(&mut completion.filter)
                             .id(filter_id)
                             .hint_text(placeholder_text("Filter…"))
                             .desired_width(ui.available_width());
@@ -4805,6 +4822,40 @@ mod tests {
         assert_eq!(target.selection.unwrap().slice_str("One"), "One", "right-click preserves the selection for clipboard commands");
         let copy = menu.text_rects.iter().find(|(text, _)| text == "Copy Text").unwrap().1.center();
         assert_eq!(click_at(&mut panel, copy).copied, "One");
+    }
+
+    #[test]
+    fn table_keyboard_scroll_keys_match_edge_buttons_and_leave_text_navigation_alone() {
+        let texts: Vec<String> = (0..200).map(|index| format!("String {index}")).collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let mut panel = Panel::new(&refs);
+        panel.frame(Vec::new());
+        panel.frame(Vec::new());
+        let offset = |panel: &Panel| {
+            let id = egui::Id::new(("field_edit", "test", "strings.multilingual_unicode_string_list", "string list view"));
+            panel.ctx.data(|data| data.get_temp::<StringListView>(id)).unwrap().scroll_offset
+        };
+        panel.frame(vec![key(egui::Key::End)]);
+        for _ in 0..10 { panel.frame(Vec::new()); }
+        assert!(panel.frame(Vec::new()).texts.iter().any(|text| text == "String 199"));
+        panel.frame(vec![key(egui::Key::Home)]);
+        for _ in 0..10 { panel.frame(Vec::new()); }
+        assert!(panel.frame(Vec::new()).texts.iter().any(|text| text == "String 0"));
+        assert!(offset(&panel) < 1.0);
+        panel.frame(vec![key(egui::Key::PageDown)]);
+        for _ in 0..10 { panel.frame(Vec::new()); }
+        assert!(offset(&panel) > 100.0);
+        assert!(!panel.frame(Vec::new()).texts.iter().any(|text| text == "String 199"));
+        panel.frame(vec![key(egui::Key::PageUp)]);
+        for _ in 0..10 { panel.frame(Vec::new()); }
+        assert!(offset(&panel) < 1.0);
+        panel.focus_first_text(3);
+        panel.frame(Vec::new());
+        panel.frame(vec![key(egui::Key::End)]);
+        for _ in 0..10 { panel.frame(Vec::new()); }
+        assert!(offset(&panel) < 1.0, "End in a text field must move its cursor, not the table");
+        let cursor = egui::TextEdit::load_state(&panel.ctx, panel.text_id.unwrap()).unwrap().cursor.char_range().unwrap();
+        assert_eq!(cursor.primary.index.0, "String 0".chars().count());
     }
 
     #[test]

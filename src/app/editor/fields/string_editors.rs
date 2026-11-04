@@ -231,8 +231,9 @@ pub(in crate::app) fn draw_string_editor_row(
     let can_group = matches!(editor, "default_model_variant" | "child_model_variant" | "object_variant" | "cinematic_object_variant");
     let mut grouped = can_group && ui.data(|data| data.get_temp::<bool>(grouping_id)).unwrap_or(false);
     let mut filter = ui.data(|data| data.get_temp::<String>(filter_id)).unwrap_or_default();
-    draw_foundation_labelled_cell_row(ui, meta, "", depth, |ui, available_width| {
-        let width = foundation_value_width(&draft.text, available_width).clamp(150.0, 300.0);
+    let controls_width = foundation_picker_controls_width(ui, &caption, suffix, 0.0);
+    draw_foundation_cell_row_with_min_width(ui, meta, "", depth, controls_width, |ui, available_width| {
+        let width = foundation_picker_value_width(ui, &draft.text, available_width, &caption, suffix, 0.0);
         let response = foundation_string_id_value_cell(ui, &mut draft.text, width, id, enabled, !valid);
         draft.note_response(&response);
         if enabled && draft.should_commit(ui, &response) {
@@ -256,7 +257,7 @@ pub(in crate::app) fn draw_string_editor_row(
                     };
                     let width = string_picker::menu_popup_width(ui, &items, &filter);
                     string_picker::search(ui, &mut filter, filter_id, just_opened, width, &search_hint);
-                    if can_group && ui.checkbox(&mut grouped, "Group by Prefix").changed() {
+                    if can_group && ui.baboon_checkbox(&mut grouped, "Group by Prefix").changed() {
                         items = if grouped {
                             std::borrow::Cow::Owned(string_picker::prefix_groups(&menu.items))
                         } else {

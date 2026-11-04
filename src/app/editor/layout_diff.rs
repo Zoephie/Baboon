@@ -192,7 +192,7 @@ fn draw_field_pane(
             edit.docs = preview.docs;
             edit.expert_mode = preview.expert_mode;
             edit.field_filter = Some(&filter);
-            egui::ScrollArea::horizontal()
+            crate::app::ScrollArea::horizontal()
                 .id_salt((scope, names, field_name))
                 .auto_shrink([false, true])
                 .show(ui, |ui| {

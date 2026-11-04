@@ -90,7 +90,7 @@ pub(in crate::app) fn draw_welcome_screen(
         validation,
     );
 
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(32.0);
@@ -139,7 +139,7 @@ pub(in crate::app) fn draw_welcome_screen(
                             .show(ui, |ui| {
                                 ui.spacing_mut().item_spacing.y = content_item_spacing_y;
                                 draw_welcome_columns(ui, |columns| {
-                                    Frame::NONE.inner_margin(egui::Margin::same(28)).show(
+                                    Frame::NONE.inner_margin(egui::Margin::same(if card_width < 680.0 { 16 } else { 28 })).show(
                                         &mut columns[0],
                                         |ui| {
                                             section_heading(ui, "Start", text_dark());
@@ -327,7 +327,7 @@ pub(in crate::app) fn draw_welcome_screen(
                                         },
                                     );
 
-                                    Frame::NONE.inner_margin(egui::Margin::same(28)).show(
+                                    Frame::NONE.inner_margin(egui::Margin::same(if card_width < 680.0 { 16 } else { 28 })).show(
                                         &mut columns[1],
                                         |ui| {
                                             section_heading(ui, "Recent", text_dark());
@@ -503,7 +503,10 @@ pub(in crate::app) fn draw_welcome_screen(
     // active kit only when it is still an empty workspace; with another
     // game active it would add a third kit and leave this pane empty. So
     // this pane's kit is made active first.
-    cx.send(AppAction::FocusKit(cx.model.kits[kit_index].id));
+    if matches!(&action, WelcomeAction::LoadFolder | WelcomeAction::LoadTag | WelcomeAction::LoadMonolithic
+        | WelcomeAction::LoadContainer | WelcomeAction::LoadRecent(_) | WelcomeAction::LoadKit(_) | WelcomeAction::LoadCustomKit(_)) {
+        cx.send(AppAction::FocusKit(cx.model.kits[kit_index].id));
+    }
     match action {
         WelcomeAction::LoadFolder => cx.send(AppAction::LoadFolder),
         WelcomeAction::LoadTag => cx.send(AppAction::LoadTag),
@@ -557,7 +560,7 @@ fn welcome_image_button(
         };
         ui.add_enabled(
             enabled,
-            egui::Button::image_and_text(image, text)
+            egui::Button::image_and_text(image, text).wrap()
                 .min_size(Vec2::new(ui.available_width(), BUTTON_HEIGHT)),
         )
     })

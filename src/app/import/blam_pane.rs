@@ -84,7 +84,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
         .show(ui, |ui| {
             ui.label(RichText::new("Log").color(text_dark()).strong());
             ui.separator();
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt(("blam_log_scroll", kit_id.0))
                 .auto_shrink([false, false])
                 .stick_to_bottom(true)
@@ -119,7 +119,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
             bottom: 10,
         }))
         .show(ui, |ui| {
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt(("blam_pane", kit_id.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
@@ -172,19 +172,19 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
                     let scan = blam.scan;
                                 ui.add_enabled(
                         scan.render,
-                        egui::Checkbox::new(&mut blam.import_render, "Render (render_model)"),
+                        ThemedCheckbox::new(&mut blam.import_render, "Render (render_model)"),
                     )
                     .on_disabled_hover_text("No render folder in this asset's data folder");
                     ui.indent("blam_prt_indent", |ui| {
                         ui.add_enabled(
                             scan.render && blam.import_render,
-                            egui::Checkbox::new(&mut blam.import_prt, "Calculate PRT data"),
+                            ThemedCheckbox::new(&mut blam.import_prt, "Calculate PRT data"),
                         )
                         .on_disabled_hover_text("PRT is calculated as part of a render import");
                     });
                     ui.add_enabled(
                         scan.collision,
-                        egui::Checkbox::new(
+                        ThemedCheckbox::new(
                             &mut blam.import_collision,
                             "Collision (collision_model)",
                         ),
@@ -192,7 +192,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
                     .on_disabled_hover_text("No collision folder in this asset's data folder");
                     ui.add_enabled(
                         scan.physics,
-                        egui::Checkbox::new(
+                        ThemedCheckbox::new(
                             &mut blam.import_physics,
                             "Physics (physics_model)",
                         ),
@@ -200,7 +200,7 @@ pub(in crate::app) fn draw_blam_pane(cx: &Ctx, ui: &mut Ui, kit_index: usize, bl
                     .on_disabled_hover_text("No physics folder in this asset's data folder");
                     ui.add_enabled(
                         scan.structure,
-                        egui::Checkbox::new(
+                        ThemedCheckbox::new(
                             &mut blam.import_structure,
                             "Structure (structure_bsp)",
                         ),

@@ -787,7 +787,7 @@ impl Dialog for AddShortcutDialog {
                     }
                 }
                 ui.add_space(10.0);
-                let global_changed = ui.checkbox(&mut self.global, "Global Shortcut")
+                let global_changed = ui.baboon_checkbox(&mut self.global, "Global Shortcut")
                     .on_hover_text(
                         "Shortcuts this app for all existing Editing Kits, and for any newly created Editing Kit profiles.",
                     ).changed();

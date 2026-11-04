@@ -55,7 +55,7 @@ impl Dialog for ExtractTargetPrompt {
                     } else {
                         name.to_owned()
                     };
-                    ui.radio_value(
+                    ui.baboon_radio_value(
                         &mut state.target,
                         game,
                         RichText::new(label).color(text_dark()),

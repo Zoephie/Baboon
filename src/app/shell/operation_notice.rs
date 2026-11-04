@@ -30,7 +30,7 @@ impl Dialog for OperationNotice {
                 // A read-only multiline edit rather than a label: the message
                 // carries paths and a writer error, and it is only useful if it
                 // can be selected and copied.
-                egui::ScrollArea::vertical()
+                crate::app::ScrollArea::vertical()
                     .max_height(220.0)
                     .show(ui, |ui| {
                         ui.add(

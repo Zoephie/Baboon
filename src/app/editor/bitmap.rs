@@ -494,7 +494,7 @@ fn draw_bitmap_index_control(
     );
     let (combo, wheel_delta) = combo_box_with_scroll(
         ui,
-        egui::ComboBox::from_id_salt((id_salt, count))
+        crate::app::ui_kit::ValueComboBox::from_id_salt((id_salt, count))
             .selected_text(selected_text)
             .width(64.0),
         |ui| {
@@ -545,11 +545,11 @@ fn draw_bitmap_view_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
             });
             context_menu_separator(ui);
             ui.label(RichText::new("Options").strong().color(text_dark()));
-            ui.checkbox(&mut preview.show_checkerboard, "Show Checkerboard")
+            ui.baboon_checkbox(&mut preview.show_checkerboard, "Show Checkerboard")
                 .on_hover_text(
                     "Draw a fixed 4 px checker behind the bitmap to make transparency visible.",
                 );
-            ui.checkbox(&mut preview.show_border, "Show Bitmap Border")
+            ui.baboon_checkbox(&mut preview.show_border, "Show Bitmap Border")
                 .on_hover_text("Draw a two-pixel contrasting outline outside the bitmap edge.");
         },
     );

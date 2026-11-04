@@ -661,7 +661,7 @@ pub(in crate::app) struct RowHeights {
     /// width, the UI scale, expert mode and whether Find was filtering. Any
     /// change can move rows, so it starts the measuring over.
     measured_under: Option<RowHeightsBasis>,
-    heights: HashMap<String, f32>,
+    heights: HashMap<String, (f32, f32)>,
     /// Whether rows may be skipped on this pass.
     cull: bool,
 }
@@ -703,11 +703,11 @@ impl RowHeights {
 
     /// The height to stand in for the row at `path` when it is wholly outside
     /// what `ui` shows, or `None` to draw it.
-    pub(in crate::app) fn skip(&self, ui: &Ui, path: &str) -> Option<f32> {
+    pub(in crate::app) fn skip(&self, ui: &Ui, path: &str) -> Option<(f32, f32)> {
         if !self.cull {
             return None;
         }
-        let height = *self.heights.get(path)?;
+        let (height, trailing_gap) = *self.heights.get(path)?;
         // A row that took no more than the spacing after it drew nothing
         // worth skipping, and can't be stood in for by an allocation.
         if height < ui.spacing().item_spacing.y {
@@ -715,15 +715,15 @@ impl RowHeights {
         }
         let top = ui.cursor().min.y;
         let view = ui.clip_rect();
-        (top + height < view.top() || top > view.bottom()).then_some(height)
+        (top + height < view.top() || top > view.bottom()).then_some((height, trailing_gap))
     }
 
     /// Record the height the row at `path` took when drawn.
-    pub(in crate::app) fn record(&mut self, path: &str, height: f32) {
+    pub(in crate::app) fn record(&mut self, path: &str, height: f32, trailing_gap: f32) {
         match self.heights.get_mut(path) {
-            Some(known) => *known = height,
+            Some(known) => *known = (height, trailing_gap),
             None => {
-                self.heights.insert(path.to_owned(), height);
+                self.heights.insert(path.to_owned(), (height, trailing_gap));
             }
         }
     }

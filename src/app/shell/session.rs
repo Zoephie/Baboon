@@ -180,6 +180,8 @@ pub(in crate::app) struct LastOpenedWindowsKit {
 /// folder panes are reopened through their normal paths. Restores are independent,
 /// so the kits can finish loading in any order.
 pub(in crate::app) struct LastOpenedWindowsPrompt {
+    /// Identifies this saved snapshot, so a skipped session is recorded once.
+    pub(in crate::app) recents_token: Option<String>,
     pub(in crate::app) kits: Vec<LastOpenedWindowsKit>,
     /// "Don't ask again": on OK, remember as Always; on Cancel, as Never.
     pub(in crate::app) dont_ask_again: bool,
@@ -314,6 +316,7 @@ impl LastOpenedWindowsPrompt {
         Some(Self {
             kits,
             dont_ask_again: false,
+            recents_token: None,
         })
     }
 
@@ -354,6 +357,42 @@ impl LastOpenedWindowsPrompt {
             .iter()
             .any(|kit| kit.checked && kit.source_available)
     }
+
+    pub(in crate::app) fn skipped_recents(&self, prefs: &GuiPrefs, restore_selected: bool) -> SkippedSessionRecents {
+        let kits = self.kits.iter().filter(|kit| kit.source_kind == LastSessionSourceKind::LooseFolder)
+            .filter_map(|kit| {
+                let root = if let Some(profile) = kit.profile_id.as_deref()
+                    .and_then(|id| prefs.custom_editing_kit_profiles.iter().find(|profile| profile.id == id)) {
+                    crate::app::kits::validate_profile_layout(profile).ok()?.tags
+                } else {
+                    crate::core::source::resolve_folder_root(&kit.source_path, &prefs.ek_folder_aliases).ok()?.scan_root
+                };
+                let paths = kit.entries.iter().filter(|entry| entry.available
+                    && !(restore_selected && kit.checked && entry.checked))
+                    .filter_map(|entry| crate::app::browser::recent_relative_path(&root, entry.tag.path.as_ref()?)).collect();
+                Some((root, paths))
+            }).collect();
+        SkippedSessionRecents { token: self.recents_token.clone(), kits }
+    }
+}
+
+pub(in crate::app) struct SkippedSessionRecents {
+    token: Option<String>,
+    kits: Vec<(PathBuf, Vec<PathBuf>)>,
+}
+
+impl SkippedSessionRecents {
+    pub(in crate::app) fn apply(self, prefs: &mut GuiPrefs) {
+        if self.token.is_some() && self.token == prefs.recents_handled_session { return; }
+        let any_skipped = self.kits.iter().any(|(_, tags)| !tags.is_empty());
+        for (root, tags) in self.kits { prefs.remember_closed_tags(&root, tags); }
+        if any_skipped { prefs.recents_handled_session = self.token; }
+    }
+}
+
+pub(in crate::app) fn last_session_recents_token() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    Some(format!("{:x}", Sha256::digest(fs::read(last_session_path()).ok()?)))
 }
 use crate::app::kits::loading::loose_entry_key_for_canonical_path;
 
@@ -752,7 +791,7 @@ fn restore_path_row(
             egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(20.0, 0.0))),
             |ui| {
                 ui.horizontal_centered(|ui| {
-                    ui.checkbox(checked, "");
+                    ui.baboon_checkbox(checked, "");
                     let (icon_rect, _) =
                         ui.allocate_exact_size(Vec2::splat(BUTTON_ICON_SIZE), Sense::hover());
                     if folder {
@@ -819,7 +858,7 @@ fn restore_workspace_row(ui: &mut Ui, kit: &mut LastOpenedWindowsKit) -> (egui::
     }
     checkbox_ui.put(
         checkbox_rect,
-        egui::Checkbox::without_text(&mut kit.checked),
+        ThemedCheckbox::without_text(&mut kit.checked),
     );
     let text_rect = egui::Rect::from_min_size(
         egui::pos2(rect.left() + 32.0, rect.center().y - text_height * 0.5),
@@ -935,7 +974,7 @@ pub(in crate::app) fn render_last_opened_windows_prompt(
                     Vec2::new(ui.available_width(), 24.0),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                ui.checkbox(&mut prompt.dont_ask_again, "Don't ask me again")
+                ui.baboon_checkbox(&mut prompt.dont_ask_again, "Don't ask me again")
                     .on_hover_text("Remember this choice: Restore Selected always reopens the last session; Close All never does. Change it later in File > Settings.");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new("Close All").min_size(Vec2::new(78.0, 24.0))).clicked() {
@@ -1200,7 +1239,11 @@ pub(in crate::app) fn save_last_session(session: &LastSessionState) -> Result<()
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create session folder: {error}"))?;
     }
-    let text = serde_json::to_string_pretty(&session_value(session))
+    let mut value = session_value(session);
+    // New saves are distinct snapshots even when their open tabs are identical.
+    value["saved_at"] = json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_nanos().to_string());
+    let text = serde_json::to_string_pretty(&value)
         .map_err(|error| format!("Could not encode session: {error}"))?;
     // Atomic, as the doc above promises: this runs after every autosave, so a
     // plain write left a window for a crash to truncate the session to nothing.
@@ -1312,12 +1355,16 @@ impl Dialog for LastOpenedWindowsPrompt {
         match render_last_opened_windows_prompt(cx.egui, Some(self)) {
             LastOpenedWindowsAction::None => true,
             LastOpenedWindowsAction::Cancel { remember } => {
+                let skipped = self.skipped_recents(&cx.model.prefs, false);
+                cx.edit_prefs(move |prefs| skipped.apply(prefs));
                 if remember {
                     cx.edit_prefs(|prefs| prefs.session_restore = SessionRestore::Never);
                 }
                 false
             }
             LastOpenedWindowsAction::Restore { kits, remember } => {
+                let skipped = self.skipped_recents(&cx.model.prefs, true);
+                cx.edit_prefs(move |prefs| skipped.apply(prefs));
                 if remember {
                     cx.edit_prefs(|prefs| prefs.session_restore = SessionRestore::Always);
                 }
@@ -1334,6 +1381,38 @@ mod tests {
     use crate::core::test_kits::compat_json;
     use std::path::PathBuf;
     use std::path::Path;
+
+    #[test]
+    fn skipped_restore_tags_enter_recents_once_without_recording_restored_or_missing_tags() {
+        use crate::app::loose_fixture::*;
+        let kit = LooseKit::new("recents-skipped-session", "halo3_mcc");
+        for name in ["skipped", "restored", "missing", "newer"] {
+            kit.write_mcc(&format!("objects/{name}"), "model", |_| {});
+        }
+        let mut app = app();
+        kit.install(&mut app);
+        for name in ["skipped", "restored", "missing"] { kit.open(&mut app, &format!("objects/{name}.model")); }
+        let session = app.current_session_state().unwrap();
+        fs::remove_file(kit.path("objects/missing.model")).unwrap();
+        let mut prompt = LastOpenedWindowsPrompt::from_session(session, &[]).unwrap();
+        prompt.recents_token = Some("snapshot-one".to_owned());
+        prompt.kits[0].entries[0].checked = false;
+        let mut prefs = GuiPrefs::default();
+        prompt.skipped_recents(&prefs, true).apply(&mut prefs);
+        assert_eq!(prefs.editing_kit_recents[0].tags, vec![PathBuf::from("objects/skipped.model")]);
+        prefs.remember_closed_tags(&kit.root, vec![PathBuf::from("objects/newer.model")]);
+        prompt.skipped_recents(&prefs, true).apply(&mut prefs);
+        assert_eq!(prefs.editing_kit_recents[0].tags[0], Path::new("objects/newer.model"), "the same saved session must not reorder newer history");
+        prompt.recents_token = Some("snapshot-two".to_owned());
+        prompt.kits[0].checked = false;
+        prompt.skipped_recents(&prefs, true).apply(&mut prefs);
+        assert_eq!(&prefs.editing_kit_recents[0].tags[..2], [PathBuf::from("objects/skipped.model"), PathBuf::from("objects/restored.model")]);
+        prompt.recents_token = Some("snapshot-three".to_owned());
+        prompt.kits[0].checked = true;
+        prompt.kits[0].entries[0].checked = true;
+        prompt.skipped_recents(&prefs, false).apply(&mut prefs);
+        assert_eq!(prefs.recents_handled_session.as_deref(), Some("snapshot-three"), "Close All and Start fresh ignore checked states");
+    }
 
     /// Every completed load makes its own kit active, so a restore's focus can
     /// only be honoured once none are left in flight — otherwise whichever

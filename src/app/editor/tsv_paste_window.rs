@@ -28,7 +28,7 @@ impl Dialog for TsvPasteState {
                         .color(subtle_dark()),
                     );
                     ui.add_space(4.0);
-                    egui::ScrollArea::vertical()
+                    crate::app::ScrollArea::vertical()
                         .max_height(280.0)
                         .show(ui, |ui| {
                             ui.add(

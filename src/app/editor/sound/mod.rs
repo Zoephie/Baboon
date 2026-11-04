@@ -580,7 +580,7 @@ pub(super) fn draw_sound_output_controls(
         // H3 continues opening that missing bank while the combo says
         // "default".
         let before = current;
-        egui::ComboBox::from_id_salt("sound_language")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("sound_language")
             .selected_text(format!(
                 "\u{1F310} {}",
                 shown.map_or("default", |choice| choice.label.as_str())
@@ -1899,7 +1899,7 @@ pub(in crate::app) fn draw_sound_player(
                     .on_hover_text("Fraction of requests for this permutation that are ignored");
             }
             if has_inline_ogg {
-                ui.checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
+                ui.baboon_checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
                     "Extract CE audio as the tag's original Ogg stream (lossless) \
                      instead of decoding to WAV",
                 );
@@ -2378,7 +2378,7 @@ pub(in crate::app) fn draw_dialogue_summary(
         .id_salt("dialogue_vocalizations")
         .default_open(total <= 40)
         .show(ui, |ui| {
-            egui::ScrollArea::vertical()
+            crate::app::ScrollArea::vertical()
                 .id_salt("dialogue_overview_scroll")
                 .max_height(280.0)
                 .show(ui, |ui| {
@@ -2665,7 +2665,7 @@ pub(in crate::app) fn draw_material_effects_summary(
             ui.label(RichText::new("(no material entries)").color(subtle_dark()));
             return;
         }
-        egui::ScrollArea::vertical()
+        crate::app::ScrollArea::vertical()
             .id_salt("material_effects_overview_scroll")
             .max_height(280.0)
             .show(ui, |ui| {

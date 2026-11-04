@@ -648,7 +648,7 @@ impl Baboon {
             // it holds nothing unsaved, so its tab simply closes.
             let kit = &self.model.kits[active];
             if kit.parsed_tags.contains_key(&new) || kit.open_tabs.contains(&new) {
-                self.close_tab(&new);
+                self.close_tab_without_history(&new);
             }
             let KitMut { kit, view } = self.kit_and_view(active);
             rekey_tag_in_kit(kit, view, old, &new);
@@ -687,6 +687,27 @@ mod tests {
     use crate::app::documents::saving::new_tag_output_path_from_dialog;
     use crate::app::kits::loading::persist_entry_index_changes;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn save_as_replacing_an_open_tab_does_not_change_recents() {
+        use crate::app::loose_fixture::{LooseKit, app};
+        let fixture = LooseKit::new("save-as-recents", "halo3_mcc");
+        for name in ["closed", "source", "destination"] {
+            fixture.write_mcc(name, "model", |_| {});
+        }
+        let mut app = app();
+        fixture.install(&mut app);
+        let closed = fixture.open(&mut app, "closed.model");
+        app.close_tab(&closed);
+        let destination = fixture.open(&mut app, "destination.model");
+        let source = fixture.open(&mut app, "source.model");
+        let saved = app.model.entry_for_key(&destination).unwrap().clone();
+        let before = app.model.prefs.editing_kit_recents[0].tags.clone();
+        app.switch_to_saved_copy(&source, saved, Vec::new());
+        assert_eq!(app.model.prefs.editing_kit_recents[0].tags, before);
+        assert!(app.model.kits[0].open_tabs.contains(&destination));
+        assert!(!app.model.kits[0].open_tabs.contains(&source));
+    }
 
     /// Many exports share `ExportFinished`; one finishing while a level export
     /// runs used to end the level's job, hiding its progress and releasing

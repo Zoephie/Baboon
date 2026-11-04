@@ -340,7 +340,7 @@ pub(in crate::app) fn draw_shader_category_row(
         ui.add_enabled_ui(editable, |ui| {
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
-                egui::ComboBox::from_id_salt((
+                crate::app::ui_kit::ValueComboBox::from_id_salt((
                     edit.view_scope,
                     edit.tag_key,
                     "shader_category",
@@ -694,7 +694,7 @@ pub(in crate::app) fn draw_shader_flags_row(
     );
     measure.spacing_mut().item_spacing.y = 0.0;
     for option in &row.options {
-        measure.checkbox(&mut false, option.label);
+        measure.baboon_checkbox(&mut false, option.label);
     }
     let height = (measure.min_rect().height() + 16.0).max(BUTTON_HEIGHT + 8.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
@@ -732,7 +732,7 @@ pub(in crate::app) fn draw_shader_flags_row(
                     .push_id(
                         (edit.view_scope, edit.tag_key, &row.path, option.bit),
                         |ui| {
-                            ui.add_enabled(enabled, egui::Checkbox::new(&mut checked, option.label))
+                            ui.add_enabled(enabled, ThemedCheckbox::new(&mut checked, option.label))
                         },
                     )
                     .inner;

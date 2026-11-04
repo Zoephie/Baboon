@@ -4,6 +4,16 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Match the content inset of neighboring menu buttons without shifting tables.
+pub(in crate::app) fn menu_control_margin(ui: &Ui) -> egui::Margin {
+    let inset = if egui::containers::menu::is_in_menu(ui) {
+        ui.spacing().button_padding.x.round() as i8
+    } else {
+        0
+    };
+    egui::Margin::symmetric(inset, 0)
+}
+
 /// Shared dimensions for ordinary, single-line application buttons.
 pub(in crate::app) const BUTTON_HEIGHT: f32 = 24.0;
 pub(in crate::app) const BUTTON_ICON_SIZE: f32 = 16.0;
@@ -11,6 +21,22 @@ pub(in crate::app) const ICON_BUTTON_SIZE: Vec2 = Vec2::new(24.0, 24.0);
 /// Horizontal inset for text-only buttons. Icon-only buttons use their fixed
 /// 24×24 frame, leaving four points around the 16×16 glyph.
 pub(in crate::app) const BUTTON_TEXT_PADDING_X: f32 = 8.0;
+
+/// Shared full-width menu row styling for action menus and value pickers.
+pub(in crate::app) fn style_list_menu(ui: &mut Ui) {
+    ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+    ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
+    ui.spacing_mut().interact_size.y = 28.0;
+    ui.visuals_mut().override_text_color = Some(text_dark());
+    ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
+    ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    ui.visuals_mut().widgets.hovered.bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.hovered.weak_bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::NONE;
+    ui.visuals_mut().widgets.active.bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.active.weak_bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.active.bg_stroke = Stroke::NONE;
+}
 /// Visual separation between an icon and its label: two points of spacing
 /// plus the label's four-point inner inset from the design specification.
 pub(in crate::app) const BUTTON_ICON_TEXT_GAP: f32 = 6.0;
@@ -55,31 +81,43 @@ pub(in crate::app) fn paint_frame_band(
     });
 }
 
-/// Baboon's default for a single-row text field: keep text vertically centered.
-pub(in crate::app) fn singleline_text_edit(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
-    egui::TextEdit::singleline(text).vertical_align(egui::Align::Center)
-}
-
-/// The standard input with the shared error palette. A custom frame keeps
-/// the error border visible through hover and focus, with the usual padding.
-pub(in crate::app) fn singleline_text_edit_with_error<'a>(
-    ui: &Ui,
-    text: &'a mut dyn egui::TextBuffer,
-    invalid: bool,
-) -> egui::TextEdit<'a> {
-    let edit = singleline_text_edit(text);
-    if invalid {
-        edit.text_color(invalid_value_text()).frame(
-            egui::Frame::new()
-                .fill(invalid_value_fill())
-                .stroke(invalid_value_stroke())
-                .corner_radius(ui.visuals().widgets.inactive.corner_radius)
-                // The one-pixel stroke completes the usual 4-by-2 margin.
-                .inner_margin(egui::Margin::symmetric(3, 1)),
-        )
-    } else {
-        edit
-    }
+/// A popup's bottom action band, matching its header and reaching the window
+/// frame while retaining padded, normally laid out controls.
+pub(in crate::app) fn popup_footer<R>(
+    ui: &mut Ui,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let margin = ui.spacing().window_margin;
+    // The band includes the window's side and bottom margins. Count those
+    // toward the padding rather than adding them a second time below buttons.
+    let padding = 8.max(margin.left).max(margin.right).max(margin.bottom);
+    let inset = egui::Margin {
+        left: padding - margin.left,
+        right: padding - margin.right,
+        top: padding,
+        bottom: padding - margin.bottom,
+    };
+    let width = ui.available_width().max(ui.min_rect().right() - ui.next_widget_position().x);
+    let fill = ui.painter().add(egui::Shape::Noop);
+    let footer = egui::Frame::NONE
+        .inner_margin(inset)
+        .show(ui, |ui| {
+            ui.set_min_width((width - inset.sum().x).max(0.0));
+            contents(ui)
+        });
+    let mut band = footer.response.rect;
+    band.min.x -= f32::from(margin.left);
+    band.max.x += f32::from(margin.right);
+    band.max.y += f32::from(margin.bottom);
+    // The content clip normally excludes the window's padding. Only the
+    // background painter reaches into it, leaving control clipping intact.
+    let mut background_ui = ui.new_child(egui::UiBuilder::new().max_rect(footer.response.rect));
+    let extra = f32::from(margin.left.max(margin.right).max(margin.bottom))
+        + ui.visuals().window_stroke.width;
+    background_ui.set_clip_rect(ui.clip_rect().expand(extra).intersect(ui.ctx().content_rect()));
+    paint_frame_band(&background_ui, fill, band, ui.visuals().window_corner_radius,
+        ui.visuals().window_stroke, foundation_block_bar(), false);
+    footer
 }
 
 pub(in crate::app) fn paint_alpha_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
@@ -681,6 +719,23 @@ pub(in crate::app) fn invalid_value_stroke() -> Stroke {
     })
 }
 
+/// A rejected draft is visible for correction but is not part of the document.
+pub(in crate::app) fn unapplied_value_fill() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(54, 43, 24)
+    } else {
+        Color32::from_rgb(255, 247, 220)
+    }
+}
+
+pub(in crate::app) fn unapplied_value_text() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(240, 190, 90)
+    } else {
+        Color32::from_rgb(122, 80, 0)
+    }
+}
+
 /// Formatting tags in string list text: `<color …>`, `<br/>`.
 pub(in crate::app) fn markup_tag_text() -> Color32 {
     if is_dark_mode() {
@@ -721,17 +776,6 @@ pub(in crate::app) fn foundation_flag_hover() -> Color32 {
     } else {
         Color32::from_rgb(232, 232, 228)
     }
-}
-
-pub(in crate::app) fn foundation_checkbox_bg(enabled: bool) -> Color32 {
-    if !enabled {
-        return if is_dark_mode() {
-            Color32::from_rgb(44, 44, 42)
-        } else {
-            Color32::from_rgb(226, 226, 222)
-        };
-    }
-    foundation_input()
 }
 
 pub(in crate::app) const MATERIAL_PANEL: Color32 = Color32::from_rgb(238, 238, 235);
@@ -781,9 +825,9 @@ pub(in crate::app) fn foundation_block_edge() -> Color32 {
 
 pub(in crate::app) fn browser_search_bg() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(23, 23, 23)
+        Color32::from_black_alpha(102)
     } else {
-        Color32::from_rgb(246, 246, 244)
+        Color32::from_rgba_premultiplied(102, 102, 102, 102)
     }
 }
 
@@ -804,11 +848,7 @@ pub(in crate::app) fn browser_toolbar_active() -> Color32 {
 }
 
 pub(in crate::app) fn context_menu_hover() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(70, 70, 70)
-    } else {
-        Color32::from_rgb(220, 232, 238)
-    }
+    neutral_button_fill(is_dark_mode(), 26)
 }
 
 pub(in crate::app) fn disclosure_triangle_blue() -> Color32 {
@@ -903,6 +943,38 @@ pub(in crate::app) fn material_delete_text() -> Color32 {
     } else {
         Color32::DARK_RED
     }
+}
+
+/// Shared framed color preview for shader parameters and ordinary tag fields.
+pub(in crate::app) fn paint_color_preview(ui: &Ui, rect: egui::Rect, color: Color32) {
+    // Shader cells own their click responses. Resolve the same button palette
+    // without creating a competing interaction or changing the cell's width.
+    let hovered = ui.is_enabled() && ui.rect_contains_pointer(rect);
+    let visuals = if hovered && ui.input(|input| input.pointer.primary_down()) {
+        &ui.visuals().widgets.active
+    } else if hovered {
+        &ui.visuals().widgets.hovered
+    } else {
+        &ui.visuals().widgets.inactive
+    };
+    let frame = rect.expand(visuals.expansion);
+    ui.painter().rect_filled(frame, visuals.corner_radius, visuals.weak_bg_fill);
+    ui.painter().rect_stroke(frame, visuals.corner_radius, visuals.bg_stroke, egui::StrokeKind::Inside);
+    paint_color_preview_fill(ui, rect, color);
+}
+
+fn paint_color_preview_fill(ui: &Ui, rect: egui::Rect, color: Color32) {
+    let inner = rect.shrink(3.0);
+    ui.painter().rect_filled(inner, 0.0, Color32::from_rgb(color.r(), color.g(), color.b()));
+    ui.painter().rect_stroke(inner, 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Inside);
+}
+
+/// A color swatch with the standard button frame, including themed hover,
+/// focus and pressed borders and corner radii.
+pub(in crate::app) fn color_preview_button(ui: &mut Ui, size: Vec2, color: Color32) -> egui::Response {
+    let response = ui.add_sized(size, egui::Button::new(""));
+    paint_color_preview_fill(ui, response.rect, color);
+    response
 }
 
 pub(in crate::app) fn material_color_swatch_edge(color: Color32) -> Color32 {

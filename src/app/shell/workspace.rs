@@ -26,6 +26,7 @@ impl Baboon {
             self.apply_commands(ctx);
             return;
         }
+        self.handle_browser_selection_input(ctx);
         self.prepare_root_frame(ctx);
 
         let menu = self.menu_state(ctx);
@@ -44,7 +45,9 @@ impl Baboon {
         set_window_work_area(ctx, ui.available_rect_before_wrap());
 
         egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(editor_bg()))
+            .frame(Frame::NONE.fill(row_type()).inner_margin(egui::Margin {
+                top: 6, ..egui::Margin::ZERO
+            }))
             .show(ui, |ui| {
                 self.draw_workspace_tiles(ui, ctx);
             });
@@ -101,7 +104,7 @@ impl Baboon {
         // happened. Checked against the open tabs rather than hooked into each
         // close path, so a close confirmed after the save prompt counts and a
         // cancelled one does not.
-        let focus = self.model.kits.get(self.model.active).and_then(|kit| {
+        let focus = self.model.kits.get(self.model.active).filter(|_| !self.shell.home_open).and_then(|kit| {
             kit.selected_key
                 .clone()
                 .map(|key| crate::app::audio::SoundOwner { kit: kit.id, key })
@@ -285,6 +288,7 @@ impl Baboon {
             return;
         }
         let shortcuts = pressed_shortcuts(ctx);
+        let shortcuts = shortcuts.into_iter().filter(|_| !self.shell.home_open).collect::<Vec<_>>();
         // Save, close and poke act on the tags as they stand. Giving up the
         // focused field now, before any pane draws, lets it see the loss and
         // commit on this pass; given up when the action is applied, after
@@ -375,7 +379,7 @@ pub(in crate::app) fn draw_terminal_output(
     want_scroll_bottom: bool,
 ) {
     let gap = ui.spacing().item_spacing.y;
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .id_salt("terminal_output")
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
@@ -447,7 +451,7 @@ pub(in crate::app) fn draw_status_bar(
     available_update: Option<&UpdateCheckResult>,
 ) {
     let ctx = &ui.ctx().clone();
-    egui::Panel::bottom("status")
+    let bar = egui::Panel::bottom("status")
         .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
             left: 6,
             right: 6,
@@ -616,6 +620,8 @@ pub(in crate::app) fn draw_status_bar(
                 }
             });
         });
+    ui.painter().hline(bar.response.rect.x_range(), bar.response.rect.top() + 0.5,
+        Stroke::new(1.0, grid_line()));
 }
 
 /// The "please wait" window shown while the active kit is still indexing.
@@ -747,10 +753,7 @@ pub(in crate::app) fn draw_terminal_panel(
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if ui
-                                        .small_button("×")
-                                        .on_hover_text("Close terminal")
-                                        .clicked()
+                                    if ui.small_button("×").on_hover_text("Close terminal").clicked()
                                     {
                                         cx.send(KitsCommand::CloseTerminal);
                                     }

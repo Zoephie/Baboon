@@ -53,6 +53,7 @@ pub(in crate::app) fn pressed_shortcuts(ctx: &egui::Context) -> Vec<AppAction> {
 pub(in crate::app) enum AppAction {
     /// Make `kit`'s workspace the active one, for the actions sent after it.
     FocusKit(KitId),
+    ShowHome { group: egui_tiles::TileId },
     /// Run a file action on the next frame, once any edit that was focused
     /// when the menu took focus has been committed.
     Defer(DeferredFileAction),
@@ -130,6 +131,21 @@ impl Baboon {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.focus_kit(index);
                 }
+            }
+            AppAction::ShowHome { group } => {
+                if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) = self.kit_tree.tiles.get(group)
+                    && let Some(egui_tiles::Tile::Pane(kit)) = tabs.active.and_then(|id| self.kit_tree.tiles.get(id))
+                    && let Some(index) = self.model.kit_index(*kit)
+                {
+                    self.focus_kit(index);
+                }
+                self.shell.home_groups.insert(group);
+                self.shell.home_open = true;
+                self.clear_browser_selection(ctx);
+                ctx.memory_mut(|memory| {
+                    if let Some(id) = memory.focused() { memory.surrender_focus(id); }
+                });
+                ctx.request_repaint();
             }
             AppAction::Defer(action) => self.defer_file_action(action, ctx),
             AppAction::NewTag => {

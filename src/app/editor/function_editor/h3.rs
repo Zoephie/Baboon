@@ -130,7 +130,7 @@ fn foundation_master_type_combo(
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("foundation_fn_type")
+    crate::app::ui_kit::ValueComboBox::from_id_salt("foundation_fn_type")
         .selected_text(master_label(current))
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -206,7 +206,7 @@ fn color_type_combo(
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("function_color_type")
+    crate::app::ui_kit::ValueComboBox::from_id_salt("function_color_type")
         .selected_text(color_type_label(editor, current))
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -241,7 +241,7 @@ fn h2_function_type_combo(ui: &mut Ui, editor: &mut TagFunctionEditor, editable:
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("h2_function_type")
+    crate::app::ui_kit::ValueComboBox::from_id_salt("h2_function_type")
         .selected_text(label)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -463,7 +463,7 @@ fn draw_function_editor_contents(
                                         if ui
                                             .add_enabled(
                                                 editable,
-                                                egui::Checkbox::without_text(&mut ranged),
+                                                ThemedCheckbox::without_text(&mut ranged),
                                             )
                                             .changed()
                                             && set_function_ranged(&mut editor, ranged)
@@ -790,7 +790,7 @@ fn draw_foundation_right_rail(
                         Sense::hover()
                     },
                 );
-                paint_shader_color_preview(ui, rect, color);
+                paint_color_preview(ui, rect, color);
                 if response.clicked() {
                     *color_popup = Some(
                         MaterialColorPopup::new(
@@ -1043,7 +1043,7 @@ fn draw_curve_panel(
             ui.label(RichText::new("Curve Options").color(text_dark().gamma_multiply(0.5)));
             let mut clamped = editor.is_clamped();
             if ui
-                .add_enabled(editable, egui::Checkbox::new(&mut clamped, "Clamped"))
+                .add_enabled(editable, ThemedCheckbox::new(&mut clamped, "Clamped"))
                 .changed()
             {
                 set_editor_flag(editor, FunctionFlags::CLAMPED, clamped);
@@ -1051,7 +1051,7 @@ fn draw_curve_panel(
             }
             let mut cyclic = editor.is_cyclic();
             if ui
-                .add_enabled(editable, egui::Checkbox::new(&mut cyclic, "Cyclic"))
+                .add_enabled(editable, ThemedCheckbox::new(&mut cyclic, "Cyclic"))
                 .changed()
             {
                 set_function_cyclic(editor, cyclic);
@@ -1059,7 +1059,7 @@ fn draw_curve_panel(
             }
             let mut exclusion = editor.is_exclusion();
             if ui
-                .add_enabled(editable, egui::Checkbox::new(&mut exclusion, "Exclusion"))
+                .add_enabled(editable, ThemedCheckbox::new(&mut exclusion, "Exclusion"))
                 .changed()
             {
                 set_editor_flag(editor, FunctionFlags::EXCLUSION, exclusion);
@@ -1191,16 +1191,13 @@ fn periodic_function_combo(
     let current = params.function_index as usize;
     let label = names.get(current).copied().unwrap_or("unknown");
     let mut changed = false;
-    egui::ComboBox::from_id_salt(("periodic_function", slot))
+    crate::app::ui_kit::ValueComboBox::from_id_salt(("periodic_function", slot))
         .selected_text(label)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (index, label) in names.iter().enumerate() {
                 if ui
-                    .add_enabled(
-                        editable,
-                        egui::Button::selectable(index == current, *label),
-                    )
+                    .selectable_label_enabled(editable, index == current, *label)
                     .clicked()
                 {
                     params.function_index = index as u8;
@@ -1259,16 +1256,13 @@ fn transition_function_combo(
     let current = params.function_index as usize;
     let label = names.get(current).copied().unwrap_or("unknown");
     let mut changed = false;
-    egui::ComboBox::from_id_salt(("transition_function", slot))
+    crate::app::ui_kit::ValueComboBox::from_id_salt(("transition_function", slot))
         .selected_text(label)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (index, label) in names.iter().enumerate() {
                 if ui
-                    .add_enabled(
-                        editable,
-                        egui::Button::selectable(index == current, *label),
-                    )
+                    .selectable_label_enabled(editable, index == current, *label)
                     .clicked()
                 {
                     params.function_index = index as u8;
@@ -1645,7 +1639,8 @@ mod tests {
         assert!(label_pos("No selectable points").y > min.y);
         assert!(output.shapes.iter().any(|shape| matches!(
             &shape.shape, egui::Shape::Rect(rect)
-                if rect.rect.width() > 100.0 && rect.rect.height() == 24.0 && rect.corner_radius.nw == 3
+                if rect.rect.width() > 100.0 && rect.rect.height() == 24.0
+                    && rect.corner_radius == ctx.global_style().visuals.widgets.inactive.corner_radius
         )), "the color rail uses wide shader color preview buttons");
     }
 

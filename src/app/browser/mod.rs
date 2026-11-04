@@ -16,6 +16,12 @@ use crate::app::export::is_scenario_group;
 mod filter;
 mod folder_table;
 mod tree;
+mod navigation;
+mod recents;
+use recents::draw_recents;
+pub(in crate::app) use recents::recent_relative_path;
+use navigation::*;
+pub(in crate::app) use navigation::invalidate_browser_navigation;
 
 pub(super) use filter::*;
 pub(super) use folder_table::*;
@@ -89,6 +95,20 @@ pub(in crate::app) fn set_browser_modified_tags(ui: &Ui, modified: std::sync::Ar
 
 pub(in crate::app) fn browser_modified_tags(ui: &Ui) -> Option<std::sync::Arc<ModifiedTags>> {
     ui.data(|data| data.get_temp::<std::sync::Arc<ModifiedTags>>(modified_tags_id()))
+}
+
+// Each browser publishes its own selection while it draws, then saves it back
+// to its view state. This is independent of the active editor document.
+pub(in crate::app) fn set_browser_selected_tag(ui: &Ui, key: Option<String>) {
+    ui.data_mut(|data| data.insert_temp(egui::Id::new("browser_selected_tag"), key));
+}
+
+pub(in crate::app) fn browser_selected_tag(ui: &Ui) -> Option<String> {
+    ui.data(|data| data.get_temp::<Option<String>>(egui::Id::new("browser_selected_tag"))).flatten()
+}
+
+fn browser_selection_owner_id() -> egui::Id {
+    egui::Id::new("browser_selection_owner")
 }
 
 fn favorite_folders_id() -> egui::Id {
@@ -336,6 +356,9 @@ pub(in crate::app) struct BrowserFeature {
 /// each with what it was built from.
 #[derive(Default)]
 pub(in crate::app) struct KitBrowser {
+    pub(in crate::app) recent_entries: Vec<TagEntry>,
+    /// Tag key or `folder_pane_key` selected independently of the editor tabs.
+    pub(in crate::app) selected_tag: Option<String>,
     /// How this kit's browser lists tags, and in what order. Per kit because
     /// the useful view differs by game — a folder-organized editing kit reads
     /// best as Folders while a container source reads best as Groups — and two
@@ -369,6 +392,18 @@ pub(in crate::app) struct KitBrowser {
 }
 
 impl KitBrowser {
+    pub(in crate::app) fn remap_tag_selection(&mut self, mut map: impl FnMut(&str) -> Option<String>) {
+        for selected in std::iter::once(&mut self.selected_tag)
+            .chain(self.folder_browsers.values_mut().map(|pane| &mut pane.selected_tag))
+        {
+            if let Some(key) = selected.as_deref()
+                && let Some(new_key) = map(key)
+            {
+                *selected = Some(new_key);
+            }
+        }
+    }
+
     /// A browser opening in this view, with nothing filtered or cached yet.
     pub(in crate::app) fn new(
         mode: BrowserMode,

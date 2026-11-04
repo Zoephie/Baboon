@@ -66,6 +66,14 @@ pub(super) fn findable_galley(
     ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
+pub(super) fn findable_wrapped_galley(
+    ui: &Ui, text: &str, font_id: FontId, color: Color32, kind: FindTargetKind,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = findable_layout_job(ui, text, font_id, color, kind);
+    job.wrap.max_width = ui.available_width().max(1.0);
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
 /// Return whether the current Foundation cell has a rendered match of `kind`.
 pub(in crate::app) fn findable_text_has_match(ui: &Ui, text: &str, kind: FindTargetKind) -> bool {
     findable_highlight_data(ui, text, kind).is_some()
@@ -185,13 +193,28 @@ fn findable_layout_job(
 }
 
 pub(in crate::app) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Option<&str>) {
-    let width = FOUNDATION_LABEL_WIDTH;
+    foundation_label_cell_inner(ui, text, help, false, 0.0);
+}
+
+pub(super) fn foundation_stacked_label_cell(ui: &mut Ui, text: &str, help: Option<&str>) {
+    foundation_label_cell_inner(ui, text, help, true, 0.0);
+}
+
+pub(super) fn foundation_label_cell_with_trailing_space(ui: &mut Ui, text: &str, help: Option<&str>, reserve: f32) {
+    foundation_label_cell_inner(ui, text, help, false, reserve);
+}
+
+fn foundation_label_cell_inner(ui: &mut Ui, text: &str, help: Option<&str>, stacked: bool, reserve: f32) {
+    let width = if stacked { ui.available_width().max(1.0) }
+        else { FOUNDATION_LABEL_WIDTH.min(ui.available_width().max(1.0)) };
     let height = 24.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     // Reserve a gutter for the "?" documentation cue. Foundation always reserves
     // the space (the cue is Hidden, not Collapsed, when absent) so field names
     // stay aligned whether or not a field has a doc string.
-    let gutter = 11.0;
+    let gutter = FOUNDATION_LABEL_INSET;
+    let shown = truncate_for_cell(text, width - gutter - 4.0 - reserve);
+    let truncated = shown != text;
     if help.is_some() {
         // The cue: a bold blue "?" left of the name (Foundation uses #3DA1CC).
         ui.painter().text(
@@ -202,8 +225,6 @@ pub(in crate::app) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Optio
             Color32::from_rgb(61, 161, 204),
         );
     }
-    let shown = truncate_for_cell(text, width - gutter - 4.0);
-    let truncated = shown != text;
     paint_findable_text(
         ui,
         rect.left_center() + Vec2::new(gutter, 0.0),
@@ -340,11 +361,15 @@ fn foundation_value_text_filled_with_placeholder(
     // keeps its red). It still takes focus, so its text can be copied.
     let read_only = !text.is_mutable();
     let invalid = fill == Some(invalid_value_fill());
-    let fill = fill.unwrap_or(if read_only { foundation_input_read_only() } else { foundation_input() });
+    let unapplied = fill == Some(unapplied_value_fill());
+    let status_color = if unapplied { unapplied_value_text() } else { invalid_value_text() };
+    let state = if invalid { InputState::Invalid } else if unapplied { InputState::Warning } else { InputState::Normal };
+    let appearance = input_appearance(ui, state, read_only, false);
+    let fill = fill.unwrap_or(appearance.fill);
     let color = if read_only && color == text_dark() { subtle_dark() } else { color };
-    ui.painter().rect_filled(rect, 0.0, fill);
+    ui.painter().rect_filled(rect, appearance.corners, fill);
     let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
-    let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), invalid_value_text()));
+    let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
     let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
     let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
         findable_galley(ui, text.as_str(), font_id.clone(), color, FindTargetKind::Value)
@@ -374,18 +399,12 @@ fn foundation_value_text_filled_with_placeholder(
     if showing_placeholder { ui.visuals_mut().weak_text_color = Some(text_dark().gamma_multiply(0.5)); }
     let response = ui.put(rect, edit);
     if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
-    let stroke = if invalid {
-        invalid_value_stroke()
-    } else if response.has_focus() {
-        ui.visuals().selection.stroke
-    } else {
-        Stroke::new(1.0_f32, foundation_input_edge())
-    };
-    ui.painter().rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
+    let appearance = input_appearance(ui, state, read_only, response.has_focus());
+    ui.painter().rect_stroke(rect, appearance.corners, appearance.stroke, egui::StrokeKind::Middle);
     if let Some(status) = status {
         ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
             egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
-            status, invalid_value_text());
+            status, status_color);
     }
     text_edit_cursor_to_start_on_tab_focus(ui, &response);
     response
@@ -395,10 +414,9 @@ fn tag_reference_value_width(available: f32) -> f32 {
     available.min(520.0).max(300.0)
 }
 
-pub(in crate::app) fn shared_tag_reference_value_width(ui: &Ui, depth: usize) -> f32 {
-    let indent = depth as f32 * 12.0;
+pub(in crate::app) fn shared_tag_reference_value_width(ui: &Ui, _depth: usize) -> f32 {
     let available =
-        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - 260.0).clamp(220.0, 760.0);
+        (ui.available_width() - FOUNDATION_LABEL_WIDTH - 260.0).clamp(220.0, 760.0);
     tag_reference_value_width(available)
 }
 
@@ -451,6 +469,7 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
     id: egui::Id,
     icon: TagIcon,
     missing: bool,
+    rejected: Option<(&str, &str)>,
 ) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
     let response = foundation_value_text_filled(
@@ -458,13 +477,15 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
         rect,
         text,
         Some(id),
-        if missing { invalid_value_text() } else { text_dark() },
+        if missing && rejected.is_none() { invalid_value_text() } else { text_dark() },
         tag_reference_icon_footprint(),
-        missing.then(invalid_value_fill),
-        missing.then_some("missing"),
+        if rejected.is_some() { Some(unapplied_value_fill()) } else { missing.then(invalid_value_fill) },
+        if let Some((label, _)) = rejected { Some(label) } else { missing.then_some("missing") },
     );
     paint_tag_reference_icon(ui, rect, icon);
-    if missing {
+    if let Some((_, reason)) = rejected {
+        response.on_hover_text(format!("{reason}\nThis text was not applied. Saving keeps the last accepted reference.\nCorrect the value, or press Esc in this field to restore the accepted value."))
+    } else if missing {
         response.on_hover_text("Referenced tag not found on disk")
     } else {
         response
@@ -484,14 +505,12 @@ pub(in crate::app) fn text_edit_cursor_to_start_on_tab_focus(ui: &Ui, response: 
     }
 }
 
-pub(in crate::app) fn foundation_value_width(value: &str, available: f32) -> f32 {
-    if value.len() > 48 {
-        available
-    } else if value.len() > 18 {
-        available.min(520.0).max(300.0)
-    } else {
-        available.min(180.0).max(140.0)
-    }
+pub(in crate::app) fn foundation_value_width(ui: &Ui, value: &str, available: f32) -> f32 {
+    // Match the input's font and padding. Character-count bands caused short
+    // identifiers to jump to a wider box despite fitting the normal width.
+    let font = ui.style().text_styles[&TextStyle::Monospace].clone();
+    let text_width = ui.painter().layout_no_wrap(value.to_owned(), font, text_dark()).size().x;
+    (text_width + 2.0 * VALUE_PADDING + 2.0).max(180.0).min(available.max(1.0))
 }
 
 pub(in crate::app) fn flag_value_parts(value: &TagFieldData) -> Option<(u64, Vec<(u32, String)>)> {
@@ -943,7 +962,10 @@ pub(in crate::app) fn picker_results<R>(
         if filter_changed {
             scroll = scroll.vertical_scroll_offset(0.0);
         }
-        scroll.show(ui, add_contents).inner
+        scroll.show(ui, |ui| {
+            style_list_menu(ui);
+            ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), add_contents).inner
+        }).inner
     })
     .inner
 }
@@ -1061,6 +1083,78 @@ pub(in crate::app) fn search_clear_control_at(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn searchable_picker_rows_fill_the_list_width() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+            ui.set_width(320.0);
+            picker_results(ui, 180.0, false, |ui| {
+                let available = ui.available_width();
+                for (selected, label) in [(false, "<None>"), (true, "0. minor"), (false, "1. another entry")] {
+                    let row = ui.selectable_label(selected, label);
+                    assert!((row.rect.width() - available).abs() < 1.0,
+                        "{label}: row width {} must fill list width {available}", row.rect.width());
+                    assert!(row.rect.height() >= 28.0, "pickers share the standard menu row height");
+                }
+                assert_eq!(ui.visuals().widgets.hovered.weak_bg_fill, context_menu_hover());
+            });
+        });
+    }
+
+    #[test]
+    fn standard_inputs_and_tag_values_share_rounded_frames_and_validation_states() {
+        for dark in [false, true] {
+            for state in [InputState::Normal, InputState::Invalid, InputState::Warning] {
+                for focused in [false, true] {
+                    let ctx = egui::Context::default();
+                    let mut style = foundation_style();
+                    style.visuals = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+                    ctx.set_global_style(style);
+                    let id = egui::Id::new("shared_input");
+                    let mut standard_rect = egui::Rect::NOTHING;
+                    let mut tag_rect = egui::Rect::NOTHING;
+                    let mut expected_stroke = Stroke::NONE;
+                    let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                        if focused { ui.memory_mut(|memory| memory.request_focus(id)); }
+                        let mut value = "example".to_owned();
+                        standard_rect = ui.add(singleline_text_edit(&mut value).id(id)
+                            .desired_width(180.0).validation_state(state)).rect;
+                        let (_, rect) = ui.allocate_space(standard_rect.size());
+                        tag_rect = rect;
+                        let tag_id = egui::Id::new("shared_tag_input");
+                        if focused { ui.memory_mut(|memory| memory.request_focus(tag_id)); }
+                        let fill = match state {
+                            InputState::Normal => None,
+                            InputState::Invalid => Some(invalid_value_fill()),
+                            InputState::Warning => Some(unapplied_value_fill()),
+                        };
+                        foundation_value_text_filled(ui, rect, &mut value, Some(tag_id), text_dark(), 4.0, fill, None);
+                        expected_stroke = match state {
+                            InputState::Invalid => invalid_value_stroke(),
+                            InputState::Warning => Stroke::new(1.0, unapplied_value_text()),
+                            InputState::Normal if focused => ui.visuals().selection.stroke,
+                            InputState::Normal => Stroke::new(1.0, foundation_input_edge()),
+                        };
+                    });
+                    let border = |rect| output.shapes.iter().find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(shape) if shape.rect == rect && shape.stroke.width > 0.0 => Some(shape),
+                        _ => None,
+                    }).expect("input has a visible border");
+                    for rect in [standard_rect, tag_rect] {
+                        assert_eq!(border(rect).corner_radius, egui::CornerRadius::same(2));
+                        assert_eq!(border(rect).stroke, expected_stroke, "validation border survives focus");
+                    }
+                    let fill = |rect| output.shapes.iter().find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(shape) if shape.rect == rect && shape.fill != Color32::TRANSPARENT => Some(shape.fill),
+                        _ => None,
+                    }).unwrap();
+                    assert_eq!(fill(standard_rect), fill(tag_rect));
+                }
+            }
+        }
+    }
+
     /// A read-only value is laid out like an editable one: its text starts
     /// as far into the box, in the same font.
     #[test]
@@ -1111,6 +1205,7 @@ mod tests {
                             egui::Id::new("reference"),
                             icon,
                             false,
+                            None,
                         )
                         .rect;
                     });
@@ -1669,7 +1764,7 @@ mod tests {
                     // browser starts outside the editor.
                     let (_, source) = ui.allocate_exact_size(egui::vec2(100.0, 60.0), egui::Sense::drag());
                     source.dnd_set_drag_payload(7_u32);
-                    let output = egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    let output = crate::app::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         if take_wheel {
                             scroll_during_drag(ui);
                         }

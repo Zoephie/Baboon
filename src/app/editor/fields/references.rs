@@ -223,7 +223,6 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     value_width: f32,
 ) {
     let suffix = "tag reference";
-    let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
     let droppable = edit.can_edit(meta);
@@ -231,10 +230,46 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
 
     let hierarchy = group_hierarchy(edit.definitions_root, edit.game);
     let accepted = tag_reference_accepted_groups(meta, &hierarchy);
-    let row_response = ui
-        .horizontal(|ui| {
-            ui.add_space(indent);
-            foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    let mut rejected = (draft.text.trim() != value.trim()).then(|| {
+        tag_reference_input_ops(path, &draft.text, accepted.as_deref(), edit.names, edit.game).err().map(|reason| {
+            let wrong_type = parse_tag_reference(&tag_reference_input_in_game(&draft.text, edit.game))
+                .ok().and_then(|reference| reference.group_tag_and_name)
+                .is_some_and(|(group, _)| hierarchy.name(group).is_some()
+                    || edit.names.and_then(|names| names.name_for(group)).is_some()
+                    || blam_tags::paths::group_tag_to_extension(group).is_some());
+            (if wrong_type { "wrong tag type" } else { "invalid reference" }, reason)
+        })
+    }).flatten();
+    if rejected.is_some() && ui.memory(|memory| memory.has_focus(id) || memory.had_focus_last_frame(id))
+        && ui.input(|input| input.key_pressed(egui::Key::Escape))
+    {
+        draft.set_clean(value);
+        rejected = None;
+    }
+    // A prefix of an accepted extension can itself be another group's FOURCC
+    // (e.g. `.mode` while typing `.model`). Keep that draft neutral until submit
+    // or blur, while complete incompatible extensions still warn immediately.
+    let editing_draft = draft.changed && ui.memory(|memory| memory.has_focus(id));
+    let unfinished_extension = editing_draft && rejected.is_some() && draft.text.trim().rsplit_once('.').is_some_and(|(_, extension)| {
+        let prefix = extension.to_ascii_lowercase();
+        accepted.as_ref().is_some_and(|groups| groups.iter().any(|group| {
+            hierarchy.name(*group)
+                .or_else(|| edit.names.and_then(|names| names.name_for(*group)))
+                .or_else(|| blam_tags::paths::group_tag_to_extension(*group))
+                .is_some_and(|name| name.len() > prefix.len() && name.to_ascii_lowercase().starts_with(&prefix))
+        }))
+    });
+    if rejected.as_ref().is_some_and(|(label, _)| *label == "invalid reference" || unfinished_extension)
+        && editing_draft
+    {
+        rejected = None;
+    }
+    let stacked = stacked_field_row(ui);
+    let row_response = foundation_field_row(ui, meta, depth, |ui| {
+            let value_width = if stacked {
+                (ui.available_size_before_wrap().x - 4.0 * (ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x)
+                    - foundation_caption_space(ui, suffix) - 2.0).max(1.0)
+            } else { value_width };
             let editable = droppable;
             let has_ref = target.is_some();
             let icon_group =
@@ -253,10 +288,14 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     id,
                     icon,
                     missing,
+                    rejected.as_ref().map(|(label, reason)| (*label, reason.as_str())),
                 );
+
+                if response.changed() { ui.ctx().request_repaint(); }
 
                 draft.note_response(&response);
                 if draft.should_commit(ui, &response) {
+                    ui.ctx().request_repaint();
                     let input = draft.text.trim().to_owned();
                     commit_tag_reference_input(
                         edit.pending,
@@ -524,17 +563,14 @@ pub(super) fn tag_reference_input_ops(
 ) -> Result<DeferredOps, String> {
     let input = tag_reference_input_in_game(input, game);
     let input = input.as_ref();
-    if let Some(accepted) = accepted {
-        match parse_tag_reference(input) {
-            Ok(parsed) if tag_reference_group_allowed(&parsed, accepted) => {}
-            Ok(_) => {
-                return Err(format!(
-                    "Reference must be a {} tag",
-                    accepted_groups_label(accepted, names)
-                ));
-            }
-            Err(error) => return Err(format!("Invalid tag reference: {error}")),
-        }
+    let parsed = parse_tag_reference(input).map_err(|error| format!("Invalid tag reference: {error}"))?;
+    if let Some(accepted) = accepted
+        && !tag_reference_group_allowed(&parsed, accepted)
+    {
+        return Err(format!(
+            "Reference must be a {} tag",
+            accepted_groups_label(accepted, names)
+        ));
     }
     Ok(field_edit_ops(path, input))
 }
@@ -750,7 +786,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
     flag_names: &[(u32, String)],
     field: TagField<'_>,
 
-    depth: usize,
+    _depth: usize,
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
@@ -780,16 +816,19 @@ pub(in crate::app) fn draw_foundation_flags_row(
         .filter(|(_, option, _)| !option.advanced || edit.expert_mode)
         .collect::<Vec<_>>();
 
-    let indent = depth as f32 * 12.0;
-    let row_width = ui.available_width().max(620.0);
-    let panel_width = (row_width - indent - FOUNDATION_LABEL_WIDTH - 40.0).clamp(360.0, 760.0);
+    let stacked = stacked_field_row(ui);
+    let row_width = ui.available_width();
+    let label_height = if stacked { 26.0 } else { 0.0 };
+    let panel_width = if stacked { (row_width - FOUNDATION_LABEL_INSET).max(1.0) }
+        else { (row_width - FOUNDATION_LABEL_WIDTH - 40.0).clamp(360.0, 760.0) };
     let flag_row_height = 21.0;
     let panel_height = if display_flags.is_empty() {
         32.0
     } else {
-        12.0 + flag_row_height * display_flags.len() as f32 + 24.0
+        12.0 + flag_row_height * display_flags.len() as f32
+            + if edit.expert_mode { 24.0 } else { 0.0 }
     };
-    let total_height = panel_height.max(32.0);
+    let total_height = panel_height.max(32.0) + label_height;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(row_width, total_height), Sense::hover());
     let painter = ui.painter().clone();
 
@@ -798,21 +837,26 @@ pub(in crate::app) fn draw_foundation_flags_row(
     let mut label_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(egui::Rect::from_min_size(
-                rect.left_top() + Vec2::new(indent, 4.0),
+                rect.left_top() + Vec2::new(0.0, 4.0),
                 Vec2::new(FOUNDATION_LABEL_WIDTH, 24.0),
             ))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    foundation_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
+    if stacked {
+        foundation_stacked_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
+    } else {
+        foundation_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
+    }
 
     let flags_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x, 0.0),
+        rect.left_top() + Vec2::new(if stacked { FOUNDATION_LABEL_INSET }
+            else { FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x }, label_height),
         Vec2::new(panel_width, panel_height),
     );
-    painter.rect_filled(flags_rect, 0.0, foundation_input());
+    painter.rect_filled(flags_rect, INPUT_CORNER_RADIUS, foundation_input());
     painter.rect_stroke(
         flags_rect,
-        0.0,
+        INPUT_CORNER_RADIUS,
         Stroke::new(1.0_f32, foundation_input_edge()),
         egui::StrokeKind::Middle,
     );
@@ -822,7 +866,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
             ui,
             flags_rect.left_center() + Vec2::new(8.0, 0.0),
             Align2::LEFT_CENTER,
-            &format!("0x{raw:04X} (none set)"),
+            &if edit.expert_mode { format!("0x{raw:04X} (none set)") } else { "No visible flags".to_owned() },
             FontId::proportional(12.5),
             text_dark(),
             FindTargetKind::Value,
@@ -837,8 +881,8 @@ pub(in crate::app) fn draw_foundation_flags_row(
                 Vec2::new(flags_rect.width() - 16.0, flag_row_height),
             );
             let checkbox_rect = egui::Rect::from_min_size(
-                row_rect.left_top() + Vec2::new(0.0, 3.0),
-                Vec2::splat(13.0),
+                row_rect.left_top() + Vec2::new(0.0, 2.5),
+                Vec2::splat(16.0),
             );
             let enabled = edit.can_edit(meta);
             let response = ui.interact(
@@ -858,30 +902,10 @@ pub(in crate::app) fn draw_foundation_flags_row(
                 });
             }
 
-            painter.rect_filled(checkbox_rect, 0.0, foundation_checkbox_bg(enabled));
-            painter.rect_stroke(
-                checkbox_rect,
-                0.0,
-                Stroke::new(1.0_f32, foundation_input_edge()),
-                egui::StrokeKind::Middle,
-            );
-            if *is_set {
-                let stroke = Stroke::new(1.6_f32, text_dark());
-                painter.line_segment(
-                    [
-                        checkbox_rect.left_center() + Vec2::new(3.0, 0.0),
-                        checkbox_rect.center() + Vec2::new(-1.0, 3.0),
-                    ],
-                    stroke,
-                );
-                painter.line_segment(
-                    [
-                        checkbox_rect.center() + Vec2::new(-1.0, 3.0),
-                        checkbox_rect.right_center() + Vec2::new(-2.0, -4.0),
-                    ],
-                    stroke,
-                );
-            }
+            let mut checkbox_ui = ui.new_child(egui::UiBuilder::new().max_rect(checkbox_rect));
+            if !enabled { checkbox_ui.disable(); }
+            paint_checkbox_at(&checkbox_ui, checkbox_rect, *is_set,
+                response.hovered() || response.has_focus());
 
             paint_findable_text(
                 ui,
@@ -908,24 +932,169 @@ pub(in crate::app) fn draw_foundation_flags_row(
             }
         }
 
-        paint_findable_text(
-            ui,
-            flags_rect.left_bottom() + Vec2::new(8.0, -5.0),
-            Align2::LEFT_BOTTOM,
-            &format!("0x{raw:04X}"),
-            FontId::proportional(11.5),
-            subtle_dark(),
-            FindTargetKind::Value,
-        );
+        if edit.expert_mode {
+            paint_findable_text(
+                ui,
+                flags_rect.left_bottom() + Vec2::new(8.0, -5.0),
+                Align2::LEFT_BOTTOM,
+                &format!("0x{raw:04X}"),
+                FontId::proportional(11.5),
+                subtle_dark(),
+                FindTargetKind::Value,
+            );
+        }
     }
 
-    ui.add_space(4.0);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::editor::{model_source_dir, sanitize_ref_path};
+
+    #[test]
+    fn rejected_reference_draft_is_marked_wrong_tag_type_in_its_field() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "tag");
+        edit.editable = true;
+        edit.game = Some(GameId::Halo3);
+        let mut meta = field_display_meta("bitmap");
+        meta.tag_reference_allowed = vec![u32::from_be_bytes(*b"bitm")];
+        let draft = edit.buffers.draft_mut("tag|bitmap", "NONE");
+        draft.text = "objects\\wrong.model".to_owned();
+        draft.changed = true;
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1100.0, 200.0))),
+            ..Default::default()
+        }, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                draw_foundation_tag_reference_row(ui, &meta, "NONE", None, None, 0, "bitmap", &mut edit, 320.0);
+            });
+        });
+        assert!(edit.pending.is_empty(), "a mismatched type must not enter the document");
+        let commits = edit.buffers.take_uncommitted(DraftFlush::All);
+        assert!(commits[0].1.as_ref().is_err_and(|message| message.contains("bitmap")));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "wrong tag type")),
+            "the rejected reference needs a persistent in-field warning");
+    }
+
+    #[test]
+    fn typing_an_accepted_extension_does_not_flash_another_fourcc_type() {
+        for (group, extension) in [(b"hlmt", "model"), (b"scnr", "scenario")] {
+            let ctx = egui::Context::default();
+            ctx.set_global_style(foundation_style());
+            let mut sinks = EditSinks::default();
+            let mut edit = FieldEditContext::read_only(&mut sinks, "test", "tag");
+            edit.editable = true;
+            edit.game = Some(GameId::Halo3);
+            let mut meta = field_display_meta("reference");
+            meta.tag_reference_allowed = vec![u32::from_be_bytes(*group)];
+            let key = "tag|reference".to_owned();
+            let id = edit.widget_id(("tag_ref", &key));
+            for length in 1..=extension.len() {
+                let draft = edit.buffers.draft_mut(&key, "NONE");
+                draft.text = format!("objects\\example.{}", &extension[..length]);
+                draft.changed = true;
+                ctx.memory_mut(|memory| memory.request_focus(id));
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    draw_foundation_tag_reference_row(ui, &meta, "NONE", None, None, 0, "reference", &mut edit, 320.0);
+                });
+                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text() == "wrong tag type")), "{extension}, prefix length {length}");
+            }
+        }
+    }
+
+    #[test]
+    fn reference_warnings_wait_for_unfinished_typing_but_show_wrong_types_immediately() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "tag");
+        edit.editable = true;
+        edit.game = Some(GameId::Halo3);
+        let mut meta = field_display_meta("bitmap");
+        meta.tag_reference_allowed = vec![u32::from_be_bytes(*b"bitm")];
+        let key = "tag|bitmap".to_owned();
+        let id = edit.widget_id(("tag_ref", &key));
+        let frame = |edit: &mut FieldEditContext<'_>, events| {
+            crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1100.0, 200.0))),
+                events, ..Default::default()
+            }, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_foundation_tag_reference_row(ui, &meta, "NONE", None, None, 0, "bitmap", edit, 320.0);
+                });
+            })
+        };
+        let has_warning = |output: &egui::FullOutput, label| output.shapes.iter().any(|shape|
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label));
+        frame(&mut edit, Vec::new());
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        for (text, expected) in [
+            ("objects\\partial", None),
+            ("objects\\partial.bi", None),
+            ("objects\\partial.bitm", None),
+            ("objects\\wrong.model", Some("wrong tag type")),
+            ("objects\\correct.bitmap", None),
+            ("objects\\partial", None),
+        ] {
+            let draft = edit.buffers.draft_mut(&key, "NONE");
+            draft.text = text.to_owned();
+            draft.changed = true;
+            let output = frame(&mut edit, Vec::new());
+            assert_eq!(has_warning(&output, "wrong tag type"), expected == Some("wrong tag type"), "{text}");
+            assert!(!has_warning(&output, "invalid reference"), "unfinished typing must stay neutral: {text}");
+        }
+        ctx.memory_mut(|memory| memory.surrender_focus(id));
+        let output = frame(&mut edit, Vec::new());
+        assert!(has_warning(&output, "invalid reference"), "leaving invalid text must show a warning");
+        // A rejected submit remains marked on refocus until typing resumes.
+        edit.buffers.take_uncommitted(DraftFlush::All);
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        let output = frame(&mut edit, Vec::new());
+        assert!(has_warning(&output, "invalid reference"));
+        let output = frame(&mut edit, vec![egui::Event::Key {
+            key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(!has_warning(&output, "invalid reference"));
+        assert_eq!(edit.buffers.draft_mut(&key, "NONE").text, "NONE");
+    }
+
+    #[test]
+    fn rejected_reference_draft_keeps_the_previous_reference_when_other_edits_are_saved() {
+        use crate::app::loose_fixture::{LooseKit, edit_field, group_tag, real_of, reference_of, set_reference};
+        let fixture = LooseKit::new("rejected-reference-save", "halo3_mcc");
+        let render_model = group_tag("halo3_mcc", "render_model");
+        fixture.write_mcc("objects\\example", "model", |tag| {
+            set_reference(tag, "render model", render_model, "objects\\previous");
+        });
+        let mut app = Baboon::for_test();
+        fixture.install(&mut app);
+        let key = fixture.open(&mut app, "objects\\example.model");
+        let id = app.model.kits[0].id;
+        let draft_key = format!("{key}|render model");
+        let draft = app.views[id].edit_buffers.draft_mut(&draft_key, "objects\\previous.render_model");
+        draft.text = "objects\\wrong.bitmap".to_owned();
+        draft.changed = true;
+        draft.keep_commit(|| DraftCommit::new(&key, vec![draft_key.clone()], move |texts| {
+            tag_reference_input_ops("render model", texts[0], Some(&[render_model]), None, Some(GameId::Halo3))
+        }));
+        app.commit_drafts(DraftFlush::All);
+        assert!(!app.model.kits[0].parsed_tags[&key].dirty.is_set());
+        assert!(app.model.status.contains("render_model"));
+        edit_field(&mut app, &key, "disappear distance", "12.5");
+        app.save_tag_by_key(&key).expect("other valid changes still save");
+        let saved = blam_tags::TagFile::read(fixture.path("objects\\example.model")).unwrap();
+        assert_eq!(reference_of(&saved, "render model").as_deref(), Some("objects\\previous"));
+        assert_eq!(real_of(&saved, "disappear distance"), Some(12.5));
+        let draft = app.views[id].edit_buffers.draft_mut(&draft_key, "objects\\previous.render_model");
+        assert_eq!(draft.text, "objects\\wrong.bitmap", "the rejected draft stays visible until corrected or discarded");
+    }
 
     #[test]
     fn missing_reference_status_does_not_shift_row_actions() {
@@ -1009,7 +1178,6 @@ mod tests {
         let mut value_left = 0.0;
         let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             ui.horizontal(|ui| {
-                ui.add_space(12.0);
                 foundation_label_cell(ui, "otherrow", None);
                 value_left = ui.allocate_exact_size(Vec2::new(100.0, 24.0), Sense::hover()).0.left();
             });
@@ -1073,7 +1241,10 @@ mod tests {
         assert!(normal.iter().all(|text| !text.contains(['#', '!', '*'])), "{normal:?}");
         assert!(!normal.iter().any(|text| text == "unused0"), "{normal:?}");
 
+        assert!(normal.iter().all(|text| !text.starts_with("0x")), "normal mode hides raw flag values: {normal:?}");
+
         let expert = painted(true);
+        assert!(expert.iter().any(|text| text.starts_with("0x")), "expert mode retains raw flag values: {expert:?}");
         assert!(expert.iter().any(|text| text == "unused0"), "{expert:?}");
         assert!(expert.len() > normal.len(), "expert mode lists the `!` options too");
     }

@@ -505,7 +505,7 @@ impl Baboon {
                             // Scrolled within its own pane: an editor row is
                             // wider than half a dialog, and without this the
                             // window grows to fit it every frame.
-                            egui::ScrollArea::horizontal()
+                            crate::app::ScrollArea::horizontal()
                                 .id_salt((title, &element))
                                 // Fill the pane's width, but only as tall as
                                 // what is in it.
@@ -748,7 +748,7 @@ impl Dialog for ModExportDialog {
                     160.0
                 };
                 let list_height = (ui.available_height() - reserve).max(120.0);
-                egui::ScrollArea::vertical()
+                crate::app::ScrollArea::vertical()
                     .max_height(list_height)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -777,7 +777,7 @@ impl Dialog for ModExportDialog {
                                     let mut include = row.include;
                                     let enabled = row.kind != ModExportChange::Unresolved;
                                     if ui
-                                        .add_enabled(enabled, egui::Checkbox::new(&mut include, ""))
+                                        .add_enabled(enabled, ThemedCheckbox::new(&mut include, ""))
                                         .changed()
                                     {
                                         toggled = Some(index);
@@ -934,7 +934,7 @@ impl Dialog for ModExportDialog {
                     // more than not noticing a line of text.
                     let mut acknowledged = dialog.overwrite_acknowledged;
                     if ui
-                        .checkbox(&mut acknowledged, "Replace these files")
+                        .baboon_checkbox(&mut acknowledged, "Replace these files")
                         .changed()
                     {
                         acknowledge = Some(acknowledged);
