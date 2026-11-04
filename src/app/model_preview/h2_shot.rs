@@ -776,6 +776,14 @@ fn h4_pass_inputs() {
     };
     let [shader, technique, pass]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
     let program = H4ShaderSource::read(&source, shader).unwrap().program(&H4_DEFINES).unwrap();
+    for technique in &program.techniques {
+        let passes: Vec<String> = technique
+            .passes
+            .iter()
+            .map(|(name, shaders)| format!("{name}[{}]", shaders.iter().map(|shader| &*shader.stage).collect::<Vec<_>>().join(",")))
+            .collect();
+        eprintln!("NOTE TECHNIQUE {} {}", technique.name, passes.join(" "));
+    }
     for (stage, pass) in [(Stage::Vertex, pass), (Stage::Pixel, "_default")] {
         let translated = translate_pass(&program, technique, pass, stage).unwrap();
         for (name, ty) in &translated.uniforms {
