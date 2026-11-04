@@ -148,7 +148,13 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
     };
     let blend = h4_blend(baked.alpha_blend_mode);
     let opaque = blend == H3Blend::Opaque;
-    let (albedo, lit) = if opaque {
+    // A decal shader's one technique (`techniques_decals.fxh`) writes the
+    // albedo target, ahead of the lights unless the material puts it after
+    // (`materialFlags` bit 1, `decal post lighting`).
+    let decal = shader.shader.flags & blam_tags::material::shader_flags::IS_DECAL != 0;
+    let (albedo, lit) = if decal {
+        (None, shader.pass("_default"))
+    } else if opaque {
         (shader.pass("albedo"), shader.pass("static_probe"))
     } else {
         (None, shader.pass("single_pass_single_probe").or_else(|| shader.pass("albedo")))
@@ -161,9 +167,9 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                 albedo: albedo.filter(|_| opaque),
                 lit: Arc::clone(&lit),
                 screen_maps: Vec::new(),
-                decal: false,
+                decal,
                 decal_modulates_specular: false,
-                after_lighting: false,
+                after_lighting: decal && material.flags & 0x2 != 0,
                 sort_layer: i32::from(baked.sort_layer),
                 prt: [None, None, None],
                 camo: None,
