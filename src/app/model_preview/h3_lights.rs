@@ -383,7 +383,7 @@ pub(super) fn read_h3_lights(
             return;
         }
         let (offset, yaw, pitch) = read_part_placement(part.part);
-        for marker in &part_markers(markers, &part.marker, part.effect.once) {
+        for marker in &part.effect.locations(markers, &part.marker, &frame) {
             let Some(tag) = read_h3_light(source, &part.path) else {
                 return;
             };
@@ -645,8 +645,7 @@ pub(super) fn read_h3_flares(
     };
     let flare_group = u32::from_be_bytes(*b"lens");
     let mut place_flare = |path: &str,
-                           name: &str,
-                           once: bool,
+                           found: Vec<RenderModelPreviewMarker>,
                            scale_by: String,
                            secondary_by: String,
                            by_effect: Option<H3EffectScale>,
@@ -655,7 +654,7 @@ pub(super) fn read_h3_flares(
         let Some(flare) = read_h3_flare(source, path).map(Arc::new) else {
             return;
         };
-        for marker in &part_markers(markers, name, once) {
+        for marker in &found {
             let (place, node) = frame(marker);
             let (place, node) = placed(place, node);
             flares.push(H3FlareAt {
@@ -682,7 +681,7 @@ pub(super) fn read_h3_flares(
             let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
             // Reach's `render_object_attachments` (0x8274f128) scales by both.
             let secondary_by = attachment.read_string_id("secondary scale").unwrap_or_default();
-            place_flare(&path, &name, false, scale_by, secondary_by, None, None, &|place, node| (place, node));
+            place_flare(&path, part_markers(markers, &name, false), scale_by, secondary_by, None, None, &|place, node| (place, node));
         }
     }
     for_each_attached_part(source, object, |part| {
@@ -691,7 +690,8 @@ pub(super) fn read_h3_flares(
             let event = Some((Arc::clone(&part.times), part.event));
             let placed = |place, node| part.placed(place, node);
             let scale_by = part.effect.scale_by.clone();
-            place_flare(&part.path, &part.marker, part.effect.once, scale_by, String::new(), by_effect, event, &placed);
+            let found = part.effect.locations(markers, &part.marker, &frame);
+            place_flare(&part.path, found, scale_by, String::new(), by_effect, event, &placed);
         }
     });
     flares

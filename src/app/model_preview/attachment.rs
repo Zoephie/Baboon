@@ -38,6 +38,16 @@ pub(super) fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// `perpendicular3d`: a vector square to `a`, from its two largest parts.
+pub(super) fn perpendicular(a: [f32; 3]) -> [f32; 3] {
+    let [x, y, z] = a.map(f32::abs);
+    if x > y || x > z {
+        if y > z { [a[1], -a[0], 0.0] } else { [-a[2], 0.0, a[0]] }
+    } else {
+        [0.0, a[2], -a[1]]
+    }
+}
+
 pub(super) fn scaled(a: [f32; 3], by: f32) -> [f32; 3] {
     a.map(|value| value * by)
 }

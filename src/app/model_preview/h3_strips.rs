@@ -13,7 +13,7 @@ use super::ce_attachments::elements;
 use super::ce_lights::{CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
-use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, part_markers, read_part_placement};
+use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, read_part_placement};
 use super::h3_particles::{
     H3ParticleVertex, H3SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader, slerped,
 };
@@ -492,7 +492,7 @@ pub(super) fn read_h3_strips(
                 continue;
             };
             let (look, kind) = (Arc::new(look), Arc::new(kind));
-            for marker in &part_markers(markers, &part.marker, part.effect.once) {
+            for marker in &part.effect.locations(markers, &part.marker, &frame) {
                 let (place, node) = frame(marker);
                 let (place, node) = part.placed(place, node);
                 let place = part_frame(&place, offset, yaw, pitch);

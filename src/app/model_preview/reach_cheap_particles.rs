@@ -17,7 +17,7 @@ use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::{
     CHEAP_PARTICLE_EMITTER, H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
-    part_markers, read_part_placement,
+    read_part_placement,
 };
 use super::h3_particles::{PRE_ROLL, Random, particle_game_time};
 use super::reach_lights::object_value;
@@ -710,7 +710,7 @@ pub(super) fn read_reach_cheap_emitters(
             return;
         };
         let (offset, yaw, pitch) = read_part_placement(part.part);
-        for marker in &part_markers(markers, &part.marker, part.effect.once) {
+        for marker in &part.effect.locations(markers, &part.marker, &frame) {
             let (place, node) = frame(marker);
             let (place, node) = part.placed(place, node);
             let place = part_frame(&place, offset, yaw, pitch);
@@ -1599,6 +1599,36 @@ mod tests {
         assert!(on(0.05), "in its event of a tenth of a second");
         assert!(!on(0.5), "after it");
         assert!(on(15.05), "the next cycle, 15 seconds on");
+    }
+
+    /// With `BLAM_TEST_HREK`: m45's huge space junk attaches its effect on
+    /// `marker`, and its cheap particle part sits at `up`, a vector
+    /// `build_gravity_effect_vectors` makes there, not a marker of the model.
+    #[test]
+    fn kit_space_junk_emits_from_its_up_vector() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        let path = "levels\\solo\\m45\\fx\\space_junk_huge";
+        let object = load_referenced_tag_from_source(&source, path, "effect_scenery", b"efsc").unwrap();
+        let marker = RenderModelPreviewMarker {
+            name: "marker".to_owned(),
+            node_index: 0,
+            position: [1.0, 2.0, 3.0],
+            axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            scale: 1.0,
+            only_under: None,
+        };
+        let frame = |marker: &RenderModelPreviewMarker| {
+            (MarkerFrame { axes: marker.axes, position: marker.position, node: marker.node_index }, 0)
+        };
+        let emitters = read_reach_cheap_emitters(&source, &object, 0, &[marker], frame);
+        assert_eq!(emitters.len(), 1, "one cpem part, though the model has no `up` marker");
+        let emitter = &emitters[0];
+        assert_eq!(emitter.position, [1.0, 2.0, 3.0], "at the attachment's marker");
+        assert_eq!((emitter.forward, emitter.up), ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0]), "facing up");
     }
 
     /// IEEE half to single, for the kit's `abgrfp16` type texture.

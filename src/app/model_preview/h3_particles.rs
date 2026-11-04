@@ -15,7 +15,7 @@ use super::ce_lights::CeFlareView;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;
-use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_markers, part_runs_by};
+use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_runs_by};
 use super::h3_strips::{H3StripAt, read_carried_strips};
 use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::h2_passes::H2Image;
@@ -2491,7 +2491,7 @@ pub(super) fn read_h3_particles(
                     .flat_map(|(_, path)| read_carried_strips(source, path))
                     .map(Arc::new)
                     .collect();
-                for marker in &part_markers(markers, &name, object_effect.once) {
+                for marker in &object_effect.locations(markers, &name, &frame) {
                     let (place, node) = frame(marker);
                     let attached = children.iter().enumerate().map(|(at, child)| (child.0, at + 1)).collect();
                     let parts = parts.clone();

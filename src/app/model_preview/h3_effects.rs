@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachment::MarkerFrame;
+use super::attachment::{MarkerFrame, cross, perpendicular, unit};
 use super::ce_attachments::{elements, object_block};
 use super::h2_functions::H2FunctionValues;
 use super::*;
@@ -393,6 +393,10 @@ pub(super) struct H3ObjectEffect {
     pub(super) change_color: i128,
     /// Plays through once, as an event's does; attachments and `looping effect`s loop.
     pub(super) once: bool,
+    /// Made with `gravity` and `up` vectors at its marker, as Reach's
+    /// `effect_new_attached_from_marker_name` (the 360's 0x82EA7CF8) makes an
+    /// attachment's.
+    vectors: bool,
 }
 
 impl H3ObjectEffect {
@@ -410,6 +414,68 @@ impl H3ObjectEffect {
 
     pub(super) fn times_of(&self, effect: TagStruct<'_>) -> H3EffectTimes {
         H3EffectTimes { once: self.once, ..H3EffectTimes::read(effect) }
+    }
+
+    /// What a location named `name` (after `marker_of`) lands on. Reach's
+    /// `effect_build_locations` (the 360's 0x82EADD50) takes a vector of that
+    /// name before any marker; this effect's are `build_gravity_effect_vectors`'
+    /// (0x82EA6DB0): `gravity` straight down and `up` straight up, at its
+    /// marker. Anything else is `part_markers`'. A `replace` location is the
+    /// marker itself and asks for no vector; after `marker_of` it reads as the
+    /// marker's name, which no Reach attachment marker shares with a vector.
+    pub(super) fn locations<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+        &self,
+        markers: &[RenderModelPreviewMarker],
+        name: &str,
+        frame: &F,
+    ) -> Vec<RenderModelPreviewMarker> {
+        let down = if name.eq_ignore_ascii_case(GRAVITY) {
+            Some(-1.0)
+        } else {
+            name.eq_ignore_ascii_case(UP).then_some(1.0)
+        };
+        match down {
+            Some(z) if self.vectors && !name.eq_ignore_ascii_case(&self.marker) => {
+                vec![vector_marker(markers, &self.marker, name, [0.0, 0.0, z], frame)]
+            }
+            _ => part_markers(markers, name, self.once),
+        }
+    }
+}
+
+const GRAVITY: &str = "gravity";
+const UP: &str = "up";
+
+/// `effect_marker_list_get_marker` for a world `direction` at the first marker
+/// named `at` (`object_get_markers_by_string_id`, one wanted; none, or no name,
+/// is the object's origin, as `MarkerFrame::find` has it): forward along it and
+/// up `perpendicular3d` of that, held on the marker's node. The game turns the
+/// vector into that node's space first; the preview has only the object's rest
+/// space here, so it squares the vector there, which is the node's own on an
+/// object whose node sits unturned at rest, as an effect anchor's does.
+/// `frame` takes the object's space to the world's, so the vector is turned
+/// back through it.
+fn vector_marker<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+    markers: &[RenderModelPreviewMarker],
+    at: &str,
+    name: &str,
+    direction: [f32; 3],
+    frame: &F,
+) -> RenderModelPreviewMarker {
+    let found = markers.iter().find(|marker| !at.is_empty() && marker.name.eq_ignore_ascii_case(at));
+    let (position, node_index, only_under) =
+        found.map_or(([0.0; 3], 0, None), |marker| (marker.position, marker.node_index, marker.only_under.clone()));
+    let probe = RenderModelPreviewMarker { node_index, axes: WORLD_AXES, scale: 1.0, ..Default::default() };
+    let (world, _) = frame(&probe);
+    let forward = unit(std::array::from_fn(|index| super::attachment::dot(world.axes[index], direction)));
+    let up = unit(perpendicular(forward));
+    RenderModelPreviewMarker {
+        name: name.to_owned(),
+        node_index,
+        position,
+        axes: [forward, cross(up, forward), up],
+        scale: 1.0,
+        only_under,
     }
 }
 
@@ -463,6 +529,7 @@ fn axes_of_vector(forward: [f32; 3]) -> [[f32; 3]; 3] {
 pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3ObjectEffect> {
     let mut effects = Vec::new();
     let effect_group = u32::from_be_bytes(*b"effe");
+    let reach = source.game() == Some(crate::core::game::GameId::HaloReach);
     if let Some(block) = object_block(object, "attachments") {
         for attachment in elements(block, "attachments") {
             let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
@@ -476,6 +543,7 @@ pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3O
                     secondary_by: attachment.read_string_id("secondary scale").unwrap_or_default(),
                     change_color: attachment.read_int_any("change color").unwrap_or(0),
                     once: false,
+                    vectors: reach,
                 });
             }
         }
@@ -497,6 +565,7 @@ pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3O
                 marker: String::new(),
                 secondary_by: String::new(),
                 change_color: 0,
+                vectors: false,
             });
         }
     }
@@ -546,7 +615,7 @@ fn with_nested_effects(source: &TagSource, mut effects: Vec<H3ObjectEffect>) -> 
                 let location = location.and_then(|location| locations.get(location));
                 if let (true, false, Some(location)) = (group == effect_group, path.is_empty(), location) {
                     let marker = outer.marker_of(*location);
-                    nested.push(H3ObjectEffect { path, marker, once: true, ..outer.clone() });
+                    nested.push(H3ObjectEffect { path, marker, once: true, vectors: false, ..outer.clone() });
                 }
             }
         }
@@ -725,6 +794,58 @@ mod tests {
             only_under: None,
         };
         assert_eq!(part_markers(&[marker], "up", true)[0].position, [1.0, 2.0, 3.0]);
+    }
+
+    fn attachment(vectors: bool) -> H3ObjectEffect {
+        H3ObjectEffect {
+            path: String::new(),
+            marker: "fx_anchor".to_owned(),
+            scale_by: String::new(),
+            secondary_by: String::new(),
+            change_color: 0,
+            once: false,
+            vectors,
+        }
+    }
+
+    fn named(name: &str, node_index: i16, position: [f32; 3]) -> RenderModelPreviewMarker {
+        RenderModelPreviewMarker { name: name.to_owned(), node_index, position, axes: WORLD_AXES, scale: 1.0, only_under: None }
+    }
+
+    fn at_rest(marker: &RenderModelPreviewMarker) -> (MarkerFrame, usize) {
+        (MarkerFrame { axes: marker.axes, position: marker.position, node: marker.node_index }, 0)
+    }
+
+    /// Reach's `build_gravity_effect_vectors`: `up` and `gravity` sit at the
+    /// attachment's marker, on its node, facing up and down, even where the
+    /// model has a marker of that name; H3's attachment has no vectors.
+    #[test]
+    fn a_reach_attachment_finds_its_vectors_at_its_marker_before_any_marker() {
+        let markers = [named("fx_anchor", 2, [1.0, 2.0, 3.0]), named("gravity", 1, [4.0, 5.0, 6.0])];
+        let up = attachment(true).locations(&markers[..1], "up", &at_rest);
+        assert_eq!(up.len(), 1);
+        assert_eq!((up[0].position, up[0].node_index), ([1.0, 2.0, 3.0], 2));
+        assert_eq!(up[0].axes, [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], "forward, left, up");
+        let down = attachment(true).locations(&markers, "gravity", &at_rest);
+        assert_eq!(down[0].position, [1.0, 2.0, 3.0], "the vector, not the `gravity` marker");
+        assert_eq!(down[0].axes, [[0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]);
+        assert!(attachment(false).locations(&markers, "up", &at_rest).is_empty(), "H3: a looping effect needs its marker");
+        assert_eq!(attachment(false).locations(&markers, "gravity", &at_rest)[0].position, [4.0, 5.0, 6.0]);
+        assert_eq!(attachment(true).locations(&markers, "fx_anchor", &at_rest)[0].axes, WORLD_AXES, "a marker is a marker");
+    }
+
+    /// The vector is the world's: on an object turned onto its side it is
+    /// turned back into the object's space, so it still faces world up.
+    #[test]
+    fn a_vector_faces_the_worlds_way_on_a_turned_object() {
+        // The object's x stays, its y is the world's z and its z the world's -y.
+        let turn = |[x, y, z]: [f32; 3]| [x, -z, y];
+        let turned = |marker: &RenderModelPreviewMarker| {
+            (MarkerFrame { axes: marker.axes.map(turn), position: turn(marker.position), node: 0 }, 0)
+        };
+        let up = attachment(true).locations(&[], "up", &turned);
+        assert_eq!(up[0].axes[0], [0.0, 1.0, 0.0], "the object's y is the world's up");
+        assert_eq!(turned(&up[0]).0.axes[0], [0.0, 0.0, 1.0]);
     }
 
     #[test]

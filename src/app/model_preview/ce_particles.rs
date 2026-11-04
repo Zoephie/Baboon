@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
+use super::attachment::perpendicular;
 use super::ce_attachments::{elements, has_flag, object_block};
 use super::ce_lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
 use super::ce_particle_systems::{
@@ -1560,16 +1561,6 @@ enum Fate {
     Deleted,
     /// `particle_die`: gone, making its death effect.
     Died,
-}
-
-/// `perpendicular3d`: a vector square to `a`, from its two largest parts.
-fn perpendicular(a: [f32; 3]) -> [f32; 3] {
-    let [x, y, z] = a.map(f32::abs);
-    if x > y || x > z {
-        if y > z { [a[1], -a[0], 0.0] } else { [-a[2], 0.0, a[0]] }
-    } else {
-        [0.0, a[2], -a[1]]
-    }
 }
 
 /// `particle_effect_new` for an effect: `effect_new_unattached_from_markers`

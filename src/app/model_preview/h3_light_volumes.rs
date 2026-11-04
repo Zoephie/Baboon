@@ -13,7 +13,7 @@ use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::{
-    H3EffectTimes, for_each_attached_part, part_frame, part_markers, read_part_placement,
+    H3EffectTimes, for_each_attached_part, part_frame, read_part_placement,
 };
 use super::h3_particles::inline_real;
 use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
@@ -524,7 +524,7 @@ pub(super) fn read_h3_light_volumes(
             let Some(definition) = read_definition(source, element).map(Arc::new) else {
                 continue;
             };
-            for marker in &part_markers(markers, &part.marker, part.effect.once) {
+            for marker in &part.effect.locations(markers, &part.marker, &frame) {
                 let (place, node) = frame(marker);
                 let (place, node) = part.placed(place, node);
                 let place = part_frame(&place, offset, yaw, pitch);

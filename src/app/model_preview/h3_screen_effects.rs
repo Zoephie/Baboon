@@ -11,7 +11,7 @@ use super::ce_attachments::elements;
 use super::ce_lights::{CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
-use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_markers};
+use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part};
 use super::*;
 use super::renderer::REACH_SCREEN_NOISE_BITMAP;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -507,7 +507,7 @@ pub(super) fn read_h3_screen_effects(
         if definitions.is_empty() {
             return;
         }
-        for marker in &part_markers(markers, &part.marker, part.effect.once) {
+        for marker in &part.effect.locations(markers, &part.marker, &frame) {
             let (place, node) = frame(marker);
             effects.push(H3ScreenEffectAt {
                 object: owner,
