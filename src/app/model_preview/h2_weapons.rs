@@ -623,7 +623,11 @@ fn fold_attached(
     };
     // `Game::of` calls Reach `Halo3` too; its attachments, lights and held
     // weapons read differently, and wait on their own readers.
-    if source.game() == Some(GameId::HaloReach) {
+    if source.game() == Some(GameId::Halo4) {
+        // Halo 4's attachment kinds, lights and flares have their own
+        // readers (docs/h4-preview-plan.md, phase 6); until then an attached
+        // object brings only its geometry, never Halo 3's readings of it.
+    } else if source.game() == Some(GameId::HaloReach) {
         let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
         read_reach_attached_features(source, object, owner, &attached.markers, &frame, Some(name), center, preview);
     } else if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
