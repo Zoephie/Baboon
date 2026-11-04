@@ -123,6 +123,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 "lights" => preview.h2_point_lights.clear(),
                 "gels" => preview.h2_gel_lights.clear(),
                 "volumes" => preview.h2_light_volumes.clear(),
+                "h3_volumes" => preview.h3_light_volumes.clear(),
                 "contrails" => preview.h2_contrails.clear(),
                 "prt" => preview.h3_prt = None,
                 "shield" => preview.reach_shield = None,
