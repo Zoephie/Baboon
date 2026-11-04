@@ -809,6 +809,7 @@ fn prepare_h3_material(
         change_colors: Vec::new(),
         animations: Vec::new(),
         shield: None,
+        h4: None,
     };
     if opaque {
         material.shield = h3_shield(source, caches);

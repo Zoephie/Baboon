@@ -10,7 +10,14 @@ use super::*;
 use crate::app::model_preview::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::Program;
-use blam_tags::material::{BakedMaterial, Material, MaterialShader, bake, shader_flags};
+use crate::app::model_preview::h4_submit::H4Submit;
+use blam_tags::material::{Material, MaterialShader, bake, shader_flags};
+
+/// Entry points (`entry_point_enum`) the passes are taken from.
+const ENTRY_DEFAULT: usize = 0;
+const ENTRY_ALBEDO: usize = 1;
+const ENTRY_STATIC_PROBE: usize = 8;
+const ENTRY_SINGLE_PASS_SINGLE_PROBE: usize = 23;
 
 /// A material shader read once: its parameters and its parsed effect.
 pub(super) struct H4Shader {
@@ -107,59 +114,6 @@ fn texture_uniform<'a>(wanted: &'a [(String, TextureKind)], parameter: &str) -> 
     wanted.iter().find(|(name, _)| name.eq_ignore_ascii_case(&lowercase)).map(|(name, kind)| (name.as_str(), kind))
 }
 
-/// `ps_material_generic_parameters` for a hologram's pass 0
-/// (`handle_object_part`): rows 0-2 the key, fill and rim light directions,
-/// each the material's `lgt_*_forward`, `_right` and `_up` values (externs
-/// 35, 37 and 39, which point at the first of three neighbouring lanes)
-/// taken as a vector and normalized; row 3's x the alpha the shader clips
-/// below, 1 for a blended hologram. The game first turns each vector by a
-/// node's matrix (node 1's, `model_skinning_get_node_matrix`); the preview
-/// leaves them in model space.
-fn hologram_parameters(baked: &BakedMaterial, blended: bool) -> [[f32; 4]; 4] {
-    let mut rows = [[0.0; 4]; 4];
-    // The pixel constants as one run of lanes, c160.x first.
-    let lanes = baked.real_vectors.as_flattened();
-    for extern_ in &baked.externs {
-        let [index @ (35 | 37 | 39), register, offset, _] = *extern_ else { continue };
-        let Some(start) = usize::from(register).checked_sub(160).map(|slot| slot * 4 + usize::from(offset)) else {
-            continue;
-        };
-        let Some(&[x, y, z]) = lanes.get(start..start + 3) else { continue };
-        let length = (x * x + y * y + z * z).sqrt();
-        if length > 0.0 {
-            rows[usize::from((index - 35) / 2)] = [x / length, y / length, z / length, 0.0];
-        }
-    }
-    rows[3][0] = if blended { 1.0 } else { 0.0 };
-    rows
-}
-
-/// The bake's constants under the names the translated source reads.
-fn baked_values(baked: &BakedMaterial) -> HashMap<String, H3Value> {
-    let mut values = HashMap::new();
-    for (index, vector) in baked.real_vectors.iter().enumerate() {
-        values.insert(format!("user_parameter_{}", 160 + index), H3Value::Floats(*vector));
-    }
-    for (index, vector) in baked.real_vertex_vectors.iter().enumerate() {
-        values.insert(format!("user_vertex_parameter_{}", 240 + index), H3Value::Floats(*vector));
-    }
-    let mut transforms = baked.texture_constants.clone();
-    transforms.resize(12, [1.0, 1.0, 0.0, 0.0]);
-    values.insert("ps_material_shader_transforms".to_owned(), H3Value::FloatArray(transforms));
-    for bit in 0..32 {
-        if baked.bools.used & (1 << bit) != 0 {
-            values.insert(format!("user_parameter_bool_{bit}"), H3Value::Integer(i32::from(baked.bools.values & (1 << bit) != 0)));
-        }
-    }
-    for bit in 0..8 {
-        if baked.vertex_bools.used & (1 << bit) != 0 {
-            let on = i32::from(baked.vertex_bools.values & (1 << bit) != 0);
-            values.insert(format!("user_parameter_vertex_bool_{}", 40 + bit), H3Value::Integer(on));
-        }
-    }
-    values
-}
-
 pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mut ResolveCaches) -> MaterialTextures {
     let material = Material::from_tag(tag);
     if material.shader.is_empty() {
@@ -196,24 +150,28 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
     // `single_pass_single_probe`.
     let blend = if hologram || blended_hologram { H3Blend::Opaque } else { blend };
     let opaque = blend == H3Blend::Opaque;
+    let single_pass = |shader: &mut H4Shader| shader.pass("single_pass_single_probe").map(|pass| (pass, ENTRY_SINGLE_PASS_SINGLE_PROBE));
     let (albedo, lit) = if hologram || blended_hologram {
-        (None, shader.pass("single_pass_single_probe"))
+        (None, single_pass(&mut shader))
     } else if decal {
-        (None, shader.pass("_default"))
+        (None, shader.pass("_default").map(|pass| (pass, ENTRY_DEFAULT)))
     } else if opaque && let (Some(albedo), Some(lit)) = (shader.pass("albedo"), shader.pass("static_probe")) {
-        (Some(albedo), Some(lit))
+        (Some(albedo), Some((lit, ENTRY_STATIC_PROBE)))
     } else if opaque {
         // `opaque_alpha_blend` counts as transparent too (`GetIsTransparent`,
         // X360 0x82A9EAB0), and its blend state is off: a shader with no
         // deferred techniques (Cortana's hair compiles only `single_pass_*`)
         // shows through that pass, drawn as opaque.
-        (None, shader.pass("single_pass_single_probe"))
+        (None, single_pass(&mut shader))
     } else {
-        (None, shader.pass("single_pass_single_probe").or_else(|| shader.pass("albedo")))
+        (None, single_pass(&mut shader).or_else(|| shader.pass("albedo").map(|pass| (pass, ENTRY_ALBEDO))))
     };
     let mut textures = MaterialTextures::default();
     let result = match lit {
-        Some(lit) => {
+        Some((lit, lit_entry)) => {
+            // `handle_object_part` clips a blended hologram below full alpha.
+            let clip = (hologram || blended_hologram).then_some(if blended_hologram { 1.0 } else { 0.0 });
+            let submit = H4Submit::new(baked.clone(), ENTRY_ALBEDO, lit_entry, clip);
             let mut h3 = H3Material {
                 dialect: H3Dialect::Halo4,
                 albedo: albedo.filter(|_| opaque),
@@ -228,20 +186,12 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                 shadow_generate: None,
                 dynamic_light: None,
                 blend,
-                values: {
-                    let mut values = baked_values(&baked);
-                    if hologram || blended_hologram {
-                        values.insert(
-                            "ps_material_generic_parameters".to_owned(),
-                            H3Value::FloatArray(hologram_parameters(&baked, blended_hologram).to_vec()),
-                        );
-                    }
-                    values
-                },
+                values: submit.baked_values(),
                 textures: Vec::new(),
                 change_colors: Vec::new(),
                 animations: Vec::new(),
                 shield: None,
+                h4: submit.is_dynamic().then(|| Arc::new(submit)),
             };
             let passes = [h3.albedo.as_ref(), Some(&lit)];
             let wanted: Vec<(String, TextureKind)> =
@@ -310,21 +260,6 @@ mod tests {
         assert_eq!(texture_uniform(&wanted, "control_map_spglrf").map(|(name, _)| name), Some("control_map_SpGlRfTexture"));
         assert_eq!(texture_uniform(&wanted, "reflection_map").map(|(_, kind)| *kind), Some(TextureKind::Cube));
         assert_eq!(texture_uniform(&wanted, "control_map"), None, "a prefix is not a match");
-    }
-
-    /// The light vectors run across register boundaries, and the blended
-    /// hologram (Cortana's hair) clips below full alpha.
-    #[test]
-    fn a_holograms_lights_come_from_its_lgt_vectors() {
-        let mut baked = BakedMaterial::default();
-        baked.real_vectors = vec![[0.0, 0.0, 3.0, 4.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 2.0]];
-        // Key at c160.z (spills into c161.x), rim at c162.w: out of lanes.
-        baked.externs = vec![[35, 160, 2, 0xFF], [36, 160, 1, 0xFF], [39, 162, 3, 0xFF]];
-        let rows = hologram_parameters(&baked, false);
-        assert_eq!(rows[0], [0.6, 0.8, 0.0, 0.0]);
-        assert_eq!(rows[2], [0.0; 4], "a vector past the last lane is left alone");
-        assert_eq!(rows[3][0], 0.0);
-        assert_eq!(hologram_parameters(&baked, true)[3][0], 1.0);
     }
 
     #[test]

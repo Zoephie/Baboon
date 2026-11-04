@@ -56,6 +56,7 @@ pub(in crate::app) mod h3_prt;
 pub(crate) mod h3_shaders;
 pub(crate) mod h4_shaders;
 mod h4_lighting;
+mod h4_submit;
 mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;

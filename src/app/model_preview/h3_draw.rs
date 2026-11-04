@@ -616,6 +616,32 @@ fn frame_probe(frame: &ModelGpuFrame) -> [[f32; 9]; 3] {
     turned_probe(y.atan2(x) - probe_heading())
 }
 
+/// The matrix a Halo 4 hologram's light rig turns by: the skinning matrix of
+/// the object's node 1 (`min(1, count - 1)`, `handle_object_part`), which is
+/// `world × inverse_bind` and so none at all in the bind pose. With the light
+/// following the camera the rig also turns about the vertical by the eye's
+/// heading, so the key light keeps the side it was authored on toward the
+/// viewer; this is the preview's own.
+fn h4_hologram_node(frame: &ModelGpuFrame) -> [[f32; 4]; 3] {
+    let node = 1.min(frame.preview.nodes.len().saturating_sub(1));
+    let mut rows = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+    if let Some(posed) = frame.bones.as_ref().and_then(|bones| bones.get(node * 3..node * 3 + 3)) {
+        rows.copy_from_slice(posed);
+    }
+    if !frame.light_follows_camera {
+        return rows;
+    }
+    let camera = camera_to_world(frame);
+    let heading = camera[6].atan2(camera[2]);
+    let (sin, cos) = heading.sin_cos();
+    let turn = [[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]];
+    std::array::from_fn(|row| {
+        let mut turned: [f32; 4] = std::array::from_fn(|column| (0..3).map(|k| turn[row][k] * rows[k][column]).sum());
+        turned[3] = rows[row][3];
+        turned
+    })
+}
+
 /// What a particle's `lighting` option reads.
 pub(super) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
     lighting_constants(&frame_probe(frame))
@@ -949,6 +975,13 @@ impl ModelGlRenderer {
             };
             gl.use_program(Some(program.program));
             let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+            let h4_values = material.h4.as_ref().map(|submit| {
+                let object = batch.material_index as usize;
+                let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
+                let drawn = super::h4_submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
+                let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
+                submit.draw_values(albedo, &drawn, h4_hologram_node(frame))
+            });
             for (name, ty) in &pass.uniforms {
                 let location = program.location(gl, name);
                 if location.is_none() {
@@ -1011,6 +1044,7 @@ impl ModelGlRenderer {
                 let mut value = change_color
                     .or(reach_light)
                     .or_else(|| frame_value(frame, material.dialect, name, size, self.reach_stops))
+                    .or_else(|| h4_values.as_ref().and_then(|values| values.get(name)).cloned())
                     .or_else(|| material.values.get(name).cloned());
                 let object = batch.material_index as usize;
                 let screen_values = self.h3_screen_alpha.map(|alpha| {
@@ -2355,6 +2389,7 @@ mod tests {
             change_colors: Vec::new(),
             animations: Vec::new(),
             shield: None,
+            h4: None,
         };
         let foliage = Some(u32::from_be_bytes(*b"rmfl"));
         let reach = material(H3Dialect::Reach);

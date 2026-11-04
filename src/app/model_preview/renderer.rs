@@ -998,6 +998,8 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let h2_liquids = data.preview.h2_liquids.iter().filter(|at| at.object == object).map(|at| at.scale_name());
     let h3 = owned.iter().filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
     let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
+    let h4 = owned.iter().filter_map(|texture| texture.h3.as_ref()).filter_map(|material| material.h4.as_ref());
+    let h3 = h3.chain(h4.flat_map(|submit| submit.inputs()));
     let flares = flares
         .chain(h3)
         .chain(h3_lights.flat_map(|light| light.inputs()))
@@ -1111,6 +1113,7 @@ pub(super) fn object_moves(
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
+                    || material.h4.as_ref().is_some_and(|submit| submit.moves())
                     || (material.shield.is_some() && h3_draw::h3_shield_showing(h2_values))
             })
         })

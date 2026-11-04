@@ -855,6 +855,8 @@ pub(crate) struct H3Material {
     pub(crate) change_colors: Vec<(String, usize)>,
     pub(crate) animations: Vec<H3Animation>,
     pub(crate) shield: Option<Arc<H3Shield>>,
+    /// Halo 4's per-draw functions and hologram rig.
+    pub(crate) h4: Option<Arc<super::h4_submit::H4Submit>>,
 }
 
 /// `shield_impact.hlsl` and the settings it runs on.
