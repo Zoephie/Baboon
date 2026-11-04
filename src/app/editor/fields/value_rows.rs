@@ -30,6 +30,9 @@ fn foundation_field_row_inner<R>(
     controls: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<R> {
     // Container bodies already position nested fields; row padding is local.
+    // Controls retain one identity even when the label moves to another row.
+    let controls_id = ui.next_auto_id().with("foundation_field_controls");
+    let controls = |ui: &mut Ui| ui.scope_builder(egui::UiBuilder::new().id(controls_id), controls).inner;
     if ui.available_width() < breakpoint {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
@@ -1057,6 +1060,24 @@ pub(in crate::app) fn block_flags_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn field_control_identity_survives_a_breakpoint_change() {
+        let ctx = egui::Context::default();
+        let mut ids = Vec::new();
+        for width in [1000.0, 500.0, 1000.0] {
+            crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width, 200.0))),
+                ..Default::default()
+            }, |ui| {
+                foundation_field_row(ui, &field_display_meta("enum"), 0, |ui| {
+                    ids.push(ui.make_persistent_id("enum_dropdown"));
+                });
+            });
+        }
+        assert_eq!(ids[0], ids[1]);
+        assert_eq!(ids[1], ids[2]);
+    }
 
     #[test]
     fn string_id_boxes_only_grow_when_the_text_needs_more_space() {

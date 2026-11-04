@@ -277,16 +277,25 @@ pub(in crate::app) fn tag_icon_image(
     let uri = tag_icon_uri_for_pixels_per_point_and_size(icon.name, ctx.pixels_per_point(), size);
     if icon.svg.contains("currentColor") {
         let [r, g, b, _] = text_dark().to_array();
-        let color = format!("#{r:02x}{g:02x}{b:02x}");
         return egui::Image::from_bytes(
             format!(
                 "{}-rgb{r:02x}{g:02x}{b:02x}.svg",
                 uri.trim_end_matches(".svg")
             ),
-            icon.svg.replace("currentColor", &color).into_bytes(),
+            themed_tag_icon_bytes(icon, [r, g, b]),
         );
     }
     egui::Image::from_bytes(uri, icon.svg.as_bytes())
+}
+
+fn themed_tag_icon_bytes(icon: TagIcon, rgb: [u8; 3]) -> std::sync::Arc<[u8]> {
+    thread_local! {
+        static SVGS: std::cell::RefCell<std::collections::HashMap<(&'static str, [u8; 3]), std::sync::Arc<[u8]>>> = Default::default();
+    }
+    SVGS.with(|cache| cache.borrow_mut().entry((icon.name, rgb)).or_insert_with(|| {
+        let [r, g, b] = rgb;
+        icon.svg.replace("currentColor", &format!("#{r:02x}{g:02x}{b:02x}")).into_bytes().into()
+    }).clone())
 }
 
 #[cfg(test)]
@@ -451,6 +460,7 @@ mod tests {
 
     #[test]
     fn particle_and_imposter_icons_stay_on_the_requested_types() {
+        let mut checked = 0;
         for game in GameId::ALL {
             let groups = crate::app::help::bundled_group_hierarchy(Some(game));
             for name in [
@@ -461,6 +471,7 @@ mod tests {
                 "particleman",
             ] {
                 if let Some(group) = groups.group_named(name) {
+                    checked += 1;
                     assert_eq!(
                         tag_icon(Some(group), Some(game)).name,
                         "default_tag",
@@ -469,6 +480,19 @@ mod tests {
                 }
             }
         }
+        assert!(checked > 0, "the definitions must contain the tested groups");
+    }
+
+    #[test]
+    fn current_color_icons_reuse_bytes_for_each_theme_color() {
+        let icon = tag_icon!("default_tag");
+        let dark = themed_tag_icon_bytes(icon, [255; 3]);
+        assert!(std::sync::Arc::ptr_eq(&dark, &themed_tag_icon_bytes(icon, [255; 3])));
+        let light = themed_tag_icon_bytes(icon, [0; 3]);
+        assert!(!std::sync::Arc::ptr_eq(&dark, &light));
+        assert!(std::str::from_utf8(&dark).unwrap().contains("#ffffff"));
+        assert!(std::str::from_utf8(&light).unwrap().contains("#000000"));
+        assert!(!std::str::from_utf8(&dark).unwrap().contains("currentColor"));
     }
 
     /// Every group the icon table names exists, with that name, in some

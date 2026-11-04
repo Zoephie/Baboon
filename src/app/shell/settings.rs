@@ -777,7 +777,7 @@ fn settings_hint(ui: &mut Ui, help: &str) {
 }
 
 fn settings_dropdown_option<T: PartialEq>(
-    ui: &mut Ui,
+    ui: &mut crate::app::ui_kit::ValueComboUi<'_>,
     selected: &mut T,
     value: T,
     title: &str,

@@ -98,6 +98,11 @@ impl Baboon {
 
     pub(in crate::app) fn close_tab(&mut self, key: &str) {
         self.remember_closed_tag_keys(self.model.active, vec![key.to_owned()]);
+        self.close_tab_without_history(key);
+    }
+
+    /// Retire a replaced tab during Save As without recording a user close.
+    pub(in crate::app) fn close_tab_without_history(&mut self, key: &str) {
         // `close_tag_pane` re-derives the open set and moves the selection off
         // a removed tag, so there is nothing to fix up afterwards.
         self.kit_and_view(self.model.active).close_tag_pane(key);

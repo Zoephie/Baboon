@@ -670,6 +670,7 @@ impl Baboon {
         self.forget_campaign_overlay(kit_index, key);
         self.kit_and_view(kit_index).close_tag_pane(key);
         forget_tag_in_kit(self.kit_and_view(kit_index), key);
+        self.refresh_recent_entries_for(kit_index);
         // Navigation state names tags by key, and this key now names nothing.
         if self
             .browser.reveal_target

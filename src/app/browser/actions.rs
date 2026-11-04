@@ -24,10 +24,14 @@ impl Baboon {
     /// Run before widgets draw so an outside press clears their borders on this
     /// very frame, and the copy event cannot also reach a text field.
     pub(in crate::app) fn handle_browser_selection_input(&mut self, ctx: &egui::Context) {
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F5)) {
+        let owner = ctx.data(|data| data.get_temp::<(egui::Id, egui::Rect)>(browser_selection_owner_id()));
+        let browser_has_focus = owner.is_some_and(|(id, _)| ctx.memory(|memory| memory.focused()) == Some(id));
+        let browser_shortcuts_allowed = (!ctx.egui_wants_keyboard_input() || browser_has_focus)
+            && ctx.memory(|memory| memory.top_modal_layer().is_none());
+        if browser_shortcuts_allowed && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F5)) {
             self.refresh_tag_browser(ctx.clone());
         }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::ALT, egui::Key::ArrowUp)) {
+        if browser_shortcuts_allowed && ctx.input_mut(|input| input.consume_key(egui::Modifiers::ALT, egui::Key::ArrowUp)) {
             let kit = &self.model.kits[self.model.active];
             let pane_key = kit.current_pane.clone();
             let kit_id = kit.id;
@@ -42,7 +46,6 @@ impl Baboon {
                 ctx.request_repaint();
             }
         }
-        let owner = ctx.data(|data| data.get_temp::<(egui::Id, egui::Rect)>(browser_selection_owner_id()));
         let context_menu_open = ctx.data(|data| data.get_temp::<egui::Id>(browser_selection_owner_id().with("popup")))
             .is_some_and(|id| egui::Popup::is_id_open(ctx, id));
         let copy_event = |event: &egui::Event| matches!(event, egui::Event::Copy)
@@ -844,6 +847,44 @@ mod tests {
     }
 
     #[test]
+    fn browser_shortcuts_leave_text_edits_and_modals_alone() {
+        for modal in [false, true] {
+            let fixture = fixture();
+            let mut app = Baboon::for_test();
+            fixture.install(&mut app);
+            let context = ctx();
+            app.handle_browser_action(BrowserAction::OpenFolderBrowser {
+                rel_path: tag_path::to_relative(FOLDER), label: "props".into(), open_in_new_tab: true,
+            }, context.clone());
+            let id = app.model.kits[0].id;
+            let key = app.model.kits[0].current_pane.clone().unwrap();
+            let mut text = String::from("text");
+            let mut unconsumed = (false, false);
+            let mut frame = |app: &mut Baboon, events| {
+                crate::app::run_ui_test(&context, screen(events, 1.0), |ui| {
+                    app.handle_browser_selection_input(&context);
+                    unconsumed = context.input(|input| (input.key_pressed(egui::Key::ArrowUp), input.key_pressed(egui::Key::F5)));
+                    if modal {
+                        egui::Modal::new(egui::Id::new("shortcut_modal")).show(&context, |ui| { ui.label("Modal"); });
+                    } else {
+                        ui.text_edit_multiline(&mut text).request_focus();
+                    }
+                })
+            };
+            frame(&mut app, Vec::new());
+            frame(&mut app, Vec::new());
+            let events = vec![
+                egui::Event::Key { key: egui::Key::ArrowUp, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::ALT },
+                egui::Event::Key { key: egui::Key::F5, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE },
+            ];
+            // The text editor/modal, rather than browser shortcuts, owns these keys.
+            frame(&mut app, events);
+            assert_eq!(unconsumed, (true, true), "modal={modal}: both shortcuts remain available to the focused UI");
+            assert_eq!(app.views[id].browser.folder_browsers[&key].rel_path, tag_path::to_relative(FOLDER), "modal={modal}");
+        }
+    }
+
+    #[test]
     fn alt_up_navigates_the_active_folder_tab_without_opening_another() {
         let fixture = fixture();
         let mut app = Baboon::for_test();
@@ -856,6 +897,9 @@ mod tests {
         let pane_key = app.model.kits[0].current_pane.clone().unwrap();
         app.views[id].browser.folder_browsers.get_mut(&pane_key).unwrap().selected_tag = Some(fixture.key(MODEL));
         for (time, expected) in [(1.0, "objects"), (2.0, ""), (3.0, "")] {
+            let owner = egui::Id::new("browser_shortcut_owner");
+            context.data_mut(|data| data.insert_temp(browser_selection_owner_id(), (owner, egui::Rect::EVERYTHING)));
+            context.memory_mut(|memory| memory.request_focus(owner));
             let _ = crate::app::run_ui_test(&context, screen(vec![egui::Event::Key {
                 key: egui::Key::ArrowUp, physical_key: None, pressed: true, repeat: false,
                 modifiers: egui::Modifiers::ALT,
@@ -968,7 +1012,7 @@ mod tests {
             let pane = folder.then(|| folder_pane_key(Path::new(FOLDER)));
             if folder {
                 app.handle_browser_action(BrowserAction::OpenFolderBrowser {
-                    rel_path: PathBuf::from(FOLDER), label: "props".into(), open_in_new_tab: true,
+                    rel_path: tag_path::to_relative(FOLDER), label: "props".into(), open_in_new_tab: true,
                 }, context.clone());
             }
             let render = fixture.key(RENDER);
@@ -1069,7 +1113,7 @@ mod tests {
             let pane = folder.then(|| folder_pane_key(Path::new(FOLDER)));
             if folder {
                 app.handle_browser_action(BrowserAction::OpenFolderBrowser {
-                    rel_path: PathBuf::from(FOLDER), label: "props".into(), open_in_new_tab: true,
+                    rel_path: tag_path::to_relative(FOLDER), label: "props".into(), open_in_new_tab: true,
                 }, context.clone());
             }
             let expected = crate::app::run_ui_test(&context, screen(Vec::new(), 0.0), |_| {

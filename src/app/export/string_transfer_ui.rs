@@ -1,6 +1,6 @@
 use super::*;
 
-fn described_option<T: PartialEq>(ui: &mut egui::Ui, value: &mut T, option: T, title: &str, description: &str) -> egui::Response {
+fn described_option<T: PartialEq>(ui: &mut crate::app::ui_kit::ValueComboUi<'_>, value: &mut T, option: T, title: &str, description: &str) -> egui::Response {
     let mut text = egui::text::LayoutJob::default();
     text.append(title, 0.0, egui::TextFormat::simple(TextStyle::Body.resolve(ui.style()), text_dark()));
     text.append(&format!("\n{description}"), 0.0, egui::TextFormat::simple(TextStyle::Small.resolve(ui.style()), subtle_dark()));

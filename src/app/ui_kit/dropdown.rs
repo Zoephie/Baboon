@@ -162,6 +162,22 @@ pub(in crate::app) struct ValueComboUi<'a> {
 }
 
 impl ValueComboUi<'_> {
+    /// Keep filtering, measurement and selection behavior through enabled scopes.
+    pub(in crate::app) fn add_enabled_ui<R>(
+        &mut self, enabled: bool, contents: impl FnOnce(&mut ValueComboUi<'_>) -> R,
+    ) -> egui::InnerResponse<R> {
+        let response = self.ui.add_enabled_ui(enabled, |ui| {
+            let mut rows = ValueComboUi { ui, query: self.query, options: 0, shown: 0, width: 0.0 };
+            let result = contents(&mut rows);
+            (result, rows.options, rows.shown, rows.width)
+        });
+        let (inner, options, shown, width) = response.inner;
+        self.options += options;
+        self.shown += shown;
+        self.width = self.width.max(width);
+        egui::InnerResponse { inner, response: response.response }
+    }
+
     pub(in crate::app) fn baboon_checkbox(
         &mut self,
         checked: &mut bool,
@@ -209,10 +225,21 @@ impl ValueComboUi<'_> {
         selected: bool,
         text: impl Into<egui::WidgetText>,
     ) -> egui::Response {
+        self.selectable_label_search(enabled, selected, text.into(), None)
+    }
+
+    pub(in crate::app) fn selectable_label_with_search(
+        &mut self, selected: bool, text: impl Into<egui::WidgetText>, search: &str,
+    ) -> egui::Response {
+        self.selectable_label_search(true, selected, text.into(), Some(search))
+    }
+
+    fn selectable_label_search(
+        &mut self, enabled: bool, selected: bool, text: egui::WidgetText, search: Option<&str>,
+    ) -> egui::Response {
         self.options += 1;
-        let text = text.into();
         let label = text.text().to_owned();
-        if !self.query.is_empty() && !label.to_lowercase().contains(self.query) {
+        if !self.query.is_empty() && !search.unwrap_or(&label).to_lowercase().contains(self.query) {
             let id = self.ui.next_auto_id();
             self.ui.skip_ahead_auto_ids(1);
             return self.ui.interact(egui::Rect::NOTHING, id, Sense::hover());
@@ -287,6 +314,8 @@ mod tests {
         open: bool,
         texts: Vec<String>,
         option_font_size: Option<f32>,
+        nested: bool,
+        shortened: bool,
     }
 
     impl Demo {
@@ -306,6 +335,8 @@ mod tests {
                 open: false,
                 texts: Vec::new(),
                 option_font_size: None,
+                nested: false,
+                shortened: false,
             }
         }
 
@@ -333,7 +364,13 @@ mod tests {
                                     || label.into(),
                                     |size| RichText::new(label).size(size).into(),
                                 );
-                                let row = ui.selectable_value(&mut self.selected, index, text);
+                                let row = if self.shortened {
+                                    ui.selectable_label_with_search(self.selected == index, "Short display…", label)
+                                } else if self.nested {
+                                    ui.add_enabled_ui(true, |ui| ui.selectable_value(&mut self.selected, index, text)).inner
+                                } else {
+                                    ui.selectable_value(&mut self.selected, index, text)
+                                };
                                 if row.rect.is_positive() {
                                     self.rows.push((index, row.rect));
                                 }
@@ -389,6 +426,31 @@ mod tests {
             self.frame(vec![egui::Event::Text(query.to_owned())]);
             self.settle();
         }
+    }
+
+    #[test]
+    fn nested_options_filter_and_close_like_direct_options() {
+        for nested in [false, true] {
+            let mut demo = Demo::new((0..20).map(|i| format!("Choice {i}")).collect(), 180.0);
+            demo.nested = nested;
+            demo.open();
+            demo.search("Choice 19");
+            assert_eq!(demo.rows.iter().map(|(i, _)| *i).collect::<Vec<_>>(), [19]);
+            demo.click(demo.rows[0].1.center());
+            assert_eq!(demo.selected, 19);
+            assert!(!demo.open, "nested={nested}: selection closes the popup");
+        }
+    }
+
+    #[test]
+    fn shortened_rows_search_the_full_label() {
+        let mut demo = Demo::new((0..20).map(|i| format!("Long path to tag {i}")).collect(), 180.0);
+        demo.shortened = true;
+        demo.open();
+        demo.search("tag 19");
+        assert_eq!(demo.rows.iter().map(|(i, _)| *i).collect::<Vec<_>>(), [19]);
+        demo.click(demo.rows[0].1.center());
+        assert!(!demo.open);
     }
 
     #[test]

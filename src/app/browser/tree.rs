@@ -7,14 +7,17 @@ pub(in crate::app) fn browser_open_requested(
     response: &egui::Response,
     double_click_to_open: bool,
 ) -> bool {
-    if response.ctx.input(|input| input.modifiers.ctrl || input.modifiers.command) {
-        return false;
-    }
     if double_click_to_open {
         response.double_clicked()
     } else {
-        response.clicked()
+        response.clicked() && !response.ctx.input(|input| input.modifiers.ctrl || input.modifiers.command)
     }
+}
+
+/// Shortcut rows launch tools rather than selecting tags, so Ctrl does not
+/// reserve their click for browser selection.
+pub(super) fn browser_shortcut_open_requested(response: &egui::Response, double_click_to_open: bool) -> bool {
+    if double_click_to_open { response.double_clicked() } else { response.clicked() }
 }
 
 pub(in crate::app) const CONTEXT_MENU_WIDTH: f32 = 340.0;
@@ -4172,6 +4175,11 @@ mod tests {
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Rect(rect) if rect.stroke == ctx.global_style().visuals.selection.stroke
                     && rect.stroke_kind == egui::StrokeKind::Inside)));
+            if double_click && pointer_button == egui::PointerButton::Primary {
+                frame(vec![button(true)]);
+                let (_, action, _, _) = frame(vec![button(false)]);
+                assert!(matches!(action, Some(BrowserAction::Select(_))), "Ctrl must not block double-click opening");
+            }
             // Selection survives leaving the row and the editor's active tag stays separate.
             let (_, action, _, selected) = frame(vec![egui::Event::PointerGone]);
             assert_eq!(selected.as_deref(), Some(entry.key.as_str()));

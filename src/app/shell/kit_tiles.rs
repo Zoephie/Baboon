@@ -124,7 +124,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         let home = kit.is_empty_workspace()
             || group.is_some_and(|id| self.parts.shell.home_groups.contains(&id));
         if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) {
-            if home && let Some(group) = group {
+            if home && let Some(group) = group.filter(|id| Some(*id) == self.primary_group) {
                 cx.send(AppAction::ShowHome { group });
             } else {
                 cx.send(AppAction::FocusKit(kit_id));
@@ -714,6 +714,7 @@ mod tests {
         frame(&mut app, vec![press(over_right, true)]);
         frame(&mut app, vec![press(over_right, false)]);
         assert_eq!(app.model.active, 1);
+        assert!(!app.shell.home_open, "an empty secondary split must not activate primary Home");
     }
 
     /// The kits whose workspaces are on screen.
@@ -812,5 +813,20 @@ mod tests {
         let active = app.model.kits[app.model.active].id;
         assert_eq!(active, kits[2], "the kit that slid into the closed one's place");
         assert_eq!(visible_kits(&app), vec![active]);
+    }
+
+    #[test]
+    fn closing_a_kit_preserves_the_home_group() {
+        for home in [false, true] {
+            let (mut app, kits) = tabbed_kits(2);
+            let group = app.kit_tree.tiles.iter().find_map(|(id, tile)|
+                matches!(tile, egui_tiles::Tile::Container(egui_tiles::Container::Tabs(_))).then_some(*id)).unwrap();
+            if home { app.shell.home_groups.insert(group); }
+            app.shell.home_open = home;
+            app.remove_kit(kits[1]);
+            app.sync_kit_tree();
+            assert_eq!(app.shell.home_open, home);
+            assert_eq!(app.shell.home_groups.contains(&group), home);
+        }
     }
 }

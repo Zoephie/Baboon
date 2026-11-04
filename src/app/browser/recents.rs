@@ -97,6 +97,22 @@ mod tests {
     }
 
     #[test]
+    fn deleting_a_recent_tag_removes_the_row_and_persisted_history() {
+        let kit = fixture("recents-delete-action");
+        let mut app = app();
+        kit.install(&mut app);
+        let key = kit.open(&mut app, "objects/tag0.model");
+        app.close_tab(&key);
+        let id = app.model.kits[0].id;
+        assert_eq!(app.views[id].browser.recent_entries.len(), 1);
+        app.open_delete_tag(&key);
+        app.begin_delete_tag(ctx());
+        assert!(!kit.path("objects/tag0.model").exists());
+        assert!(app.views[id].browser.recent_entries.is_empty());
+        assert!(app.model.prefs.editing_kit_recents[0].tags.is_empty());
+    }
+
+    #[test]
     fn recents_keep_five_unique_paths_per_kit_and_follow_moves_and_deletions() {
         let kit = fixture("recents-history");
         let other = fixture("recents-other-kit");

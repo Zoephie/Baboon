@@ -541,7 +541,7 @@ pub(in crate::app) fn draw_folder_asset_grid(
     );
     let height = cell + CELL_CAPTION + CELL_GAP;
     if browser_navigation_building(ui) {
-        browser_navigation_columns(ui, columns, height);
+        browser_navigation_columns(ui, columns, height + ui.spacing().item_spacing.y);
         for entry in &visible {
             register_browser_navigation(ui, &entry.key, browser_asset_navigation_id(ui, &entry.key));
         }
@@ -550,7 +550,7 @@ pub(in crate::app) fn draw_folder_asset_grid(
     if let Some((key, _)) = browser_navigation_target(ui)
         && let Some(index) = visible.iter().position(|entry| entry.key == key)
     {
-        scroll = scroll.vertical_scroll_offset((index / columns) as f32 * height);
+        scroll = scroll.vertical_scroll_offset(asset_grid_scroll_offset(ui, index, columns, height));
     }
     scroll
         .show_rows(ui, height, visible.len().div_ceil(columns), |ui, rows| {
@@ -593,6 +593,11 @@ pub(in crate::app) fn draw_folder_asset_grid(
             action,
         });
     }
+}
+
+/// Match the row stride used by `ScrollArea::show_rows`, including outer spacing.
+fn asset_grid_scroll_offset(ui: &Ui, index: usize, columns: usize, height: f32) -> f32 {
+    (index / columns) as f32 * (height + ui.spacing().item_spacing.y)
 }
 
 /// One grid cell, and whatever the user asked it for.
@@ -1168,6 +1173,28 @@ mod tests {
             group_tag: u32::from_be_bytes(*group),
             group_name: path.rsplit_once('.').map(|(_, name)| name.to_owned()),
             location: TagEntryLocation::LooseFile(tag_path::to_relative(path)),
+        }
+    }
+
+    /// Scroll offsets must put their targets in the virtualized row range.
+    #[test]
+    fn asset_grid_scroll_targets_are_drawn_even_far_down_the_folder() {
+        for target in [10, 100, 300, 1000] {
+            let ctx = egui::Context::default();
+            ctx.set_global_style(foundation_style());
+            let mut drawn = false;
+            for _ in 0..3 {
+                crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                    ..Default::default()
+                }, |ui| {
+                    let offset = asset_grid_scroll_offset(ui, target * 4, 4, 66.0);
+                    ScrollArea::vertical().vertical_scroll_offset(offset).show_rows(ui, 66.0, 1200, |_, rows| {
+                        drawn = rows.contains(&target);
+                    });
+                });
+            }
+            assert!(drawn, "target row {target} must enter the virtualized range");
         }
     }
 

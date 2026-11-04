@@ -918,7 +918,7 @@ fn draw_kit_browser_inner(
                                     "builtin:git_review" if git_review_enabled => {
                                         let app = crate::app::shell::shortcuts::builtin_shortcut(&cx.model.prefs, &shortcut_kit, &key, tool_root.as_deref(), cx.model.tag_test_executable_for(kit_index));
                                         let response = sidebar_list_button(ui, ButtonIcon::Git, &app.name);
-                                        if browser_open_requested(&response, double_click_to_open) { shortcut = Some(KitShortcut::GitReview); }
+                                        if browser_shortcut_open_requested(&response, double_click_to_open) { shortcut = Some(KitShortcut::GitReview); }
                                         response
                                     }
                                     "builtin:tag_test" | "builtin:sapien" => {
@@ -938,7 +938,7 @@ fn draw_kit_browser_inner(
                                         } else { ready };
                                         let response = sidebar_kit_app_button(ui, &app.name, Some(&app.path), uri, bytes, true)
                                             .on_hover_text(app.path.display().to_string());
-                                        if browser_open_requested(&response, double_click_to_open) && ready {
+                                        if browser_shortcut_open_requested(&response, double_click_to_open) && ready {
                                             if overridden {
                                                 cx.send(AppAction::FocusKit(kit_id));
                                                 cx.send(AppAction::LaunchShortcutApp(app));
@@ -952,7 +952,7 @@ fn draw_kit_browser_inner(
                                         let texture = crate::app::shell::shortcuts::app_icon(ui.ctx(), &app.path);
                                         let response = sidebar_app_button(ui, texture.as_ref(), &app.name, "↗", true)
                                             .on_hover_text(app.path.display().to_string());
-                                        if browser_open_requested(&response, double_click_to_open) { custom_shortcut = Some(index); }
+                                        if browser_shortcut_open_requested(&response, double_click_to_open) { custom_shortcut = Some(index); }
                                         response
                                     }
                                 };

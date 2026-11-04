@@ -1806,18 +1806,14 @@ pub(in crate::app) fn draw_foundation_array(
     }
 }
 
-/// The parent block/array path for a block path, for "jump to parent". Strips
-/// the last `/segment` and a trailing element index, e.g.
-/// `regions[0]/permutations` → `regions`. `None` for a top-level block.
+/// Nearest ancestor block/array, identified by its element index. Struct
+/// segments have no header to jump to, so skip them (or return `None`).
 pub(in crate::app) fn parent_block_path(path: &str) -> Option<String> {
     let cut = path.rfind('/')?;
-    let mut parent = path[..cut].to_string();
-    if parent.ends_with(']') {
-        if let Some(open) = parent.rfind('[') {
-            parent.truncate(open);
-        }
-    }
-    Some(parent)
+    let ancestors = &path[..cut];
+    let close = ancestors.rfind(']')?;
+    let open = ancestors[..close].rfind('[')?;
+    Some(ancestors[..open].to_owned())
 }
 
 /// A readable breadcrumb for a block path: cleaned segments (index/ordinal
@@ -2040,7 +2036,8 @@ pub(in crate::app) fn draw_foundation_block_control(
 
     // Paint controls inside the already-reserved row without changing the
     // parent's cursor; otherwise the 8pt bottom padding is lost.
-    let jump_space = if depth > 0 { ICON_BUTTON_SIZE.x + 4.0 } else { 0.0 };
+    let parent_block = parent_block_path(path_salt);
+    let jump_space = if parent_block.is_some() { ICON_BUTTON_SIZE.x + 4.0 } else { 0.0 };
     let mut controls_rect = row_rect.shrink(8.0);
     if !narrow { controls_rect.max.x -= jump_space; }
     let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(controls_rect));
@@ -2243,7 +2240,7 @@ pub(in crate::app) fn draw_foundation_block_control(
     });
 
     // Parent navigation stays anchored to the top-right in both layouts.
-    if depth > 0 {
+    if let Some(parent) = parent_block {
         let jump_rect = egui::Rect::from_min_size(
             egui::pos2(row_rect.right() - 8.0 - ICON_BUTTON_SIZE.x, row_rect.top() + 8.0), ICON_BUTTON_SIZE);
         let mut jump_ui = ui.new_child(egui::UiBuilder::new().id_salt(id.with("parent_jump"))
@@ -2252,10 +2249,8 @@ pub(in crate::app) fn draw_foundation_block_control(
             &mut jump_ui, ButtonIcon::JumpUp, "Jump to parent block", true, foundation_block_text(),
         ).on_hover_text(format!("Jump to parent block\n{}", breadcrumb_for_path(path_salt)));
         if jump.clicked() {
-            if let Some(parent) = parent_block_path(path_salt) {
-                ui.data_mut(|d| d.insert_temp(parent_jump_id, parent));
-                ui.ctx().request_repaint();
-            }
+            ui.data_mut(|d| d.insert_temp(parent_jump_id, parent));
+            ui.ctx().request_repaint();
         }
     }
 
@@ -4696,12 +4691,14 @@ mod tests {
 
     #[test]
     fn parent_block_path_and_breadcrumb() {
+        assert_eq!(parent_block_path("definitions/skeleton nodes"), None);
+        assert_eq!(parent_block_path("regions[0]/definitions/skeleton nodes").as_deref(), Some("regions"));
         assert_eq!(
             parent_block_path("regions[0]/permutations").as_deref(),
             Some("regions")
         );
-        assert_eq!(parent_block_path("a/b/c").as_deref(), Some("a/b"));
-        assert_eq!(parent_block_path("a/b[3]").as_deref(), Some("a"));
+        assert_eq!(parent_block_path("a/b/c"), None);
+        assert_eq!(parent_block_path("a/b[3]"), None);
         assert_eq!(parent_block_path("regions"), None);
 
         assert_eq!(

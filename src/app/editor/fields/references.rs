@@ -246,10 +246,21 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
         draft.set_clean(value);
         rejected = None;
     }
-    // An unfinished path is ordinary while typing. Report malformed text only
-    // after leaving/submitting the field; a recognizable wrong type is immediate.
-    if rejected.as_ref().is_some_and(|(label, _)| *label == "invalid reference")
-        && draft.changed && ui.memory(|memory| memory.has_focus(id))
+    // A prefix of an accepted extension can itself be another group's FOURCC
+    // (e.g. `.mode` while typing `.model`). Keep that draft neutral until submit
+    // or blur, while complete incompatible extensions still warn immediately.
+    let editing_draft = draft.changed && ui.memory(|memory| memory.has_focus(id));
+    let unfinished_extension = editing_draft && rejected.is_some() && draft.text.trim().rsplit_once('.').is_some_and(|(_, extension)| {
+        let prefix = extension.to_ascii_lowercase();
+        accepted.as_ref().is_some_and(|groups| groups.iter().any(|group| {
+            hierarchy.name(*group)
+                .or_else(|| edit.names.and_then(|names| names.name_for(*group)))
+                .or_else(|| blam_tags::paths::group_tag_to_extension(*group))
+                .is_some_and(|name| name.len() > prefix.len() && name.to_ascii_lowercase().starts_with(&prefix))
+        }))
+    });
+    if rejected.as_ref().is_some_and(|(label, _)| *label == "invalid reference" || unfinished_extension)
+        && editing_draft
     {
         rejected = None;
     }
@@ -971,6 +982,33 @@ mod tests {
     }
 
     #[test]
+    fn typing_an_accepted_extension_does_not_flash_another_fourcc_type() {
+        for (group, extension) in [(b"hlmt", "model"), (b"scnr", "scenario")] {
+            let ctx = egui::Context::default();
+            ctx.set_global_style(foundation_style());
+            let mut sinks = EditSinks::default();
+            let mut edit = FieldEditContext::read_only(&mut sinks, "test", "tag");
+            edit.editable = true;
+            edit.game = Some(GameId::Halo3);
+            let mut meta = field_display_meta("reference");
+            meta.tag_reference_allowed = vec![u32::from_be_bytes(*group)];
+            let key = "tag|reference".to_owned();
+            let id = edit.widget_id(("tag_ref", &key));
+            for length in 1..=extension.len() {
+                let draft = edit.buffers.draft_mut(&key, "NONE");
+                draft.text = format!("objects\\example.{}", &extension[..length]);
+                draft.changed = true;
+                ctx.memory_mut(|memory| memory.request_focus(id));
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    draw_foundation_tag_reference_row(ui, &meta, "NONE", None, None, 0, "reference", &mut edit, 320.0);
+                });
+                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text() == "wrong tag type")), "{extension}, prefix length {length}");
+            }
+        }
+    }
+
+    #[test]
     fn reference_warnings_wait_for_unfinished_typing_but_show_wrong_types_immediately() {
         let ctx = egui::Context::default();
         ctx.set_global_style(foundation_style());
@@ -999,6 +1037,7 @@ mod tests {
         for (text, expected) in [
             ("objects\\partial", None),
             ("objects\\partial.bi", None),
+            ("objects\\partial.bitm", None),
             ("objects\\wrong.model", Some("wrong tag type")),
             ("objects\\correct.bitmap", None),
             ("objects\\partial", None),

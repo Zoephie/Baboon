@@ -331,6 +331,7 @@ impl Baboon {
             return;
         };
         let stay_on_home = self.shell.home_open;
+        let home_groups = self.shell.home_groups.clone();
         self.remember_closed_tag_keys(index, self.views[id].tabs_from_tree());
         let closing_campaign_evolved = self.model.kits[index]
             .source
@@ -348,6 +349,7 @@ impl Baboon {
         // actions went to the kit that slid into the closed one's place.
         self.focus_kit(active_after_removal(self.model.active, index, self.model.kits.len()));
         self.shell.home_open = stay_on_home;
+        self.shell.home_groups = home_groups;
     }
 
     /// Route an open request for `path` to a kit.

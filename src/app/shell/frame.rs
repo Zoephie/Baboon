@@ -5808,6 +5808,11 @@ mod tests {
         idle(&mut h);
         assert!(h.app.shell.home_open);
         assert!(h.painted.iter().any(|text| text.contains("Open a tags folder")), "Home draws the welcome page");
+        h.app.views[kit].terminal.open = true;
+        idle(&mut h);
+        assert!(h.painted.iter().any(|text| text == "Terminal"), "the terminal remains visible on Home");
+        h.app.views[kit].terminal.open = false;
+        idle(&mut h);
         assert_eq!(h.app.model.kits.len(), 1, "Home is not an extra empty editing kit");
         assert_eq!(open_tabs(&h), keys);
         assert!(h.app.model.kits[0].parsed_tags[&keys[0]].dirty.is_set());

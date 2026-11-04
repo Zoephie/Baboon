@@ -1237,7 +1237,7 @@ impl Dialog for TagDiffState {
                                                     egui::TextStyle::Body.resolve(ui.style()),
                                                 );
                                                 if ui
-                                                    .selectable_label(selected, shown)
+                                                    .selectable_label_with_search(selected, shown, label)
                                                     .on_hover_text(label)
                                                     .clicked()
                                                 {
@@ -1360,7 +1360,7 @@ impl Dialog for TagDiffState {
                                                         .x
                                                 });
                                             if ui
-                                                .selectable_label(selected, shown)
+                                                .selectable_label_with_search(selected, shown, &label)
                                                 .on_hover_text(format!("{label}\n{}", commit.hash))
                                                 .clicked()
                                             {

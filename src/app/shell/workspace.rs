@@ -41,9 +41,7 @@ impl Baboon {
         );
         // Terminal panel — rendered AFTER status so it sits above it.
         let active = self.model.kits[self.model.active].id;
-        if !self.shell.home_open {
-            draw_terminal_panel(&cx!(self, ctx), ui, &mut self.kit_tools, &mut self.views[active]);
-        }
+        draw_terminal_panel(&cx!(self, ctx), ui, &mut self.kit_tools, &mut self.views[active]);
         set_window_work_area(ctx, ui.available_rect_before_wrap());
 
         egui::CentralPanel::default()
