@@ -10,7 +10,7 @@ use super::*;
 use crate::app::model_preview::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::Program;
-use blam_tags::material::{BakedMaterial, Material, MaterialShader, bake};
+use blam_tags::material::{BakedMaterial, Material, MaterialShader, bake, shader_flags};
 
 /// A material shader read once: its parameters and its parsed effect.
 pub(super) struct H4Shader {
@@ -107,6 +107,33 @@ fn texture_uniform<'a>(wanted: &'a [(String, TextureKind)], parameter: &str) -> 
     wanted.iter().find(|(name, _)| name.eq_ignore_ascii_case(&lowercase)).map(|(name, kind)| (name.as_str(), kind))
 }
 
+/// `ps_material_generic_parameters` for a hologram's pass 0
+/// (`handle_object_part`): rows 0-2 the key, fill and rim light directions,
+/// each the material's `lgt_*_forward`, `_right` and `_up` values (externs
+/// 35, 37 and 39, which point at the first of three neighbouring lanes)
+/// taken as a vector and normalized; row 3's x the alpha the shader clips
+/// below, 1 for a blended hologram. The game first turns each vector by a
+/// node's matrix (node 1's, `model_skinning_get_node_matrix`); the preview
+/// leaves them in model space.
+fn hologram_parameters(baked: &BakedMaterial, blended: bool) -> [[f32; 4]; 4] {
+    let mut rows = [[0.0; 4]; 4];
+    // The pixel constants as one run of lanes, c160.x first.
+    let lanes = baked.real_vectors.as_flattened();
+    for extern_ in &baked.externs {
+        let [index @ (35 | 37 | 39), register, offset, _] = *extern_ else { continue };
+        let Some(start) = usize::from(register).checked_sub(160).map(|slot| slot * 4 + usize::from(offset)) else {
+            continue;
+        };
+        let Some(&[x, y, z]) = lanes.get(start..start + 3) else { continue };
+        let length = (x * x + y * y + z * z).sqrt();
+        if length > 0.0 {
+            rows[usize::from((index - 35) / 2)] = [x / length, y / length, z / length, 0.0];
+        }
+    }
+    rows[3][0] = if blended { 1.0 } else { 0.0 };
+    rows
+}
+
 /// The bake's constants under the names the translated source reads.
 fn baked_values(baked: &BakedMaterial) -> HashMap<String, H3Value> {
     let mut values = HashMap::new();
@@ -160,8 +187,18 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
     // albedo target, ahead of the lights unless the material puts it after
     // (`materialFlags` bit 1, `decal post lighting`).
     let decal = shader.shader.flags & blam_tags::material::shader_flags::IS_DECAL != 0;
+    let hologram = shader.shader.flags & shader_flags::IS_HOLOGRAM != 0;
+    let blended_hologram = shader.shader.flags & shader_flags::IS_BLENDED_HOLOGRAM != 0;
+    // `c_render_hologram::render_object_callback` (X360 0x83B2CCD8): outside a
+    // cinematic the transparent mode is 0, and `handle_object_part`
+    // (0x83B2EB80) draws every hologram, blended ones too, in pass 0 alone:
+    // opaque, depth written, back faces culled, through pass 16's entry,
+    // `single_pass_single_probe`.
+    let blend = if hologram || blended_hologram { H3Blend::Opaque } else { blend };
     let opaque = blend == H3Blend::Opaque;
-    let (albedo, lit) = if decal {
+    let (albedo, lit) = if hologram || blended_hologram {
+        (None, shader.pass("single_pass_single_probe"))
+    } else if decal {
         (None, shader.pass("_default"))
     } else if opaque && let (Some(albedo), Some(lit)) = (shader.pass("albedo"), shader.pass("static_probe")) {
         (Some(albedo), Some(lit))
@@ -191,7 +228,16 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                 shadow_generate: None,
                 dynamic_light: None,
                 blend,
-                values: baked_values(&baked),
+                values: {
+                    let mut values = baked_values(&baked);
+                    if hologram || blended_hologram {
+                        values.insert(
+                            "ps_material_generic_parameters".to_owned(),
+                            H3Value::FloatArray(hologram_parameters(&baked, blended_hologram).to_vec()),
+                        );
+                    }
+                    values
+                },
                 textures: Vec::new(),
                 change_colors: Vec::new(),
                 animations: Vec::new(),
@@ -264,6 +310,21 @@ mod tests {
         assert_eq!(texture_uniform(&wanted, "control_map_spglrf").map(|(name, _)| name), Some("control_map_SpGlRfTexture"));
         assert_eq!(texture_uniform(&wanted, "reflection_map").map(|(_, kind)| *kind), Some(TextureKind::Cube));
         assert_eq!(texture_uniform(&wanted, "control_map"), None, "a prefix is not a match");
+    }
+
+    /// The light vectors run across register boundaries, and the blended
+    /// hologram (Cortana's hair) clips below full alpha.
+    #[test]
+    fn a_holograms_lights_come_from_its_lgt_vectors() {
+        let mut baked = BakedMaterial::default();
+        baked.real_vectors = vec![[0.0, 0.0, 3.0, 4.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 2.0]];
+        // Key at c160.z (spills into c161.x), rim at c162.w: out of lanes.
+        baked.externs = vec![[35, 160, 2, 0xFF], [36, 160, 1, 0xFF], [39, 162, 3, 0xFF]];
+        let rows = hologram_parameters(&baked, false);
+        assert_eq!(rows[0], [0.6, 0.8, 0.0, 0.0]);
+        assert_eq!(rows[2], [0.0; 4], "a vector past the last lane is left alone");
+        assert_eq!(rows[3][0], 0.0);
+        assert_eq!(hologram_parameters(&baked, true)[3][0], 1.0);
     }
 
     #[test]
