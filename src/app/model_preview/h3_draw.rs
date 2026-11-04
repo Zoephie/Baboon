@@ -1031,6 +1031,7 @@ impl ModelGlRenderer {
                     }),
                 };
                 match kind {
+                    TextureKind::Line => gl.bind_texture(glow::TEXTURE_1D, texture),
                     TextureKind::Flat => gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder)),
                     TextureKind::Cube => gl.bind_texture(glow::TEXTURE_CUBE_MAP, texture.or(self.h2_black_cube)),
                     TextureKind::Volume => gl.bind_texture(glow::TEXTURE_3D, texture.or(self.h2_black_volume)),

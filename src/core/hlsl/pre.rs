@@ -153,16 +153,21 @@ struct Conditional {
     outer: bool,
 }
 
+/// Resolves an `#include`: the name as written and the path of the file
+/// that includes it (empty for the main source), giving the included
+/// file's own path and its text.
+pub(crate) type Include<'a> = dyn FnMut(&str, &str) -> Option<(Arc<str>, Arc<str>)> + 'a;
+
 pub(crate) struct Preprocessor<'a> {
     macros: HashMap<Arc<str>, Macro>,
-    include: &'a mut dyn FnMut(&str) -> Option<Arc<str>>,
+    include: &'a mut Include<'a>,
     output: Vec<Token>,
 }
 
 impl<'a> Preprocessor<'a> {
     pub(crate) fn new(
         defines: &[(&str, &str)],
-        include: &'a mut dyn FnMut(&str) -> Option<Arc<str>>,
+        include: &'a mut Include<'a>,
     ) -> Self {
         let mut macros = HashMap::new();
         for (name, value) in defines {
@@ -172,11 +177,11 @@ impl<'a> Preprocessor<'a> {
     }
 
     pub(crate) fn run(mut self, source: &str) -> Result<Vec<Token>, String> {
-        self.file(source, 0)?;
+        self.file(source, "", 0)?;
         Ok(self.output)
     }
 
-    fn file(&mut self, source: &str, depth: usize) -> Result<(), String> {
+    fn file(&mut self, source: &str, path: &str, depth: usize) -> Result<(), String> {
         if depth > MAX_INCLUDE_DEPTH {
             return Err("includes nest too deeply".to_owned());
         }
@@ -238,8 +243,9 @@ impl<'a> Preprocessor<'a> {
                     self.flush(&mut pending)?;
                     let name = tokenize(&format!("#include {}", rest.trim()));
                     let name = name.last().ok_or("#include names nothing")?.text.clone();
-                    let text = (self.include)(&name).ok_or_else(|| format!("no include {name}"))?;
-                    self.file(&text, depth + 1)?;
+                    let (included, text) =
+                        (self.include)(&name, path).ok_or_else(|| format!("no include {name}"))?;
+                    self.file(&text, &included, depth + 1)?;
                 }
                 "error" => return Err(format!("#error{rest}")),
                 _ => {}
@@ -528,7 +534,7 @@ mod tests {
     use super::*;
 
     fn text(source: &str, defines: &[(&str, &str)]) -> String {
-        let mut include = |name: &str| (name == "inner.fx").then(|| Arc::from("int from_inner;\n"));
+        let mut include = |name: &str, _: &str| (name == "inner.fx").then(|| (Arc::from(name), Arc::from("int from_inner;\n")));
         let tokens = Preprocessor::new(defines, &mut include).run(source).unwrap();
         tokens.iter().map(|token| &*token.text).collect::<Vec<_>>().join(" ")
     }

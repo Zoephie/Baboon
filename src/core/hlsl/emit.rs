@@ -107,7 +107,9 @@ fn pair_kind(name: &str) -> Option<TextureKind> {
     if !name.contains("texture_sampler") {
         return None;
     }
-    Some(if name.ends_with("_cube") {
+    Some(if name.ends_with("_1d") {
+        TextureKind::Line
+    } else if name.ends_with("_cube") {
         TextureKind::Cube
     } else if name.ends_with("_3d") {
         TextureKind::Volume
@@ -120,6 +122,7 @@ fn pair_kind(name: &str) -> Option<TextureKind> {
 
 fn sampler_type(kind: TextureKind) -> &'static str {
     match kind {
+        TextureKind::Line => "sampler1D",
         TextureKind::Flat => "sampler2D",
         TextureKind::FlatArray => "sampler2DArray",
         TextureKind::Volume => "sampler3D",
@@ -1503,8 +1506,11 @@ impl Emitter<'_> {
     }
 
     fn coordinate(&mut self, value: Code, kind: TextureKind) -> Result<Code, String> {
-        let size = if kind == TextureKind::Flat { 2 } else { 3 };
-        self.convert(value, &Type::Vector(Scalar::Float, size))
+        match kind {
+            TextureKind::Line => self.convert(value, &Type::Scalar(Scalar::Float)),
+            TextureKind::Flat => self.convert(value, &Type::Vector(Scalar::Float, 2)),
+            _ => self.convert(value, &Type::Vector(Scalar::Float, 3)),
+        }
     }
 
     fn method(&mut self, object: Code, name: &str, arguments: &[Expression]) -> Result<Code, String> {
@@ -1561,16 +1567,18 @@ impl Emitter<'_> {
                 let location = next("a location")?;
                 let offset = parts.next();
                 let (position, level) = match kind {
+                    TextureKind::Line => (1, 1),
                     TextureKind::Flat => (2, 2),
                     _ => (3, 3),
                 };
                 let whole = Type::Vector(Scalar::Int, position + 1);
                 let location = self.convert(location, &whole)?;
                 let swizzle = &"xyzw"[..position];
+                let offset_type = if position == 1 { Type::Scalar(Scalar::Int) } else { Type::Vector(Scalar::Int, position) };
                 let (held, lod) = (location.text.clone(), &"xyzw"[level..=level]);
                 let mut text = format!("{held}.{swizzle}");
                 if let Some(offset) = offset {
-                    let offset = self.convert(offset, &Type::Vector(Scalar::Int, position))?;
+                    let offset = self.convert(offset, &offset_type)?;
                     text = format!("({text} + {})", offset.text);
                 }
                 Ok(Code::new(format!("texelFetch({texture}, {text}, {held}.{lod})"), vec4()))
@@ -1817,7 +1825,7 @@ mod tests {
     use super::*;
 
     fn glsl(source: &str, entry: &str, stage: Stage) -> Translated {
-        let mut include = |_: &str| None;
+        let mut include = |_: &str, _: &str| None;
         let tokens = Preprocessor::new(&[], &mut include).run(source).unwrap();
         translate(&parse(&tokens).unwrap(), entry, stage).unwrap()
     }
@@ -1825,6 +1833,19 @@ mod tests {
     fn pixel(body: &str) -> String {
         let source = format!("float4 m[2]; float4x3 t;\n{body}\n");
         glsl(&source, "main_ps", Stage::Pixel).source
+    }
+
+    #[test]
+    fn a_line_texture_samples_and_loads_by_one_coordinate() {
+        let translated = glsl(
+            "Texture1D t; SamplerState s; float4 main(float u : TEXCOORD0) : SV_Target { return t.Sample(s, u) + t.Load(int2(3, 0)); }\n",
+            "main",
+            Stage::Pixel,
+        );
+        assert!(translated.source.contains("uniform sampler1D t;"), "{}", translated.source);
+        assert!(translated.source.contains("texture(t, "), "{}", translated.source);
+        assert!(translated.source.contains("texelFetch(t, "), "{}", translated.source);
+        assert!(!translated.source.contains("vec2(u"), "a line reads one coordinate: {}", translated.source);
     }
 
     #[test]

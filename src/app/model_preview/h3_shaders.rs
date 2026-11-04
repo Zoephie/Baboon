@@ -422,7 +422,7 @@ impl H3Sources {
         stage: Stage,
     ) -> Result<Translated, String> {
         let borrowed: Vec<_> = defines.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
-        let mut include = |name: &str| self.file(name);
+        let mut include = |name: &str, _: &str| self.file(name).map(|text| (Arc::from(name), text));
         let tokens = Preprocessor::new(&borrowed, &mut include).run(main)?;
         translate(&parse(&tokens)?, entry, stage)
     }

@@ -14,6 +14,8 @@ pub(crate) enum Scalar {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum TextureKind {
+    /// `Texture1D`: a row of texels, read by one coordinate.
+    Line,
     Flat,
     FlatArray,
     Volume,
@@ -105,6 +107,23 @@ pub(crate) enum Statement {
     Continue,
 }
 
+/// One `SetVertexShader(CompileShader(vs_5_0, f(..)))` of an effect pass.
+#[derive(Debug, Clone)]
+pub(crate) struct PassShader {
+    /// `vs`, `ps`, `cs` and so on: the profile's stage.
+    pub(crate) stage: Arc<str>,
+    pub(crate) function: Arc<str>,
+    /// Literal arguments the pass compiles the function with.
+    pub(crate) arguments: Vec<Expression>,
+}
+
+/// A D3DX effect's `technique11 name { pass name { .. } }`.
+#[derive(Debug, Clone)]
+pub(crate) struct Technique {
+    pub(crate) name: Arc<str>,
+    pub(crate) passes: Vec<(Arc<str>, Vec<PassShader>)>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Program {
     pub(crate) structs: Vec<(Arc<str>, Vec<Variable>)>,
@@ -112,6 +131,17 @@ pub(crate) struct Program {
     /// In source order: a static's initializer may read an earlier one.
     pub(crate) globals: Vec<Variable>,
     pub(crate) functions: Vec<Function>,
+    /// An effect file's techniques, in source order.
+    pub(crate) techniques: Vec<Technique>,
+}
+
+impl Program {
+    /// The function a technique's pass compiles for a stage (`vs`, `ps`).
+    pub(crate) fn pass_function(&self, technique: &str, pass: &str, stage: &str) -> Option<&PassShader> {
+        let technique = self.techniques.iter().find(|candidate| &*candidate.name == technique)?;
+        let (_, shaders) = technique.passes.iter().find(|(name, _)| &**name == pass)?;
+        shaders.iter().find(|shader| &*shader.stage == stage)
+    }
 }
 
 const MODIFIERS: [&str; 13] = [
@@ -169,6 +199,7 @@ pub(crate) fn numeric_type(name: &str) -> Option<Type> {
 
 fn texture_type(name: &str) -> Option<Type> {
     let kind = match name.to_ascii_lowercase().as_str() {
+        "texture1d" => TextureKind::Line,
         "texture2d" | "rwtexture2d" => TextureKind::Flat,
         "texture2darray" => TextureKind::FlatArray,
         "texture3d" => TextureKind::Volume,
@@ -248,14 +279,38 @@ impl Parser<'_> {
             return Ok(());
         }
         self.skip_attributes();
+        if self.at_mark("technique") || self.at_mark("technique10") || self.at_mark("technique11") {
+            return self.technique();
+        }
+        // An effect's `string` globals only annotate it for tools.
+        if self.at_mark("string") || self.modifiers_then("string") {
+            self.modifiers();
+            self.at += 1;
+            self.identifier()?;
+            self.skip_annotations()?;
+            return self.skip_statement();
+        }
         if self.at_mark("struct") {
             self.structure()?;
             return Ok(());
         }
         if self.eat("typedef") {
-            let ty = self.type_name()?;
-            let name = self.identifier()?;
-            self.program.typedefs.push((name, ty));
+            // `typedef struct { .. } a, b;` names one anonymous struct twice.
+            let ty = if self.at_mark("struct") && self.peek_at(1).is_some_and(|token| token.is("{")) {
+                self.at += 1;
+                let anonymous: Arc<str> = Arc::from(format!("__anonymous_{}", self.program.structs.len()));
+                self.struct_body(anonymous.clone())?;
+                Type::Named(anonymous)
+            } else {
+                self.type_name()?
+            };
+            loop {
+                let name = self.identifier()?;
+                self.program.typedefs.push((name, ty.clone()));
+                if !self.eat(",") {
+                    break;
+                }
+            }
             return self.expect(";");
         }
         if self.at_mark("cbuffer") || self.at_mark("tbuffer") {
@@ -288,6 +343,10 @@ impl Parser<'_> {
     fn structure(&mut self) -> Result<Arc<str>, String> {
         self.expect("struct")?;
         let name = self.identifier()?;
+        self.struct_body(name)
+    }
+
+    fn struct_body(&mut self, name: Arc<str>) -> Result<Arc<str>, String> {
         self.program.structs.push((name.clone(), Vec::new()));
         let slot = self.program.structs.len() - 1;
         self.expect("{")?;
@@ -419,8 +478,137 @@ impl Parser<'_> {
         let name = self.identifier()?;
         let dimensions = self.dimensions()?;
         let semantic = self.semantic()?;
+        self.skip_annotations()?;
+        // `= sampler_state { .. }` sets D3DX sampler state, which the
+        // engine overrides at draw time.
+        if self.at_mark("=") && self.peek_at(1).is_some_and(|token| token.is("sampler_state")) {
+            self.at += 2;
+            self.skip_braces()?;
+            return Ok(Variable { ty, name, semantic, init: None, dimensions });
+        }
         let init = if self.eat("=") { Some(self.initializer()?) } else { None };
         Ok(Variable { ty, name, semantic, init, dimensions })
+    }
+
+    /// Whether storage words lead up to `word`, without moving.
+    fn modifiers_then(&self, word: &str) -> bool {
+        let mut at = self.at;
+        while self.tokens.get(at).is_some_and(|token| MODIFIERS.iter().any(|modifier| token.is(modifier))) {
+            at += 1;
+        }
+        at != self.at && self.tokens.get(at).is_some_and(|token| token.is(word))
+    }
+
+    /// Up to and past the next `;` at this nesting.
+    fn skip_statement(&mut self) -> Result<(), String> {
+        let mut depth = 0;
+        loop {
+            let token = self.peek().ok_or("statement never ends")?;
+            depth += i32::from(token.is("{") || token.is("(")) - i32::from(token.is("}") || token.is(")"));
+            let ends = depth == 0 && token.is(";");
+            self.at += 1;
+            if ends {
+                return Ok(());
+            }
+        }
+    }
+
+    fn skip_braces(&mut self) -> Result<(), String> {
+        self.expect("{")?;
+        let mut depth = 1;
+        while depth > 0 {
+            let token = self.peek().ok_or("braces never close")?;
+            depth += i32::from(token.is("{")) - i32::from(token.is("}"));
+            self.at += 1;
+        }
+        Ok(())
+    }
+
+    /// `< .. >` effect annotations, which describe a variable to tools.
+    fn skip_annotations(&mut self) -> Result<(), String> {
+        while self.at_mark("<") {
+            let mut depth = 0;
+            loop {
+                let token = self.peek().ok_or("annotation never closes")?;
+                depth += i32::from(token.is("<")) - i32::from(token.is(">"));
+                self.at += 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `technique11 name <..> { pass name <..> { state; .. } .. }`. Each
+    /// pass keeps its `SetXShader(CompileShader(profile, f(args)))`; other
+    /// state is the engine's to set.
+    fn technique(&mut self) -> Result<(), String> {
+        self.at += 1;
+        // A technique may go unnamed (water's).
+        let name = if self.at_mark("{") || self.at_mark("<") { Arc::from("") } else { self.identifier()? };
+        self.skip_annotations()?;
+        self.expect("{")?;
+        let mut passes = Vec::new();
+        while !self.eat("}") {
+            self.expect("pass")?;
+            let pass = self.identifier()?;
+            self.skip_annotations()?;
+            self.expect("{")?;
+            let mut shaders = Vec::new();
+            while !self.eat("}") {
+                let setter = self.peek().map(|token| token.text.clone()).ok_or("pass never closes")?;
+                let stage = setter.strip_prefix("Set").and_then(|rest| rest.strip_suffix("Shader"));
+                if let Some(stage) = stage.filter(|_| self.peek_at(1).is_some_and(|token| token.is("("))) {
+                    let stage: Arc<str> = Arc::from(match stage {
+                        "Vertex" => "vs",
+                        "Pixel" => "ps",
+                        "Compute" => "cs",
+                        "Geometry" => "gs",
+                        "Hull" => "hs",
+                        "Domain" => "ds",
+                        other => other,
+                    });
+                    self.at += 2;
+                    if self.eat("CompileShader") {
+                        self.expect("(")?;
+                        self.identifier()?;
+                        self.expect(",")?;
+                        let function = self.identifier()?;
+                        self.expect("(")?;
+                        let mut arguments = Vec::new();
+                        if !self.eat(")") {
+                            loop {
+                                arguments.push(self.assignment()?);
+                                if !self.eat(",") {
+                                    break;
+                                }
+                            }
+                            self.expect(")")?;
+                        }
+                        // Closing `CompileShader(` and `SetXShader(`.
+                        self.expect(")")?;
+                        self.expect(")")?;
+                        shaders.push(PassShader { stage, function, arguments });
+                    } else {
+                        // `SetGeometryShader(NULL)` and the like.
+                        let mut depth = 1;
+                        while depth > 0 {
+                            let token = self.peek().ok_or("pass state never closes")?;
+                            depth += i32::from(token.is("(")) - i32::from(token.is(")"));
+                            self.at += 1;
+                        }
+                    }
+                    self.expect(";")?;
+                } else {
+                    self.skip_statement()?;
+                }
+            }
+            passes.push((pass, shaders));
+        }
+        self.eat(";");
+        self.program.techniques.push(Technique { name, passes });
+        Ok(())
     }
 
     fn dimensions(&mut self) -> Result<Vec<Option<Expression>>, String> {
@@ -776,9 +964,53 @@ mod tests {
     use super::*;
 
     fn parsed(source: &str) -> Program {
-        let mut include = |_: &str| None;
+        let mut include = |_: &str, _: &str| None;
         let tokens = Preprocessor::new(&[], &mut include).run(source).unwrap();
         parse(&tokens).unwrap()
+    }
+
+    #[test]
+    fn an_effects_techniques_name_each_passs_functions() {
+        let program = parsed(concat!(
+            "float4 a_ps() : SV_Target { return 0; }\nfloat4 a_vs() : SV_Position { return 0; }\n",
+            "technique11 albedo <int blendMaterialCount = 2;> {\n",
+            "  pass _default { SetPixelShader(CompileShader(ps_5_0, a_ps())); }\n",
+            "  pass rigid { SetVertexShader(CompileShader(vs_5_0, a_vs())); SetGeometryShader(NULL); }\n",
+            "}\ntechnique11 { pass water { SetVertexShader(CompileShader(vs_5_0, a_vs(1, 2))); } }\n",
+        ));
+        assert_eq!(program.functions.len(), 2);
+        assert_eq!(&*program.pass_function("albedo", "_default", "ps").unwrap().function, "a_ps");
+        assert_eq!(&*program.pass_function("albedo", "rigid", "vs").unwrap().function, "a_vs");
+        // A pass names one stage only: asking another finds nothing.
+        assert!(program.pass_function("albedo", "rigid", "ps").is_none());
+        assert!(program.pass_function("albedo", "skinned", "vs").is_none());
+        assert_eq!(program.pass_function("", "water", "vs").unwrap().arguments.len(), 2);
+    }
+
+    #[test]
+    fn annotations_strings_and_sampler_state_fall_away() {
+        let program = parsed(concat!(
+            "static const float k = 1; string k_notes <int RegisterOffset = 3; string Name = \"k\"; float3 Default = float3(1, 1, 1);>;\n",
+            "float4 tint <string Name = \"tint\"; float Minimum = 0;> = float4(1, 1, 1, 1);\n",
+            "sampler s = sampler_state { Filter = MIN_MAG_MIP_LINEAR; AddressU = Wrap; };\n",
+            "float f() { return k; }\n",
+        ));
+        let names: Vec<&str> = program.globals.iter().map(|global| &*global.name).collect();
+        assert_eq!(names, ["k", "tint", "s"]);
+        assert!(program.globals[1].init.is_some(), "an annotated initializer survives");
+        assert!(program.globals[2].init.is_none(), "sampler state is the engine's");
+        assert_eq!(program.functions.len(), 1);
+    }
+
+    #[test]
+    fn a_typedef_can_name_one_anonymous_struct_twice() {
+        let program = parsed("typedef struct { float a; int b; } pair, other_pair;\npair f(other_pair p) { return p; }\n");
+        assert_eq!(program.structs.len(), 1);
+        let named: Vec<_> = program.typedefs.iter().map(|(name, ty)| (&**name, ty.clone())).collect();
+        assert_eq!(named[0].1, named[1].1);
+        assert_eq!(named[0].0, "pair");
+        assert_eq!(named[1].0, "other_pair");
+        assert_eq!(program.functions[0].returns, Type::Named(program.structs[0].0.clone()));
     }
 
     #[test]
