@@ -82,7 +82,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let TagSource::LooseFolder { root, .. } = source else { unreachable!() };
     // A sky has a render_model and nothing above it.
     let file = root.join(format!("{}.model", shot.model.replace('\\', "/")));
-    let (extension, group) = if let Ok(kind) = std::env::var("H2_SHOT_OBJECT") { if kind == "scenery" { ("scenery", b"scen") } else if kind == "machine" { ("device_machine", b"mach") } else if kind == "crate" { ("crate", b"bloc") } else if kind == "giant" { ("giant", b"gint") } else if kind == "equipment" { ("equipment", b"eqip") } else if kind == "weapon" { ("weapon", b"weap") } else if kind == "vehicle" { ("vehicle", b"vehi") } else { ("biped", b"bipd") } } else if std::env::var_os("H2_SHOT_BIPED").is_some() {
+    let (extension, group) = if let Ok(kind) = std::env::var("H2_SHOT_OBJECT") { if kind == "scenery" { ("scenery", b"scen") } else if kind == "machine" { ("device_machine", b"mach") } else if kind == "crate" { ("crate", b"bloc") } else if kind == "giant" { ("giant", b"gint") } else if kind == "equipment" { ("equipment", b"eqip") } else if kind == "weapon" { ("weapon", b"weap") } else if kind == "vehicle" { ("vehicle", b"vehi") } else if kind == "effect_scenery" { ("effect_scenery", b"efsc") } else { ("biped", b"bipd") } } else if std::env::var_os("H2_SHOT_BIPED").is_some() {
         ("biped", b"bipd")
     } else if shot_game() == GameId::HaloCe {
         ("gbxmodel", b"mod2")
@@ -113,6 +113,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         eprintln!("NOTE MAT {} h3 {} {:?}", material.shader_path, texture.h3.is_some(), texture.error);
     }
     data.textures = Some(Arc::new(textures));
+    eprintln!("NOTE {} cheap particle emitters", data.preview.reach_cheap_emitters.len());
     // `H2_SHOT_DROP=a,b` leaves out whole features, to see one on its own.
     if let Ok(dropped) = std::env::var("H2_SHOT_DROP") {
         let preview = Arc::make_mut(&mut data.preview);
@@ -124,6 +125,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 "gels" => preview.h2_gel_lights.clear(),
                 "volumes" => preview.h2_light_volumes.clear(),
                 "h3_volumes" => preview.h3_light_volumes.clear(),
+                "cheap_particles" => preview.reach_cheap_emitters.clear(),
                 "contrails" => preview.h2_contrails.clear(),
                 "prt" => preview.h3_prt = None,
                 "shield" => preview.reach_shield = None,
@@ -228,6 +230,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         h3_volumes_shown: super::h3_volumes_shown(&data.preview, &state),
         h3_systems_shown: super::h3_systems_shown(&data.preview, &state),
         h3_strips_shown: super::h3_strips_shown(&data.preview, &state),
+        reach_cheap_shown: super::reach_cheap_shown(&data.preview, &state),
         h2_flares_shown: super::h2_flares_shown(&data.preview, &state),
         h2_shown: super::H2Shown::of(&data.preview, &state),
         h2_values: {
