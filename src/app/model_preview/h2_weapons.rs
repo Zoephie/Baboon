@@ -781,11 +781,11 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
     }
 }
 
-/// What a Halo 4 object brings of its own so far: its lights and cheap
-/// lights and the screen-space passes they draw with
+/// What a Halo 4 object brings of its own so far: its lights, cheap lights
+/// and lens flares and the passes they draw with
 /// (`docs/h4-preview-research/lights.md`), and antennas and cloth, whose
-/// definitions are Reach's (`objects.md` §3.10). Its flares and effects wait
-/// on their own readers.
+/// definitions are Reach's (`objects.md` §3.10). Its effects wait on their
+/// own readers.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
@@ -803,6 +803,11 @@ pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (Mar
     preview.h4_lights.extend(named!(lights, name));
     preview.h4_cheap_lights.extend(named!(cheap, name));
     super::h4_lights::read_h4_light_passes(source, preview);
+    let flares = super::h4_flares::read_h4_flares(source, object, owner, markers, frame);
+    preview.h4_flares.extend(named!(flares, name));
+    if !preview.h4_flares.is_empty() && preview.h4_flare_pass.is_none() {
+        preview.h4_flare_pass = super::h4_flares::h4_flare_pass(source).ok().map(Arc::new);
+    }
     preview.h2_antennas.extend(super::h2_lights::read_reach_antennas(source, object, markers, frame, name));
     super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
 }

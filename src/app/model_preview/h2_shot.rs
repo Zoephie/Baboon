@@ -128,10 +128,11 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     data.textures = Some(Arc::new(textures));
     eprintln!("NOTE {} cheap particle emitters", data.preview.reach_cheap_emitters.len());
     eprintln!(
-        "NOTE H4 {} lights, {} cheap lights, {} light passes",
+        "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares",
         data.preview.h4_lights.len(),
         data.preview.h4_cheap_lights.len(),
-        data.preview.h4_light_passes.len()
+        data.preview.h4_light_passes.len(),
+        data.preview.h4_flares.len()
     );
     // `H2_SHOT_DROP=a,b` leaves out whole features, to see one on its own.
     if let Ok(dropped) = std::env::var("H2_SHOT_DROP") {
@@ -162,6 +163,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                     preview.h4_lights.clear();
                     preview.h4_cheap_lights.clear();
                 }
+                "h4_flares" => preview.h4_flares.clear(),
                 other => panic!("H2_SHOT_DROP: no feature {other}"),
             }
         }
@@ -526,6 +528,38 @@ fn h4_light_passes_link() {
                 assert!(gl.get_program_link_status(linked), "{physical} {technique}: {}", gl.get_program_info_log(linked));
             }
         }
+    }
+}
+
+/// Halo 4's lens flare pass, explicit 46, compiles and links, and takes its
+/// corners and texture coordinates as `POSITION` and `TEXCOORD0`.
+#[test]
+fn h4_flare_pass_links() {
+    let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+        return;
+    };
+    let source = TagSource::LooseFolder {
+        root: root.into(),
+        game: Some(GameId::Halo4),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let gl = headless_gl();
+    let pass = super::h4_flares::h4_flare_pass(&source).expect("the flare pass");
+    for (name, _) in &pass.uniforms {
+        eprintln!("NOTE flare UNIFORM {name}");
+    }
+    assert!(pass.vertex.contains("in vec2 a_POSITION;") && pass.vertex.contains("a_TEXCOORD0"), "{}", pass.vertex);
+    unsafe {
+        let linked = gl.create_program().unwrap();
+        for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
+            let shader = gl.create_shader(kind).unwrap();
+            gl.shader_source(shader, text);
+            gl.compile_shader(shader);
+            assert!(gl.get_shader_compile_status(shader), "{}", gl.get_shader_info_log(shader));
+            gl.attach_shader(linked, shader);
+        }
+        gl.link_program(linked);
+        assert!(gl.get_program_link_status(linked), "{}", gl.get_program_info_log(linked));
     }
 }
 

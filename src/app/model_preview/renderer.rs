@@ -371,7 +371,8 @@ fn visible_instances(preview: &RenderModelPreview, state: &ModelPreviewState) ->
 /// Which of the preview's Halo 3 flares have a marker under what is selected.
 fn h3_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    preview.h3_flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+    let h4 = preview.h4_flares.iter().map(|at| at.only_under().is_none_or(shown));
+    preview.h3_flares.iter().map(|at| at.only_under().is_none_or(shown)).chain(h4).collect()
 }
 
 /// The same of Reach's lights and then its cheap lights, then Halo 4's.
@@ -990,6 +991,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let reach_cheap = data.preview.reach_cheap_lights.iter().filter(|light| light.object == object);
     let h4_lights = data.preview.h4_lights.iter().filter(|light| light.object == object);
     let h4_cheap = data.preview.h4_cheap_lights.iter().filter(|light| light.object == object);
+    let h4_flares = data.preview.h4_flares.iter().filter(|at| at.object == object);
     let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == object);
     let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == object);
     let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == object);
@@ -1014,6 +1016,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
         .chain(reach_cheap.flat_map(|light| light.inputs()))
         .chain(h4_lights.flat_map(|light| light.inputs()))
         .chain(h4_cheap.flat_map(|light| light.inputs()))
+        .chain(h4_flares.flat_map(|at| at.inputs()))
         .chain(h3_flares.map(|at| at.scale_name()))
         .chain(h3_volumes.flat_map(|at| at.scale_names()))
         .chain(h3_systems.flat_map(|at| at.scale_names()))
@@ -1100,6 +1103,7 @@ pub(super) fn object_moves(
         || data.preview.reach_cheap_lights.iter().any(|light| light.animates())
         || data.preview.h4_lights.iter().any(|light| light.animates())
         || data.preview.h4_cheap_lights.iter().any(|light| light.animates())
+        || data.preview.h4_flares.iter().any(|at| at.animates())
         || data.preview.h3_flares.iter().any(|at| at.animates())
         || data.preview.h3_light_volumes.iter().any(|at| at.animates())
         || !data.preview.h3_particles.is_empty()
@@ -1153,6 +1157,7 @@ pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
         && preview.reach_cheap_lights.is_empty()
         && preview.h4_lights.is_empty()
         && preview.h4_cheap_lights.is_empty()
+        && preview.h4_flares.is_empty()
         && preview.h3_flares.is_empty()
         && preview.h3_light_volumes.is_empty()
         && preview.h3_particles.is_empty()
@@ -1486,6 +1491,8 @@ mod reach_shadow_pass;
 mod reach_light_pass;
 #[path = "h4_light_pass.rs"]
 mod h4_light_pass;
+#[path = "h4_flare_pass.rs"]
+mod h4_flare_pass;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -2320,6 +2327,7 @@ impl ModelGpuSlot {
                     let (image, texels, mips) = at.bitmap();
                     vec![h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)]
                 }))
+                .chain(h4_flare_pass::h4_flare_images(gl, frame))
                 .collect();
             for texture in self.ce_effect_flare_textures.drain().flat_map(|(_, lights)| lights).flatten().flatten() {
                 gl.delete_texture(texture);
@@ -4102,6 +4110,8 @@ struct ModelGlRenderer {
     h4_bloom: Option<h4_bloom::H4Bloom>,
     /// Halo 4's hologram surfaces and the screen materials' bitmaps.
     h4_holograms: Option<h4_holograms::H4Holograms>,
+    /// The corners Halo 4's flare reflections draw from.
+    h4_flare_geometry: Option<(glow::NativeVertexArray, glow::NativeBuffer)>,
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
     h4_draw: Option<h4_submit::H4Draw>,
@@ -4266,6 +4276,7 @@ impl ModelGlRenderer {
                 reach_bloom: None,
                 h4_bloom: None,
                 h4_holograms: None,
+                h4_flare_geometry: None,
                 h4_draw: None,
                 reach_shadow: None,
                 reach_shadow_program: None,
@@ -4649,6 +4660,7 @@ impl ModelGlRenderer {
                 && preview.h2_antennas.is_empty()
                 && preview.h2_flares.is_empty()
                 && preview.h3_flares.is_empty()
+                && preview.h4_flares.is_empty()
                 && preview.h3_light_volumes.is_empty()
                 && preview.h2_light_volumes.is_empty()
                 && preview.h2_contrails.is_empty()

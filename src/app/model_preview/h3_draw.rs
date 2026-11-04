@@ -1557,6 +1557,7 @@ impl ModelGlRenderer {
             // and the tone curve, so these are in the same light as the scene.
             if sprites {
                 self.draw_ce_flares(gl, frame, slot, SpriteStage::Rest);
+                self.draw_h4_flares(gl, frame, slot);
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             if bloomed && bloom.is_none() {

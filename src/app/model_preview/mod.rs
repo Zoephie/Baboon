@@ -66,6 +66,7 @@ mod h4_ik;
 mod reach_cheap_particles;
 mod reach_lights;
 mod h4_lights;
+mod h4_flares;
 mod reach_blend_screens;
 mod reach_camo;
 mod reach_shadow;
@@ -165,6 +166,9 @@ pub(crate) struct RenderModelPreview {
     /// Explicit 187 and 204's screen-space passes, by (physically correct,
     /// technique).
     pub h4_light_passes: std::collections::HashMap<(bool, usize), Arc<h3_shaders::H3Pass>>,
+    /// Halo 4's attached `lens_flare`s, and explicit 46's pass that draws them.
+    pub h4_flares: Vec<h4_flares::H4FlareAt>,
+    pub h4_flare_pass: Option<Arc<h3_shaders::H3Pass>>,
     /// Reach's shield impact, as its damage sections choose it.
     pub reach_shield: Option<Arc<reach_shield::ReachShield>>,
     /// `globals`' active camo curves, for a Reach object.
