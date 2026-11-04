@@ -593,6 +593,27 @@ fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
         "v_TEXCOORD7 = hlsl_result.prt_ravi_diff;",
         "v_TEXCOORD7 = hlsl_result.prt_ravi_diff;\n    v_TEXCOORD7.x = min(v_TEXCOORD7.x, 1.0);",
     );
+    // Reach keeps the binormal's handedness in the position's w, which the
+    // preview's three-component positions leave at 1: every mirrored half
+    // lit with the wrong binormal. The preview carries the authored
+    // binormal, so its side of the normal and tangent gives the sign.
+    const REACH_BINORMAL_SCALE: &str = "float l_binormal_scale = ((l_vertex.position.w * 2.) - 1.);";
+    let source = if source.contains(REACH_BINORMAL_SCALE) {
+        // Functions come before the inputs they would read, so `main` works
+        // the sign out into a global first.
+        let source = source
+            .replace(REACH_BINORMAL_SCALE, "float l_binormal_scale = g_reach_binormal_sign;")
+            .replacen("void main() {", "void main() {\n    g_reach_binormal_sign = (dot(cross(a_NORMAL, a_TANGENT), a_BINORMAL) < 0.0) ? -1.0 : 1.0;", 1);
+        let source = if source.contains("in vec3 a_BINORMAL;") {
+            source
+        } else {
+            source.replacen("in vec3 a_NORMAL;", "in vec3 a_NORMAL;\nin vec3 a_BINORMAL;", 1)
+        };
+        let (version, rest) = source.split_once('\n').unwrap_or((&source, ""));
+        format!("{version}\nfloat g_reach_binormal_sign = 1.0;\n{rest}")
+    } else {
+        source
+    };
     // The game's camo reads the frame ahead of its tone curve; the preview's
     // copy of what lies behind has been through it. This is that curve undone,
     // the root of `1.5x - 0.5x^3`.
