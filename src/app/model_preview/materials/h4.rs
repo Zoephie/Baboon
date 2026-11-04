@@ -163,8 +163,14 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
     let opaque = blend == H3Blend::Opaque;
     let (albedo, lit) = if decal {
         (None, shader.pass("_default"))
+    } else if opaque && let (Some(albedo), Some(lit)) = (shader.pass("albedo"), shader.pass("static_probe")) {
+        (Some(albedo), Some(lit))
     } else if opaque {
-        (shader.pass("albedo"), shader.pass("static_probe"))
+        // `opaque_alpha_blend` counts as transparent too (`GetIsTransparent`,
+        // X360 0x82A9EAB0), and its blend state is off: a shader with no
+        // deferred techniques (Cortana's hair compiles only `single_pass_*`)
+        // shows through that pass, drawn as opaque.
+        (None, shader.pass("single_pass_single_probe"))
     } else {
         (None, shader.pass("single_pass_single_probe").or_else(|| shader.pass("albedo")))
     };
