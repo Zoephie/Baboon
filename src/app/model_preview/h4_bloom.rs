@@ -144,7 +144,7 @@ void main() {
         // DARK_COLOR_MULTIPLIER, `ps_exposure.g`.
         s.rgb *= 8.0;
         float intensity = graded
-            ? texture(grading, s.rgb * grading_scale + grading_offset).a
+            ? textureLod(grading, s.rgb * grading_scale + grading_offset, 0.0).a
             : dot(s.rgb, vec3(0.3086, 0.6094, 0.0820));
         float bloom = scale.x * intensity + scale.z * s.a + scale.y;
         color = vec4(s.rgb * bloom, keeps_alpha ? s.a : intensity);
