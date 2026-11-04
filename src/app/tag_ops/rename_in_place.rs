@@ -1041,6 +1041,7 @@ mod tests {
             names: _,
             scanning_entries: _,
             requested_path: _,
+            loading_label: _,
             profile: _,
             project: _,
             pending_container_folders: _,

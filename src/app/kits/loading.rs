@@ -22,12 +22,31 @@ impl Baboon {
             self.settle_restored_kit(kit);
             return true;
         };
-        self.focus_kit(index);
+        // The loader's active-kit helpers need its destination temporarily,
+        // but completion must not select a workspace tab or dismiss Home.
+        let focused = self.model.active_kit_id();
+        self.model.active = index;
+        let repaint = self.install_source_load_result(kit, result, recent_path, ctx);
+        if let Some(index) = self.model.kit_index(focused) {
+            self.model.active = index;
+        }
+        // Session restore is an explicit focus plan, applied only once all
+        // restored workspaces have settled, rather than on each arriving load.
+        self.settle_restored_kit(kit);
+        repaint
+    }
+
+    fn install_source_load_result(
+        &mut self,
+        kit: KitId,
+        result: Result<LoadedSourceData, String>,
+        recent_path: Option<PathBuf>,
+        ctx: &egui::Context,
+    ) -> bool {
         let mut loaded = match result {
             Ok(loaded) => loaded,
             Err(error) => {
                 self.release_source_load(kit);
-                self.settle_restored_kit(kit);
                 self.model.status = error;
                 return false;
             }
@@ -119,10 +138,6 @@ impl Baboon {
             self.schedule_next_entry_index_refresh(installed, ctx);
         }
         self.finish_pending_session_restore(ctx.clone());
-        // This load made its own kit active. If a session restore is still in
-        // flight that is only provisional — the focus belongs to the kit the
-        // session named, once every restored kit has landed.
-        self.settle_restored_kit(kit);
         self.finish_pending_command_line_launch(ctx.clone());
         false
     }
@@ -1650,6 +1665,44 @@ mod tests {
     /// The flags were app-wide, so any kit finishing a load cleared another
     /// kit's running reference build (and its progress bar), which let a
     /// second build start over it.
+    #[test]
+    fn background_source_completion_preserves_the_focused_workspace_and_home() {
+        let source = || LoadedSourceData {
+            label: "Loading kit".to_owned(),
+            source: TagSource::SingleFile { path: PathBuf::from("second.model") },
+            names: TagNameIndex::default(), game: None,
+            entries: Vec::new(), tree: TagTree::default(), group_tree: TagTree::default(),
+            all_entries: Vec::new(), reverse_dependencies: None, initial_tag: None,
+            key_hints: Default::default(), complete_scan: false, chosen_kit_layout: None,
+        };
+        for success in [false, true] {
+            for home in [false, true] {
+                let mut app = Baboon::for_test();
+                app.install_loaded_source(source());
+                let first = app.model.active_kit_id();
+                let second = KitId(first.0 + 1);
+                let mut loading = Kit::empty(second, TagNameIndex::default());
+                loading.requested_path = Some(PathBuf::from("second.model"));
+                loading.loading_label = Some("Loading kit".to_owned());
+                app.push_kit(loading);
+                app.kit_tree = egui_tiles::Tree::new_tabs("background_load_focus", vec![first, second]);
+                app.focus_kit(0);
+                app.shell.home_open = home;
+                let selected_tab = |app: &Baboon| match app.kit_tree.tiles.get(app.kit_tree.root().unwrap()) {
+                    Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) => tabs.active,
+                    _ => panic!("workspace tab group"),
+                };
+                let before = selected_tab(&app);
+                let result = if success { Ok(source()) } else { Err("load failed".to_owned()) };
+                app.handle_source_loaded(second, result, None, &egui::Context::default());
+                assert_eq!(app.model.active_kit_id(), first, "completion cannot steal keyboard focus");
+                assert_eq!(selected_tab(&app), before, "completion cannot select a workspace tab");
+                assert_eq!(app.shell.home_open, home, "completion cannot dismiss Home");
+                assert_eq!(app.model.kits[1].source.is_some(), success);
+            }
+        }
+    }
+
     #[test]
     fn loading_one_kit_leaves_another_kits_index_build_running() {
         let mut app = Baboon::for_test();
