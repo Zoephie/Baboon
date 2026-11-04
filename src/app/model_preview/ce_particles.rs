@@ -110,14 +110,20 @@ pub(crate) struct CePointPhysics {
 impl CePointPhysics {
     pub(super) fn read(tag: &TagFile) -> Self {
         let root = tag.root();
-        let density = root.read_real("density").unwrap_or(0.0);
+        let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let flags = root.read_int_any("flags").unwrap_or(0);
+        Self::new(real("density"), flags, real("air friction"), real("surface friction"), real("elasticity"))
+    }
+
+    /// What the postprocess makes of a tag's `density`, `flags`, `air
+    /// friction`, `surface friction` and `elasticity`.
+    pub(super) fn new(density: f32, flags: i128, air_friction: f32, surface_friction: f32, elasticity: f32) -> Self {
         Self {
             mass_over_radius_cubed: density * MASS_OF_DENSITY,
             air_buoyancy: if flags & 0x20 != 0 { 0.0 } else { 1.0 - 2.0 * density / (density + 0.0011) },
-            air_friction: root.read_real("air friction").unwrap_or(0.0) * 10_000.0,
-            surface_friction: root.read_real("surface friction").unwrap_or(0.0),
-            elasticity: root.read_real("elasticity").unwrap_or(0.0),
+            air_friction: air_friction * 10_000.0,
+            surface_friction,
+            elasticity,
             collides_with_structure: flags & 0x2 != 0,
         }
     }

@@ -14,6 +14,7 @@ use super::attachment::{attach_point, attach_vector};
 use super::loading::build_render_preview;
 use super::ce_attachments::CeWeaponIk;
 use super::h2_passes::{h2_change_colors_for, read_h2_change_colors};
+use super::h3_cloth::ClothGame;
 use super::*;
 use crate::core::source::TagSource;
 
@@ -623,7 +624,8 @@ fn fold_attached(
     // `Game::of` calls Reach `Halo3` too; its attachments, lights and held
     // weapons read differently, and wait on their own readers.
     if source.game() == Some(GameId::HaloReach) {
-        read_reach_attached_features(source, object, owner, &attached.markers, &frame, Some(name), preview);
+        let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
+        read_reach_attached_features(source, object, owner, &attached.markers, &frame, Some(name), center, preview);
     } else if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
         read_h3_attached_features(source, object, owner, &attached.markers, &frame, Some(name), preview);
         read_extension_weapons(source, object, owner, &attached.markers, &frame, preview, Some(name));
@@ -645,7 +647,7 @@ fn fold_attached(
         preview.h2_contrails.extend(contrails.into_iter().map(|contrail| contrail.on_attached(name)));
         let liquids = super::h2_liquid::read_h2_liquids(source, object, owner, markers, frame);
         preview.h2_liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
-        super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, true);
+        super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
         read_extension_weapons(source, object, owner, markers, &frame, preview, Some(name));
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
@@ -699,7 +701,7 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     preview.h3_strips.extend(carried);
     let strips = super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
     preview.h3_strips.extend(named!(strips, name).map(Arc::new));
-    super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, false);
+    super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
     super::h3_screen_effects::add_screen_shader_materials(preview);
@@ -711,8 +713,11 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
 
 /// What hangs on a Reach object brought into the preview, or on the one
 /// opened (`name` none): its flares, lights and cheap lights, and the
-/// `light_apply` passes they are drawn with, and its effects' volumes,
-/// particles, cheap particles, strips and screen effects.
+/// `light_apply` passes they are drawn with, its effects' volumes,
+/// particles, cheap particles, strips and screen effects, and its antennas
+/// and cloth. `center` is the middle of its bounding sphere, in its own
+/// space.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
     object: &TagFile,
@@ -720,6 +725,7 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
     markers: &[RenderModelPreviewMarker],
     frame: &F,
     name: Option<&str>,
+    center: [f32; 3],
     preview: &mut RenderModelPreview,
 ) {
     let flares = super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
@@ -741,6 +747,8 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
     let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
     super::h3_screen_effects::add_screen_shader_materials(preview);
+    preview.h2_antennas.extend(super::h2_lights::read_reach_antennas(source, object, markers, frame, name));
+    super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
     let lit = !(preview.reach_lights.is_empty() && preview.reach_cheap_lights.is_empty());
     if lit && preview.reach_light_passes.is_empty() {

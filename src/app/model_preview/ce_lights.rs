@@ -103,9 +103,31 @@ impl CeAntenna {
     }
 }
 
+/// The first sprite of an antenna vertex's sequence, as `antenna_new` and
+/// `get_vertex_scale_by_distance` size it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct AntennaSprite {
+    /// Left, right, top and bottom, across the bitmap.
+    pub(super) rect: [f32; 4],
+    pub(super) registration: [f32; 2],
+    /// The image of the bitmap it is cut from.
+    pub(super) index: usize,
+    /// What of the bitmap's width a sprite runs along.
+    pub(super) covered: f32,
+    /// That image's width, in texels.
+    pub(super) width: f32,
+}
+
+/// What Halo CE, 2 and 3 take off a sprite's pixels besides its spacing.
+pub(super) const ANTENNA_TRIM: f32 = 1.0;
+/// Reach's: `get_vertex_scale_by_distance` (the 360's 0x82C93A88, its
+/// constant at 0x82C93BFC) takes half a pixel.
+pub(super) const REACH_ANTENNA_TRIM: f32 = 0.5;
+
 /// `antenna_new`'s scale for a sprite, or none where a bitmap has no such
-/// sprite to draw.
-pub(super) fn antenna_sprite(bitmap: &TagFile, sequence: usize) -> Option<([f32; 4], [f32; 2], usize, f32)> {
+/// sprite to draw: its `pixels`, `width · (right - left) - 2 · spacing -
+/// trim`, must be more than none.
+pub(super) fn antenna_sprite(bitmap: &TagFile, sequence: usize, trim: f32) -> Option<AntennaSprite> {
     let root = bitmap.root();
     let sequences = elements(root, "sequences");
     let sprite = *elements(*sequences.get(sequence)?, "sprites").first()?;
@@ -115,8 +137,9 @@ pub(super) fn antenna_sprite(bitmap: &TagFile, sequence: usize) -> Option<([f32;
     let spacing = root.read_int_any("sprite spacing").unwrap_or(0) as f32;
     let rect = [read("left"), read("right"), read("top"), read("bottom")];
     let registration = sprite.read_point2d("registration point");
-    let pixels = (rect[1] - rect[0]) * width - spacing * 2.0 - 1.0;
-    (pixels > 0.0).then_some((rect, [registration.x, registration.y], index, pixels / width))
+    let pixels = (rect[1] - rect[0]) * width - spacing * 2.0 - trim;
+    let registration = [registration.x, registration.y];
+    (pixels > 0.0).then_some(AntennaSprite { rect, registration, index, covered: pixels / width, width })
 }
 
 /// `object_get_marker_by_name` as a widget reads it: the marker, or, when the
@@ -146,7 +169,7 @@ fn read_antenna(source: &TagSource, path: &str, owner: u8, markers: &[RenderMode
     let mut segments = Vec::new();
     for vertex in elements(root, "vertices") {
         let sequence = vertex.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
-        let (rect, registration, index, covered) = antenna_sprite(&bitmap, sequence)?;
+        let AntennaSprite { rect, registration, index, covered, .. } = antenna_sprite(&bitmap, sequence, ANTENNA_TRIM)?;
         image_index.get_or_insert(index);
         let length = vertex.read_real("length").unwrap_or(0.0);
         segments.push(CeAntennaSegment {

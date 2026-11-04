@@ -17,22 +17,59 @@ const MOST_VERTICES: usize = 121;
 const H2_MOST_VERTICES: usize = 128;
 /// `k_maximum_attachments_per_cloth`.
 const MOST_ATTACHMENTS: usize = 6;
+/// Reach's: `cloth_setup_attachments` (the 360's 0x82C8E450) fetches up to
+/// `NUMBEROF(marker)`, ten, of the attachment's markers.
+const REACH_MOST_ATTACHMENTS: usize = 10;
 /// `k_maximum_collision_spheres_per_cloth`.
 const MOST_SPHERES: usize = 8;
 /// `cloth_constrain_positions_relaxation`'s, past the tag's own limit because
 /// a moving object adds to them; a preview's stands still.
 const MOST_ITERATIONS: i32 = 15;
+/// Its passes, a sheet that keeps coming apart included.
+const MOST_PASSES: usize = 16;
+/// Reach's (the 360's 0x82C8EE80, MCC's 0x140D96750): at most 9 iterations,
+/// and the tenth pass ends the loop (`if (pass++ == 9) i = N`).
+const REACH_MOST_ITERATIONS: i32 = 9;
+const REACH_MOST_PASSES: usize = 10;
+/// How far Reach's `cloth_enforce_attachments` (the 360's 0x82C8F9B0) lets
+/// the object's bounding sphere move before it carries the whole sheet along.
+const REACH_CENTER_JUMP: f32 = 0.4;
+/// The relaxations Reach's `cloth_new_attachment` (the 360's 0x82C8E2F0)
+/// settles a new sheet with.
+const REACH_CREATION_RELAXATIONS: usize = 5;
 const ERROR_MAX: f32 = 2.0;
 /// How many links it keeps of those that touch a pin.
 const MOST_HELD_LINKS: usize = 1210;
 /// The shortest a link is measured at, and how near a sphere's centre a point
 /// has no way out but `global_left3d`.
 const NEARLY_ZERO: f32 = 0.0001;
+
+/// Which game's cloth a sheet is: they share the sheet and its links, and
+/// differ in their limits, wind, ticks and how they start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClothGame {
+    Halo2,
+    /// Halo 3 and ODST.
+    Halo3,
+    Reach,
+}
+
+/// Reach's game ticks a second, for its cloth and its antennas. [inferred]
+/// The rate comes from `game_options +12` (the 360's
+/// `game_time_initialize_for_new_map`, 0x82D7A998), which was not read for
+/// MCC. 30 is the 360's, and the antennas' fixed step, 0.0333 a tick, is a
+/// 30th of a second.
+pub(crate) const REACH_TICK_RATE: f32 = 30.0;
+
 /// The game's ticks a second: `cloth_update` runs each cloth at most once a
 /// tick (`last_update_tick`), whatever the frame's time. Halo 2 ticks at 30;
 /// Halo 3 and ODST at their native rate, the 60 of `get_vblank_rate`.
-fn tick_rate(halo2: bool) -> f32 {
-    if halo2 { 30.0 } else { 60.0 }
+fn tick_rate(game: ClothGame) -> f32 {
+    match game {
+        ClothGame::Halo2 => 30.0,
+        ClothGame::Halo3 => 60.0,
+        ClothGame::Reach => REACH_TICK_RATE,
+    }
 }
 
 /// `cloth_update_positions_verlet`'s gravity for one tick at `rate`.
@@ -95,17 +132,28 @@ impl Default for H3Wind {
     }
 }
 
+/// The random generator the winds draw on: the seed's next step, and the
+/// upper half of it.
+fn next_random(seed: &mut u32) -> f32 {
+    *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+    (*seed >> 16) as f32
+}
+
+/// `random_direction3d`, from two of `next`'s draws in `0..1`.
+fn random_direction(mut next: impl FnMut() -> f32) -> [f32; 3] {
+    let z = next() * 2.0 - 1.0;
+    let (sin, cos) = (next() * std::f32::consts::TAU).sin_cos();
+    let flat = (1.0 - z * z).max(0.0).sqrt();
+    [flat * cos, flat * sin, z]
+}
+
 impl H3Wind {
     fn next(&mut self) -> f32 {
-        self.random = self.random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.random >> 16) as f32 / 65_536.0
+        next_random(&mut self.random) / 65_536.0
     }
 
     fn random_direction(&mut self) -> [f32; 3] {
-        let z = self.next() * 2.0 - 1.0;
-        let (sin, cos) = (self.next() * std::f32::consts::TAU).sin_cos();
-        let flat = (1.0 - z * z).max(0.0).sqrt();
-        [flat * cos, flat * sin, z]
+        random_direction(|| self.next())
     }
 
     /// What the wind accelerates by this tick, `tick` counting from the start
@@ -143,15 +191,11 @@ impl Default for H2Wind {
 
 impl H2Wind {
     fn next(&mut self) -> f32 {
-        self.random = self.random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.random >> 16) as f32 * 1.525_902_2e-5
+        next_random(&mut self.random) * 1.525_902_2e-5
     }
 
     fn random_direction(&mut self) -> [f32; 3] {
-        let z = self.next() * 2.0 - 1.0;
-        let (sin, cos) = (self.next() * std::f32::consts::TAU).sin_cos();
-        let flat = (1.0 - z * z).max(0.0).sqrt();
-        [flat * cos, flat * sin, z]
+        random_direction(|| self.next())
     }
 
     /// What the wind accelerates by this tick, before the cloth's own scale.
@@ -169,6 +213,68 @@ impl H2Wind {
         self.scale = (self.scale + drift * 0.3).clamp(-0.1, 0.1);
         let strength = (self.scale.abs() + 0.0075) * 0.4 * 0.2;
         self.direction.map(|axis| axis * strength)
+    }
+}
+
+/// Reach's `cloth_update_wind` (the 360's 0x82C902A0, MCC's 0x140D98EF0):
+/// one wind for every cloth, which moves on only when a new frame is drawn.
+#[derive(Debug, Clone)]
+struct ReachWind {
+    direction: [f32; 3],
+    scale: f32,
+    random: u32,
+    /// `c_render_globals::get_frame_index()` when it last moved.
+    last_frame: u64,
+}
+
+impl Default for ReachWind {
+    fn default() -> Self {
+        Self { direction: [0.0; 3], scale: 0.0, random: 1, last_frame: 0 }
+    }
+}
+
+/// Reach's least and greatest wind, either way.
+const REACH_WIND_LEAST: f32 = 0.05;
+const REACH_WIND_MOST: f32 = 0.2;
+
+impl ReachWind {
+    /// `real_random`: the upper half of the seed over 65535.
+    fn next(&mut self) -> f32 {
+        next_random(&mut self.random) * (1.0 / 65_535.0)
+    }
+
+    /// What the wind accelerates by, before the cloth's own scale. It moves
+    /// only on a `frame` past the last it moved on; `t` is its clock,
+    /// `game_time · game_tick_rate + (datum index & 0xFF) · 0.75`, ticks and
+    /// rate together as both binaries have it.
+    fn step(&mut self, frame: u64, t: f32) -> [f32; 3] {
+        // Drawn once, and again only if it came out too short to turn.
+        if self.direction == [0.0; 3] {
+            let direction = random_direction(|| self.next());
+            if dot(direction, direction).sqrt() >= NEARLY_ZERO {
+                self.direction = unit(direction);
+            }
+        }
+        if frame > self.last_frame {
+            self.last_frame = frame;
+            let turn = (t * 0.005).cos();
+            let angle = self.next() * turn * turn * 0.15;
+            // `random_direction3d` is taken to draw as Halo 3's does. [inferred]
+            let about = random_direction(|| self.next());
+            self.direction = turned_about(self.direction, about, angle);
+            self.direction = away_from_pole([0.0, 0.0, 1.0], WIND_POLE_ANGLE, self.direction);
+            let slow = (t * 0.0001).cos();
+            let drift = 0.01 * (t * 0.005).sin() * slow + 0.01 * (t * 0.0006).cos() * (t * 0.001).cos() * slow;
+            self.scale += drift;
+            // Never stiller than its least: nothing at all counts as the other way.
+            self.scale = if self.scale <= 0.0 {
+                self.scale.min(-REACH_WIND_LEAST)
+            } else {
+                self.scale.max(REACH_WIND_LEAST)
+            };
+            self.scale = self.scale.clamp(-REACH_WIND_MOST, REACH_WIND_MOST);
+        }
+        self.direction.map(|axis| axis * self.scale.abs())
     }
 }
 
@@ -204,8 +310,11 @@ pub(crate) fn away_from_pole(pole: [f32; 3], angle: f32, vector: [f32; 3]) -> [f
 }
 
 /// `cloth_generate_flag_grid`: rows hang down from the top, and a square of
-/// texture spans the longer side.
-fn flag_grid(size: [usize; 2], spacing: [f32; 2], most: usize) -> (Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<usize>) {
+/// texture spans the longer side. Reach's `create_cloth_grid_data` (the 360's
+/// 0x82C916E8, MCC's 0x140D994E0) spans the texture across each side by its
+/// own step instead: `u = j / (wide - 1)`, `v = 1 - i / (high - 1)`.
+fn flag_grid(size: [usize; 2], spacing: [f32; 2], game: ClothGame) -> (Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<usize>) {
+    let most = if game == ClothGame::Halo2 { H2_MOST_VERTICES } else { MOST_VERTICES };
     let [mut wide, mut high] = size;
     if wide * high > most {
         if high > wide {
@@ -218,11 +327,15 @@ fn flag_grid(size: [usize; 2], spacing: [f32; 2], most: usize) -> (Vec<[f32; 3]>
     if wide < 2 || high < 2 {
         return (places, uvs, indices);
     }
-    let step = ((wide - 1).max(high - 1) as f32).recip();
+    let shared = ((wide - 1).max(high - 1) as f32).recip();
+    let [across, down] = match game {
+        ClothGame::Reach => [((wide - 1).max(1) as f32).recip(), ((high - 1).max(1) as f32).recip()],
+        ClothGame::Halo2 | ClothGame::Halo3 => [shared; 2],
+    };
     for row in 0..high {
         for column in 0..wide {
             places.push([column as f32 * spacing[0], 0.0, -(row as f32) * spacing[1]]);
-            uvs.push([column as f32 * step, (high - 1) as f32 * step - row as f32 * step]);
+            uvs.push([column as f32 * across, (high - 1) as f32 * down - row as f32 * down]);
         }
     }
     for row in 0..high - 1 {
@@ -315,15 +428,21 @@ struct ClothSphere {
 }
 
 /// `cloth_setup_attachments`: the markers in order along an axis, first to the
-/// sheet's first corner and last to the far one of its first column.
+/// sheet's first corner and last to the far one of its first column. Reach
+/// takes ten markers to the others' six, and pins no secondary: it would pin
+/// the last vertex to a marker slot that is never filled.
 fn cloth_pins(
     mut markers: Vec<(usize, [f32; 3])>,
     secondary: Option<(usize, [f32; 3])>,
     size: [usize; 2],
     vertex_count: usize,
     top: bool,
+    game: ClothGame,
 ) -> Vec<ClothPin> {
-    markers.truncate(MOST_ATTACHMENTS);
+    let most = if game == ClothGame::Reach { REACH_MOST_ATTACHMENTS } else { MOST_ATTACHMENTS };
+    // The game's result is undefined, and no kit tag sets one. [inferred]
+    let secondary = secondary.filter(|_| game != ClothGame::Reach);
+    markers.truncate(most);
     let axis = if top { 0 } else { 2 };
     markers.sort_by(|a, b| a.1[axis].total_cmp(&b.1[axis]));
     let count = markers.len();
@@ -343,7 +462,7 @@ fn cloth_pins(
             ClothPin { vertex, node: *node, position: *position }
         })
         .collect();
-    if let (true, Some((node, position))) = (pins.len() < MOST_ATTACHMENTS, secondary) {
+    if let (true, Some((node, position))) = (pins.len() < most, secondary) {
         pins.push(ClothPin { vertex: vertex_count - 1, node, position });
     }
     pins
@@ -364,12 +483,26 @@ pub(crate) struct H3ClothAt {
     flappiness: f32,
     /// The sheet's two sides in the model's vertices, each `places` long.
     first_vertex: usize,
-    halo2: bool,
+    game: ClothGame,
+    /// Reach's: the middle of the object's bounding sphere, and the node it
+    /// is posed on, which `cloth_enforce_attachments` follows.
+    center: (usize, [f32; 3]),
 }
 
 impl H3ClothAt {
     pub(crate) fn halo2(&self) -> bool {
-        self.halo2
+        self.game == ClothGame::Halo2
+    }
+
+    #[cfg(test)]
+    pub(crate) fn game(&self) -> ClothGame {
+        self.game
+    }
+
+    /// Each pin's vertex, in the order the markers sort.
+    #[cfg(test)]
+    pub(crate) fn pinned_vertices(&self) -> Vec<usize> {
+        self.pins.iter().map(|pin| pin.vertex).collect()
     }
 }
 
@@ -394,13 +527,15 @@ fn read_cloth(
     root: TagStruct<'_>,
     markers: &[RenderModelPreviewMarker],
     frame: &impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-    halo2: bool,
+    game: ClothGame,
+    center: [f32; 3],
 ) -> Option<(H3ClothAt, Vec<[f32; 2]>, Option<(String, String)>)> {
+    let halo2 = game == ClothGame::Halo2;
     // The ranges are `tool.exe`'s postprocess, which tags on disk have not been through.
     let int = |name: &str| root.read_int_any(name).unwrap_or(0).clamp(2, 32) as usize;
     let size = [int("grid x dimension"), int("grid y dimension")];
     let spacing = [root.read_real("grid spacing x")?, root.read_real("grid spacing y")?];
-    let (places, uvs, indices) = flag_grid(size, spacing, if halo2 { H2_MOST_VERTICES } else { MOST_VERTICES });
+    let (places, uvs, indices) = flag_grid(size, spacing, game);
     if places.is_empty() {
         return None;
     }
@@ -410,6 +545,9 @@ fn read_cloth(
         let value = properties.read_real(name).unwrap_or(0.0);
         if halo2 { value } else { value.clamp(low, high) }
     };
+    // The bounding sphere's middle, carried as a marker of the object's own.
+    let middle = RenderModelPreviewMarker { position: center, scale: 1.0, ..Default::default() };
+    let (middle, middle_node) = frame(&middle);
     let flags = root.read_flag_names("flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     let placed = |name: &str| -> Vec<(usize, [f32; 3])> {
@@ -443,7 +581,8 @@ fn read_cloth(
         })
         .collect();
     let links = generate_links(&places, &indices, real("longest_rod", 1.0, 10.0));
-    let pins = cloth_pins(attach, secondary, [size[0], high], places.len(), flagged("Uses grid attach top"));
+    let top = flagged("Uses grid attach top");
+    let pins = cloth_pins(attach, secondary, [size[0], high], places.len(), top, game);
     let cloth = H3ClothAt {
         places,
         indices,
@@ -451,24 +590,37 @@ fn read_cloth(
         pins,
         spheres,
         iterations: properties.read_int_any("Number iterations").unwrap_or(1).clamp(1, 8) as i32,
-        gravity: real("weight", -10.0, 10.0) * gravity_per_tick(tick_rate(halo2)),
+        gravity: real("weight", -10.0, 10.0) * gravity_per_tick(tick_rate(game)),
         drag: real("drag", 0.0, 0.5),
         wind_scale: real("wind_scale", 0.0, 3.0),
         flappiness: properties.read_real("wind_flappiness_scale").unwrap_or(0.0),
         first_vertex: 0,
-        halo2,
+        game,
+        center: (middle_node, middle.position),
     };
     Some((cloth, uvs, under))
 }
 
+/// Reach's binormal for a cloth vertex: `deform.hlsl_include` takes
+/// `cross(normal, tangent)`, its sign from the position's w, which
+/// `cloth_render_opaque` (the 360's 0x82C8D6A0) writes as 1; the tangent is
+/// `global_forward3d`.
+fn reach_binormal(normal: [f32; 3]) -> [f32; 3] {
+    cross(normal, [1.0, 0.0, 0.0])
+}
+
 /// `cloth_render_opaque`'s mesh: both sides, to be written over each frame.
-fn sheet_vertices(uvs: &[[f32; 2]], halo2: bool) -> Vec<RenderModelPreviewVertex> {
+fn sheet_vertices(uvs: &[[f32; 2]], game: ClothGame) -> Vec<RenderModelPreviewVertex> {
     [1.0, -1.0]
         .iter()
         .flat_map(|side| {
-            // Halo 2's `cloth_render` turns the whole frame over with the side.
-            let (tangent, binormal) =
-                if halo2 { ([1.0 * side, 0.0, 0.0], [0.0, 0.0, 1.0 * side]) } else { ([1.0, 0.0, 0.0], [0.0, *side, 0.0]) };
+            let (tangent, binormal) = match game {
+                // Halo 2's `cloth_render` turns the whole frame over with the side.
+                ClothGame::Halo2 => ([1.0 * side, 0.0, 0.0], [0.0, 0.0, 1.0 * side]),
+                ClothGame::Halo3 => ([1.0, 0.0, 0.0], [0.0, *side, 0.0]),
+                // Both sides one frame, from the rest normal, `global_left3d`.
+                ClothGame::Reach => ([1.0, 0.0, 0.0], reach_binormal([0.0, 1.0, 0.0])),
+            };
             uvs.iter().map(move |uv| RenderModelPreviewVertex {
                 texcoord: *uv,
                 tangent,
@@ -479,8 +631,23 @@ fn sheet_vertices(uvs: &[[f32; 2]], halo2: bool) -> Vec<RenderModelPreviewVertex
         .collect()
 }
 
+/// The region the preview lists a sheet under, which no game has: the tag's
+/// name. Reach's keeps its `.cloth`, since its models' variants name regions
+/// the render model lacks, and one such (the flag's `flag`) would hide a
+/// sheet of the same name.
+fn cloth_region_name(path: &str, game: ClothGame) -> String {
+    let name = path.rsplit('\\').next().unwrap_or(path);
+    match game {
+        ClothGame::Reach => format!("{name}.cloth"),
+        ClothGame::Halo2 | ClothGame::Halo3 => name.to_owned(),
+    }
+}
+
 /// An object's cloth, added to its model as a mesh of its own, drawn with the
 /// tag's shader from the first active permutation of a region of its own.
+/// `center` is the middle of the object's bounding sphere, in its own space,
+/// where Reach starts a sheet; the other games start one at its first pin.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn read_h3_cloth(
     source: &TagSource,
     object: &TagFile,
@@ -488,7 +655,8 @@ pub(super) fn read_h3_cloth(
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
     preview: &mut RenderModelPreview,
-    halo2: bool,
+    game: ClothGame,
+    center: [f32; 3],
 ) {
     for path in cloth_tags(object) {
         let Ok(tag) = load_referenced_tag_from_source(source, &path, "cloth", b"clwd") else {
@@ -498,20 +666,20 @@ pub(super) fn read_h3_cloth(
         let Some((shader_group, shader_path)) = root.read_tag_ref_with_group("Shader") else {
             continue;
         };
-        let Some((mut cloth, uvs, under)) = read_cloth(root, markers, &frame, halo2) else {
+        let Some((mut cloth, uvs, under)) = read_cloth(root, markers, &frame, game, center) else {
             continue;
         };
         cloth.first_vertex = preview.vertices.len();
         let base = cloth.first_vertex as u32;
         let count = cloth.places.len() as u32;
         let index_start = preview.indices.len() as u32;
-        preview.vertices.extend(sheet_vertices(&uvs, halo2));
+        preview.vertices.extend(sheet_vertices(&uvs, game));
         // The sides face apart, as `cloth_render_opaque`'s cull modes have it.
         preview.indices.extend(cloth.indices.iter().map(|index| *index as u32 + base));
         preview.indices.extend(cloth.indices.chunks_exact(3).rev().flat_map(|triangle| {
             [triangle[2], triangle[1], triangle[0]].map(|index| index as u32 + base + count)
         }));
-        let name = path.rsplit('\\').next().unwrap_or(&path).to_owned();
+        let name = cloth_region_name(&path, game);
         preview.materials.push(RenderModelPreviewMaterial {
             shader_path,
             shader_group,
@@ -555,29 +723,53 @@ struct RunningCloth {
     places: Vec<[f32; 3]>,
     last: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
+    /// Reach's: where the object's bounding sphere is now, and where
+    /// `cloth_enforce_attachments` last saw it.
+    center: [f32; 3],
+    last_center: [f32; 3],
 }
 
 impl RunningCloth {
-    fn at_rest(cloth: &H3ClothAt, pins: &[[f32; 3]]) -> Self {
-        // `cloth_reset_flag_to_default_positions`, moved up to its object.
-        let shift = pins.first().copied().unwrap_or([0.0; 3]);
+    /// `cloth_reset_flag_to_default_positions`. Halo 2 and 3 move the sheet up
+    /// to its first pin; Reach's (the 360's 0x82C90BF8) leaves it at the
+    /// world's origin, for `pin` to carry to the object.
+    fn at_rest(cloth: &H3ClothAt, pins: &[[f32; 3]], center: [f32; 3]) -> Self {
+        let shift = match cloth.game {
+            ClothGame::Reach => [0.0; 3],
+            ClothGame::Halo2 | ClothGame::Halo3 => pins.first().copied().unwrap_or([0.0; 3]),
+        };
         let places: Vec<[f32; 3]> =
             cloth.places.iter().map(|place| std::array::from_fn(|axis| place[axis] + shift[axis])).collect();
-        Self { last: places.clone(), normals: vec![[0.0, 1.0, 0.0]; places.len()], places }
+        Self { last: places.clone(), normals: vec![[0.0, 1.0, 0.0]; places.len()], places, center, last_center: [0.0; 3] }
     }
 
-    /// `cloth_enforce_attachments`.
+    /// `cloth_enforce_attachments`. Reach's first carries the whole sheet
+    /// with the object's bounding sphere, where that has jumped.
     fn pin(&mut self, cloth: &H3ClothAt, pins: &[[f32; 3]]) {
+        if cloth.game == ClothGame::Reach {
+            let jump = minus(self.center, self.last_center);
+            if dot(jump, jump) > REACH_CENTER_JUMP * REACH_CENTER_JUMP {
+                for place in &mut self.places {
+                    *place = std::array::from_fn(|axis| place[axis] + jump[axis]);
+                }
+                self.last.clone_from(&self.places);
+            }
+            self.last_center = self.center;
+        }
         for (pin, place) in cloth.pins.iter().zip(pins) {
             self.places[pin.vertex] = *place;
         }
     }
 
     /// `cloth_constrain_positions_relaxation`. A sheet that has come apart goes
-    /// back to rest and has that pass over, until the sixteenth ends it. Gives
-    /// back how many passes it took.
+    /// back to rest and has that pass over, until the sixteenth ends it (in
+    /// Reach, the tenth). Gives back how many passes it took.
     fn relax(&mut self, cloth: &H3ClothAt, pins: &[[f32; 3]]) -> usize {
-        let count = cloth.iterations.clamp(1, MOST_ITERATIONS);
+        let (most_iterations, most_passes) = match cloth.game {
+            ClothGame::Reach => (REACH_MOST_ITERATIONS, REACH_MOST_PASSES),
+            ClothGame::Halo2 | ClothGame::Halo3 => (MOST_ITERATIONS, MOST_PASSES),
+        };
+        let count = cloth.iterations.clamp(1, most_iterations);
         let held = |vertex: usize| cloth.pins.iter().any(|pin| pin.vertex == vertex);
         let mut passes = 0;
         let mut done = 0;
@@ -609,12 +801,12 @@ impl RunningCloth {
                 self.places[b] = std::array::from_fn(|axis| self.places[b][axis] - share[axis]);
             }
             if worst > ERROR_MAX {
-                *self = Self::at_rest(cloth, pins);
+                *self = Self::at_rest(cloth, pins, self.center);
                 done -= 1;
             }
             self.pin(cloth, pins);
             passes += 1;
-            done = if passes == 16 { count } else { done } + 1;
+            done = if passes == most_passes { count } else { done } + 1;
             if done >= count {
                 return passes;
             }
@@ -645,7 +837,7 @@ impl RunningCloth {
                     self.places[b] = std::array::from_fn(|axis| self.places[b][axis] + share[axis] * times);
                 }
                 if pull.abs() > ERROR_MAX {
-                    *self = Self::at_rest(cloth, pins);
+                    *self = Self::at_rest(cloth, pins, self.center);
                     self.pin(cloth, pins);
                     done -= 1;
                 }
@@ -695,7 +887,8 @@ impl RunningCloth {
     /// `cloth_calculate_normals`.
     fn calculate_normals(&mut self, cloth: &H3ClothAt) {
         // Halo 2 adds to what the normal was, so each carries a little of the last tick.
-        let mut sums = if cloth.halo2 { self.normals.clone() } else { vec![[0.0; 3]; self.places.len()] };
+        let halo2 = cloth.game == ClothGame::Halo2;
+        let mut sums = if halo2 { self.normals.clone() } else { vec![[0.0; 3]; self.places.len()] };
         for triangle in cloth.indices.chunks_exact(3) {
             let [a, b, c] = [triangle[0], triangle[1], triangle[2]];
             let normal = unit(cross(minus(self.places[b], self.places[a]), minus(self.places[c], self.places[a])));
@@ -706,7 +899,7 @@ impl RunningCloth {
         for (normal, sum) in self.normals.iter_mut().zip(sums) {
             *normal = if sum != [0.0; 3] {
                 unit(sum)
-            } else if cloth.halo2 {
+            } else if halo2 {
                 [0.0, 1.0, 0.0]
             } else {
                 [1.0, 0.0, 0.0]
@@ -720,12 +913,34 @@ impl RunningCloth {
 pub(crate) struct H3ClothField {
     wind: H3Wind,
     h2_wind: H2Wind,
+    reach_wind: ReachWind,
     time: Option<f32>,
     ticks: f32,
+    /// The frames drawn, each a call of `advance`: Reach's wind moves once a
+    /// frame.
+    frames: u64,
     running: Vec<RunningCloth>,
 }
 
+/// A cloth vertex as a step leaves it: its place, its normal, and, where the
+/// game derives one from the normal, its binormal.
+pub(crate) type MovedClothVertex = ([f32; 3], [f32; 3], Option<[f32; 3]>);
+
 impl H3ClothField {
+    /// A new sheet. Reach's `cloth_new_attachment` (the 360's 0x82C8E2F0)
+    /// resets it, enforces its attachments, which carry it to the object's
+    /// bounding sphere, and relaxes it five times.
+    fn created(cloth: &H3ClothAt, pins: &[[f32; 3]], center: [f32; 3]) -> RunningCloth {
+        let mut running = RunningCloth::at_rest(cloth, pins, center);
+        if cloth.game == ClothGame::Reach {
+            running.pin(cloth, pins);
+            for _ in 0..REACH_CREATION_RELAXATIONS {
+                running.relax(cloth, pins);
+            }
+        }
+        running
+    }
+
     /// Run the ticks up to `time`, and hand back what each cloth's vertices
     /// have become: where they start, and each side's in turn.
     pub(crate) fn advance(
@@ -733,32 +948,47 @@ impl H3ClothField {
         cloths: &[H3ClothAt],
         bones: Option<&[[f32; 4]]>,
         time: f32,
-    ) -> Vec<(usize, Vec<RenderModelPreviewVertex>)> {
+    ) -> Vec<(usize, Vec<MovedClothVertex>)> {
         let pins_of = |cloth: &H3ClothAt| -> Vec<[f32; 3]> {
             let posed = |pin: &ClothPin| posed_on(pin.node, pin.position, [1.0, 0.0, 0.0], bones).0;
             cloth.pins.iter().map(posed).collect()
         };
+        let center_of = |cloth: &H3ClothAt| posed_on(cloth.center.0, cloth.center.1, [1.0, 0.0, 0.0], bones).0;
+        self.frames += 1;
         if self.running.len() != cloths.len() || self.time.is_none_or(|last| time < last) {
-            self.running = cloths.iter().map(|cloth| RunningCloth::at_rest(cloth, &pins_of(cloth))).collect();
+            self.running = cloths.iter().map(|cloth| Self::created(cloth, &pins_of(cloth), center_of(cloth))).collect();
             // It settles before it is seen.
             self.time = Some(time - SETTLE);
         }
         let mut now = resume_point(self.time.unwrap_or(time), time, SETTLE);
-        let halo2 = cloths.first().is_some_and(|cloth| cloth.halo2);
-        let tick = 1.0 / tick_rate(halo2);
+        let game = cloths.first().map_or(ClothGame::Halo3, |cloth| cloth.game);
+        let rate = tick_rate(game);
+        let tick = 1.0 / rate;
         while now + tick <= time {
             now += tick;
             self.ticks += 1.0;
-            // Halo 3's wind clock counts the ticks the wind was authored at, 30 a second.
-            let wind = if halo2 { self.h2_wind.step(self.ticks) } else { self.wind.step(self.ticks * 30.0 * tick) };
-            for (cloth, running) in cloths.iter().zip(&mut self.running) {
+            let shared = match game {
+                ClothGame::Halo2 => Some(self.h2_wind.step(self.ticks)),
+                // Halo 3's wind clock counts the ticks the wind was authored at, 30 a second.
+                ClothGame::Halo3 => Some(self.wind.step(self.ticks * 30.0 * tick)),
+                // Reach's moves as each cloth's verlet asks, on its own clock.
+                ClothGame::Reach => None,
+            };
+            for (index, (cloth, running)) in cloths.iter().zip(&mut self.running).enumerate() {
+                // A datum's index is taken to be its place in the slot's list. [inferred]
+                let clock = self.ticks * rate + (index & 0xFF) as f32 * 0.75;
+                let wind = match shared {
+                    Some(wind) => wind,
+                    None => self.reach_wind.step(self.frames, clock),
+                };
                 let pins = pins_of(cloth);
                 let spheres: Vec<([f32; 3], f32)> = cloth
                     .spheres
                     .iter()
                     .map(|sphere| (posed_on(sphere.node, sphere.position, [1.0, 0.0, 0.0], bones).0, sphere.radius))
                     .collect();
-                if cloth.halo2 {
+                running.center = center_of(cloth);
+                if cloth.game == ClothGame::Halo2 {
                     running.relax_h2(cloth, &pins);
                 } else {
                     running.relax(cloth, &pins);
@@ -773,15 +1003,18 @@ impl H3ClothField {
             .iter()
             .zip(&self.running)
             .map(|(cloth, running)| {
-                // In Halo 3 both sides keep the one normal: only the binormal turns over.
-                let back = if cloth.halo2 { -1.0 } else { 1.0 };
+                // In Halo 3 and Reach both sides keep the one normal: only
+                // Halo 3's binormal turns over, as loaded.
+                let back = if cloth.game == ClothGame::Halo2 { -1.0 } else { 1.0 };
                 let side = |sign: f32| {
                     let places = running.places.iter().zip(&running.normals);
-                    places.map(move |(place, normal)| (*place, normal.map(|axis| axis * sign)))
+                    places.map(move |(place, normal)| {
+                        let normal = normal.map(|axis| axis * sign);
+                        let binormal = (cloth.game == ClothGame::Reach).then(|| reach_binormal(normal));
+                        (*place, normal, binormal)
+                    })
                 };
-                let written = side(1.0).chain(side(back));
-                let vertices = written.map(|(position, normal)| RenderModelPreviewVertex { position, normal, ..Default::default() });
-                (cloth.first_vertex, vertices.collect())
+                (cloth.first_vertex, side(1.0).chain(side(back)).collect())
             })
             .collect()
     }
@@ -796,7 +1029,7 @@ mod tests {
 
     #[test]
     fn a_grid_hangs_down_from_its_first_row() {
-        let (places, uvs, indices) = flag_grid([3, 2], [0.5, 0.25], MOST_VERTICES);
+        let (places, uvs, indices) = flag_grid([3, 2], [0.5, 0.25], ClothGame::Halo3);
         assert_eq!(places, [[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -0.25], [0.5, 0.0, -0.25], [1.0, 0.0, -0.25]]);
         assert_eq!(uvs[0], [0.0, 0.5], "a square of texture spans the longer side");
         assert_eq!(uvs[5], [1.0, 0.0]);
@@ -806,14 +1039,14 @@ mod tests {
 
     #[test]
     fn a_grid_past_the_limit_gives_way_on_its_longer_side() {
-        let (places, ..) = flag_grid([20, 20], [1.0, 1.0], MOST_VERTICES);
+        let (places, ..) = flag_grid([20, 20], [1.0, 1.0], ClothGame::Halo3);
         assert_eq!(places.len(), 120);
-        assert!(flag_grid([1, 5], [1.0, 1.0], MOST_VERTICES).0.is_empty());
+        assert!(flag_grid([1, 5], [1.0, 1.0], ClothGame::Halo3).0.is_empty());
     }
 
     #[test]
     fn every_edge_is_a_link_once_and_each_keeps_its_length() {
-        let (places, _, indices) = flag_grid([3, 3], [1.0, 1.0], MOST_VERTICES);
+        let (places, _, indices) = flag_grid([3, 3], [1.0, 1.0], ClothGame::Halo3);
         let links = generate_links(&places, &indices, 0.5);
         let pairs: std::collections::BTreeSet<_> = links.iter().map(|link| (link.ends[0].min(link.ends[1]), link.ends[0].max(link.ends[1]))).collect();
         assert_eq!(pairs.len(), links.len(), "no link twice");
@@ -825,7 +1058,7 @@ mod tests {
 
     #[test]
     fn a_longer_rod_allows_links_across_more_of_the_sheet() {
-        let (places, _, indices) = flag_grid([4, 4], [1.0, 1.0], MOST_VERTICES);
+        let (places, _, indices) = flag_grid([4, 4], [1.0, 1.0], ClothGame::Halo3);
         let short = generate_links(&places, &indices, 0.5).len();
         let long = generate_links(&places, &indices, 2.0).len();
         assert!(long > short, "{long} against {short}");
@@ -834,16 +1067,16 @@ mod tests {
     #[test]
     fn pins_take_the_markers_in_order_from_corner_to_corner() {
         let markers = vec![(1, [0.0, 0.0, 2.0]), (2, [0.0, 0.0, 0.0]), (3, [0.0, 0.0, 1.0])];
-        let pins = cloth_pins(markers, Some((4, [9.0; 3])), [8, 8], 64, false);
+        let pins = cloth_pins(markers, Some((4, [9.0; 3])), [8, 8], 64, false, ClothGame::Halo3);
         assert_eq!(pins.iter().map(|pin| pin.vertex).collect::<Vec<_>>(), [0, 24, 56, 63]);
         assert_eq!(pins[0].node, 2, "the lowest first");
         assert_eq!(pins[3].node, 4, "the secondary takes the last vertex");
     }
 
     fn hung() -> (H3ClothAt, RunningCloth, Vec<[f32; 3]>) {
-        let (places, _, indices) = flag_grid([4, 4], [0.1, 0.1], MOST_VERTICES);
+        let (places, _, indices) = flag_grid([4, 4], [0.1, 0.1], ClothGame::Halo3);
         let links = generate_links(&places, &indices, 2.0);
-        let pins = cloth_pins(vec![(0, [0.0, 0.0, 1.0]), (0, [0.0, 0.0, 0.7])], None, [4, 4], 16, false);
+        let pins = cloth_pins(vec![(0, [0.0, 0.0, 1.0]), (0, [0.0, 0.0, 0.7])], None, [4, 4], 16, false, ClothGame::Halo3);
         let cloth = H3ClothAt {
             places,
             indices,
@@ -851,34 +1084,37 @@ mod tests {
             pins,
             spheres: Vec::new(),
             iterations: 5,
-            gravity: 0.5 * gravity_per_tick(tick_rate(false)),
+            gravity: 0.5 * gravity_per_tick(tick_rate(ClothGame::Halo3)),
             drag: 0.01,
             wind_scale: 0.15,
             flappiness: 0.25,
             first_vertex: 0,
-            halo2: false,
+            game: ClothGame::Halo3,
+            center: (0, [0.0; 3]),
         };
         let targets: Vec<[f32; 3]> = cloth.pins.iter().map(|pin| pin.position).collect();
-        let running = RunningCloth::at_rest(&cloth, &targets);
+        let running = RunningCloth::at_rest(&cloth, &targets, [0.0; 3]);
         (cloth, running, targets)
     }
 
     /// `cloth_update` runs a cloth at most once a tick, so a faster frame
-    /// rate adds no steps, and Halo 3 ticks twice as often as Halo 2.
+    /// rate adds no steps, and Halo 3 ticks twice as often as Halo 2 and
+    /// Reach.
     #[test]
     fn cloth_steps_by_its_games_ticks_whatever_the_frame_rate() {
-        let ticks_over_a_second = |halo2: bool, frames: usize| {
+        let ticks_over_a_second = |game: ClothGame, frames: usize| {
             let (cloth, _, _) = hung();
-            let cloths = [H3ClothAt { halo2, ..cloth }];
+            let cloths = [H3ClothAt { game, ..cloth }];
             let mut field = H3ClothField::default();
             field.advance(&cloths, None, 10.0);
             let settled = field.ticks;
             (1..=frames).for_each(|frame| _ = field.advance(&cloths, None, 10.0 + frame as f32 / frames as f32));
             field.ticks - settled
         };
-        assert_eq!(ticks_over_a_second(false, 60), 60.0);
-        assert_eq!(ticks_over_a_second(false, 240), 60.0, "frames between ticks add none");
-        assert_eq!(ticks_over_a_second(true, 60), 30.0, "Halo 2 ticks at 30");
+        assert_eq!(ticks_over_a_second(ClothGame::Halo3, 60), 60.0);
+        assert_eq!(ticks_over_a_second(ClothGame::Halo3, 240), 60.0, "frames between ticks add none");
+        assert_eq!(ticks_over_a_second(ClothGame::Halo2, 60), 30.0, "Halo 2 ticks at 30");
+        assert_eq!(ticks_over_a_second(ClothGame::Reach, 60), REACH_TICK_RATE, "Reach at its own rate");
     }
 
     #[test]
@@ -936,7 +1172,7 @@ mod tests {
             }
             running.places[15]
         };
-        let (weightless, weighted) = (settled(0.0), settled(gravity_per_tick(tick_rate(false))));
+        let (weightless, weighted) = (settled(0.0), settled(gravity_per_tick(tick_rate(ClothGame::Halo3))));
         assert!(weighted[2] < weightless[2] - 1e-4, "{weighted:?} against {weightless:?}");
         assert!(weighted[1].abs() < 1e-3, "nothing pushes it out of its plane");
         let (cloth, mut blown, pins) = hung();
@@ -952,8 +1188,8 @@ mod tests {
 
     #[test]
     fn halo_2_allows_the_larger_sheet() {
-        assert_eq!(flag_grid([16, 8], [1.0, 1.0], H2_MOST_VERTICES).0.len(), 128);
-        assert_eq!(flag_grid([16, 8], [1.0, 1.0], MOST_VERTICES).0.len(), 120);
+        assert_eq!(flag_grid([16, 8], [1.0, 1.0], ClothGame::Halo2).0.len(), 128);
+        assert_eq!(flag_grid([16, 8], [1.0, 1.0], ClothGame::Halo3).0.len(), 120);
     }
 
     #[test]
@@ -967,10 +1203,10 @@ mod tests {
     #[test]
     fn halo_2_links_pull_a_stretched_sheet_back_with_the_pin_held() {
         let (mut cloth, mut running, pins) = hung();
-        cloth.halo2 = true;
+        cloth.game = ClothGame::Halo2;
         cloth.pins.truncate(1);
         let pins = &pins[..1];
-        running = RunningCloth::at_rest(&cloth, pins);
+        running = RunningCloth::at_rest(&cloth, pins, [0.0; 3]);
         running.places[15][1] += 0.3;
         for _ in 0..200 {
             running.relax_h2(&cloth, pins);
@@ -985,7 +1221,7 @@ mod tests {
     #[test]
     fn a_halo_2_link_at_length_does_not_pull() {
         let (mut cloth, mut running, pins) = hung();
-        cloth.halo2 = true;
+        cloth.game = ClothGame::Halo2;
         cloth.pins.clear();
         let before = running.places.clone();
         running.relax_h2(&cloth, &pins);
@@ -1001,7 +1237,7 @@ mod tests {
         running.normals = vec![[1.0, 0.0, 0.0]; running.places.len()];
         running.calculate_normals(&cloth);
         let halo3 = fresh(&running);
-        cloth.halo2 = true;
+        cloth.game = ClothGame::Halo2;
         running.normals = vec![[1.0, 0.0, 0.0]; running.places.len()];
         running.calculate_normals(&cloth);
         assert_ne!(fresh(&running), halo3);
@@ -1044,5 +1280,128 @@ mod tests {
             let push = wind.step(tick as f32);
             assert!(dot(push, push).sqrt() <= (0.1 + 0.0075) * 0.4 * 0.2 + 1e-5);
         }
+    }
+
+    /// Reach's `create_cloth_grid_data` spans the texture across each side by
+    /// its own step; Halo 3's one square spans the longer side.
+    #[test]
+    fn a_reach_grid_spans_its_texture_across_each_side() {
+        let (places, uvs, indices) = flag_grid([3, 2], [0.5, 0.25], ClothGame::Reach);
+        assert_eq!(places, flag_grid([3, 2], [0.5, 0.25], ClothGame::Halo3).0, "the same sheet");
+        assert_eq!(indices, flag_grid([3, 2], [0.5, 0.25], ClothGame::Halo3).2);
+        assert_eq!(uvs, [[0.0, 1.0], [0.5, 1.0], [1.0, 1.0], [0.0, 0.0], [0.5, 0.0], [1.0, 0.0]]);
+        let (_, halo3, _) = flag_grid([3, 2], [0.5, 0.25], ClothGame::Halo3);
+        assert_eq!(halo3[0], [0.0, 0.5], "Halo 3 keeps its square");
+        let (_, flag, _) = flag_grid([10, 10], [0.03, 0.04], ClothGame::Reach);
+        assert_eq!((flag[0], flag[99]), ([0.0, 1.0], [1.0, 0.0]), "the kit's flag, corner to corner");
+    }
+
+    /// Reach lists a sheet as its tag's whole name, apart from any region a
+    /// model's variant names; the others as the tag's name.
+    #[test]
+    fn a_reach_sheet_is_listed_by_its_tags_whole_name() {
+        let path = "objects\\weapons\\multiplayer\\flag\\flag";
+        assert_eq!(cloth_region_name(path, ClothGame::Reach), "flag.cloth");
+        assert_eq!(cloth_region_name(path, ClothGame::Halo3), "flag");
+        assert_eq!(cloth_region_name(path, ClothGame::Halo2), "flag");
+    }
+
+    /// Reach's flag has ten `flag_attach` markers up its pole, every one a pin
+    /// down the first column from the lowest; Halo 3 keeps six, and only it
+    /// pins a secondary.
+    #[test]
+    fn reach_pins_all_ten_markers_and_no_secondary() {
+        let markers: Vec<_> = (0..10).rev().map(|at| (at, [0.0, 0.0, 0.26 + 0.04 * at as f32])).collect();
+        let secondary = Some((11, [9.0; 3]));
+        let reach = cloth_pins(markers.clone(), secondary, [10, 10], 100, false, ClothGame::Reach);
+        assert_eq!(reach.iter().map(|pin| pin.vertex).collect::<Vec<_>>(), [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+        assert_eq!(reach[0].node, 0, "row 0 on the lowest marker");
+        let halo3 = cloth_pins(markers, secondary, [10, 10], 100, false, ClothGame::Halo3);
+        assert_eq!(halo3.len(), 6);
+        assert_eq!(halo3.last().map(|pin| pin.vertex), Some(90), "the sixth ends the column");
+        let fewer: Vec<_> = (0..3).map(|at| (at, [0.0, 0.0, at as f32])).collect();
+        assert_eq!(cloth_pins(fewer.clone(), secondary, [10, 10], 100, false, ClothGame::Reach).len(), 3);
+        let halo3 = cloth_pins(fewer, secondary, [10, 10], 100, false, ClothGame::Halo3);
+        assert_eq!(halo3.last().map(|pin| (pin.vertex, pin.node)), Some((99, 11)), "Halo 3's secondary");
+    }
+
+    /// Reach relaxes at most 9 times, and its tenth pass ends a sheet that
+    /// keeps coming apart; Halo 3's limits are 15 and 16.
+    #[test]
+    fn a_reach_sheet_that_comes_apart_has_its_pass_over_up_to_the_tenth() {
+        let (cloth, mut running, pins) = hung();
+        let mut cloth = H3ClothAt { game: ClothGame::Reach, ..cloth };
+        assert_eq!(running.relax(&cloth, &pins), 5, "a sound sheet takes what the tag asks");
+        cloth.iterations = 40;
+        assert_eq!(running.relax(&cloth, &pins), 9);
+        cloth.iterations = 5;
+        let held = cloth.pins[0].vertex;
+        let link = cloth.links.iter_mut().find(|link| link.ends.contains(&held)).unwrap();
+        link.length += 100.0;
+        assert_eq!(running.relax(&cloth, &pins), 10);
+    }
+
+    /// Reach's reset leaves the sheet at the world's origin, and enforcing its
+    /// attachments carries it to the object's bounding sphere once that is
+    /// more than 0.4 away; Halo 3 moves it up to its first pin.
+    #[test]
+    fn a_reach_sheet_starts_at_its_objects_bounding_sphere() {
+        let (cloth, _, pins) = hung();
+        let reach = H3ClothAt { game: ClothGame::Reach, ..cloth.clone() };
+        let start = |cloth: &H3ClothAt, center: [f32; 3]| {
+            let mut running = RunningCloth::at_rest(cloth, &pins, center);
+            running.pin(cloth, &pins);
+            running
+        };
+        let far = start(&reach, [0.0, 0.0, 2.0]);
+        assert_eq!(far.places[15], [cloth.places[15][0], 0.0, cloth.places[15][2] + 2.0]);
+        assert_eq!(far.last[15], far.places[15], "its last places go with it");
+        assert_eq!(start(&reach, [0.0, 0.0, 0.3]).places[15], cloth.places[15], "a sphere within 0.4 leaves it");
+        let halo3 = start(&cloth, [0.0, 0.0, 2.0]);
+        assert_eq!(halo3.places[15], [cloth.places[15][0], 0.0, cloth.places[15][2] + pins[0][2]], "at the first pin");
+        // Once there, it is carried only by a jump.
+        let mut moved = far.clone();
+        moved.center = [0.0, 0.0, 2.3];
+        moved.pin(&reach, &pins);
+        assert_eq!(moved.places[15], far.places[15]);
+    }
+
+    /// Reach's wind is never stiller than 0.05 nor stronger than 0.2, more
+    /// than Halo 3's ever blows.
+    #[test]
+    fn the_reach_wind_stays_between_its_least_and_most() {
+        let mut wind = ReachWind::default();
+        for frame in 1..5000 {
+            let push = wind.step(frame, frame as f32 * REACH_TICK_RATE);
+            let strength = dot(push, push).sqrt();
+            assert!((REACH_WIND_LEAST - 1e-5..=REACH_WIND_MOST + 1e-5).contains(&strength), "{strength}");
+            assert!(strength > (0.1 + 0.0075) * 0.4 * 0.2, "past Halo 3's");
+        }
+    }
+
+    /// It moves once a drawn frame, however many ticks that frame runs.
+    #[test]
+    fn the_reach_wind_moves_only_on_a_new_frame() {
+        let mut wind = ReachWind::default();
+        let first = wind.step(1, 0.0);
+        assert_eq!(wind.step(1, 30.0), first, "the same frame");
+        assert_ne!(wind.step(2, 60.0), first);
+    }
+
+    /// Reach derives a vertex's binormal from its normal, `cross(n, x)`, each
+    /// step, on both sides; Halo 3 keeps the one it was loaded with.
+    #[test]
+    fn a_reach_sheet_turns_its_binormal_with_its_normal() {
+        let (cloth, _, _) = hung();
+        let reach = [H3ClothAt { game: ClothGame::Reach, ..cloth.clone() }];
+        let written = H3ClothField::default().advance(&reach, None, 10.0);
+        let (_, vertices) = &written[0];
+        assert_eq!(vertices.len(), cloth.places.len() * 2);
+        for (_, normal, binormal) in vertices {
+            assert_eq!(*binormal, Some(cross(*normal, [1.0, 0.0, 0.0])));
+        }
+        assert_eq!(sheet_vertices(&[[0.0; 2]], ClothGame::Reach)[1].binormal, [0.0, 0.0, -1.0], "from the rest normal");
+        let written = H3ClothField::default().advance(&[cloth], None, 10.0);
+        assert!(written[0].1.iter().all(|(_, _, binormal)| binormal.is_none()));
     }
 }

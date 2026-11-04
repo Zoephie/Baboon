@@ -428,6 +428,7 @@ pub(super) struct H2Shown {
     volumes: Vec<bool>,
     contrails: Vec<bool>,
     liquids: Vec<bool>,
+    antennas: Vec<bool>,
 }
 
 impl H2Shown {
@@ -439,6 +440,7 @@ impl H2Shown {
             volumes: preview.h2_light_volumes.iter().map(|at| shown(at.only_under())).collect(),
             contrails: preview.h2_contrails.iter().map(|at| shown(at.only_under())).collect(),
             liquids: preview.h2_liquids.iter().map(|at| shown(at.only_under())).collect(),
+            antennas: preview.h2_antennas.iter().map(|at| shown(at.only_under())).collect(),
         }
     }
 }
@@ -2050,6 +2052,7 @@ struct ModelGpuSlot {
     /// How long VISR has been on, as of when.
     h3_vision_clock: Option<(f32, f32)>,
     h3_cloth: h3_cloth::H3ClothField,
+    reach_antennas: reach_antennas::ReachAntennaField,
     h3_leaves: h3_leaves::H3LeafField,
     leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
@@ -2126,6 +2129,7 @@ impl ModelGpuSlot {
                 h3_onsets: Default::default(),
                 h3_vision_clock: None,
                 h3_cloth: Default::default(),
+                reach_antennas: Default::default(),
                 h3_leaves: Default::default(),
                 leaf_textures: Vec::new(),
                 strip_textures: Vec::new(),
@@ -2134,24 +2138,28 @@ impl ModelGpuSlot {
         }
     }
 
-    /// Write `moved` (places and normals) over the uploaded vertices from
-    /// `first` on, the rest of each vertex as loaded. A range the preview
-    /// does not have (a simulation left from another model) writes nothing.
+    /// Write `moved` (places, normals and, where given, binormals) over the
+    /// uploaded vertices from `first` on, the rest of each vertex as loaded.
+    /// A range the preview does not have (a simulation left from another
+    /// model) writes nothing.
     unsafe fn rewrite_vertices(
         &self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         first: usize,
-        moved: impl IntoIterator<Item = ([f32; 3], [f32; 3])>,
+        moved: impl IntoIterator<Item = h3_cloth::MovedClothVertex>,
     ) {
         let moved: Vec<_> = moved.into_iter().collect();
         let Some(loaded) = frame.preview.vertices.get(first..first + moved.len()) else {
             return;
         };
         let mut vertices = loaded.to_vec();
-        for (vertex, (position, normal)) in vertices.iter_mut().zip(moved) {
+        for (vertex, (position, normal, binormal)) in vertices.iter_mut().zip(moved) {
             vertex.position = position;
             vertex.normal = normal;
+            if let Some(binormal) = binormal {
+                vertex.binormal = binormal;
+            }
         }
         let offset = first * size_of::<RenderModelPreviewVertex>();
         unsafe {
@@ -2314,12 +2322,13 @@ impl ModelGpuSlot {
                 .iter()
                 .map(|antenna| upload_h2_image(gl, &antenna.image))
                 .chain(frame.preview.h2_antennas.iter().map(|antenna| match &antenna.h3_bitmap {
-                    // `build_sprite`.
+                    // `build_sprite`. Reach's `draw_textured_transparent_quad`
+                    // sets address mode 1 and filter mode 2, taken to be
+                    // clamped and trilinear. [inferred]
                     Some((image, texels, mips)) => {
-                        let sampler = H3Sampler {
-                            address: [BitmapAddressMode::Clamp; 2],
-                            filter: BitmapFilterMode::Bilinear,
-                        };
+                        let filter =
+                            if antenna.is_reach() { BitmapFilterMode::Trilinear } else { BitmapFilterMode::Bilinear };
+                        let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter };
                         h3_draw::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
                     }
                     None => upload_h2_image(gl, &antenna.image),
@@ -2450,6 +2459,7 @@ impl ModelGpuSlot {
         self.h3_strips = Default::default();
         self.h3_leaves = Default::default();
         self.h3_cloth = Default::default();
+        self.reach_antennas = Default::default();
         self.h3_onsets = Default::default();
         self.h3_vision_clock = None;
         self.ce_particles = Default::default();
@@ -4147,6 +4157,7 @@ impl ModelGlRenderer {
         let ground = lowest.fold(0.0, f32::min);
         let written = uploaded.ce_flags.advance(&frame.preview.ce_flags, bones, ground, frame.time);
         for (first, moved) in written {
+            let moved = moved.into_iter().map(|(position, normal)| (position, normal, None));
             unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
         }
     }
@@ -4835,8 +4846,24 @@ impl ModelGlRenderer {
                 }
                 gl.color_mask(true, true, true, h3);
             }
-            let quads = if antennas { h2_antennas(frame, &uploaded.antenna_textures, bones, &view) } else { Vec::new() };
-            for (quads, texture) in quads {
+            let tips = if antennas {
+                uploaded.reach_antennas.advance(&frame.preview.h2_antennas, bones, frame.time)
+            } else {
+                Vec::new()
+            };
+            let quads = if antennas { h2_antennas(frame, &uploaded.antenna_textures, bones, &view, &tips) } else { Vec::new() };
+            for (quads, texture, reach) in quads {
+                if reach {
+                    // `draw_textured_transparent_quad`'s blend mode 3: source
+                    // alpha over its inverse, which Xenon sets for color alone;
+                    // alpha is taken to blend the same. [inferred] Its
+                    // `transparent` shader writes color times map with no
+                    // exposure on it, into the lit target the composite
+                    // brings up by `REACH_DARK_MULTIPLIER`; that it shows at
+                    // eight times the tag's color follows the code, and is
+                    // not checked against a capture. [inferred]
+                    h3_draw::h3_set_blend(gl, H3Blend::AlphaBlend);
+                }
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                 for quad in quads {
                     let vertices = quad.corners.map(|[x, y, z, u, v]| {
@@ -6184,6 +6211,32 @@ mod tests {
         let mut off = selections.clone();
         off.get_mut("f_hull").unwrap().enabled = false;
         assert!(!marker_active(&of("f_hull", "base"), &off));
+    }
+
+    /// With `BLAM_TEST_HREK`: the marine's radio antenna is drawn only while
+    /// its `trooper_radio` backpack is.
+    #[test]
+    fn kit_reach_antenna_shows_only_with_its_permutation() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let path = "objects\\characters\\marine\\marine";
+        let data = super::super::loading::kit_object_tests::kit_preview(
+            &root,
+            crate::core::game::GameId::HaloReach,
+            path,
+            "biped",
+            b"bipd",
+        );
+        let shown = |permutation: &str| {
+            let mut state = ModelPreviewState::default();
+            let selection = ModelRegionSelection { enabled: true, permutation: permutation.to_owned() };
+            state.region_selections.insert("flair_backpack".to_owned(), selection);
+            H2Shown::of(&data.preview, &state).antennas
+        };
+        assert_eq!(shown("trooper_radio"), [true]);
+        assert_eq!(shown("trooper"), [false]);
     }
 
     #[test]
@@ -7547,17 +7600,29 @@ unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeT
 /// Mipmaps matter here beyond quality: a detail map tiling twenty times across
 /// a model aliases into noise without them, which is exactly where a preview
 /// looks worst.
-/// Halo 2's antennas, whose maps follow Halo CE's in the slot's.
+/// Halo 2's, 3's and Reach's antennas, whose maps follow Halo CE's in the
+/// slot's, each with whether it is Reach's; Reach's far ends are at `tips`.
+/// Those on a permutation not shown are left out.
 fn h2_antennas(
     frame: &ModelGpuFrame,
     textures: &[Option<glow::NativeTexture>],
     bones: Option<&[[f32; 4]]>,
     view: &ce_lights::CeFlareView,
-) -> Vec<(Vec<ce_lights::CeAntennaQuad>, glow::NativeTexture)> {
+    tips: &[Option<[f32; 3]>],
+) -> Vec<(Vec<ce_lights::CeAntennaQuad>, glow::NativeTexture, bool)> {
     let preview = &frame.preview;
-    let quads = preview.h2_antennas.iter().map(|antenna| antenna.quads(bones, view));
     let textures = textures.iter().skip(preview.ce_antennas.len());
-    quads.zip(textures).filter_map(|(quads, texture)| Some((quads, (*texture)?))).collect()
+    preview
+        .h2_antennas
+        .iter()
+        .zip(textures)
+        .enumerate()
+        .filter(|(index, _)| is_shown(&frame.h2_shown.antennas, *index))
+        .filter_map(|(index, (antenna, texture))| {
+            let tip = tips.get(index).copied().flatten();
+            Some((antenna.quads(bones, view, tip), (*texture)?, antenna.is_reach()))
+        })
+        .collect()
 }
 
 /// Whether the preview has any of Halo CE's effects, particle systems, glows,

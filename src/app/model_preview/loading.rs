@@ -5,6 +5,7 @@ use super::*;
 use crate::core::source::MountedContainer;
 use super::h2_passes::{H2Layer, h2_prt_lights};
 use super::h2_prt::read_h2_prt;
+use super::h3_cloth::ClothGame;
 use blam_tags::iostore::IoStoreArchive;
 use blam_tags::iostore::container_header::EIoContainerHeaderVersion;
 use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
@@ -781,7 +782,9 @@ fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, model: &T
     preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);
     let markers = preview.markers.clone();
     let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
-    super::h2_weapons::read_reach_attached_features(source, model_tag, 0, &markers, &frame, None, preview);
+    // `object_get_bounding_sphere`'s middle, as the leaves take it.
+    let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
+    super::h2_weapons::read_reach_attached_features(source, model_tag, 0, &markers, &frame, None, center, preview);
 }
 
 /// A Halo 3 or ODST object's own shield, lights, flares, light volumes,
@@ -819,7 +822,7 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
     }
     preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
     let markers = preview.markers.clone();
-    super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, false);
+    super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     super::h2_weapons::read_extension_weapons(source, model_tag, 0, &markers, &frame, preview, None);
     let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
     let leaves = super::h3_leaves::read_h3_leaves(source, model_tag, &markers, middle);
@@ -880,7 +883,7 @@ fn read_h2_object_features(source: &TagSource, model_tag: &TagFile, preview: &mu
     };
     let frame = &frame;
     preview.h2_liquids = super::h2_liquid::read_h2_liquids(source, model_tag, 0, &markers, frame);
-    super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, true);
+    super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
     super::h2_weapons::read_extension_weapons(source, model_tag, 0, &markers, frame, preview, None);
     preview.markers = markers;
 }
@@ -4278,14 +4281,20 @@ mod tests {
 }
 
 #[cfg(test)]
-mod kit_object_tests {
+pub(super) mod kit_object_tests {
     use super::*;
     use crate::core::format::TagNameIndex;
     use crate::core::game::GameId;
     use crate::core::source::TagEntryLocation;
 
     /// The preview of the kit tag at `path`, as the panel loads it.
-    fn kit_preview(root: &str, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> ModelPreviewData {
+    pub(in crate::app::model_preview) fn kit_preview(
+        root: &str,
+        game: GameId,
+        path: &str,
+        extension: &str,
+        group: &[u8; 4],
+    ) -> ModelPreviewData {
         kit_preview_with(root, game, path, extension, group, &PreviewLoadSettings::default())
     }
 
@@ -4362,6 +4371,119 @@ mod kit_object_tests {
         // `illumination`; the vehicle has none of its own.
         let firing = data.preview.h3_lights.iter().filter(|light| light.scale_name() == "illumination");
         assert_eq!(firing.count(), 1, "the gun's firing light");
+    }
+
+    /// With `BLAM_TEST_HREK`: the warthog's one widget is its antenna, on
+    /// its `antenna` marker, sprung and weighted by its steel. At rest it
+    /// stands straight: its length takes out what gravity does along it.
+    #[test]
+    fn kit_reach_warthog_hangs_its_antenna_straight() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let path = "objects\\vehicles\\human\\warthog\\warthog";
+        let data = kit_preview(&root, GameId::HaloReach, path, "vehicle", b"vehi");
+        let antennas = &data.preview.h2_antennas;
+        assert_eq!(antennas.len(), 1);
+        let antenna = &antennas[0];
+        assert!(antenna.is_reach() && antenna.h3_bitmap.is_some());
+        let spring = antenna.reach_spring().unwrap();
+        assert_eq!(spring.strength, 0.1);
+        assert!((spring.length - 0.4).abs() < 1e-6);
+        assert!(spring.physics.is_some(), "warthog_antenna_steel");
+        let (marker, forward) = antenna.marker(None);
+        assert!(forward[2] > 0.99, "the marker faces up: {forward:?}");
+        let mut field = super::super::reach_antennas::ReachAntennaField::default();
+        field.advance(antennas, None, 0.0);
+        let tip = field.advance(antennas, None, 20.0)[0].unwrap();
+        let rest: [f32; 3] = std::array::from_fn(|axis| marker[axis] + forward[axis] * spring.length);
+        // The marker leans a little off up, so gravity bends the tip a hair.
+        assert!((0..3).all(|axis| (tip[axis] - rest[axis]).abs() < 1e-3), "{tip:?} against {rest:?}, {forward:?}");
+        assert!(tip[0] < rest[0], "toward where it leans: {tip:?} against {rest:?}, {forward:?}");
+        let view = super::super::ce_lights::CeFlareView {
+            eye: [0.0, -3.0, 1.0],
+            forward: [0.0, 1.0, 0.0],
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 0.0, 1.0],
+        };
+        assert_eq!(antenna.quads(None, &view, Some(tip)).len(), 10, "a sprite a vertex");
+    }
+
+    /// With `BLAM_TEST_HREK`: the scorpion's antennas hang on its cannon, a
+    /// child object, so they come in through it.
+    #[test]
+    fn kit_reach_scorpion_brings_its_cannons_antennas() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let path = "objects\\vehicles\\human\\scorpion\\scorpion";
+        let data = kit_preview(&root, GameId::HaloReach, path, "vehicle", b"vehi");
+        let antennas = &data.preview.h2_antennas;
+        assert_eq!(antennas.len(), 2, "short_antenna and medium_antenna");
+        assert!(antennas.iter().all(|antenna| antenna.is_reach()));
+        let lengths: Vec<f32> = antennas.iter().map(|antenna| antenna.reach_spring().unwrap().length).collect();
+        assert!((lengths[0] - 0.25).abs() < 1e-5 && (lengths[1] - 0.45).abs() < 1e-5, "{lengths:?}");
+    }
+
+    /// With `BLAM_TEST_HREK`: the marine's radio antenna hangs on a marker of
+    /// its `trooper_radio` backpack alone, and goes with it.
+    #[test]
+    fn kit_reach_marine_antenna_goes_with_its_backpack() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let path = "objects\\characters\\marine\\marine";
+        let data = kit_preview(&root, GameId::HaloReach, path, "biped", b"bipd");
+        let antennas = &data.preview.h2_antennas;
+        assert_eq!(antennas.len(), 1);
+        let under = antennas[0].only_under().map(|(region, permutation)| (region.as_str(), permutation.as_str()));
+        assert_eq!(under, Some(("flair_backpack", "trooper_radio")));
+    }
+
+    /// With `BLAM_TEST_HREK`: Reach's flag hangs from all ten of its
+    /// `flag_attach` markers, down its first column.
+    #[test]
+    fn kit_reach_flag_hangs_from_all_ten_markers() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let path = "objects\\weapons\\multiplayer\\flag\\flag";
+        let data = kit_preview(&root, GameId::HaloReach, path, "weapon", b"weap");
+        let cloths = &data.preview.h3_cloth;
+        assert_eq!(cloths.len(), 1);
+        assert_eq!(cloths[0].game(), super::super::h3_cloth::ClothGame::Reach);
+        assert_eq!(cloths[0].pinned_vertices(), [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+        // The model's variant names a `flag` region its render model lacks;
+        // the sheet, listed apart from it, still shows.
+        let mut state = ModelPreviewState::default();
+        reset_model_preview_selection(&mut state, &data, default_variant_index(&data));
+        let visible = visible_batch_indices(&data.preview, &state);
+        let sheet = data.preview.batches.iter().position(|batch| batch.region_name == "flag.cloth");
+        assert!(sheet.is_some_and(|sheet| visible.contains(&sheet)), "{sheet:?} in {visible:?}");
+    }
+
+    /// With `BLAM_TEST_H3EK`: Halo 3's flag and warthog stay Halo 3's, six
+    /// pins at most and an antenna at rest.
+    #[test]
+    fn kit_halo_3_cloth_and_antennas_stay_halo_3s() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let path = "objects\\weapons\\multiplayer\\flag\\flag";
+        let data = kit_preview(&root, GameId::Halo3, path, "weapon", b"weap");
+        let cloths = &data.preview.h3_cloth;
+        assert_eq!(cloths.len(), 1);
+        assert_eq!(cloths[0].game(), super::super::h3_cloth::ClothGame::Halo3);
+        assert!(cloths[0].pinned_vertices().len() <= 6);
+        let path = "objects\\vehicles\\warthog\\warthog";
+        let data = kit_preview(&root, GameId::Halo3, path, "vehicle", b"vehi");
+        assert!(!data.preview.h2_antennas.is_empty());
+        assert!(data.preview.h2_antennas.iter().all(|antenna| !antenna.is_reach()));
     }
 
     /// With `BLAM_TEST_H2EK`: an effect's `lens_flare` and `light_volume`

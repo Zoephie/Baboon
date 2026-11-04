@@ -1105,7 +1105,6 @@ impl ModelGlRenderer {
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let written = uploaded.h3_cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
         for (first, moved) in written {
-            let moved = moved.iter().map(|vertex| (vertex.position, vertex.normal));
             unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
         }
     }

@@ -57,6 +57,7 @@ pub(crate) mod h3_shaders;
 mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
+mod reach_antennas;
 mod reach_ik;
 mod reach_cheap_particles;
 mod reach_lights;
