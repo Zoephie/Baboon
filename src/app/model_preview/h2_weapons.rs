@@ -643,9 +643,9 @@ fn fold_attached(
     // `Game::of` calls Reach `Halo3` too; its attachments, lights and held
     // weapons read differently, and wait on their own readers.
     if source.game() == Some(GameId::Halo4) {
-        // Halo 4's attachment kinds, lights and flares have their own
-        // readers (docs/h4-preview-plan.md, phase 6); until then an attached
-        // object brings only its geometry, never Halo 3's readings of it.
+        // Halo 4's own readers, never Halo 3's readings of it.
+        let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
+        read_h4_attached_features(source, object, owner, &attached.markers, &frame, Some(name), center, preview);
     } else if source.game() == Some(GameId::HaloReach) {
         let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
         read_reach_attached_features(source, object, owner, &attached.markers, &frame, Some(name), center, preview);
@@ -779,6 +779,24 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
         let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
         preview.reach_light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
     }
+}
+
+/// What a Halo 4 object brings of its own so far: antennas and cloth, whose
+/// definitions are Reach's (`docs/h4-preview-research/objects.md` §3.10).
+/// Its lights, cheap lights, flares and effects wait on their own readers.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+    source: &TagSource,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+    frame: &F,
+    name: Option<&str>,
+    center: [f32; 3],
+    preview: &mut RenderModelPreview,
+) {
+    preview.h2_antennas.extend(super::h2_lights::read_reach_antennas(source, object, markers, frame, name));
+    super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
 }
 
 /// A unit's own `weapons` that are an `extension of parent` (vehicle and

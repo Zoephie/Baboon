@@ -464,6 +464,12 @@ fn load_tag_preview(
             // The unit's markers its IK sets and chains place.
             let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
             preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);
+            let markers = preview.markers.clone();
+            let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
+            let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
+            feature_into(&mut notes, "its antennas and cloth", preview, |preview| {
+                super::h2_weapons::read_h4_attached_features(source, model_tag, 0, &markers, &frame, None, center, preview);
+            });
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
@@ -4335,6 +4341,25 @@ pub(super) mod kit_object_tests {
     use crate::core::source::TagEntryLocation;
 
     /// The preview of the kit tag at `path`, as the panel loads it.
+    /// With `BLAM_TEST_H4EK`: the Warthog's antenna sways and the CTF flag
+    /// hangs as cloth, through Reach's readers. Lasky names a sensor-pack
+    /// antenna, but his model has no `antenna` marker for it, so he has none,
+    /// nor has the Chief either.
+    #[test]
+    fn halo_4_objects_bring_their_antennas_and_cloth() {
+        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+            return;
+        };
+        let warthog = kit_preview(&root, GameId::Halo4, "objects\\vehicles\\human\\storm_warthog\\storm_warthog", "vehicle", b"vehi");
+        assert!(!warthog.preview.h2_antennas.is_empty(), "{:?}", warthog.notes);
+        let lasky = kit_preview(&root, GameId::Halo4, "objects\\characters\\storm_lasky\\storm_lasky", "biped", b"bipd");
+        assert!(lasky.preview.h2_antennas.is_empty());
+        let flag = kit_preview(&root, GameId::Halo4, "objects\\weapons\\multiplayer\\flag\\flag", "weapon", b"weap");
+        assert!(!flag.preview.h3_cloth.is_empty(), "{:?}", flag.notes);
+        let chief = kit_preview(&root, GameId::Halo4, "objects\\characters\\storm_masterchief\\storm_masterchief", "biped", b"bipd");
+        assert!(chief.preview.h2_antennas.is_empty() && chief.preview.h3_cloth.is_empty());
+    }
+
     pub(in crate::app::model_preview) fn kit_preview(
         root: &str,
         game: GameId,
