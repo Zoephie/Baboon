@@ -795,7 +795,7 @@ fn h4_pass_inputs() {
             .collect();
         eprintln!("NOTE TECHNIQUE {} {}", technique.name, passes.join(" "));
     }
-    for (stage, pass) in [(Stage::Vertex, pass), (Stage::Pixel, "_default")] {
+    for stage in [Stage::Vertex, Stage::Pixel] {
         let translated = translate_pass(&program, technique, pass, stage).unwrap();
         for (name, ty) in &translated.uniforms {
             eprintln!("NOTE {stage:?} UNIFORM {name} {ty:?}");

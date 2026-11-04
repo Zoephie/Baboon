@@ -93,9 +93,15 @@ pub(crate) const H4_DEFINES: [(&str, &str); 1] = [("DX_VERSION", "11")];
 
 /// One stage of a technique's pass, translated.
 pub(crate) fn translate_pass(program: &Program, technique: &str, pass: &str, stage: Stage) -> Result<Translated, String> {
-    let (stage_name, pass) = match stage {
-        Stage::Vertex => ("vs", pass),
-        Stage::Pixel => ("ps", "_default"),
+    let stage_name = match stage {
+        Stage::Vertex => "vs",
+        Stage::Pixel => "ps",
+    };
+    // A material technique's pixel shader is its `_default` pass, beside one
+    // vertex pass per vertex type; an explicit shader's one pass holds both.
+    let pass = match stage {
+        Stage::Pixel if program.pass_function(technique, "_default", stage_name).is_some() => "_default",
+        _ => pass,
     };
     let shader = program
         .pass_function(technique, pass, stage_name)
