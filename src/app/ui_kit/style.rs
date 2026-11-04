@@ -825,9 +825,9 @@ pub(in crate::app) fn foundation_block_edge() -> Color32 {
 
 pub(in crate::app) fn browser_search_bg() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(23, 23, 23)
+        Color32::from_black_alpha(102)
     } else {
-        Color32::from_rgb(246, 246, 244)
+        Color32::from_rgba_premultiplied(102, 102, 102, 102)
     }
 }
 

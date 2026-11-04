@@ -298,6 +298,7 @@ fn draw_tag_fields_scroll(
                     expert_mode,
                     edit,
                 );
+                add_tag_content_bottom_padding(ui);
         };
         if is_shader {
             draw_shader_scroll_area(ui, scope, &mut contents);
@@ -321,7 +322,15 @@ fn draw_tag_fields_scroll(
             } else {
                 draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
             }
+            add_tag_content_bottom_padding(ui);
         });
+}
+
+fn add_tag_content_bottom_padding(ui: &mut Ui) {
+    // Include the inset in the scrolling content so it is revealed at the end,
+    // while unfinished content still runs right down to the page's border.
+    let existing_gap = (ui.cursor().top() - ui.min_rect().bottom()).max(0.0);
+    ui.add_space((16.0 - existing_gap).max(0.0));
 }
 
 const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;

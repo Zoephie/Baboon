@@ -348,7 +348,8 @@ pub(in crate::app) fn draw_tag_pane(
     // for a field (it has to be drawn to be scrolled to), on the frame that
     // expands or collapses everything, and while Find filters the fields.
     let filtering = matches!(field_filter, Some(FieldFilterAction::Apply(_)));
-    let navigating = field_nav.is_some_and(|nav| nav.kit == kit_id && nav.tag_key == key);
+    let navigating = field_nav.is_some_and(|nav| nav.kit == kit_id && nav.tag_key == key)
+        || ui.ctx().data(|data| data.get_temp::<String>(parent_block_jump_id(scope, &key)).is_some());
     let editing = ui.ctx().memory(|memory| memory.focused().is_some());
     let row_heights = view.row_heights.entry(format!("{scope}\u{1f}{key}")).or_default();
     row_heights.begin(

@@ -453,7 +453,7 @@ pub(in crate::app) fn draw_status_bar(
     available_update: Option<&UpdateCheckResult>,
 ) {
     let ctx = &ui.ctx().clone();
-    egui::Panel::bottom("status")
+    let bar = egui::Panel::bottom("status")
         .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
             left: 6,
             right: 6,
@@ -622,6 +622,8 @@ pub(in crate::app) fn draw_status_bar(
                 }
             });
         });
+    ui.painter().hline(bar.response.rect.x_range(), bar.response.rect.top() + 0.5,
+        Stroke::new(1.0, grid_line()));
 }
 
 /// The "please wait" window shown while the active kit is still indexing.

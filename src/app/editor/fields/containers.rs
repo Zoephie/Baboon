@@ -1833,6 +1833,12 @@ pub(in crate::app) fn jump_target_id() -> egui::Id {
     egui::Id::new("foundation_jump_to_block")
 }
 
+/// A parent jump belongs to the exact tag pane that initiated it. Matching
+/// block paths in another pane or editing kit must never consume this request.
+pub(in crate::app) fn parent_block_jump_id(view_scope: &str, tag_key: &str) -> egui::Id {
+    egui::Id::new(("foundation_parent_block_jump", view_scope, tag_key))
+}
+
 const BLOCK_JUMP_SCROLL_LEAD: f32 = 80.0;
 const BLOCK_JUMP_HIGHLIGHT_SECONDS: f64 = 1.25;
 
@@ -1959,7 +1965,14 @@ pub(in crate::app) fn draw_foundation_block_control(
     // A block-index "Go to" can target a block hidden under one or more
     // collapsed containers. Force every ancestor and the target block itself
     // open until the target header consumes the one-shot jump below.
-    let pending_jump = ui.data(|data| data.get_temp::<String>(jump_target_id()));
+    let parent_jump_id = parent_block_jump_id(view_scope, tag_key);
+    let (pending_jump_id, pending_jump) = ui.data(|data| {
+        if let Some(path) = data.get_temp::<String>(parent_jump_id) {
+            (parent_jump_id, Some(path))
+        } else {
+            (jump_target_id(), data.get_temp::<String>(jump_target_id()))
+        }
+    });
     if pending_jump
         .as_deref()
         .is_some_and(|target| block_jump_opens_path(target, path_salt))
@@ -2004,7 +2017,7 @@ pub(in crate::app) fn draw_foundation_block_control(
     {
         ui.scroll_to_rect(block_jump_scroll_rect(row_rect), Some(egui::Align::Min));
         ui.data_mut(|d| {
-            d.remove::<String>(jump_target_id());
+            d.remove::<String>(pending_jump_id);
             d.insert_temp(jump_highlight_id, now + BLOCK_JUMP_HIGHLIGHT_SECONDS);
         });
         ui.ctx().request_repaint();
@@ -2240,7 +2253,8 @@ pub(in crate::app) fn draw_foundation_block_control(
         ).on_hover_text(format!("Jump to parent block\n{}", breadcrumb_for_path(path_salt)));
         if jump.clicked() {
             if let Some(parent) = parent_block_path(path_salt) {
-                ui.data_mut(|d| d.insert_temp(jump_target_id(), parent));
+                ui.data_mut(|d| d.insert_temp(parent_jump_id, parent));
+                ui.ctx().request_repaint();
             }
         }
     }
@@ -3325,6 +3339,54 @@ mod tests {
     }
 
     #[test]
+    fn parent_jump_does_not_reach_another_workspace_with_the_same_tag() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let frame = |events| {
+            let mut opened = [false; 2];
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                events,
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1240.0, 600.0))),
+                ..Default::default()
+            }, |ui| {
+                for pane in 0..2 {
+                    let area = egui::Rect::from_min_size(egui::pos2(pane as f32 * 620.0, 0.0), Vec2::new(600.0, 600.0));
+                    ui.scope_builder(egui::UiBuilder::new().id_salt(pane).max_rect(area), |ui| {
+                        let scope = format!("workspace_{pane}/tag_pane");
+                        let key = "objects/characters/brute/brute.model";
+                        draw_foundation_block_control(ui, "Variants", "0. entry", 0, 1,
+                            None, true, true, &scope, key, "variants", 0,
+                            false, None, false, PasteGate::Empty, None, |_| "0. entry".to_owned(), |_| {
+                                opened[pane] = true;
+                            });
+                        // The child is drawn independently so opening the target
+                        // parent exposes which pane consumed the actual click.
+                        draw_foundation_block_control(ui, &format!("Child {pane}"), "0. entry", 0, 1,
+                            None, true, true, &scope, key, "variants[0]/regions", 1,
+                            false, None, false, PasteGate::Empty, None, |_| "0. entry".to_owned(), |_| {});
+                    });
+                }
+            });
+            (opened, output)
+        };
+        frame(vec![]);
+        let (_, output) = frame(vec![]);
+        let title = output.shapes.iter().find_map(|paint| match &paint.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Child 1" =>
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
+            _ => None,
+        }).expect("the second workspace's child block is visible");
+        let pos = egui::pos2(1220.0 - 20.0, title.center().y);
+        frame(vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            frame(vec![egui::Event::PointerButton { pos, pressed,
+                button: egui::PointerButton::Primary, modifiers: egui::Modifiers::NONE }]);
+        }
+        let (opened, _) = frame(vec![]);
+        assert_eq!(opened, [false, true], "only the workspace whose Jump to parent button was clicked may react");
+    }
+
+    #[test]
     fn parent_jump_stays_at_the_top_right_in_both_header_layouts() {
         for width in [280.0, 600.0, 1200.0] {
             for depth in [1, 3] {
@@ -3359,7 +3421,7 @@ mod tests {
                         pos: jump.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE,
                     }]);
                 }
-                assert_eq!(ctx.data(|data| data.get_temp::<String>(jump_target_id())).as_deref(), Some("regions"));
+                assert_eq!(ctx.data(|data| data.get_temp::<String>(parent_block_jump_id("jump", "test"))).as_deref(), Some("regions"));
             }
         }
     }

@@ -121,7 +121,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         // The scope salts every widget id under the pane, so the same tag shown
         // in two panes keeps independent scroll, focus, and collapse state
         // while both edit the one shared document.
-        let scope = format!("tile{}", tile_id.0);
+        let scope = format!("kit{}_tile{}", self.kit.0, tile_id.0);
         let caches = self.inputs.tags.get(&(self.kit, key));
         Frame::NONE
             .inner_margin(egui::Margin {

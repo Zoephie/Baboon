@@ -198,8 +198,11 @@ pub(in crate::app) fn paint_page_outline(
 
 /// The tile library owns resizing; this grip only advertises the same handle.
 pub(in crate::app) fn paint_kit_split_grips(ui: &Ui, tree: &egui_tiles::Tree<KitId>) {
-    for (_, tile) in tree.tiles.iter() {
+    let root_top = tree.root().and_then(|id| tree.tiles.rect(id)).map(|rect| rect.top());
+    let toolbar_bottom = window_work_area(ui.ctx()).top();
+    for (id, tile) in tree.tiles.iter() {
         let egui_tiles::Tile::Container(egui_tiles::Container::Linear(linear)) = tile else { continue };
+        let Some(parent) = tree.tiles.rect(*id) else { continue };
         let rects = linear.children.iter().filter_map(|id| tree.tiles.rect(*id)).collect::<Vec<_>>();
         for pair in rects.windows(2) {
             let horizontal = linear.dir == egui_tiles::LinearDir::Horizontal;
@@ -208,8 +211,32 @@ pub(in crate::app) fn paint_kit_split_grips(ui: &Ui, tree: &egui_tiles::Tree<Kit
             } else {
                 egui::pos2(pair[0].center().x, (pair[0].bottom() + pair[1].top()) * 0.5)
             };
-            let size = if horizontal { egui::vec2(4.0, 32.0) } else { egui::vec2(32.0, 4.0) };
-            ui.painter().rect_filled(egui::Rect::from_center_size(center, size), 2.0, subtle_dark());
+            let size = if horizontal { egui::vec2(4.0, 96.0) } else { egui::vec2(96.0, 4.0) };
+            // Match the tile library's full-length resize target, rather than
+            // requiring the pointer to be directly over the visible grip.
+            let hit_size = if horizontal {
+                egui::vec2(2.0 * ui.style().interaction.resize_grab_radius_side, parent.height())
+            } else {
+                egui::vec2(parent.width(), 2.0 * ui.style().interaction.resize_grab_radius_side)
+            };
+            let hovered = ui.rect_contains_pointer(egui::Rect::from_center_size(center, hit_size));
+            if horizontal && root_top.is_some_and(|top| (parent.top() - top).abs() < 0.5)
+                && toolbar_bottom < parent.top()
+            {
+                // The workspace's top inset gives its tabs breathing room;
+                // carry top-row split dividers through that inset to the toolbar.
+                let mut painter = ui.painter().clone();
+                painter.set_clip_rect(ui.clip_rect().with_min_y(toolbar_bottom)
+                    .intersect(ui.ctx().content_rect()));
+                let divider_color = if hovered && ui.input(|input| input.pointer.primary_down()) {
+                    text_dark()
+                } else if hovered { subtle_dark() } else { grid_line() };
+                painter.vline(center.x, toolbar_bottom..=parent.top(), Stroke::new(2.0, divider_color));
+            }
+            let color = if hovered {
+                if is_dark_mode() { Color32::WHITE } else { Color32::BLACK }
+            } else { subtle_dark() };
+            ui.painter().rect_filled(egui::Rect::from_center_size(center, size), 2.0, color);
         }
     }
 }
@@ -897,9 +924,9 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
             .data_mut(|data| data.get_temp::<String>(draft_id))
             .unwrap_or_default();
         let keyword_field = Frame::NONE
-            .fill(foundation_input())
+            .fill(browser_search_bg())
             .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
-            .inner_margin(egui::Margin::same(2))
+            .inner_margin(egui::Margin { left: 8, right: 2, top: 2, bottom: 2 })
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.spacing_mut().interact_size.y = 20.0;

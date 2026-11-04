@@ -1639,7 +1639,8 @@ mod tests {
         assert!(label_pos("No selectable points").y > min.y);
         assert!(output.shapes.iter().any(|shape| matches!(
             &shape.shape, egui::Shape::Rect(rect)
-                if rect.rect.width() > 100.0 && rect.rect.height() == 24.0 && rect.corner_radius.nw == 3
+                if rect.rect.width() > 100.0 && rect.rect.height() == 24.0
+                    && rect.corner_radius == ctx.global_style().visuals.widgets.inactive.corner_radius
         )), "the color rail uses wide shader color preview buttons");
     }
 
