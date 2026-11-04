@@ -769,7 +769,7 @@ fn h4_normal_axis(frame: &ModelGpuFrame) -> [f32; 9] {
 /// The matrices Halo 4's passes read, by name: `mul(position, matrix)` as
 /// Halo 3's `View_Projection`, the camera's axes and eye in
 /// `camera_to_world`'s columns (`vs_view_camera_right` is `._m00_m10_m20`).
-fn h4_matrix(frame: &ModelGpuFrame, name: &str) -> Option<Vec<f32>> {
+pub(super) fn h4_matrix(frame: &ModelGpuFrame, name: &str) -> Option<Vec<f32>> {
     match name {
         "vs_view_view_projection_matrix" => Some(view_projection(&frame.camera).to_vec()),
         "vs_view_camera_to_world_matrix" | "ps_camera_to_world_matrix" => Some(camera_to_world(frame).to_vec()),
@@ -1397,6 +1397,16 @@ impl ModelGlRenderer {
                     }
                 }
                 self.h3_light = None;
+            }
+            // `MidnightLightParfait::Render`: Halo 4's lights after the static
+            // lighting, before what blends.
+            if halo4 {
+                self.draw_h4_lights(gl, frame, accumulation_target);
+                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                h3_set_cull(gl, frame);
+                gl.depth_func(glow::LEQUAL);
+                gl.depth_mask(false);
+                gl.blend_func(glow::ONE, glow::ONE);
             }
             // `c_lights_view::render`: after the static lighting, before what blends.
             if reach {

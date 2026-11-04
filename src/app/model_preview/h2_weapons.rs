@@ -781,9 +781,11 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
     }
 }
 
-/// What a Halo 4 object brings of its own so far: antennas and cloth, whose
-/// definitions are Reach's (`docs/h4-preview-research/objects.md` §3.10).
-/// Its lights, cheap lights, flares and effects wait on their own readers.
+/// What a Halo 4 object brings of its own so far: its lights and cheap
+/// lights and the screen-space passes they draw with
+/// (`docs/h4-preview-research/lights.md`), and antennas and cloth, whose
+/// definitions are Reach's (`objects.md` §3.10). Its flares and effects wait
+/// on their own readers.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
@@ -795,6 +797,12 @@ pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (Mar
     center: [f32; 3],
     preview: &mut RenderModelPreview,
 ) {
+    // A weapon opened on its own has no parent to hold it.
+    let lone_weapon = name.is_none() && object.group().tag == u32::from_be_bytes(*b"weap");
+    let (lights, cheap) = super::h4_lights::read_h4_lights(source, object, owner, markers, frame, lone_weapon);
+    preview.h4_lights.extend(named!(lights, name));
+    preview.h4_cheap_lights.extend(named!(cheap, name));
+    super::h4_lights::read_h4_light_passes(source, preview);
     preview.h2_antennas.extend(super::h2_lights::read_reach_antennas(source, object, markers, frame, name));
     super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
 }

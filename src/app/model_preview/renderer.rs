@@ -374,12 +374,14 @@ fn h3_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> V
     preview.h3_flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
-/// The same of Reach's lights and then its cheap lights.
+/// The same of Reach's lights and then its cheap lights, then Halo 4's.
 pub(super) fn reach_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
     let lights = preview.reach_lights.iter().map(|light| light.only_under().is_none_or(shown));
     let cheap = preview.reach_cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
-    lights.chain(cheap).collect()
+    let h4 = preview.h4_lights.iter().map(|light| light.only_under().is_none_or(shown));
+    let h4_cheap = preview.h4_cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
+    lights.chain(cheap).chain(h4).chain(h4_cheap).collect()
 }
 
 /// The same of Halo 3's lights.
@@ -986,6 +988,8 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let h3_lights = data.preview.h3_lights.iter().filter(|light| light.object == object);
     let reach_lights = data.preview.reach_lights.iter().filter(|light| light.object == object);
     let reach_cheap = data.preview.reach_cheap_lights.iter().filter(|light| light.object == object);
+    let h4_lights = data.preview.h4_lights.iter().filter(|light| light.object == object);
+    let h4_cheap = data.preview.h4_cheap_lights.iter().filter(|light| light.object == object);
     let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == object);
     let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == object);
     let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == object);
@@ -1008,6 +1012,8 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
         .chain(h3_lights.flat_map(|light| light.inputs()))
         .chain(reach_lights.flat_map(|light| light.inputs()))
         .chain(reach_cheap.flat_map(|light| light.inputs()))
+        .chain(h4_lights.flat_map(|light| light.inputs()))
+        .chain(h4_cheap.flat_map(|light| light.inputs()))
         .chain(h3_flares.map(|at| at.scale_name()))
         .chain(h3_volumes.flat_map(|at| at.scale_names()))
         .chain(h3_systems.flat_map(|at| at.scale_names()))
@@ -1092,6 +1098,8 @@ pub(super) fn object_moves(
         || data.preview.h3_lights.iter().any(|light| light.animates())
         || data.preview.reach_lights.iter().any(|light| light.animates())
         || data.preview.reach_cheap_lights.iter().any(|light| light.animates())
+        || data.preview.h4_lights.iter().any(|light| light.animates())
+        || data.preview.h4_cheap_lights.iter().any(|light| light.animates())
         || data.preview.h3_flares.iter().any(|at| at.animates())
         || data.preview.h3_light_volumes.iter().any(|at| at.animates())
         || !data.preview.h3_particles.is_empty()
@@ -1143,6 +1151,8 @@ pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
         && preview.h3_lights.is_empty()
         && preview.reach_lights.is_empty()
         && preview.reach_cheap_lights.is_empty()
+        && preview.h4_lights.is_empty()
+        && preview.h4_cheap_lights.is_empty()
         && preview.h3_flares.is_empty()
         && preview.h3_light_volumes.is_empty()
         && preview.h3_particles.is_empty()
@@ -1474,6 +1484,8 @@ mod h4_holograms;
 mod reach_shadow_pass;
 #[path = "reach_light_pass.rs"]
 mod reach_light_pass;
+#[path = "h4_light_pass.rs"]
+mod h4_light_pass;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",

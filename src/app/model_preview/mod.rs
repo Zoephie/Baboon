@@ -65,6 +65,7 @@ mod reach_ik;
 mod h4_ik;
 mod reach_cheap_particles;
 mod reach_lights;
+mod h4_lights;
 mod reach_blend_screens;
 mod reach_camo;
 mod reach_shadow;
@@ -158,6 +159,12 @@ pub(crate) struct RenderModelPreview {
     /// `light_apply`, `_frustum`, `_specular` and `_frustum_specular`, by
     /// `combo` (frustum 1, specular 2), for its screen-space lights.
     pub reach_light_passes: Vec<Option<Arc<h3_shaders::H3Pass>>>,
+    /// Halo 4's attached `light`s and `cheap_light`s.
+    pub h4_lights: Vec<h4_lights::H4Light>,
+    pub h4_cheap_lights: Vec<h4_lights::H4CheapLight>,
+    /// Explicit 187 and 204's screen-space passes, by (physically correct,
+    /// technique).
+    pub h4_light_passes: std::collections::HashMap<(bool, usize), Arc<h3_shaders::H3Pass>>,
     /// Reach's shield impact, as its damage sections choose it.
     pub reach_shield: Option<Arc<reach_shield::ReachShield>>,
     /// `globals`' active camo curves, for a Reach object.

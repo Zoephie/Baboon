@@ -127,6 +127,12 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     }
     data.textures = Some(Arc::new(textures));
     eprintln!("NOTE {} cheap particle emitters", data.preview.reach_cheap_emitters.len());
+    eprintln!(
+        "NOTE H4 {} lights, {} cheap lights, {} light passes",
+        data.preview.h4_lights.len(),
+        data.preview.h4_cheap_lights.len(),
+        data.preview.h4_light_passes.len()
+    );
     // `H2_SHOT_DROP=a,b` leaves out whole features, to see one on its own.
     if let Ok(dropped) = std::env::var("H2_SHOT_DROP") {
         let preview = Arc::make_mut(&mut data.preview);
@@ -151,6 +157,10 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 "reach_lights" => {
                     preview.reach_lights.clear();
                     preview.reach_cheap_lights.clear();
+                }
+                "h4_lights" => {
+                    preview.h4_lights.clear();
+                    preview.h4_cheap_lights.clear();
                 }
                 other => panic!("H2_SHOT_DROP: no feature {other}"),
             }
@@ -482,6 +492,39 @@ fn reach_light_passes_link() {
             }
             gl.link_program(program);
             assert!(gl.get_program_link_status(program), "{file}: {}", gl.get_program_info_log(program));
+        }
+    }
+}
+
+/// Halo 4's screen-space light passes, explicit 187 and 204's sixteen
+/// techniques each, compile and link; `BLAM_TEST_H4EK` to the tags folder.
+#[test]
+fn h4_light_passes_link() {
+    let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+        return;
+    };
+    let source = TagSource::LooseFolder {
+        root: root.into(),
+        game: Some(GameId::Halo4),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let gl = headless_gl();
+    for physical in [false, true] {
+        let program = super::h4_lights::h4_light_program(&source, physical).expect("the light shader");
+        for technique in 0..16 {
+            let pass = super::h4_lights::h4_light_pass(&program, technique).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));
+            unsafe {
+                let linked = gl.create_program().unwrap();
+                for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
+                    let shader = gl.create_shader(kind).unwrap();
+                    gl.shader_source(shader, text);
+                    gl.compile_shader(shader);
+                    assert!(gl.get_shader_compile_status(shader), "{physical} {technique}: {}", gl.get_shader_info_log(shader));
+                    gl.attach_shader(linked, shader);
+                }
+                gl.link_program(linked);
+                assert!(gl.get_program_link_status(linked), "{physical} {technique}: {}", gl.get_program_info_log(linked));
+            }
         }
     }
 }

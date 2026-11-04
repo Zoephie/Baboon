@@ -117,6 +117,11 @@ void main() {
 }
 ";
 
+/// [`SCREEN_VERTEX`], for the light passes.
+pub(in crate::app::model_preview) fn h4_screen_vertex() -> &'static str {
+    SCREEN_VERTEX
+}
+
 /// One of `rasterizer_globals`' explicit shaders that is a `material`, baked
 /// as any material is, its one pass (`screen`) over the picture.
 fn screen_material(source: &TagSource, path: &str, caches: &mut ResolveCaches) -> Result<H4ScreenMaterial, String> {
