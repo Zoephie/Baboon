@@ -186,6 +186,10 @@ pub(crate) struct RenderModelPreview {
     /// A Halo 4 object's `bounding offset` (in its node 0's frame) and
     /// `bounding radius`, which its holograms frame their screen effects by.
     pub h4_bounding_sphere: Option<([f32; 3], f32)>,
+    /// How many change colours a Halo 4 object has (its `change colors`
+    /// block, at most four): those its materials read as theirs, the rest
+    /// as white.
+    pub h4_change_color_count: u8,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,

@@ -55,6 +55,23 @@ pub(crate) fn blend_constant(state_mode: u8) -> [f32; 4] {
     [0.0, 1.0, z, w]
 }
 
+/// `ps_material_object_parameters` for an object's change colours
+/// (`MaterialSubmitData`, X360 0x82A886D0, MCC 0x1408CA2F0): the first
+/// `count` colours as packed to 8 bits (`real_rgb_color_to_pixel32` truncates,
+/// `sub_14041AE10` divides by 255) with w = 1, then white with w = 0 (MCC
+/// leaves that w unwritten; the X360 build writes 0). Hologram bipeds take a
+/// node matrix here instead (`setup_object_shader_parameters`, X360
+/// 0x839D6580), which none of their shaders read; that is not built.
+pub(crate) fn object_parameters(colors: [[f32; 3]; 4], count: u8) -> Vec<[f32; 4]> {
+    let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0) as u8 as f32 / 255.0;
+    (0..4)
+        .map(|index| match colors.get(index).filter(|_| index < usize::from(count)) {
+            Some(color) => [byte(color[0]), byte(color[1]), byte(color[2]), 1.0],
+            None => [1.0, 1.0, 1.0, 0.0],
+        })
+        .collect()
+}
+
 /// A Halo 4 material's per-draw state.
 #[derive(Debug)]
 pub(crate) struct H4Submit {
@@ -399,5 +416,18 @@ mod tests {
         assert_eq!(blend_constant(24), [0.0, 1.0, 0.0, -1.0]);
         assert_eq!(blend_constant(2), [0.0, 1.0, 1.0, 1.0]);
         assert_eq!(blend_constant(0), [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    /// The colours the object has come through packed to bytes; the rest
+    /// read white with no weight.
+    #[test]
+    fn change_colors_pack_to_bytes_and_the_rest_are_white() {
+        let colors = [[1.0, 0.5, 0.0], [0.2, 0.4, 0.6], [0.3; 3], [0.9; 3]];
+        let packed = object_parameters(colors, 2);
+        assert_eq!(packed[0], [1.0, 127.0 / 255.0, 0.0, 1.0], "0.5 truncates to 127");
+        assert_eq!(packed[1][3], 1.0);
+        assert_eq!(packed[2], [1.0, 1.0, 1.0, 0.0]);
+        assert_eq!(packed[3], [1.0, 1.0, 1.0, 0.0]);
+        assert_eq!(object_parameters(colors, 0)[0], [1.0, 1.0, 1.0, 0.0]);
     }
 }

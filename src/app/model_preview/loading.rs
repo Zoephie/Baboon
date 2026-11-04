@@ -458,7 +458,9 @@ fn load_tag_preview(
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
-            std::sync::Arc::make_mut(&mut data.preview).h4_bounding_sphere = read_h4_bounding_sphere(model_tag);
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            preview.h4_bounding_sphere = read_h4_bounding_sphere(model_tag);
+            preview.h4_change_color_count = read_h4_change_color_count(model_tag);
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
@@ -797,6 +799,16 @@ fn read_h4_bounding_sphere(object: &TagFile) -> Option<([f32; 3], f32)> {
         _ => [0.0; 3],
     };
     (radius > 0.0).then_some((offset, radius))
+}
+
+/// How many of a Halo 4 object's change colours reach its materials:
+/// `render_object_update_change_colors` (X360 0x82A80E18) packs the first
+/// four the object has (`object_get_change_color` answers for each index
+/// below the block's count).
+fn read_h4_change_color_count(object: &TagFile) -> u8 {
+    let holder = super::ce_attachments::object_block(object, "change colors");
+    let count = holder.map_or(0, |holder| super::ce_attachments::elements(holder, "change colors").len());
+    count.min(4) as u8
 }
 
 /// What a Reach object brings so far: its flares and lights. Its light
