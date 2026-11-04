@@ -222,6 +222,7 @@ impl H3Definition {
             // Reach's entries past `motion_blur_inhibit` are its own; no
             // Reach definition offers them as options, so none reach here.
             H3Dialect::Reach => REACH_BLEND_MODES[..13].iter().position(|mode| name.starts_with(mode)),
+            H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
         };
         H3Blend::ALL[index.unwrap_or(0)]
     }
@@ -322,9 +323,14 @@ fn option_defines(definition: &H3Definition, options: &[Option<usize>]) -> Vec<(
 pub(crate) enum H3Dialect {
     Halo3,
     Reach,
+    /// Halo 4's materials: translated from their own sources
+    /// (`h4_shaders`), never through `H3Sources`.
+    Halo4,
 }
 
 impl H3Dialect {
+    /// A render method's dialect; never `Halo4`, whose materials are not
+    /// render methods.
     fn of(source: &TagSource) -> Self {
         match source.game() {
             Some(GameId::HaloReach) => Self::Reach,
@@ -348,6 +354,7 @@ fn include_tag(dialect: H3Dialect, name: &str) -> String {
             let stem = path.rsplit_once('.').map_or(path.as_str(), |(stem, _)| stem);
             format!("shaders\\{stem}")
         }
+        H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
     }
 }
 
@@ -433,6 +440,7 @@ impl H3Sources {
         let main = match self.dialect {
             H3Dialect::Halo3 => format!("#include \"{file}.hlsl\"\n"),
             H3Dialect::Reach => format!("#include \"explicit\\{file}.hlsl\"\n"),
+            H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
         };
         let vertex_defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Vertex);
         let pixel_defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Pixel);
@@ -555,10 +563,11 @@ fn widen_varyings(vertex: &str, pixel: &str) -> String {
     source
 }
 
-fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
+pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
     let mut uniforms = vertex.uniforms;
+    // Halo 4 calls them `vs_model_skinning_matrices`, the same shape.
     let nodes = uniforms.iter_mut().find_map(|(name, ty)| match ty {
-        Type::Array(_, Some(nodes)) if name == "Nodes" => Some(nodes),
+        Type::Array(_, Some(nodes)) if name == "Nodes" || name == "vs_model_skinning_matrices" => Some(nodes),
         _ => None,
     });
     let spare = nodes.map(|nodes| {
@@ -580,7 +589,9 @@ fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
     // The albedo pass lays depth that later passes test equal against, from
     // other shaders' arithmetic: Direct3D's `precise` positions, in GLSL terms.
     let invariant = vertex.source.replacen('\n', "\ninvariant gl_Position;\n", 1);
-    let source = widen_varyings(&invariant, &pixel.source).replace("Nodes[210]", &format!("Nodes[{}]", H3_NODES * 3));
+    let source = widen_varyings(&invariant, &pixel.source)
+        .replace("Nodes[210]", &format!("Nodes[{}]", H3_NODES * 3))
+        .replace("vs_model_skinning_matrices[210]", &format!("vs_model_skinning_matrices[{}]", H3_NODES * 3));
     let source = source.replace(
         "hlsl_p0.node_weights = a_BLENDWEIGHT;",
         "hlsl_p0.node_weights = a_BLENDWEIGHT;
@@ -619,10 +630,35 @@ fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
     } else {
         source
     };
+    // Halo 4 keeps the binormal's handedness in the tangent's w
+    // (`generate_binormal(normal, tangent, vertex.tangent.w)`), which the
+    // preview's three-component tangents leave at 1. As for Reach, the
+    // authored binormal's side of the normal and tangent gives it.
+    const H4_TANGENT: &str = "hlsl_p0.tangent = a_TANGENT;";
+    let source = if source.contains(H4_TANGENT) && source.contains("in vec4 a_NORMAL;") {
+        let source = source.replace(
+            H4_TANGENT,
+            "hlsl_p0.tangent = vec4(a_TANGENT.xyz, (dot(cross(a_NORMAL.xyz, a_TANGENT.xyz), a_BINORMAL) < 0.0) ? -1.0 : 1.0);",
+        );
+        if source.contains("in vec3 a_BINORMAL;") {
+            source
+        } else {
+            source.replacen("in vec4 a_NORMAL;", "in vec4 a_NORMAL;\nin vec3 a_BINORMAL;", 1)
+        }
+    } else {
+        source
+    };
+    // Halo 4's lit passes `Load` the shadow mask at their pixel. With no level
+    // it is white everywhere, which a texel bound smaller than the picture
+    // stands for once the read stays inside it.
+    let pixel_source = pixel.source.replace(
+        "texelFetch(l_shadowMask, l_screen_texcoord.xy, l_screen_texcoord.z)",
+        "texelFetch(l_shadowMask, min(l_screen_texcoord.xy, textureSize(l_shadowMask, 0) - 1), 0)",
+    );
     // The game's camo reads the frame ahead of its tone curve; the preview's
     // copy of what lies behind has been through it. This is that curve undone,
     // the root of `1.5x - 0.5x^3`.
-    let pixel_source = pixel.source.replace(
+    let pixel_source = pixel_source.replace(
         "vec3 l_true_scene_color = l_ldr_color.xyz;",
         "vec3 l_true_scene_color = 2.0 * sin(asin(clamp(l_ldr_color.xyz, 0.0, 1.0)) / 3.0);",
     );
@@ -696,6 +732,8 @@ impl H3Blend {
 pub(crate) enum H3Value {
     Floats([f32; 4]),
     Integer(i32),
+    /// A `float4[n]` uniform, as Halo 4's `ps_material_shader_transforms`.
+    FloatArray(Vec<[f32; 4]>),
 }
 
 #[derive(Debug)]

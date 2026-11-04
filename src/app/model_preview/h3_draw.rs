@@ -626,6 +626,10 @@ pub(super) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
 fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
     let [width, height] = size.map(|side| side as f32);
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+    // Halo 4's engine constants have names of their own.
+    if dialect == H3Dialect::Halo4 {
+        return super::h4_lighting::h4_frame_value(name);
+    }
     if dialect == H3Dialect::Reach {
         if let Some(value) = reach_frame_value(frame, name, stops) {
             return Some(value);
@@ -721,6 +725,28 @@ pub(super) fn camera_to_world(frame: &ModelGpuFrame) -> [f32; 16] {
     matrix
 }
 
+/// The rotation Halo 4's albedo pass encodes normals in and its lit pass
+/// decodes them from (`EncodeWorldspaceNormal`, `DecodeWorldspaceNormal`).
+/// The two only need to agree, but the encoding fails for a normal at -z, so
+/// it is the camera's: whatever faces the camera has z toward it. Rowed for
+/// HLSL, whose `mul(normal, axis)` turns world into camera space.
+fn h4_normal_axis(frame: &ModelGpuFrame) -> [f32; 9] {
+    let camera = camera_to_world(frame);
+    [camera[0], camera[1], camera[2], camera[4], camera[5], camera[6], camera[8], camera[9], camera[10]]
+}
+
+/// The matrices Halo 4's passes read, by name: `mul(position, matrix)` as
+/// Halo 3's `View_Projection`, the camera's axes and eye in
+/// `camera_to_world`'s columns (`vs_view_camera_right` is `._m00_m10_m20`).
+fn h4_matrix(frame: &ModelGpuFrame, name: &str) -> Option<Vec<f32>> {
+    match name {
+        "vs_view_view_projection_matrix" => Some(view_projection(&frame.camera).to_vec()),
+        "vs_view_camera_to_world_matrix" | "ps_camera_to_world_matrix" => Some(camera_to_world(frame).to_vec()),
+        "ps_worldspace_normal_axis" => Some(h4_normal_axis(frame).to_vec()),
+        _ => None,
+    }
+}
+
 /// A translated uniform's value, by its type.
 pub(super) unsafe fn set_uniform_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
     unsafe { set_value(gl, location, ty, value) }
@@ -737,6 +763,13 @@ unsafe fn set_value(gl: &glow::Context, location: Option<&glow::NativeUniformLoc
             (Type::Scalar(Scalar::Uint), H3Value::Integer(v)) => gl.uniform_1_u32(location, *v as u32),
             (Type::Scalar(_), H3Value::Integer(v)) => gl.uniform_1_i32(location, *v),
             (Type::Scalar(_), H3Value::Floats(v)) => gl.uniform_1_i32(location, v[0] as i32),
+            (Type::Array(element, Some(length)), H3Value::FloatArray(rows))
+                if **element == Type::Vector(Scalar::Float, 4) =>
+            {
+                let mut data = rows.clone();
+                data.resize(*length, [0.0; 4]);
+                gl.uniform_4_f32_slice(location, data.as_flattened());
+            }
             _ => {}
         }
     }
@@ -930,7 +963,7 @@ impl ModelGlRenderer {
                         gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &camera_to_world(frame));
                         continue;
                     }
-                    "Nodes" => {
+                    "Nodes" | "vs_model_skinning_matrices" => {
                         self.h3_nodes(gl, frame, location.as_ref(), ty);
                         continue;
                     }
@@ -949,6 +982,15 @@ impl ModelGlRenderer {
                         continue;
                     }
                     _ => {}
+                }
+                if material.dialect == H3Dialect::Halo4
+                    && let Some(matrix) = h4_matrix(frame, name)
+                {
+                    match matrix.len() {
+                        9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
+                        _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
+                    }
+                    continue;
                 }
                 // The dynamic pass borrows this constant for its gel's xform.
                 if name == "p_lighting_constant_4" && self.h3_light.is_some() {
@@ -1012,8 +1054,10 @@ impl ModelGlRenderer {
             for (unit, (name, kind)) in pass.textures.iter().enumerate() {
                 gl.active_texture(glow::TEXTURE0 + unit as u32);
                 let texture = match name.as_str() {
-                    "albedo_texture" => targets.map(|targets| targets.albedo),
-                    "normal_texture" => targets.map(|targets| targets.normal),
+                    "albedo_texture" | "ps_view_albedo" => targets.map(|targets| targets.albedo),
+                    "normal_texture" | "ps_view_normal" => targets.map(|targets| targets.normal),
+                    // No level casts shadows into Halo 4's mask: white.
+                    "ps_view_shadow_mask" => self.placeholder,
                     "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
                     "depth_buffer" => self.h3_depth_copy,
                     "shadow_mask_texture" => self.reach_shadow_mask,
@@ -1160,9 +1204,11 @@ impl ModelGlRenderer {
                 .collect();
             // A model's materials are all of one game.
             let reach = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Reach);
+            let halo4 = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Halo4);
             // Reach shadows into a mask ahead of the lights, which is not
-            // built, so its self shadow does not run.
-            let (bloomed, self_shadow) = (frame.bloom, frame.self_shadow && !reach);
+            // built, so its self shadow does not run. Halo 4's bloom and
+            // shadow are not built yet.
+            let (bloomed, self_shadow) = (frame.bloom && !halo4, frame.self_shadow && !reach && !halo4);
             // `screen_effect_sample`, ahead of the scene: Reach's
             // `c_player_view::render` hands its exposure stops to
             // `setup_camera_fx_parameters` before anything draws.
@@ -1414,7 +1460,7 @@ impl ModelGlRenderer {
             if bloomed && bloom.is_none() {
                 bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size, reach);
             }
-            if reach {
+            if reach || halo4 {
                 // The object's depth, which tells the composite what it covers.
                 let depth = self.h3_targets.as_ref().map(|targets| {
                     let [width, height] = targets.size;
@@ -1425,8 +1471,12 @@ impl ModelGlRenderer {
                     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                     targets.depth_copy
                 });
-                let noise = frame.preview.reach_screen_noise.as_ref();
-                self.reach_composite(gl, accumulation, bloom, depth, screen, noise);
+                if halo4 {
+                    self.h4_composite(gl, frame, accumulation, bloom, depth, screen);
+                } else {
+                    let noise = frame.preview.reach_screen_noise.as_ref();
+                    self.reach_composite(gl, accumulation, bloom, depth, screen, noise);
+                }
             } else {
                 self.h3_composite(gl, accumulation, bloom, screen);
             }
@@ -1599,6 +1649,64 @@ impl ModelGlRenderer {
             gl.disable(glow::DEPTH_TEST);
             gl.enable(glow::BLEND);
             // The accumulation is premultiplied: what adds light covers nothing.
+            gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            gl.enable(glow::DEPTH_TEST);
+        }
+    }
+
+    /// Halo 4's `final_composite`: see `h4_lighting::H4_COMPOSITE_FRAGMENT`.
+    unsafe fn h4_composite(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        accumulation: glow::NativeTexture,
+        bloom: Option<glow::NativeTexture>,
+        depth: Option<glow::NativeTexture>,
+        screen: h3_screen_effects::H3ScreenSettings,
+    ) {
+        use super::super::h4_lighting::{H4_COMPOSITE_FRAGMENT, H4_DARK_MULTIPLIER, h4_grading_scale_offset};
+        unsafe {
+            let grading = frame.preview.h4_color_grading.as_ref();
+            let key = grading.map(|(image, ..)| Arc::as_ptr(image) as usize);
+            if self.h4_grading.map(|(known, _)| Some(known)) != Some(key) {
+                if let Some((_, texture)) = self.h4_grading.take() {
+                    gl.delete_texture(texture);
+                }
+                // Sampler 8: bilinear, clamped (`SetColorGradingParameters`).
+                let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
+                let uploaded = grading.and_then(|(image, _, _)| upload_h2_image_linear(gl, image, H3Texels::Linear, &[], Some(sampler)));
+                self.h4_grading = key.zip(uploaded);
+            }
+            let size = match grading.map(|(image, ..)| &**image) {
+                Some(H2Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
+                _ => [1, 1, 1],
+            };
+            if self.h4_composite_program.is_none() {
+                self.h4_composite_program = screen_program(gl, H4_COMPOSITE_FRAGMENT);
+            }
+            let Some(program) = self.h4_composite_program else {
+                return;
+            };
+            gl.use_program(Some(program));
+            let bind = |unit: u32, target: u32, texture: Option<glow::NativeTexture>, name: &str| {
+                gl.active_texture(glow::TEXTURE0 + unit);
+                gl.bind_texture(target, texture);
+                gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
+            };
+            bind(0, glow::TEXTURE_2D, Some(accumulation), "accumulation");
+            bind(1, glow::TEXTURE_2D, bloom.or(self.h3_no_bloom), "bloom");
+            bind(2, glow::TEXTURE_2D, depth, "scene_depth");
+            bind(3, glow::TEXTURE_3D, self.h4_grading.map(|(_, texture)| texture).or(self.h2_white_volume), "grading");
+            gl.active_texture(glow::TEXTURE0);
+            let (scale, offset) = h4_grading_scale_offset(size);
+            gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_scale").as_ref(), &scale);
+            gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_offset").as_ref(), &offset);
+            gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), H4_DARK_MULTIPLIER);
+            gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
+            gl.disable(glow::DEPTH_TEST);
+            gl.enable(glow::BLEND);
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
             gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);

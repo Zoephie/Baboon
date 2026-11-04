@@ -55,6 +55,7 @@ pub(crate) mod h3_lights;
 pub(in crate::app) mod h3_prt;
 pub(crate) mod h3_shaders;
 pub(crate) mod h4_shaders;
+mod h4_lighting;
 mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
@@ -98,7 +99,7 @@ use variants::*;
 fn model_preview_supports_textures(game: Option<GameId>) -> bool {
     matches!(
         game,
-        Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo2 | GameId::HaloCe)
+        Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4 | GameId::Halo2 | GameId::HaloCe)
     )
 }
 
@@ -178,6 +179,9 @@ pub(crate) struct RenderModelPreview {
     /// Reach's final composite noise map, for an object with an area screen
     /// effect that adds bright or dark noise.
     pub reach_screen_noise: Option<materials::H3Bitmap>,
+    /// Halo 4's final composite colour grading: the default camera fx
+    /// settings' 16-cube lookup.
+    pub h4_color_grading: Option<materials::H3Bitmap>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,

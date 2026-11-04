@@ -29,6 +29,8 @@ use crate::core::hlsl::parse::TextureKind;
 use std::sync::Arc;
 use std::collections::HashMap;
 
+mod h4;
+
 /// The texture roles the preview understands.
 ///
 /// Deliberately the maps that describe the *surface* — its colour and its shape
@@ -204,6 +206,10 @@ impl MaterialTextures {
 /// turns N of those reads into one.
 #[derive(Default)]
 struct ResolveCaches {
+    /// Halo 4's material shaders by path, read and parsed once.
+    h4_shaders: HashMap<String, Result<h4::H4Shader, Arc<str>>>,
+    /// Halo 4's bitmaps by path: whether each exists, and is a cube.
+    h4_bitmap_kinds: HashMap<String, Option<bool>>,
     h3_shield: Option<Option<Arc<H3Shield>>>,
     h3_sources: Option<H3Sources>,
     /// Images decoded for Halo 3 passes, with whether each is sRGB.
@@ -354,6 +360,9 @@ fn resolve_one_material(
             Ok(tag) => tag,
             Err(error) => return MaterialTextures::failed(error.to_string()),
         };
+    if group == *b"mat " {
+        return h4::resolve_h4_material(source, &shader, caches);
+    }
     match blam_tags::game::Game::of(&shader) {
         blam_tags::game::Game::Halo1 => {
             return resolve_ce_shader(source, &shader, group, material.permutation, caches);
@@ -757,6 +766,7 @@ fn prepare_h3_material(
     let camo = match dialect {
         H3Dialect::Reach => camo.and_then(|pass| super::reach_camo::camo_pass(&pass)).map(Arc::new),
         H3Dialect::Halo3 => camo,
+        H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
     };
     let shadow_generate = (dialect == H3Dialect::Reach && opaque && has("shadow_generate"))
         .then(|| sources.pass(&definition, &options, "shadow_generate", false))

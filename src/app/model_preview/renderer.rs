@@ -4065,6 +4065,10 @@ struct ModelGlRenderer {
     h3_programs: HashMap<usize, Result<h3_draw::H3Program, Arc<h3_shaders::H3Pass>>>,
     h3_composite_program: Option<glow::NativeProgram>,
     reach_composite_program: Option<glow::NativeProgram>,
+    h4_composite_program: Option<glow::NativeProgram>,
+    /// Halo 4's colour grading lookup, uploaded for the preview whose image
+    /// it is (by that image's address).
+    h4_grading: Option<(usize, glow::NativeTexture)>,
     h3_blur_program: Option<glow::NativeProgram>,
     h3_vision_program: Option<glow::NativeProgram>,
     h3_suck_program: Option<glow::NativeProgram>,
@@ -4223,6 +4227,8 @@ impl ModelGlRenderer {
                 h3_programs: HashMap::new(),
                 h3_composite_program: None,
                 reach_composite_program: None,
+                h4_composite_program: None,
+                h4_grading: None,
                 h3_blur_program: None,
                 h3_vision_program: None,
                 h3_suck_program: None,

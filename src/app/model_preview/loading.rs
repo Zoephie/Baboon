@@ -296,6 +296,10 @@ pub(super) fn load_model_preview(
 ) -> Result<ModelPreviewData, String> {
     let mut data = load_tag_preview(model_tag, entry, names, source, settings)?;
     data.halo_ce = blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1;
+    if let Some(source) = source.filter(|source| source.game() == Some(GameId::Halo4)) {
+        // Just built: no other handle shares it, so this does not copy.
+        Arc::make_mut(&mut data.preview).h4_color_grading = super::h4_lighting::read_h4_color_grading(source);
+    }
     Ok(data)
 }
 
