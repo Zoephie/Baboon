@@ -212,14 +212,17 @@ pub(in crate::app) fn draw_fields_with_docs(
         }
         let field_path = append_field_path_for(path_prefix, &field);
         // A row wholly out of view stands in as the space it took last time.
-        if let Some(height) = edit
+        if let Some((height, trailing_gap)) = edit
             .row_heights
             .as_deref()
             .and_then(|heights| heights.skip(ui, &field_path))
         {
             // Allocated like a row, so the spacing after it lies outside what
             // the enclosing section measures, just as after a drawn row.
-            ui.allocate_space(egui::vec2(0.0, height - ui.spacing().item_spacing.y));
+            let previous_gap = ui.spacing().item_spacing.y;
+            ui.spacing_mut().item_spacing.y = trailing_gap;
+            ui.allocate_space(egui::vec2(0.0, height - trailing_gap));
+            ui.spacing_mut().item_spacing.y = previous_gap;
             continue;
         }
         let top = ui.cursor().min.y;
@@ -250,8 +253,9 @@ pub(in crate::app) fn draw_fields_with_docs(
             reference_value_width,
         );
         let height = ui.cursor().min.y - top;
+        let trailing_gap = (ui.cursor().top() - ui.min_rect().bottom()).max(0.0);
         if let Some(heights) = edit.row_heights.as_deref_mut() {
-            heights.record(&field_path, height);
+            heights.record(&field_path, height, trailing_gap);
         }
     }
     // Any explanations after the last matched field.
@@ -569,8 +573,7 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     } else {
         title
     };
-    ui.scope(|ui| {
-        draw_foundation_collapsing_header(
+    draw_foundation_collapsing_header(
             ui,
             header,
             ("foundation_explanation", id_salt),
@@ -605,7 +608,6 @@ pub(in crate::app) fn draw_foundation_explanation_row(
                 }
             },
         );
-    });
 }
 
 fn draw_injected_explanation_row(
@@ -800,8 +802,7 @@ pub(in crate::app) fn draw_foundation_group(
     open_override: Option<bool>,
     add_contents: impl FnOnce(&mut Ui),
 ) {
-    ui.scope(|ui| {
-        draw_foundation_collapsing_header(
+    draw_foundation_collapsing_header(
             ui,
             title,
             id_salt,
@@ -820,16 +821,26 @@ pub(in crate::app) fn draw_foundation_group(
                     .show(ui, add_contents);
             },
         );
-    });
 }
 
 /// Draw a full-width modern collapsing header with the same rounded chevron
 /// control used by block headers. Keeping this in one helper ensures groups,
 /// explanations, and section bars share the same affordance.
 fn add_foundation_header_spacing(ui: &mut Ui) {
-    // egui has already advanced by `item_spacing.y` after the previous item.
-    // Add only the remainder so headings and blocks have an 8pt gap before them.
-    ui.add_space((8.0 - ui.spacing().item_spacing.y).max(0.0));
+    // A preceding container may already have left an 8pt gap. Count that
+    // space as well as the normal row gap rather than adding them together.
+    let existing_gap = (ui.cursor().top() - ui.min_rect().bottom())
+        .max(ui.spacing().item_spacing.y);
+    ui.add_space((8.0 - existing_gap).max(0.0));
+}
+
+fn finish_foundation_container_spacing(ui: &mut Ui, rect: egui::Rect) {
+    // Advance with an 8pt trailing gap without including it in the container's
+    // measured bounds, so the next heading can reuse the same gap.
+    let previous_gap = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 8.0;
+    ui.advance_cursor_after_rect(rect);
+    ui.spacing_mut().item_spacing.y = previous_gap;
 }
 
 pub(in crate::app) const FOUNDATION_CONTAINER_RADIUS: f32 = 5.0;
@@ -874,14 +885,22 @@ pub(in crate::app) fn draw_foundation_collapsing_header(
     leading_icon: Option<ButtonIcon>,
     add_contents: impl FnOnce(&mut Ui),
 ) -> bool {
-    draw_foundation_collapsing_header_inner(ui, title, id_salt, depth, default_open, open_override,
-        bar_fill, find_kind, collapsible, leading_icon, false, add_contents)
+    add_foundation_header_spacing(ui);
+    let header = ui.scope(|ui| {
+        draw_foundation_collapsing_header_inner(ui, title, id_salt, depth, default_open, open_override,
+            bar_fill, find_kind, collapsible, leading_icon, false, add_contents)
+    });
+    if find_kind != FindTargetKind::Documentation {
+        finish_foundation_container_spacing(ui, header.response.rect);
+    }
+    header.inner
 }
 
 pub(in crate::app) fn draw_foundation_clipped_shader_header(
     ui: &mut Ui, title: String, id_salt: impl std::hash::Hash + std::fmt::Debug,
     contents: impl FnOnce(&mut Ui),
 ) -> bool {
+    add_foundation_header_spacing(ui);
     draw_foundation_collapsing_header_inner(ui, title, id_salt, 0, true, None,
         foundation_block_bar(), FindTargetKind::Block, true, None, true, contents)
 }
@@ -912,7 +931,6 @@ fn draw_foundation_collapsing_header_inner(
         state.set_open(open);
     }
 
-    add_foundation_header_spacing(ui);
     let row_width = ui.available_width();
     let header_height = if documentation { 32.0 } else { 40.0 };
     let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, header_height), Sense::hover());
@@ -2292,6 +2310,7 @@ pub(in crate::app) fn draw_foundation_block_control(
         egui::StrokeKind::Middle,
     );
 
+    finish_foundation_container_spacing(ui, container_rect);
     actions
 }
 
@@ -3022,8 +3041,7 @@ pub(in crate::app) fn draw_foundation_bar(
     default_open: bool,
     add_contents: impl FnOnce(&mut Ui),
 ) {
-    ui.scope(|ui| {
-        draw_foundation_collapsing_header(
+    draw_foundation_collapsing_header(
             ui,
             title.clone(),
             ("foundation_bar", title, depth),
@@ -3042,7 +3060,6 @@ pub(in crate::app) fn draw_foundation_bar(
                     .show(ui, add_contents);
             },
         );
-    });
 }
 
 /// The dropdown label of every element of `target`: what the block-index
@@ -3207,6 +3224,46 @@ pub(in crate::app) fn draw_foundation_block_index_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn containers_leave_eight_points_before_fields_and_adjacent_containers() {
+        for blocks in [false, true] {
+            for open in [false, true] {
+                let ctx = egui::Context::default();
+                Baboon::configure_context(&ctx);
+                let mut following_top = 0.0;
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    for index in 0..2 {
+                        if blocks {
+                            draw_foundation_block_control(ui, "Block", "0. entry", 0, 1,
+                                None, true, true, "spacing", "test", &format!("block_{index}"), 0,
+                                true, Some(open), false, PasteGate::Empty, None, |_| "0. entry".to_owned(), |ui| {
+                                    ui.label("Field");
+                                });
+                        } else {
+                            draw_foundation_group(ui, "Group".to_owned(), index, 0, open, Some(open), |ui| {
+                                ui.label("Field");
+                            });
+                        }
+                    }
+                    following_top = ui.allocate_exact_size(Vec2::new(100.0, 24.0), Sense::hover()).0.top();
+                });
+                let outlines: Vec<_> = output.shapes.iter().filter_map(|paint| match &paint.shape {
+                    egui::Shape::Rect(rect) if rect.stroke.width == 1.0
+                        && rect.stroke.color == foundation_block_edge()
+                        && rect.corner_radius.nw == FOUNDATION_CONTAINER_RADIUS as u8
+                        && rect.rect.width() > 300.0 => Some(rect.rect),
+                    _ => None,
+                }).collect();
+                assert_eq!(outlines.len(), 2);
+                assert!((outlines[1].top() - outlines[0].bottom() - 8.0).abs() < 0.1,
+                    "adjacent containers share one 8pt gap: blocks={blocks}, open={open}, {outlines:?}");
+                assert!((following_top - outlines[1].bottom() - 8.0).abs() < 0.1,
+                    "the following field gets an 8pt gap: blocks={blocks}, open={open}");
+            }
+        }
+    }
 
     #[test]
     fn nested_blocks_and_fields_use_fixed_local_padding() {
