@@ -166,6 +166,11 @@ impl H3Definition {
         Some(self.categories[at].options.get(option)?.name.as_str())
     }
 
+    /// A decal's `specular` option is `modulate`, rather than `leave`.
+    pub(crate) fn decal_modulates_specular(&self, options: &[usize]) -> bool {
+        self.chosen("specular", options) == Some("modulate")
+    }
+
     /// A decal's `render_pass`: it goes on before the lights or after them.
     pub(crate) fn after_lighting(&self, options: &[usize]) -> bool {
         self.chosen("render_pass", options) == Some("post_lighting")
@@ -769,6 +774,9 @@ pub(crate) struct H3Material {
     /// A decal family: `lit` is its `default`, drawn into the albedo target
     /// unless its `render_pass` puts it after the lights.
     pub(crate) decal: bool,
+    /// A Reach decal whose `specular` is `modulate`: only those write the
+    /// albedo target's alpha, which holds the specular mask.
+    pub(crate) decal_modulates_specular: bool,
     pub(crate) after_lighting: bool,
     /// `sort layer`, for what blends.
     pub(crate) sort_layer: i32,
@@ -1057,6 +1065,17 @@ mod stage_option_tests {
             shared: shared.iter().map(|(entry, rules)| ((*entry).to_owned(), *rules)).collect(),
             pixel_vertex_type: 0,
         }
+    }
+
+    /// A decal leaves the albedo's specular mask unless its `specular` is
+    /// `modulate`; a definition without the category leaves it too.
+    #[test]
+    fn only_a_decal_set_to_modulate_writes_the_specular_mask() {
+        let mut decal = definition(false, &[]);
+        decal.categories.push(category("specular", &["leave", "modulate"]));
+        assert!(!decal.decal_modulates_specular(&[0, 3, 0]));
+        assert!(decal.decal_modulates_specular(&[0, 3, 1]));
+        assert!(!definition(false, &[]).decal_modulates_specular(&[0, 3]));
     }
 
     #[test]

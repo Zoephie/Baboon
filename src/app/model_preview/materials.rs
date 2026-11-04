@@ -745,6 +745,7 @@ fn prepare_h3_material(
         lit,
         screen_maps,
         decal,
+        decal_modulates_specular: decal && definition.decal_modulates_specular(&options),
         after_lighting: definition.after_lighting(&options),
         sort_layer: values.sort_layer,
         prt,

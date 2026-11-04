@@ -1195,6 +1195,13 @@ impl ModelGlRenderer {
                 batches.iter().filter(|(_, material)| material.decal && !material.after_lighting)
             {
                 h3_set_blend(gl, material.blend);
+                // `render_mesh_part_default` (Reach X360 0x826754D8): a
+                // decal that leaves the specular mask writes the albedo's RGB
+                // alone. One that modulates writes alpha too, under a separate
+                // alpha blend this preview does not set [inferred: it keeps
+                // the colour blend's].
+                let keeps_mask = material.dialect == H3Dialect::Reach && !material.decal_modulates_specular;
+                gl.color_mask_draw_buffer(0, true, true, true, !keeps_mask);
                 self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
             gl.blend_equation(glow::FUNC_ADD);
@@ -2198,6 +2205,7 @@ mod tests {
             lit: pass(),
             screen_maps: Vec::new(),
             decal: false,
+            decal_modulates_specular: false,
             after_lighting: false,
             sort_layer: 0,
             prt: [None, None, Some(pass())],
