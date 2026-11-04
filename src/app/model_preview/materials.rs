@@ -501,13 +501,26 @@ fn h3_stored_mips(tag: &TagFile, index: usize, image: &H2Image) -> Option<Vec<H2
     }
 }
 
+/// What an `a8` texel samples as: MCC's Halo 3 (`halo3.dll` 0x180801D30) and
+/// Reach (`haloreach.dll` 0x180A32D70) upload it as `DXGI_FORMAT_A8_UNORM`,
+/// which reads black with its alpha. Reach's `color_black` change-color map is
+/// one, and two_change_color reads its red and green.
+fn alpha_only(image: &mut H2Image) {
+    let blacken = |rgba: &mut Vec<u8>| rgba.chunks_exact_mut(4).for_each(|texel| texel[..3].fill(0));
+    match image {
+        H2Image::Flat(flat) => blacken(&mut flat.rgba),
+        H2Image::Cube { faces, .. } => faces.iter_mut().for_each(blacken),
+        H2Image::Volume { rgba, .. } => blacken(rgba),
+    }
+}
+
 pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: SamplerKind) -> Option<H3Bitmap> {
     let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok();
     // `render_method_submit`: an index past the last image takes the last.
     let images = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len());
     let index = (index.max(0) as usize).min(images.saturating_sub(1)) as i16;
     let image = decode_h2_image(source, path, kind, index as usize);
-    image.map(|image| {
+    image.map(|mut image| {
         // `c_rasterizer_texture_ref::allocate`: xRGB and sRGB curves.
         let curve = tag.as_ref().and_then(|tag| {
             elements(tag.root(), "bitmaps*").get(index.max(0) as usize)?.read_int_any("curve")
@@ -523,8 +536,11 @@ pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: S
             };
             H3Texels::of(format, srgb)
         });
-        let mips = tag.as_ref().and_then(|tag| h3_stored_mips(tag, index.max(0) as usize, &image));
-        (Arc::new(image), texels, Arc::new(mips.unwrap_or_default()))
+        let mut mips = tag.as_ref().and_then(|tag| h3_stored_mips(tag, index.max(0) as usize, &image)).unwrap_or_default();
+        if format == Some(blam_tags::bitmap::BitmapFormat::A8) {
+            std::iter::once(&mut image).chain(&mut mips).for_each(alpha_only);
+        }
+        (Arc::new(image), texels, Arc::new(mips))
     })
 }
 
@@ -2389,6 +2405,31 @@ mod tests {
         assert_eq!(rgba.len(), width * height * depth * 4);
         let slice = width * height * 4;
         assert_ne!(rgba[..slice], rgba[slice * (depth - 1)..], "slices differ");
+    }
+
+    /// With `BLAM_TEST_HREK`: `color_black`, the change-color map Emile's flair
+    /// names, is `a8` and samples black, so `two_change_color` leaves it
+    /// untinted; `gray_50_percent`, an `a8r8g8b8`, keeps its gray.
+    #[test]
+    fn kit_an_a8_bitmap_samples_black_with_its_alpha() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::HaloReach),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let first_texel = |path: &str| {
+            let (image, _, _) = read_h3_bitmap(&source, path, 0, SamplerKind::Texture2D).expect(path);
+            let H2Image::Flat(flat) = &*image else {
+                panic!("{path} should be flat");
+            };
+            [flat.rgba[0], flat.rgba[1], flat.rgba[2], flat.rgba[3]]
+        };
+        assert_eq!(first_texel("shaders\\default_bitmaps\\bitmaps\\color_black"), [0, 0, 0, 255]);
+        assert_eq!(first_texel("shaders\\default_bitmaps\\bitmaps\\gray_50_percent")[..3], [128, 128, 128]);
     }
 
     /// With `BLAM_TEST_HREK`: an array's layers each keep their whole chain,
