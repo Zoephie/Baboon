@@ -945,12 +945,14 @@ mod tests {
             frame(&mut app, vec![egui::Event::Key {
                 key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE,
             }]);
+            // Browser folders use host filesystem paths; copied tag paths keep backslashes.
+            let expected_folder = tag_path::to_relative(FOLDER);
             if let Some(key) = pane_key {
                 assert_eq!(app.model.kits[0].open_tabs.len(), tabs_before, "Enter must reuse this page");
-                assert_eq!(app.views[id].browser.folder_browsers[&key].rel_path, PathBuf::from(FOLDER));
+                assert_eq!(app.views[id].browser.folder_browsers[&key].rel_path, expected_folder);
             } else {
                 assert_eq!(app.model.kits[0].open_tabs.len(), tabs_before + 1);
-                assert!(app.views[id].browser.folder_browsers.values().any(|pane| pane.rel_path == Path::new(FOLDER)));
+                assert!(app.views[id].browser.folder_browsers.values().any(|pane| pane.rel_path == expected_folder));
             }
         }
     }
