@@ -113,6 +113,17 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     eprintln!("{}: {} materials, {with_passes} with passes", shot.model, textures.len());
     for (material, texture) in data.preview.materials.iter().zip(textures.iter()) {
         eprintln!("NOTE MAT {} h3 {} {:?}", material.shader_path, texture.h3.is_some(), texture.error);
+        // `H4_TEXTURES=1`: each pass's samplers, and whether one is bound.
+        if std::env::var_os("H4_TEXTURES").is_some()
+            && let Some(h3) = &texture.h3
+        {
+            let passes = h3.albedo.iter().chain(std::iter::once(&h3.lit));
+            for (name, kind) in passes.flat_map(|pass| pass.textures.iter()) {
+                let bound = h3.textures.iter().find(|known| &known.uniform == name);
+                let detail = bound.map(|known| format!("{:?} {:?}", known.texels, known.sampler)).unwrap_or_else(|| "UNBOUND".to_owned());
+                eprintln!("NOTE   TEX {name} {kind:?} {detail}");
+            }
+        }
     }
     data.textures = Some(Arc::new(textures));
     eprintln!("NOTE {} cheap particle emitters", data.preview.reach_cheap_emitters.len());
