@@ -1449,9 +1449,31 @@ pub(super) fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind,
     let depth = image.depth() as usize;
     let mut rgba = Vec::new();
     for index in 0..depth {
-        rgba.extend(decode(image.volume_slice_bytes(index as u32).ok()?)?);
+        let slice = if image.is_array() {
+            array_layer_bytes(&image, index as u32, 0)?
+        } else {
+            image.volume_slice_bytes(index as u32).ok()?
+        };
+        rgba.extend(decode(slice)?);
     }
     Some(H2Image::Volume { width: width as usize, height: height as usize, depth, rgba })
+}
+
+/// One layer of a texture array at mip `level`. Each layer keeps its whole
+/// chain, one after another (`globals\global_render_texture` is 14 chains
+/// of 21844 bytes), where a volume's slices lie together a level at a time.
+pub(super) fn array_layer_bytes<'a>(
+    image: &blam_tags::bitmap::BitmapImage<'a>,
+    layer: u32,
+    level: u32,
+) -> Option<&'a [u8]> {
+    let format = image.format().ok()?;
+    let (width, height) = (image.width(), image.height());
+    let chain = format.surface_bytes(width, height, image.mipmap_levels());
+    let before = format.surface_bytes(width, height, level);
+    let size = format.level_bytes((width >> level).max(1), (height >> level).max(1));
+    let start = usize::try_from(layer as u64 * chain + before).ok()?;
+    image.pixel_bytes().ok()?.get(start..start.checked_add(size as usize)?)
 }
 
 /// A shader's transparent passes, ready to draw. A pass that cannot be
@@ -2366,5 +2388,41 @@ mod tests {
         assert_eq!(rgba.len(), width * height * depth * 4);
         let slice = width * height * 4;
         assert_ne!(rgba[..slice], rgba[slice * (depth - 1)..], "slices differ");
+    }
+
+    /// With `BLAM_TEST_HREK`: an array's layers each keep their whole chain,
+    /// so `globals\global_render_texture`'s second layer starts 21844 bytes
+    /// in, not a level's 16384 in as a volume's would.
+    #[test]
+    fn kit_an_arrays_layers_are_whole_chains_apart() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::HaloReach),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let path = "globals\\global_render_texture";
+        let Some(H2Image::Volume { width, height, depth, rgba }) = decode_h2_image(&source, path, SamplerKind::Volume, 0)
+        else {
+            panic!("the render texture should decode as layers");
+        };
+        assert_eq!((width, height, depth), (64, 64, 14));
+        let tag = load_referenced_tag_from_source(&source, path, "bitmap", b"bitm").unwrap();
+        let bitmap = blam_tags::bitmap::Bitmap::new(&tag).unwrap();
+        let image = bitmap.image(0).unwrap();
+        let pixels = image.pixel_bytes().unwrap();
+        assert_eq!(pixels.len(), 14 * 21844);
+        let decode = |bytes: &[u8]| {
+            let format = image.format().unwrap();
+            blam_tags::bitmap::decode::decode_to_rgba8(format, 64, 64, bytes, bitmap.p8_palette()).unwrap()
+        };
+        let second = &rgba[64 * 64 * 4..2 * 64 * 64 * 4];
+        assert_eq!(second, decode(&pixels[21844..21844 + 16384]).as_slice());
+        assert_ne!(second, decode(&pixels[16384..2 * 16384]).as_slice(), "a volume's layout reads the first layer's mips");
+        assert_eq!(array_layer_bytes(&image, 1, 1).map(<[u8]>::len), Some(32 * 32 * 4));
+        assert_eq!(array_layer_bytes(&image, 1, 1).map(<[u8]>::as_ptr), Some(pixels[21844 + 16384..].as_ptr()));
     }
 }
