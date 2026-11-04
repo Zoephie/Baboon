@@ -758,3 +758,87 @@ fn h4_sweep() {
     }
     eprintln!("NOTE SWEEP {} tags: good {good} parse {parse_failed} translation {translation} driver {driver}", tags.len().min(limit));
 }
+
+/// What one Halo 4 pass reads: `H4_PASS=<material_shader>|<technique>|<vertex pass>`
+/// and `BLAM_TEST_H4EK`. `H4_PASS_SOURCE` prints the GLSL too.
+#[test]
+fn h4_pass_inputs() {
+    use super::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+    use crate::core::hlsl::emit::Stage;
+    let Ok(spec) = std::env::var("H4_PASS") else {
+        return;
+    };
+    let root = std::env::var("BLAM_TEST_H4EK").unwrap();
+    let source = TagSource::LooseFolder {
+        root: root.into(),
+        game: Some(GameId::Halo4),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let [shader, technique, pass]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
+    let program = H4ShaderSource::read(&source, shader).unwrap().program(&H4_DEFINES).unwrap();
+    for (stage, pass) in [(Stage::Vertex, pass), (Stage::Pixel, "_default")] {
+        let translated = translate_pass(&program, technique, pass, stage).unwrap();
+        for (name, ty) in &translated.uniforms {
+            eprintln!("NOTE {stage:?} UNIFORM {name} {ty:?}");
+        }
+        for (name, kind) in &translated.textures {
+            eprintln!("NOTE {stage:?} TEXTURE {name} {kind:?}");
+        }
+        for attribute in &translated.attributes {
+            eprintln!("NOTE {stage:?} IO {} {} {:?}", attribute.semantic, attribute.glsl, attribute.ty);
+        }
+        if std::env::var_os("H4_PASS_SOURCE").is_some() {
+            eprintln!("{}", translated.source);
+        }
+    }
+}
+
+/// Every Halo 4 `.model` through the shot harness, each caught on its own.
+/// Set `H4_KIT=<limit>`, `H2_SHOT_H4=1` and `BLAM_TEST_H2EK` to the tags
+/// folder; translation and link failures print as `h3 program failed`.
+#[test]
+fn h4_kit_sweep() {
+    let (Ok(limit), Ok(root)) = (std::env::var("H4_KIT"), std::env::var("BLAM_TEST_H2EK")) else {
+        return;
+    };
+    let limit: usize = limit.parse().unwrap();
+    let source = TagSource::LooseFolder {
+        root: root.clone().into(),
+        game: Some(GameId::Halo4),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let mut models = Vec::new();
+    let mut stack = vec![std::path::PathBuf::from(&root)];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "model") {
+                let relative = path.strip_prefix(&root).unwrap().with_extension("");
+                models.push(relative.to_string_lossy().replace('/', "\\"));
+            }
+        }
+    }
+    models.sort();
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    let out = std::env::temp_dir().join("baboon_h4_kit_sweep.raw");
+    let (mut good, mut failed) = (0, Vec::new());
+    for model in models.iter().take(limit) {
+        let shot = Shot { model: model.clone(), out: out.to_string_lossy().into_owned(), shaders: true, lights: true, yaw: -1.57, pitch: 0.3 };
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(&gl, &mut renderer, &source, &shot)));
+        match caught {
+            Ok(()) => good += 1,
+            Err(panic) => {
+                let detail = crate::app::shell::worker::panic_detail(&*panic);
+                eprintln!("NOTE FAIL {model}: {}", detail.chars().take(200).collect::<String>());
+                failed.push(model.clone());
+                // A panic mid-frame can leave state bound; start clean.
+                renderer = ModelGlRenderer::new(&gl).unwrap();
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&out);
+    eprintln!("NOTE KIT {} models: good {good}, failed {}", models.len().min(limit), failed.len());
+}
