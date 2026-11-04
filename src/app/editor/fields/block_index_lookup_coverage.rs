@@ -77,7 +77,8 @@ fn seed(
             .unwrap()
             .len();
         op(tag, path, BlockOpKind::Add, &targets);
-        apply_field_edit(tag, &format!("{path}[{index}]/name"), name).unwrap();
+        let label = if path.ends_with("Actors") { "Actor name" } else { "name" };
+        apply_field_edit(tag, &format!("{path}[{index}]/{label}"), name).unwrap();
     }
 }
 
@@ -354,5 +355,109 @@ fn installed_h3_custom_indices_resolve_named_entries() {
             );
         }
         eprintln!("{relative}: named custom index references {counts:?}");
+    }
+}
+
+const THESPIAN_GAMES: [&str; 4] = ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc", "haloce_evolved"];
+
+#[test]
+fn thespian_points_follow_the_performance_point_set() {
+    for game in THESPIAN_GAMES {
+        for (holder, field) in [
+            ("thespian[0]/Actors[0]", "debug spawn point"),
+            ("thespian[0]/Lines[0]/Point interaction[0]", "point"),
+            ("thespian[0]/Lines[0]/Sync Actions[0]", "attach to point"),
+            ("thespian[0]/Lines[0]/Sounds[0]", "attach to point"),
+        ] {
+            verify(
+                game,
+                "scenario",
+                holder,
+                field,
+                Some("thespian[0]/Point set"),
+                "scripting data[0]/point sets[1]/points",
+                Some("scripting data[0]/point sets[0]/points"),
+            );
+        }
+    }
+}
+
+#[test]
+fn thespian_actors_stay_within_their_performance() {
+    for game in THESPIAN_GAMES {
+        for (holder, field) in [
+            ("thespian[0]/Lines[0]", "Actor"),
+            ("thespian[0]/Lines[0]/Point interaction[0]", "actor"),
+        ] {
+            verify(
+                game,
+                "scenario",
+                holder,
+                field,
+                None,
+                "thespian[0]/Actors",
+                Some("thespian[1]/Actors"),
+            );
+        }
+    }
+}
+
+#[test]
+fn thespian_point_sets_use_the_script_data() {
+    for game in THESPIAN_GAMES {
+        verify(
+            game,
+            "scenario",
+            "thespian[0]",
+            "Point set",
+            None,
+            "scripting data[0]/point sets",
+            None,
+        );
+    }
+}
+
+#[test]
+fn thespian_and_cue_tasks_follow_their_objective() {
+    for game in THESPIAN_GAMES {
+        for (holder, selector) in [
+            ("thespian[0]/tasks[0]", "thespian[0]/tasks[0]/objective"),
+            (
+                "actual cues[0]/distribution/tasks[0]",
+                "actual cues[0]/distribution/tasks[0]/objective",
+            ),
+        ] {
+            verify(
+                game,
+                "scenario",
+                holder,
+                "task",
+                Some(selector),
+                "ai objectives[1]/tasks",
+                Some("ai objectives[0]/tasks"),
+            );
+        }
+    }
+}
+
+#[test]
+fn sync_action_actor_types_use_the_character_palette() {
+    let path = "thespian[0]/Lines[0]/Sync Actions[0]/Actors[0]/Actor type";
+    for game in THESPIAN_GAMES {
+        let targets = blam_tags::index_targets::IndexTargets::load(
+            crate::core::bundled::locate_definitions_root().join(game),
+        )
+        .unwrap();
+        let mut tag = TagFile::new(crate::app::test_definition_path(&format!(
+            "{game}/scenario.json"
+        )))
+        .unwrap();
+        ensure_holder(&mut tag, path.rsplit_once('/').unwrap().0, &targets);
+        for _ in 0..2 {
+            op(&mut tag, "character palette", BlockOpKind::Add, &targets);
+        }
+        apply_field_edit(&mut tag, path, "1").unwrap();
+        op(&mut tag, "character palette", BlockOpKind::Insert(0), &targets);
+        assert_eq!(value(&tag, path), 2, "{game}");
     }
 }

@@ -2525,13 +2525,11 @@ mod tests {
         None
     }
 
-    /// The root element of a freshly created tag gets every block index at 0,
-    /// while an element added to a block gets NONE (-1). The engine's
-    /// invariant is NONE everywhere; the root is a known gap in
-    /// `TagBlockData::new_root_default`. This pins today's behaviour so that
-    /// closing the gap is a deliberate change, and shows the contrast.
+    /// A freshly created tag's root element starts its block indices at NONE
+    /// (-1), as an element added to a block does — the engine's invariant, and
+    /// what Guerilla writes. The root used to be left at the zero-fill.
     #[test]
-    fn a_fresh_root_has_block_indices_at_zero_unlike_a_new_element() {
+    fn a_fresh_root_has_block_indices_at_none_like_a_new_element() {
         let block_index = |tag: &TagFile, path: &str| match tag.root().field_path(path)?.value()? {
             TagFieldData::CharBlockIndex(v) | TagFieldData::CustomCharBlockIndex(v) => {
                 Some(v as i64)
@@ -2545,8 +2543,7 @@ mod tests {
             _ => None,
         };
         let effect = TagFile::new(test_definition_path("haloreach_mcc/effect.json")).unwrap();
-        // Known gap: the engine invariant says this should be NONE (-1).
-        assert_eq!(block_index(&effect, "loop start event"), Some(0));
+        assert_eq!(block_index(&effect, "loop start event"), Some(-1));
 
         let mut physics =
             TagFile::new(test_definition_path("haloreach_mcc/physics_model.json")).unwrap();
