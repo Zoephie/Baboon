@@ -370,10 +370,13 @@ impl H3VolumeDefinition {
         stops: f32,
     ) -> [f32; 4] {
         if !self.reach {
+            // `light_volume_fx.hlsl`'s `STATE.m_color * STATE.m_intensity` is a
+            // float4, so intensity scales alpha too (Halo 3 and ODST alike).
             let color = self.color.color(state).map(|channel| channel.clamp(0.0, 1.0));
             let intensity = self.intensity.scalar(state);
             let [red, green, blue] = color.map(|channel| channel * intensity * H3_EXPOSURE);
-            return [red, green, blue, self.alpha.scalar(state).clamp(0.0, 1.0) * ratio / overdraw];
+            let alpha = self.alpha.scalar(state).clamp(0.0, 1.0) * intensity;
+            return [red, green, blue, alpha * ratio / overdraw];
         }
         let exposure = if self.blend == H3Blend::Multiply { 1.0 } else { reach_alt_exposure(stops)[1] };
         // TODO(reach-effects spec §3.4): Reach premultiplies and writes an
@@ -943,7 +946,7 @@ mod tests {
     /// colour at `V_ILLUM_EXPOSURE` and the stops; a baked row's carries its
     /// own. Halo 3's is as it was.
     #[test]
-    fn reachs_profile_colour_takes_intensity_on_alpha_and_illum_exposure() {
+    fn a_profile_colour_takes_intensity_on_alpha_and_each_games_exposure() {
         let state = H3VolumeState::default();
         let reach = definition(true, fixed(0.5));
         let halo3 = definition(false, fixed(0.5));
@@ -957,7 +960,7 @@ mod tests {
         assert_ne!(brighter, red, "the stops reach it");
         let [red, _, _, alpha] = halo3.profile_color(&state, None, [1.0, 2.0], 1.0);
         assert_eq!(red, lit * H3_EXPOSURE);
-        assert_eq!(alpha, 0.5 / 2.0, "Halo 3's alpha is not by intensity");
+        assert_eq!(alpha, 0.5 * 2.0 / 2.0, "Halo 3's float4 colour scales alpha by intensity too");
         let [red, _, _, alpha] = reach.profile_color(&state, Some([3.0, 0.0, 0.0]), [1.0, 2.0], 0.0);
         assert_eq!(red, 3.0 * reach_alt_exposure(0.0)[1], "unclamped");
         assert_eq!(alpha, 0.5, "a baked row's alpha is the ratio over the overdraw");
