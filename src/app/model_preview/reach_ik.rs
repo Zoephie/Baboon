@@ -133,7 +133,10 @@ pub(crate) fn read_reach_ik_tracks(graphs: &[&TagFile], group: &AnimationGroup<'
     let transforms = channels(group, "ik_chain_event_data");
     let weights = channels(group, "ik_chain_control_data");
     let poles = channels(group, "ik_chain_pole_vector_data");
-    let entry = |index: i128| usize::try_from(index).ok();
+    // Reach's indices are signed, −1 for none; Halo 4's are unsigned bytes,
+    // and its sampler takes 0xFF as none (`sample_extended_block_data`,
+    // X360 0x83464668).
+    let entry = |index: i128| usize::try_from(index).ok().filter(|at| *at != 0xFF);
     let mut tracks = Vec::new();
     for event in events {
         if event.read_int_any("proxy id").is_some_and(|id| id != -1) {

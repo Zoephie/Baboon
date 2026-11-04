@@ -941,3 +941,18 @@ fn h4_chief_left_hand_holds_the_assault_rifle() {
     eprintln!("NOTE IK off: apart {apart}");
     assert!(apart > 1.0 / 3048.0, "the clip alone already reaches the grip ({apart}), so this proves nothing");
 }
+
+/// With `BLAM_TEST_H4EK`: the AR reload's chain events, whose unused data
+/// indices are 0xFF, become chain tracks on the held weapon and solve.
+#[test]
+fn h4_chief_reload_reads_its_ik_chains() {
+    let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+        return;
+    };
+    let (data, state) = h4_chief_with_rifle(&root, "combat:rifle:ar:reload_1");
+    let pose = state.animation.pose.as_ref().unwrap();
+    assert!(!pose.reach_ik.is_empty(), "the reload's chains");
+    assert!(pose.reach_ik.iter().any(|track| track.holder == super::reach_ik::ReachIkHolder::Weapon(1)));
+    let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
+    assert!(rows.iter().flatten().all(|lane| lane.is_finite()));
+}
