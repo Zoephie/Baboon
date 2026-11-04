@@ -814,6 +814,9 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
     if preview.h3_screen_effects.iter().any(|effect| effect.sucks()) {
         preview.h3_motion_blur = super::h3_vision::read_h3_motion_blur(source);
     }
+    if preview.h3_screen_effects.iter().any(|effect| effect.adds_noise()) {
+        preview.reach_screen_noise = super::h3_screen_effects::read_reach_screen_noise(source);
+    }
     preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
     let markers = preview.markers.clone();
     super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, false);

@@ -170,6 +170,9 @@ pub(crate) struct RenderModelPreview {
     pub h3_vision: Option<Arc<h3_vision::H3Vision>>,
     /// ODST's motion blur, for an object with an effect that moves the view.
     pub h3_motion_blur: Option<h3_vision::H3MotionBlur>,
+    /// Reach's final composite noise map, for an object with an area screen
+    /// effect that adds bright or dark noise.
+    pub reach_screen_noise: Option<materials::H3Bitmap>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,

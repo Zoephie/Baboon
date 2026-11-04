@@ -9,7 +9,10 @@ use std::borrow::Cow;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::h3_shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
-use super::reach_lighting::{REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_frame_value};
+use super::reach_lighting::{
+    REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_composite_gamma, reach_frame_value, reach_noise_offset,
+    reach_noise_params,
+};
 use super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
@@ -619,11 +622,12 @@ pub(super) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
 }
 
 /// What the rasterizer's globals hold for an object here, by uniform name.
-fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2]) -> Option<H3Value> {
+/// `stops` is what Reach's area screen effects come to this frame.
+fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
     let [width, height] = size.map(|side| side as f32);
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     if dialect == H3Dialect::Reach {
-        if let Some(value) = reach_frame_value(frame, name) {
+        if let Some(value) = reach_frame_value(frame, name, stops) {
             return Some(value);
         }
         // Reach's lighting constants past its four vMF are not an object's.
@@ -959,7 +963,7 @@ impl ModelGlRenderer {
                 let reach_light = (material.dialect == H3Dialect::Reach).then(|| self.reach_simple_light(name)).flatten();
                 let mut value = change_color
                     .or(reach_light)
-                    .or_else(|| frame_value(frame, material.dialect, name, size))
+                    .or_else(|| frame_value(frame, material.dialect, name, size, self.reach_stops))
                     .or_else(|| material.values.get(name).cloned());
                 let object = batch.material_index as usize;
                 let screen_values = self.h3_screen_alpha.map(|alpha| {
@@ -1151,6 +1155,18 @@ impl ModelGlRenderer {
             // Reach shadows into a mask ahead of the lights, which is not
             // built, so its self shadow does not run.
             let (bloomed, self_shadow) = (frame.bloom, frame.self_shadow && !reach);
+            // `screen_effect_sample`, ahead of the scene: Reach's
+            // `c_player_view::render` hands its exposure stops to
+            // `setup_camera_fx_parameters` before anything draws.
+            let (screen, shaders) = {
+                let uploaded = &mut self.slots[slot];
+                let values = |object: u8| frame.h2_values_of_object(object);
+                let view = ce_flare_view(&frame.camera);
+                let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+                let effects = &frame.preview.h3_screen_effects;
+                h3_screen_effects::h3_screen_settings(effects, values, &mut uploaded.h3_onsets, bones, &view, frame.time)
+            };
+            self.reach_stops = if reach { screen.stops() } else { 0.0 };
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear_depth_f32(1.0);
@@ -1383,13 +1399,6 @@ impl ModelGlRenderer {
             if bloomed && bloom.is_none() {
                 bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size, reach);
             }
-            let uploaded = &mut self.slots[slot];
-            let values = |object: u8| frame.h2_values_of_object(object);
-            let view = ce_flare_view(&frame.camera);
-            let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-            let effects = &frame.preview.h3_screen_effects;
-            let (screen, shaders) =
-                h3_screen_effects::h3_screen_settings(effects, values, &mut uploaded.h3_onsets, bones, &view, frame.time);
             if reach {
                 // The object's depth, which tells the composite what it covers.
                 let depth = self.h3_targets.as_ref().map(|targets| {
@@ -1401,10 +1410,12 @@ impl ModelGlRenderer {
                     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                     targets.depth_copy
                 });
-                self.reach_composite(gl, accumulation, bloom, depth, screen);
+                let noise = frame.preview.reach_screen_noise.as_ref();
+                self.reach_composite(gl, accumulation, bloom, depth, screen, noise);
             } else {
                 self.h3_composite(gl, accumulation, bloom, screen);
             }
+            self.reach_stops = 0.0;
             self.h3_finish_picture(gl, frame, slot, framebuffer, size, &screen, &shaders);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
@@ -1588,8 +1599,16 @@ impl ModelGlRenderer {
         bloom: Option<glow::NativeTexture>,
         depth: Option<glow::NativeTexture>,
         screen: h3_screen_effects::H3ScreenSettings,
+        noise: Option<&materials::H3Bitmap>,
     ) {
         unsafe {
+            if self.reach_noise.is_none()
+                && let Some((image, texels, mips)) = noise
+            {
+                // Sampler 7: wrapped, point.
+                let sampler = H3Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Point };
+                self.reach_noise = upload_h2_image_linear(gl, image, *texels, mips, Some(sampler));
+            }
             if self.reach_composite_program.is_none() {
                 self.reach_composite_program = screen_program(gl, REACH_COMPOSITE_FRAGMENT);
             }
@@ -1606,10 +1625,25 @@ impl ModelGlRenderer {
             gl.active_texture(glow::TEXTURE2);
             gl.bind_texture(glow::TEXTURE_2D, depth);
             gl.uniform_1_i32(gl.get_uniform_location(program, "scene_depth").as_ref(), 2);
+            gl.active_texture(glow::TEXTURE3);
+            gl.bind_texture(glow::TEXTURE_2D, self.reach_noise.or(self.h3_no_bloom));
+            gl.uniform_1_i32(gl.get_uniform_location(program, "noise").as_ref(), 3);
             gl.active_texture(glow::TEXTURE0);
             let matrix = screen.color_matrix();
             let columns: [f32; 16] = std::array::from_fn(|at| matrix[at % 4][at / 4]);
             gl.uniform_matrix_4_f32_slice(gl.get_uniform_location(program, "hue_saturation").as_ref(), false, &columns);
+            let gamma = reach_composite_gamma(screen.gamma());
+            gl.uniform_1_f32(gl.get_uniform_location(program, "gamma").as_ref(), gamma);
+            // With no map to read, no noise.
+            let [bright, dark] = if self.reach_noise.is_some() { screen.noise() } else { [0.0; 2] };
+            let params = reach_noise_params(bright, dark);
+            gl.uniform_4_f32_slice(gl.get_uniform_location(program, "noise_params").as_ref(), &params);
+            // `real_random`'s two draws, new each frame.
+            self.reach_noise_frame = self.reach_noise_frame.wrapping_add(1);
+            let frame_number = self.reach_noise_frame as f32;
+            let random = [0, 1].map(|salt| reach_shield::real_random(frame_number, salt));
+            let [x, y] = reach_noise_offset(self.reach_noise_frame, random);
+            gl.uniform_2_f32(gl.get_uniform_location(program, "noise_offset").as_ref(), x, y);
             gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), REACH_DARK_MULTIPLIER);
             gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
             gl.disable(glow::DEPTH_TEST);

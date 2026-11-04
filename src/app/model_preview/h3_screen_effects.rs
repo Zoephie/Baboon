@@ -13,6 +13,8 @@ use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_markers};
 use super::*;
+use super::renderer::REACH_SCREEN_NOISE_BITMAP;
+use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
 /// `build_saturation_matrix`'s weights.
@@ -36,6 +38,8 @@ type Matrix = [[f32; 4]; 4];
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct H3ScreenSettings {
     exposure_boost: f32,
+    /// Reach's `exposure deboost`, stops taken off as `boost` adds them.
+    exposure_deboost: f32,
     hue_left: f32,
     hue_right: f32,
     saturate: f32,
@@ -43,6 +47,9 @@ pub(crate) struct H3ScreenSettings {
     contrast_enhance: f32,
     gamma_enhance: f32,
     gamma_reduce: f32,
+    /// Reach's `bright noise` and `dark noise`, for the final composite.
+    bright_noise: f32,
+    dark_noise: f32,
     color_filter: [f32; 3],
     color_floor: [f32; 3],
     /// ODST's `horizontal blur` and `vertical blur`.
@@ -62,6 +69,7 @@ impl Default for H3ScreenSettings {
     fn default() -> Self {
         Self {
             exposure_boost: 0.0,
+            exposure_deboost: 0.0,
             hue_left: 0.0,
             hue_right: 0.0,
             saturate: 0.0,
@@ -69,6 +77,8 @@ impl Default for H3ScreenSettings {
             contrast_enhance: 0.0,
             gamma_enhance: 0.0,
             gamma_reduce: 0.0,
+            bright_noise: 0.0,
+            dark_noise: 0.0,
             color_filter: [1.0; 3],
             color_floor: [0.0; 3],
             blur: [0.0; 2],
@@ -86,6 +96,7 @@ impl H3ScreenSettings {
         let falloff = falloff.clamp(0.0, 1.0);
         let most = |mine: &mut f32, theirs: f32| *mine = mine.max(falloff * theirs);
         most(&mut self.exposure_boost, other.exposure_boost);
+        most(&mut self.exposure_deboost, other.exposure_deboost);
         most(&mut self.hue_left, other.hue_left);
         most(&mut self.hue_right, other.hue_right);
         most(&mut self.saturate, other.saturate);
@@ -93,6 +104,8 @@ impl H3ScreenSettings {
         most(&mut self.contrast_enhance, other.contrast_enhance);
         most(&mut self.gamma_enhance, other.gamma_enhance);
         most(&mut self.gamma_reduce, other.gamma_reduce);
+        most(&mut self.bright_noise, other.bright_noise);
+        most(&mut self.dark_noise, other.dark_noise);
         for channel in 0..3 {
             let toward = falloff * other.color_filter[channel] + (1.0 - falloff);
             self.color_filter[channel] = self.color_filter[channel].min(toward);
@@ -172,6 +185,17 @@ impl H3ScreenSettings {
     pub(crate) fn exposure(&self) -> f32 {
         2f32.powf(self.exposure_boost)
     }
+
+    /// Reach's `c_player_view::render`: the stops it hands
+    /// `setup_camera_fx_parameters`, boost less deboost.
+    pub(crate) fn stops(&self) -> f32 {
+        self.exposure_boost - self.exposure_deboost
+    }
+
+    /// Reach's bright and dark noise, for `apply_noise`.
+    pub(crate) fn noise(&self) -> [f32; 2] {
+        [self.bright_noise, self.dark_noise]
+    }
 }
 
 fn identity() -> Matrix {
@@ -236,6 +260,8 @@ struct H3ScreenDefinition {
     radius: f32,
     /// ODST's. `postprocess` has it follow the last when they play in turn.
     delay: f32,
+    /// Reach's `screen_effect_is_visible` waits past even a delay of 0.
+    strict_delay: bool,
     lifetime: f32,
     outside_radius: bool,
     /// ODST's `disable camera falloffs`: neither distance nor angle counts.
@@ -279,8 +305,11 @@ struct H3ObjectFalloff {
 
 impl H3ScreenDefinition {
     /// `screen_effect_is_active`, for a viewer of what it hangs on.
+    /// Reach's (`is_visible`, the 360's 0x83033AB0) is strict on the delay
+    /// with no exception for none.
     fn active(&self, age: f32) -> bool {
-        self.lifetime <= 0.0 || ((self.delay == 0.0 || age > self.delay) && age <= self.delay + self.lifetime)
+        let begun = (self.delay == 0.0 && !self.strict_delay) || age > self.delay;
+        self.lifetime <= 0.0 || (begun && age <= self.delay + self.lifetime)
     }
 
     /// `evaluate_falloff`.
@@ -316,6 +345,14 @@ fn shows_in_third_person(flagged: impl Fn(&str) -> bool) -> bool {
     !(flagged("unattached") || flagged("first person") || flagged("third person")) || flagged("third person")
 }
 
+/// Reach's `is_visible` (the 360's 0x83033AB0) for a viewer who is nobody's
+/// unit: `render_object_is_third_person` (0x82752FC0) and its first person
+/// twin hold only for the viewer's own unit, so an effect naming a person
+/// shows only if it also names `unattached`.
+fn shows_to_no_unit(flagged: impl Fn(&str) -> bool) -> bool {
+    !(flagged("unattached") || flagged("first person") || flagged("third person")) || flagged("unattached")
+}
+
 fn read_screen_shader(source: &TagSource, element: TagStruct<'_>) -> Option<(String, i32, i32)> {
     let path = element.read_tag_ref_path("shader effect").filter(|path| !path.is_empty())?;
     let tag = load_referenced_tag_from_source(source, &path, "shader_screen", b"rmss").ok()?;
@@ -328,11 +365,14 @@ fn read_screen_shader(source: &TagSource, element: TagStruct<'_>) -> Option<(Str
 fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinition> {
     let flags = element.read_flag_names("flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let reach = source.game() == Some(GameId::HaloReach);
     // The preview's camera is a third person's, on nothing.
-    if flagged("debug disable") || !shows_in_third_person(flagged) {
+    let shows = if reach { shows_to_no_unit(flagged) } else { shows_in_third_person(flagged) };
+    if flagged("debug disable") || !shows {
         return None;
     }
     let real = |name: &str| element.read_real(name).unwrap_or(0.0);
+    let reach_real = |name: &str| if reach { real(name) } else { 0.0 };
     let color = |name: &str| {
         let color = element.read_rgb(name);
         [color.red, color.green, color.blue]
@@ -348,6 +388,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
     Some(H3ScreenDefinition {
         settings: H3ScreenSettings {
             exposure_boost: real("exposure boost"),
+            exposure_deboost: reach_real("exposure deboost"),
             hue_left: real("hue left"),
             hue_right: real("hue right"),
             saturate: real("saturation"),
@@ -355,6 +396,8 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
             contrast_enhance: real("contrast enhance"),
             gamma_enhance: real("gamma enhance"),
             gamma_reduce: real("gamma reduce"),
+            bright_noise: reach_real("bright noise"),
+            dark_noise: reach_real("dark noise"),
             color_filter: color("color filter"),
             color_floor: color("color floor"),
             blur: [real("horizontal blur"), real("vertical blur")],
@@ -365,6 +408,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
         },
         radius: real("maximum distance"),
         delay,
+        strict_delay: reach,
         lifetime: real("lifetime"),
         outside_radius: flagged("allow effect outside radius"),
         no_camera_falloffs: flagged("disable camera falloffs"),
@@ -427,6 +471,11 @@ impl H3ScreenEffectAt {
         self.definitions.iter().any(|definition| definition.settings.suck != 0.0)
     }
 
+    /// Whether any of it adds Reach's bright or dark noise.
+    pub(crate) fn adds_noise(&self) -> bool {
+        self.definitions.iter().any(|definition| definition.settings.noise().iter().any(|amount| *amount > 0.0))
+    }
+
     pub(crate) fn object_inputs(&self) -> impl Iterator<Item = &str> {
         let falloffs = self.definitions.iter().filter_map(|definition| definition.object_falloff.as_ref());
         falloffs.flat_map(|falloff| [falloff.input.as_str(), falloff.range.as_str()]).filter(|name| !name.is_empty())
@@ -472,6 +521,17 @@ pub(super) fn read_h3_screen_effects(
         }
     });
     effects
+}
+
+/// `rasterizer_globals`' default bitmap that Reach's final composite reads
+/// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
+pub(super) fn read_reach_screen_noise(source: &TagSource) -> Option<super::materials::H3Bitmap> {
+    let globals =
+        load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+    let defaults = elements(globals.root(), "default bitmaps");
+    let noise = defaults.get(REACH_SCREEN_NOISE_BITMAP)?;
+    let path = noise.read_tag_ref_path("default bitmaps").filter(|path| !path.is_empty())?;
+    super::materials::read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
 }
 
 /// Every `shader_screen` these can draw, as materials of no batch, which gives
@@ -571,6 +631,7 @@ mod tests {
             settings: H3ScreenSettings::default(),
             radius: 1.0,
             delay,
+            strict_delay: false,
             lifetime,
             outside_radius: false,
             no_camera_falloffs: false,
@@ -650,6 +711,68 @@ mod tests {
         assert!(!with(&["first person only"]));
         assert!(!with(&["first person{first person only}"]));
         assert!(!with(&["unattached"]));
+    }
+
+    /// Reach's viewer is nobody's unit, so a person named shows only with
+    /// `unattached`: the Spartans' body damage (0x78) does not; Halo 3's and
+    /// ODST's rule keeps it.
+    #[test]
+    fn a_reach_effect_naming_a_person_shows_to_no_unit_only_unattached() {
+        let names = |names: &'static [&'static str]| move |wanted: &str| names.iter().any(|name| name.starts_with(wanted));
+        let body_damage: &[&str] = &[
+            "first person{first person only}",
+            "third person{third person only}",
+            "disable camera falloffs{cinematic}",
+            "only affects attached object",
+        ];
+        assert!(!shows_to_no_unit(names(body_damage)));
+        assert!(shows_in_third_person(names(body_damage)), "ODST's rule shows it");
+        assert!(shows_to_no_unit(names(&[])));
+        assert!(shows_to_no_unit(names(&["unattached", "third person{third person only}"])));
+        assert!(shows_to_no_unit(names(&["unattached"])));
+        assert!(!shows_in_third_person(names(&["unattached"])), "where ODST's does not");
+    }
+
+    /// Reach's `is_visible` waits past a delay of 0 too.
+    #[test]
+    fn a_reach_effect_is_strict_on_its_delay() {
+        let reach = H3ScreenDefinition { strict_delay: true, ..timed(0.0, 1.0) };
+        assert!(!reach.active(0.0));
+        assert!(reach.active(0.01));
+        assert!(timed(0.0, 1.0).active(0.0), "ODST's starts at once");
+        assert!(H3ScreenDefinition { strict_delay: true, ..timed(5.0, 0.0) }.active(0.0), "no lifetime ignores it");
+    }
+
+    /// `c_player_view::render`'s stops: the strongest boost less the
+    /// strongest deboost; the noises take the strongest too.
+    #[test]
+    fn reachs_stops_are_boost_less_deboost_and_noise_takes_the_strongest() {
+        let mut settings = H3ScreenSettings::default();
+        assert_eq!(settings.stops(), 0.0);
+        let boost = H3ScreenSettings { exposure_boost: 2.0, bright_noise: 0.4, ..Default::default() };
+        let deboost = H3ScreenSettings { exposure_deboost: 3.0, dark_noise: 0.8, bright_noise: 0.1, ..Default::default() };
+        settings.accumulate(&boost, 1.0, [0.0; 3]);
+        settings.accumulate(&deboost, 0.5, [0.0; 3]);
+        assert_eq!(settings.stops(), 2.0 - 1.5);
+        assert_eq!(settings.noise(), [0.4, 0.4]);
+        assert_eq!(settings.exposure(), 4.0, "Halo 3's composite reads the boost alone");
+    }
+
+    /// With `BLAM_TEST_HREK`: the Spartans' body damage effect is not seen
+    /// by the preview's camera, and the composite's noise map reads.
+    #[test]
+    fn kit_reach_hides_body_damage_and_reads_its_noise_map() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        let path = "objects\\characters\\spartans\\fx\\damage_feedback\\body_damage_screen_distortion";
+        let tag = load_referenced_tag_from_source(&source, path, "area_screen_effect", b"sefc").expect(path);
+        assert!(!elements(tag.root(), "screen effects").is_empty());
+        assert!(read_definitions(&source, tag.root()).is_empty());
+        let (image, ..) = read_reach_screen_noise(&source).expect("monochrome_random");
+        assert!(image.whole());
     }
 
     #[test]

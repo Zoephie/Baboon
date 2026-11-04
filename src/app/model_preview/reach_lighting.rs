@@ -81,19 +81,44 @@ pub(super) const REACH_HDR_DIVISOR: f32 = 8.0;
 pub(super) const REACH_EXPOSURE: f32 = 1.0;
 use REACH_EXPOSURE as EXPOSURE;
 
+/// `globals\defaults\default.camera_fx_settings`' `self illum preferred` and
+/// `self illum scale`, both fixed.
+const SELF_ILLUM_PREFERRED: f32 = 0.0;
+const SELF_ILLUM_SCALE: f32 = 0.3;
+
+/// `get_render_exposure` (the 360's 0x8272B0F8) with an area screen effect's
+/// `stops` (boost less deboost), which `c_player_view::render` hands
+/// `setup_camera_fx_parameters` before the scene draws: `2^stops` up on the
+/// default's, with no adaptation.
+fn render_exposure(stops: f32) -> f32 {
+    EXPOSURE * 2f32.powf(stops)
+}
+
+/// `get_illum_render_scale` (the 360's 0x8272B198): self-illumination moves
+/// by `self illum scale` of the stops, so it scales by
+/// `2^(illum − stops)`. 1 at no stops.
+fn illum_render_scale(stops: f32) -> f32 {
+    let illum = (stops - SELF_ILLUM_PREFERRED) * SELF_ILLUM_SCALE + SELF_ILLUM_PREFERRED;
+    2f32.powf(illum - stops)
+}
+
 /// `restore_render_target_globals_with_exposure` (the 360's 0x82666F08):
 /// `g_exposure`, and the vertex shaders' `v_exposure` alike. Exposure brought
-/// down by the target's stops, the stops' factor, exposure, alpha.
-pub(crate) fn reach_exposure() -> [f32; 4] {
+/// down by the target's stops, the stops' factor, exposure, alpha. `stops`
+/// is what the area screen effects come to; 0 without one.
+pub(crate) fn reach_exposure(stops: f32) -> [f32; 4] {
     let dark = 2f32.powf(HDR_TARGET_STOPS);
-    [EXPOSURE / dark, dark, EXPOSURE, 1.0]
+    let exposure = render_exposure(stops);
+    [exposure / dark, dark, exposure, 1.0]
 }
 
 /// The same's `g_alt_exposure` and `v_alt_exposure`: self-illumination's
-/// scale at no stops, and it under the same.
-pub(crate) fn reach_alt_exposure() -> [f32; 4] {
+/// scale, and it under the same. That `.x` is the illum scale itself is
+/// lighting.md's reading of 0x82666F08, not re-read with stops on.
+pub(crate) fn reach_alt_exposure(stops: f32) -> [f32; 4] {
     let dark = 2f32.powf(HDR_TARGET_STOPS);
-    [1.0, EXPOSURE / dark, EXPOSURE, 0.0]
+    let (illum, exposure) = (illum_render_scale(stops), render_exposure(stops));
+    [illum, illum * exposure / dark, exposure, 0.0]
 }
 
 /// What `setup_object_lighting_for_pass` (the 360's 0x826DD650) gives an
@@ -201,9 +226,10 @@ pub(super) fn reach_frame_lighting(frame: &ModelGpuFrame) -> ReachObjectLighting
     reach_object_lighting(y.atan2(x) - light_heading())
 }
 
-/// What Reach's rasterizer globals hold for an object here, by uniform name.
-/// Anything not named falls to what Reach shares with Halo 3.
-pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str) -> Option<H3Value> {
+/// What Reach's rasterizer globals hold for an object here, by uniform name,
+/// at the area screen effects' exposure `stops`. Anything not named falls to
+/// what Reach shares with Halo 3.
+pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str, stops: f32) -> Option<H3Value> {
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     let lighting = || reach_frame_lighting(frame);
     if let Some(index) = name.strip_prefix("p_lighting_constant_").and_then(|index| index.parse::<usize>().ok()) {
@@ -230,8 +256,8 @@ pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str) -> Option<H3V
         // the cube maps' levels, and the object's cube map sample, at its
         // defaults, weighs the first map whole.
         "dynamic_environment_blend" => floats([0.0, 0.0, 0.0, 1.0]),
-        "g_exposure" => floats(reach_exposure()),
-        "g_alt_exposure" => floats(reach_alt_exposure()),
+        "g_exposure" => floats(reach_exposure(stops)),
+        "g_alt_exposure" => floats(reach_alt_exposure(stops)),
         "object_velocity" | "antialias_scalars" => floats([0.0; 4]),
         _ => None,
     }
@@ -240,17 +266,47 @@ pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str) -> Option<H3V
 /// `final_composite_base`'s factor on the lit target and on the bloom.
 pub(crate) const REACH_DARK_MULTIPLIER: f32 = 8.0;
 
-/// `final_composite`, as MCC runs it at the default settings: the lit target
-/// and bloom brought back up, `pow(x, 0.5)` for the default gamma
-/// (`convert_output_gamma2`), the colour matrix, and nothing after. The tone
-/// curve's call is commented out in the source.
+/// `rasterizer_globals`' `default bitmaps` element the final composite's
+/// noise reads: `monochrome noise for screen effect` (its element label).
+pub(crate) const REACH_SCREEN_NOISE_BITMAP: usize = 15;
+
+/// `postprocess_player_view`'s `gamma` constant's `.z` (MCC
+/// `sub_1408428C0`): half the screen effects' gamma, which the composite
+/// raises the light to (`convert_to_gamma2_and_apply_color_adjustments`).
+pub(super) fn reach_composite_gamma(gamma: f32) -> f32 {
+    gamma * 0.5
+}
+
+/// `noise_params` (MCC `sub_1408428C0` into `sub_140841DE0`): from the area
+/// screen effects' bright and dark noise, `(2·bright, dark, 1 − bright, 0)`.
+/// No noise leaves the picture as it was.
+pub(super) fn reach_noise_params(bright: f32, dark: f32) -> [f32; 4] {
+    [bright + bright, dark, 1.0 - bright, 0.0]
+}
+
+/// The noise's offset for a frame (MCC `sub_1408428C0`): a half texel step
+/// that turns over every other frame, plus `real_random`'s two draws
+/// (`random`, each in [0, 1)), halved.
+pub(super) fn reach_noise_offset(frame: u32, random: [f32; 2]) -> [f32; 2] {
+    let step = |frame: u32| (frame & 2) as f32 * 0.5;
+    [(step(frame) + random[0]) * 0.5, (step(frame.wrapping_add(1)) + random[1]) * 0.5]
+}
+
+/// `final_composite`, as MCC runs it: the lit target and bloom brought back
+/// up, `pow(x, gamma.z)` (0.5 at the default gamma, `convert_output_gamma2`),
+/// the colour matrix, then `apply_noise`. The tone curve's call is commented
+/// out in the source.
 pub(super) const REACH_COMPOSITE_FRAGMENT: &str = "#version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
 uniform sampler2D scene_depth;
+uniform sampler2D noise;
 uniform mat4 hue_saturation;
 uniform float dark_multiplier;
 uniform float view_scale;
+uniform float gamma;
+uniform vec4 noise_params;
+uniform vec2 noise_offset;
 out vec4 color;
 void main() {
     vec2 place = gl_FragCoord.xy / vec2(textureSize(accumulation, 0));
@@ -260,8 +316,13 @@ void main() {
         accumulated = vec4(0.0);
     }
     vec3 combined = (accumulated.rgb + texture(bloom, place).rgb) * dark_multiplier;
-    combined = sqrt(max(combined, vec3(0.0)));
+    combined = pow(max(combined, vec3(0.0)), vec3(gamma));
     color.rgb = clamp((vec4(combined, 1.0) * hue_saturation).rgb, 0.0, 1.0);
+    // `apply_noise`: the map tiled a texel a pixel (its 256 square in the
+    // game's), point sampled, at this frame's offset.
+    float shade = texture(noise, gl_FragCoord.xy / vec2(textureSize(noise, 0)) + noise_offset).z;
+    vec2 noise = shade * noise_params.xy + noise_params.zw;
+    color.rgb = color.rgb * noise.x + noise.y;
     // Reach's lit target keeps its anti-aliasing blur in alpha, not cover:
     // what the object drew covers what lies behind it.
     bool drawn = texture(scene_depth, place).r < 1.0;
@@ -338,6 +399,50 @@ mod tests {
         let tint = reach_lightmap_tint();
         assert!(close(tint, [1.064515, 0.893373, 0.896688]), "{tint:?}");
         assert!(tint[0] < reach_particle_light().ambient[0], "clamped before the exponent comes back");
+    }
+
+    /// `get_render_exposure` and `get_illum_render_scale` at the screen
+    /// effects' stops: everything lit by `2^s`, self-illumination by
+    /// `2^(0.3s)`; at none, as before.
+    #[test]
+    fn reach_exposure_moves_by_the_stops_and_illumination_by_less() {
+        assert_eq!(reach_exposure(0.0), [1.0 / 8.0, 8.0, 1.0, 1.0]);
+        assert_eq!(reach_alt_exposure(0.0), [1.0, 1.0 / 8.0, 1.0, 0.0]);
+        assert_eq!(reach_exposure(1.0), [2.0 / 8.0, 8.0, 2.0, 1.0]);
+        let alt = reach_alt_exposure(1.0);
+        assert!((alt[0] - 2f32.powf(-0.7)).abs() < 1e-6, "{alt:?}");
+        assert!((alt[1] - 2f32.powf(0.3) / 8.0).abs() < 1e-6, "{alt:?}");
+        assert_eq!(alt[2], 2.0);
+        assert!(reach_alt_exposure(-2.0)[1] < reach_alt_exposure(0.0)[1], "a deboost darkens");
+    }
+
+    /// `gamma.z` is half the screen effects' gamma: 0.5, the square root, at rest.
+    #[test]
+    fn reachs_composite_raises_to_half_the_gamma() {
+        assert_eq!(reach_composite_gamma(1.0), 0.5);
+        assert_eq!(reach_composite_gamma(3.0), 1.5);
+    }
+
+    /// `apply_noise`'s `noise_params`: none leaves the colour alone; bright
+    /// scales about 1, dark only adds.
+    #[test]
+    fn reachs_noise_scales_by_bright_and_adds_dark() {
+        assert_eq!(reach_noise_params(0.0, 0.0), [0.0, 0.0, 1.0, 0.0]);
+        let [scale, add, base, _] = reach_noise_params(0.25, 0.1);
+        let apply = |noise: f32| (noise * scale + base, noise * add);
+        assert_eq!(apply(0.0), (0.75, 0.0));
+        assert_eq!(apply(1.0), (1.25, 0.1));
+    }
+
+    /// The offset steps half a texel every other frame, each axis a frame
+    /// apart, plus half of each random draw.
+    #[test]
+    fn reachs_noise_offset_steps_by_frame_and_random() {
+        assert_eq!(reach_noise_offset(0, [0.0, 0.0]), [0.0, 0.0]);
+        assert_eq!(reach_noise_offset(1, [0.0, 0.0]), [0.0, 0.5]);
+        assert_eq!(reach_noise_offset(2, [0.0, 0.0]), [0.5, 0.5]);
+        assert_eq!(reach_noise_offset(3, [0.0, 0.0]), [0.5, 0.0]);
+        assert_eq!(reach_noise_offset(0, [0.5, 0.25]), [0.25, 0.125]);
     }
 
     #[test]

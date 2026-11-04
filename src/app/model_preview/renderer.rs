@@ -1441,7 +1441,8 @@ mod h3_draw;
 #[path = "reach_lighting.rs"]
 mod reach_lighting;
 pub(super) use reach_lighting::{
-    REACH_DARK_MULTIPLIER, reach_alt_exposure, reach_exposure, reach_lightmap_tint, reach_particle_light,
+    REACH_DARK_MULTIPLIER, REACH_SCREEN_NOISE_BITMAP, reach_alt_exposure, reach_exposure, reach_lightmap_tint,
+    reach_particle_light,
 };
 #[path = "reach_bloom.rs"]
 mod reach_bloom;
@@ -2407,7 +2408,7 @@ impl ModelGpuSlot {
                 .h3_light_volumes
                 .iter()
                 .map(|at| {
-                    let (image, texels, mips) = at.bitmap();
+                    let (image, texels, mips) = at.bitmap()?;
                     h3_draw::upload_h2_image_linear(gl, image, *texels, mips, at.sampler())
                 })
                 .collect();
@@ -2829,6 +2830,25 @@ const DEPTH_UNITS: f32 = (1 << 24) as f32;
 /// The vertex stream of Halo CE's lens flares: clip position, then texcoord.
 const CE_FLARE_STRIDE: i32 = 6 * 4;
 
+/// `view_depth`: a window depth back to the distance along the view, by
+/// `u_depth`'s projection terms (see [`scene_depth_terms`]), for the sprites
+/// that fade against the scene's depth.
+macro_rules! glsl_view_depth {
+    () => {
+        "float view_depth(float window) {
+    float ndc = window * 2.0 - 1.0;
+    return (ndc - u_depth.y) / (u_depth.x - ndc * u_depth.z);
+}
+"
+    };
+}
+
+/// `u_depth` for [`glsl_view_depth`]: the projection's depth terms, then
+/// the preview's scale, which brings its units back to the world's.
+fn scene_depth_terms(camera: &ModelGpuCamera) -> [f32; 4] {
+    [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, camera.scale]
+}
+
 const CE_FLARE_VERTEX: &str = "#version 330
 layout(location = 0) in vec4 a_clip;
 layout(location = 1) in vec2 a_uv;
@@ -2839,15 +2859,31 @@ void main() {
 }
 ";
 
-const CE_FLARE_FRAGMENT: &str = "#version 330
+const CE_FLARE_FRAGMENT: &str = concat!("#version 330
 in vec2 v_uv;
 uniform sampler2D u_map;
 uniform vec4 u_color;
 uniform float u_highlight;
 uniform vec2 u_tint;
+uniform vec2 u_circular;
+uniform float u_fade;
+uniform vec4 u_depth;
+uniform sampler2D u_scene_depth;
 out vec4 out_color;
-void main() {
+", glsl_view_depth!(), "void main() {
     vec4 map = texture(u_map, v_uv);
+    if (u_circular.x > 0.0) {
+        // Reach's light volume `circular` albedo: a disc, and no map.
+        vec2 delta = 2.0 * v_uv - 1.0;
+        float disc = pow(clamp(u_circular.x - u_circular.x * dot(delta, delta), 0.0, 1.0), u_circular.y);
+        map = vec4(vec3(disc), 1.0);
+    }
+    if (u_fade > 0.0) {
+        // Reach's light volume depth fade, as the particles'.
+        float scene = texelFetch(u_scene_depth, ivec2(gl_FragCoord.xy), 0).r;
+        float behind = (view_depth(scene) - view_depth(gl_FragCoord.z)) / u_depth.w;
+        map.a *= clamp(behind / u_fade, 0.0, 1.0);
+    }
     if (u_tint.y > 0.0) {
         vec4 lifted = pow(map, vec4(u_tint.y)) * map;
         out_color = vec4((lifted.rgb * u_tint.x + map.rgb * u_color.rgb) * u_color.a, 1.0);
@@ -2860,7 +2896,7 @@ void main() {
         out_color = vec4((1.0 - u_color.rgb) * u_highlight * sixth + map.rgb * u_color.rgb, u_color.a);
     }
 }
-";
+");
 
 /// What Halo CE's lens flares draw with, made on first use.
 struct CeFlareGl {
@@ -2871,6 +2907,11 @@ struct CeFlareGl {
     highlight: Option<glow::NativeUniformLocation>,
     tint: Option<glow::NativeUniformLocation>,
     map: Option<glow::NativeUniformLocation>,
+    /// Reach's light volumes': the `circular` albedo and the depth fade.
+    circular: Option<glow::NativeUniformLocation>,
+    fade: Option<glow::NativeUniformLocation>,
+    depth: Option<glow::NativeUniformLocation>,
+    scene_depth: Option<glow::NativeUniformLocation>,
     /// A patch's samples past the depth buffer, and in all.
     queries: [glow::NativeQuery; 2],
 }
@@ -3416,7 +3457,7 @@ void main() {
 }
 ";
 
-const PARTICLE_FRAGMENT: &str = "#version 330 core
+const PARTICLE_FRAGMENT: &str = concat!("#version 330 core
 in vec2 v_sprite;
 in vec2 v_next_sprite;
 in vec2 v_billboard;
@@ -3452,12 +3493,9 @@ uniform vec2 u_contrast;
 uniform float u_sphere_warp;
 uniform float u_palette_shift;
 uniform bool u_plasma_second_sprite;
+uniform bool u_unit_particle_alpha;
 out vec4 out_color;
-float view_depth(float window) {
-    float ndc = window * 2.0 - 1.0;
-    return (ndc - u_depth.y) / (u_depth.x - ndc * u_depth.z);
-}
-// `other` is the second sprite texcoord, which only Reach's plasmas read.
+", glsl_view_depth!(), "// `other` is the second sprite texcoord, which only Reach's plasmas read.
 vec4 albedo(vec2 sprite, vec2 other, float particle_alpha, float depth_fade) {
     float external_alpha = particle_alpha * depth_fade;
     if (u_albedo == 6) {
@@ -3532,9 +3570,11 @@ void main() {
     vec2 warp = u_sphere_warp == 0.0 ? vec2(0.0) : rim * dot(rim, rim) * dot(rim, rim) * u_sphere_warp;
     vec2 sprite = v_sprite + warp;
     vec2 next_sprite = v_next_sprite + warp;
+    // Reach's beams sample with a `particle_alpha` of 1.
+    float particle_alpha = u_unit_particle_alpha ? 1.0 : v_color.a;
     vec4 color = mix(
-        albedo(sprite, next_sprite, v_color.a, depth_fade),
-        albedo(next_sprite, sprite, v_color.a, depth_fade),
+        albedo(sprite, next_sprite, particle_alpha, depth_fade),
+        albedo(next_sprite, sprite, particle_alpha, depth_fade),
         v_extra.x
     );
     if (u_distortion != 0.0) {
@@ -3597,7 +3637,7 @@ void main() {
     }
     out_color = color;
 }
-";
+");
 
 const PARTICLE_FLOATS: usize = 24;
 
@@ -3661,6 +3701,7 @@ struct H3ParticleGl {
     sphere_warp: Option<glow::NativeUniformLocation>,
     palette_shift: Option<glow::NativeUniformLocation>,
     plasma_second_sprite: Option<glow::NativeUniformLocation>,
+    unit_particle_alpha: Option<glow::NativeUniformLocation>,
 }
 
 impl H3ParticleGl {
@@ -3674,6 +3715,7 @@ impl H3ParticleGl {
         depth: Option<glow::NativeTexture>,
         camera: &ModelGpuCamera,
         lighting: &[[f32; 4]; 10],
+        stops: f32,
     ) {
         unsafe {
             gl.use_program(Some(self.program));
@@ -3691,13 +3733,7 @@ impl H3ParticleGl {
             gl.active_texture(glow::TEXTURE0);
             let range = if depth.is_some() { look.depth_fade.unwrap_or(0.0) } else { 0.0 };
             gl.uniform_1_f32(self.fade.as_ref(), range);
-            gl.uniform_4_f32(
-                self.depth.as_ref(),
-                camera.depth_scale * camera.depth_map[0],
-                camera.depth_map[1],
-                camera.perspective,
-                camera.scale,
-            );
+            gl.uniform_4_f32_slice(self.depth.as_ref(), &scene_depth_terms(camera));
             gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
             if look.albedo == h3_particles::H3ParticleAlbedo::H2Distortion {
                 let mut viewport = [0; 4];
@@ -3713,7 +3749,7 @@ impl H3ParticleGl {
             gl.uniform_1_i32(self.black_point.as_ref(), i32::from(look.black_point));
             let multiply = look.blend == H3Blend::Multiply;
             gl.uniform_1_i32(self.multiply.as_ref(), i32::from(multiply));
-            gl.uniform_3_f32_slice(self.add.as_ref(), &look.add);
+            gl.uniform_3_f32_slice(self.add.as_ref(), &look.add(stops));
             gl.uniform_1_f32(self.distortion.as_ref(), look.distortion.unwrap_or(0.0));
             gl.uniform_1_i32(self.lit.as_ref(), i32::from(look.lit_pixels));
             let contrast = look.smooth_contrast();
@@ -3727,6 +3763,7 @@ impl H3ParticleGl {
             gl.uniform_1_f32(self.sphere_warp.as_ref(), look.sphere_warp.unwrap_or(0.0));
             gl.uniform_1_f32(self.palette_shift.as_ref(), look.palette_shift.unwrap_or(0.0));
             gl.uniform_1_i32(self.plasma_second_sprite.as_ref(), i32::from(look.plasma_second_sprite));
+            gl.uniform_1_i32(self.unit_particle_alpha.as_ref(), i32::from(look.unit_particle_alpha));
             let premultiplied = look.blend == H3Blend::PreMultiplied;
             gl.uniform_1_i32(self.premultiplied.as_ref(), i32::from(premultiplied));
             gl.uniform_1_i32(self.alpha_test.as_ref(), i32::from(look.alpha_test));
@@ -3844,6 +3881,7 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
             sphere_warp: gl.get_uniform_location(program, "u_sphere_warp"),
             palette_shift: gl.get_uniform_location(program, "u_palette_shift"),
             plasma_second_sprite: gl.get_uniform_location(program, "u_plasma_second_sprite"),
+            unit_particle_alpha: gl.get_uniform_location(program, "u_unit_particle_alpha"),
         })
     }
 }
@@ -3914,6 +3952,13 @@ struct ModelGlRenderer {
     reach_inline: Vec<[[f32; 4]; 5]>,
     /// Constants a Reach pass of the frame sets over the material's: the shield's and the camo's.
     reach_pass_values: Option<std::collections::HashMap<&'static str, [f32; 4]>>,
+    /// The exposure stops Reach's area screen effects come to this frame,
+    /// set before its scene draws; 0 outside a Reach picture.
+    reach_stops: f32,
+    /// `rasterizer_globals`' screen noise, uploaded on first use.
+    reach_noise: Option<glow::NativeTexture>,
+    /// The composites drawn, for the noise's frame-to-frame offset.
+    reach_noise_frame: u32,
     h3_empty_vertices: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -4057,6 +4102,9 @@ impl ModelGlRenderer {
                 reach_shadow_mask: None,
                 reach_inline: Vec::new(),
                 reach_pass_values: None,
+                reach_stops: 0.0,
+                reach_noise: None,
+                reach_noise_frame: 0,
                 h3_empty_vertices: None,
                 h2_gel: None,
                 h2_bloom: None,
@@ -4535,6 +4583,8 @@ impl ModelGlRenderer {
             }
             let particle_gl = self.h3_particle_gl.as_ref().and_then(Option::as_ref);
             let no_map = self.h3_no_bloom;
+            // What Reach's area screen effects do to the sprites' exposure.
+            let stops = self.reach_stops;
             let uploaded = &mut self.slots[slot];
             uploaded.sync_sprite_textures(gl, frame);
             let camera = &frame.camera;
@@ -4732,7 +4782,10 @@ impl ModelGlRenderer {
             let strips = frame.preview.h3_strips.iter().enumerate();
             let strips = strips
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
-                .map(|(at, strip)| (layered(strip.shader().sort_layer, eye_distance(strip.origin(bones))), Sprites::Strip(at)));
+                .map(|(at, strip)| {
+                    let distance = eye_distance(strip.origin(bones)) - strip.sort_bias();
+                    (layered(strip.shader().sort_layer, distance), Sprites::Strip(at))
+                });
             let leaves = frame.preview.h3_leaves.iter().enumerate();
             let leaves = leaves
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
@@ -4761,18 +4814,32 @@ impl ModelGlRenderer {
                         if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
                             continue;
                         }
-                        let Some(texture) = uploaded.volume_textures.get(index).copied().flatten() else {
+                        let texture = uploaded.volume_textures.get(index).copied().flatten();
+                        let circular = at.circular();
+                        if texture.is_none() && circular.is_none() {
                             continue;
-                        };
+                        }
                         gl.use_program(Some(flares.program));
                         gl.bind_vertex_array(Some(flares.vertex_array));
                         gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
                         gl.active_texture(glow::TEXTURE0);
                         h3_draw::h3_set_blend(gl, at.blend());
-                        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                        gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder));
+                        let [center, falloff] = circular.unwrap_or([0.0; 2]);
+                        gl.uniform_2_f32(flares.circular.as_ref(), center, falloff);
+                        // With no depth copy, no fade to read one.
+                        let fade = at.depth_fade().filter(|_| self.h3_depth_copy.is_some());
+                        if let Some(range) = fade {
+                            gl.active_texture(glow::TEXTURE1);
+                            gl.bind_texture(glow::TEXTURE_2D, self.h3_depth_copy);
+                            gl.active_texture(glow::TEXTURE0);
+                            gl.uniform_1_i32(flares.scene_depth.as_ref(), 1);
+                            gl.uniform_4_f32_slice(flares.depth.as_ref(), &scene_depth_terms(camera));
+                            gl.uniform_1_f32(flares.fade.as_ref(), range);
+                        }
                         let values = frame.h2_values_of_object(at.object);
                         let onset = uploaded.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
-                        for quad in at.quads(values, bones, &view, frame.time, onset) {
+                        for quad in at.quads(values, bones, &view, frame.time, onset, stops) {
                             let vertices = quad.corners.map(|[x, y, z, u, v]| {
                                 let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
                                 [a, b, c, d, u, v]
@@ -4781,6 +4848,12 @@ impl ModelGlRenderer {
                             let [red, green, blue, alpha] = quad.color;
                             gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
                             gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                        }
+                        // The flare program's other users draw maps, unfaded.
+                        gl.uniform_2_f32(flares.circular.as_ref(), 0.0, 0.0);
+                        if fade.is_some() {
+                            gl.uniform_1_f32(flares.fade.as_ref(), 0.0);
+                            gl.uniform_1_i32(flares.scene_depth.as_ref(), 0);
                         }
                     }
                     Sprites::System(index) => {
@@ -4795,7 +4868,7 @@ impl ModelGlRenderer {
                         let lighting = h3_draw::h3_lighting_constants(frame);
                         let onset = uploaded.h3_onsets.of(system.object, system.scale_name(), values, frame.time);
                         let drawn =
-                            uploaded.h3_particles.vertices(index, system, values, bones, &view, &lighting, frame.time, onset);
+                            uploaded.h3_particles.vertices(index, system, values, bones, &view, &lighting, frame.time, onset, stops);
                         if drawn.is_empty() {
                             continue;
                         }
@@ -4806,7 +4879,7 @@ impl ModelGlRenderer {
                             // distortion`, the frame as it stands is copied there.
                             textures[2] = copy_frame(gl, &mut self.h2_distortion_copy);
                         }
-                        particles.draw(gl, &system.look.shader, &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting);
+                        particles.draw(gl, &system.look.shader, &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting, stops);
                     }
                     Sprites::Leaves(index) => {
                         let leaves = &frame.preview.h3_leaves[index];
@@ -4820,7 +4893,7 @@ impl ModelGlRenderer {
                         }
                         let vertices = particle_floats(camera, &drawn);
                         let textures = uploaded.leaf_textures.get(index).copied().unwrap_or_default();
-                        particles.draw(gl, leaves.shader(), &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting);
+                        particles.draw(gl, leaves.shader(), &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting, stops);
                     }
                     Sprites::Strip(index) => {
                         let strip = &frame.preview.h3_strips[index];
@@ -4833,13 +4906,13 @@ impl ModelGlRenderer {
                         let values = frame.h2_values_of_object(strip.object);
                         let onset = uploaded.h3_onsets.of(strip.object, strip.scale_name(), values, frame.time);
                         let lighting = h3_draw::h3_lighting_constants(frame);
-                        let drawn = uploaded.h3_strips.vertices(index, strip, values, bones, &view, &lighting, frame.time, onset);
+                        let drawn = uploaded.h3_strips.vertices(index, strip, values, bones, &view, &lighting, frame.time, onset, stops);
                         if drawn.is_empty() {
                             continue;
                         }
                         let vertices = particle_floats(camera, &drawn);
                         let textures = uploaded.strip_textures.get(index).copied().unwrap_or_default();
-                        particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting);
+                        particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting, stops);
                     }
                 }
             }
@@ -6283,17 +6356,32 @@ mod tests {
     /// skip by name.
     #[test]
     fn the_particle_program_compiles_under_glslang() {
+        assert_compiles_under_glslang("particle", &[("vert", PARTICLE_VERTEX), ("frag", PARTICLE_FRAGMENT)]);
+    }
+
+    /// The flare program, which Reach's light volumes' disc and depth fade
+    /// share, and Reach's composite with its gamma and noise, as the
+    /// particle program is checked.
+    #[test]
+    fn the_flare_and_reach_composite_programs_compile_under_glslang() {
+        assert_compiles_under_glslang("flare", &[("vert", CE_FLARE_VERTEX), ("frag", CE_FLARE_FRAGMENT)]);
+        assert_compiles_under_glslang("reach_composite", &[("frag", reach_lighting::REACH_COMPOSITE_FRAGMENT)]);
+    }
+
+    /// Each `(stage, source)` of `name` through `glslangValidator`; without
+    /// it, skip by name.
+    fn assert_compiles_under_glslang(name: &str, stages: &[(&str, &str)]) {
         if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
             eprintln!("skipping: glslangValidator is not on PATH (brew install glslang)");
             return;
         }
-        let dir = crate::core::test_kits::unique_temp_dir("model_preview_particle_glsl");
-        for (stage, source) in [("vert", PARTICLE_VERTEX), ("frag", PARTICLE_FRAGMENT)] {
-            let path = dir.join(format!("particle.{stage}"));
+        let dir = crate::core::test_kits::unique_temp_dir(&format!("model_preview_{name}_glsl"));
+        for (stage, source) in stages {
+            let path = dir.join(format!("{name}.{stage}"));
             std::fs::write(&path, source).expect("write shader");
             let output = std::process::Command::new("glslangValidator").arg(&path).output().expect("run glslangValidator");
             let printed = String::from_utf8_lossy(&output.stdout);
-            assert!(output.status.success(), "particle {stage} does not compile:\n{printed}");
+            assert!(output.status.success(), "{name} {stage} does not compile:\n{printed}");
         }
     }
 
@@ -7482,6 +7570,10 @@ unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<C
             highlight: gl.get_uniform_location(program, "u_highlight"),
             tint: gl.get_uniform_location(program, "u_tint"),
             map: gl.get_uniform_location(program, "u_map"),
+            circular: gl.get_uniform_location(program, "u_circular"),
+            fade: gl.get_uniform_location(program, "u_fade"),
+            depth: gl.get_uniform_location(program, "u_depth"),
+            scene_depth: gl.get_uniform_location(program, "u_scene_depth"),
             queries: [gl.create_query().ok()?, gl.create_query().ok()?],
         })
     }

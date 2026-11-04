@@ -86,7 +86,7 @@ impl ShieldChannel {
 }
 
 /// A stand-in for `real_random`, new each frame and each call site.
-fn real_random(time: f32, salt: u32) -> f32 {
+pub(crate) fn real_random(time: f32, salt: u32) -> f32 {
     let mut bits = time.to_bits() ^ salt.wrapping_mul(0x9E37_79B9);
     bits ^= bits >> 16;
     bits = bits.wrapping_mul(0x7FEB_352D);

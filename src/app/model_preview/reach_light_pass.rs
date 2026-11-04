@@ -176,7 +176,7 @@ impl ModelGlRenderer {
                         "camera_to_light" => gl.uniform_4_f32(location.as_ref(), to_light[0], to_light[1], to_light[2], 0.0),
                         "material_coeff" => gl.uniform_4_f32(location.as_ref(), CHEAP_ALBEDO_BLEND, 0.0, 0.0, 0.0),
                         other => {
-                            if let Some(value) = reach_frame_value(frame, other) {
+                            if let Some(value) = reach_frame_value(frame, other, self.reach_stops) {
                                 h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
                             }
                         }

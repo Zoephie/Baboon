@@ -884,7 +884,12 @@ pub(crate) struct H3SpriteShader {
     pub(crate) frame_blend: bool,
     /// `depth_fade_range`, with the `depth_fade` option on.
     pub(crate) depth_fade: Option<f32>,
-    pub(crate) add: [f32; 3],
+    add: [f32; 3],
+    /// Reach's: `add` is at `V_ILLUM_EXPOSURE` (`default_vs`).
+    add_at_illum: bool,
+    /// Reach's beams: `sample_diffuse` takes a `particle_alpha` of 1
+    /// (`effects__beam.hlsl` l.373–458), not the vertex's alpha.
+    pub(crate) unit_particle_alpha: bool,
     /// `alpha_test.hlsl`: under a half of alpha it is gone, and otherwise
     /// solid, writing depth like anything opaque.
     pub(crate) alpha_test: bool,
@@ -917,6 +922,13 @@ pub(crate) struct H3SpriteShader {
 }
 
 impl H3SpriteShader {
+    /// The constant self-illumination added, at the area screen effects'
+    /// exposure `stops` where it is Reach's.
+    pub(crate) fn add(&self, stops: f32) -> [f32; 3] {
+        let exposure = if self.add_at_illum { reach_alt_exposure(stops)[1] } else { 1.0 };
+        self.add.map(|channel| channel * exposure)
+    }
+
     /// Reach's `per_pixel_smooth` contrast, when its pixels are lit so.
     pub(crate) fn smooth_contrast(&self) -> Option<[f32; 2]> {
         (self.lighting == H3ParticleLighting::ReachSmooth).then_some(self.contrast)
@@ -931,6 +943,8 @@ impl H3SpriteShader {
             frame_blend: false,
             depth_fade: None,
             add: [0.0; 3],
+            add_at_illum: false,
+            unit_particle_alpha: false,
             alpha_test: false,
             lit_pixels: false,
             sort_layer: 2,
@@ -959,6 +973,17 @@ impl H3SpriteShader {
     #[cfg(test)]
     pub(crate) fn blank() -> Self {
         Self::plain(H3Blend::Additive)
+    }
+}
+
+/// A kit's `tags` folder as the effects tests read it, against the bundled
+/// definitions.
+#[cfg(test)]
+pub(super) fn loose_kit(root: &str, game: GameId) -> TagSource {
+    TagSource::LooseFolder {
+        root: root.into(),
+        game: Some(game),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
     }
 }
 
@@ -1014,6 +1039,8 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
             range.max(1e-4)
         }),
         add,
+        add_at_illum: false,
+        unit_particle_alpha: false,
         alpha_test: false,
         lit_pixels: chosen("lighting") == "per_pixel_ravi_order_3",
         sort_layer: h3_sort_layer(shader),
@@ -1063,7 +1090,7 @@ fn inline_value(resolved: Option<&ResolvedRenderMethod>, name: &str) -> Option<R
     Some(value.clone())
 }
 
-fn inline_real(resolved: Option<&ResolvedRenderMethod>, name: &str) -> Option<f32> {
+pub(super) fn inline_real(resolved: Option<&ResolvedRenderMethod>, name: &str) -> Option<f32> {
     match inline_value(resolved, name)? {
         ResolvedValue::Real(real) => Some(real),
         _ => None,
@@ -1261,10 +1288,8 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     properties.iter_mut().for_each(|property| property.allocate(&mut seeds));
     let [aspect, color, intensity, alpha, frame, rate, palette] = properties;
     let mut sprite_shader = read_sprite_shader(source, shader)?;
-    if reach {
-        // `default_vs`: a constant self-illumination is at `V_ILLUM_EXPOSURE`.
-        sprite_shader.add = sprite_shader.add.map(|channel| channel * reach_alt_exposure()[1]);
-    }
+    // `default_vs`: Reach's constant self-illumination is at `V_ILLUM_EXPOSURE`.
+    sprite_shader.add_at_illum = reach;
     if cheap {
         // `particle_render_fast.hlsl` warps nothing and lights no pixel.
         sprite_shader.sphere_warp = None;
@@ -3216,16 +3241,18 @@ fn billboard(
 
 /// `default_vs`' exposure: none for a multiply, nor for Halo 2, whose colours
 /// are what shows. Halo 3's at its own; Reach's additives at
-/// `V_ILLUM_EXPOSURE` (`v_alt_exposure.y`) and the rest at `v_exposure.x`.
-fn particle_exposure(blend: H3Blend, exposed: bool, reach: bool) -> f32 {
+/// `V_ILLUM_EXPOSURE` (`v_alt_exposure.y`) and the rest at `v_exposure.x`,
+/// at the area screen effects' `stops`. Beams and contrails take the same
+/// (`effects__beam.hlsl` and `effects__contrail_render.hlsl`, l.258–269).
+pub(super) fn particle_exposure(blend: H3Blend, exposed: bool, reach: bool, stops: f32) -> f32 {
     if blend == H3Blend::Multiply || !exposed {
         1.0
     } else if !reach {
         H3_EXPOSURE
     } else if matches!(blend, H3Blend::Additive | H3Blend::AddSrcTimesSrcAlpha) {
-        reach_alt_exposure()[1]
+        reach_alt_exposure(stops)[1]
     } else {
-        reach_exposure()[0]
+        reach_exposure(stops)[0]
     }
 }
 
@@ -3446,7 +3473,8 @@ impl H3ParticleField {
         particles.filter(|particle| particle.id == id).map(|particle| particle.inverse_lifespan.recip()).next()
     }
 
-    /// The quads of a system, in a world-space triangle list.
+    /// The quads of a system, in a world-space triangle list, at the area
+    /// screen effects' exposure `stops`.
     pub(crate) fn vertices(
         &self,
         index: usize,
@@ -3457,6 +3485,7 @@ impl H3ParticleField {
         lighting: &[[f32; 4]; 10],
         time: f32,
         onset: f32,
+        stops: f32,
     ) -> Vec<H3ParticleVertex> {
         let mut vertices = Vec::new();
         if system.hidden {
@@ -3465,7 +3494,7 @@ impl H3ParticleField {
         if system.child {
             for run in self.instances.get(index).into_iter().flatten() {
                 let at = (run.origin, run.axes, run.start);
-                system.vertices_at(&run.running, at, values, view, lighting, time, &mut vertices);
+                system.vertices_at(&run.running, at, values, view, lighting, time, stops, &mut vertices);
             }
             return vertices;
         }
@@ -3473,7 +3502,7 @@ impl H3ParticleField {
             return vertices;
         };
         let (origin, axes) = location(system, bones);
-        system.vertices_at(running, (origin, axes, onset), values, view, lighting, time, &mut vertices);
+        system.vertices_at(running, (origin, axes, onset), values, view, lighting, time, stops, &mut vertices);
         vertices
     }
 
@@ -3511,11 +3540,12 @@ impl H3ParticleSystem {
         view: &CeFlareView,
         lighting: &[[f32; 4]; 10],
         time: f32,
+        stops: f32,
         vertices: &mut Vec<H3ParticleVertex>,
     ) {
         let system = self;
         let look = &*system.look;
-        let light = particle_exposure(look.shader.blend, look.exposed, look.reach);
+        let light = particle_exposure(look.shader.blend, look.exposed, look.reach, stops);
         let initial = match (look.tint_from_lightmap, look.reach) {
             (false, _) => [1.0; 3],
             (true, false) => lightmap_tint(lighting),
@@ -4515,12 +4545,28 @@ mod tests {
     /// `v_exposure.x`, and multiply none; Halo 3's keep its own.
     #[test]
     fn reach_exposes_a_particle_by_its_blend() {
-        assert_eq!(particle_exposure(H3Blend::Additive, true, true), reach_alt_exposure()[1]);
-        assert_eq!(particle_exposure(H3Blend::AddSrcTimesSrcAlpha, true, true), reach_alt_exposure()[1]);
-        assert_eq!(particle_exposure(H3Blend::AlphaBlend, true, true), reach_exposure()[0]);
-        assert_eq!(particle_exposure(H3Blend::Multiply, true, true), 1.0);
-        assert_eq!(particle_exposure(H3Blend::Additive, true, false), H3_EXPOSURE);
-        assert_eq!(particle_exposure(H3Blend::Additive, false, false), 1.0, "Halo 2's show as they are");
+        assert_eq!(particle_exposure(H3Blend::Additive, true, true, 0.0), reach_alt_exposure(0.0)[1]);
+        assert_eq!(particle_exposure(H3Blend::AddSrcTimesSrcAlpha, true, true, 0.0), reach_alt_exposure(0.0)[1]);
+        assert_eq!(particle_exposure(H3Blend::AlphaBlend, true, true, 0.0), reach_exposure(0.0)[0]);
+        assert_eq!(particle_exposure(H3Blend::Multiply, true, true, 0.0), 1.0);
+        assert_eq!(particle_exposure(H3Blend::Additive, true, false, 0.0), H3_EXPOSURE);
+        assert_eq!(particle_exposure(H3Blend::Additive, false, false, 0.0), 1.0, "Halo 2's show as they are");
+    }
+
+    /// The area screen effects' stops reach Reach's exposure and its
+    /// constant self-illumination, and not Halo 3's.
+    #[test]
+    fn the_stops_move_reachs_particle_exposure_alone() {
+        assert_eq!(particle_exposure(H3Blend::Additive, true, true, 1.0), reach_alt_exposure(1.0)[1]);
+        assert_ne!(reach_alt_exposure(1.0)[1], reach_alt_exposure(0.0)[1]);
+        assert_eq!(particle_exposure(H3Blend::AlphaBlend, true, true, -1.0), reach_exposure(-1.0)[0]);
+        assert_eq!(particle_exposure(H3Blend::Additive, true, false, 1.0), H3_EXPOSURE);
+        let mut shader = H3SpriteShader::blank();
+        shader.add = [1.0; 3];
+        assert_eq!(shader.add(1.0), [1.0; 3], "Halo 3's add as authored");
+        shader.add_at_illum = true;
+        assert_eq!(shader.add(0.0), [reach_alt_exposure(0.0)[1]; 3]);
+        assert_eq!(shader.add(1.0), [reach_alt_exposure(1.0)[1]; 3]);
     }
 
     #[test]
@@ -4541,11 +4587,7 @@ mod tests {
     }
 
     fn reach_source(root: &str) -> TagSource {
-        TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(GameId::HaloReach),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        }
+        loose_kit(root, GameId::HaloReach)
     }
 
     /// With `BLAM_TEST_HREK`: Reach's particle options read by name, and its
