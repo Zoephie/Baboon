@@ -98,6 +98,15 @@ impl H4Shader {
     }
 }
 
+/// The pass's sampler for a parameter. Parameter names are string ids, which
+/// hold lowercase; the source spells the sampler as it likes
+/// (`control_map_SpGlRf`) and GLSL names are exact, so the pass's spelling
+/// is the one to bind.
+fn texture_uniform<'a>(wanted: &'a [(String, TextureKind)], parameter: &str) -> Option<(&'a str, &'a TextureKind)> {
+    let lowercase = format!("{parameter}Texture");
+    wanted.iter().find(|(name, _)| name.eq_ignore_ascii_case(&lowercase)).map(|(name, kind)| (name.as_str(), kind))
+}
+
 /// The bake's constants under the names the translated source reads.
 fn baked_values(baked: &BakedMaterial) -> HashMap<String, H3Value> {
     let mut values = HashMap::new();
@@ -147,11 +156,11 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
         bake(&material, &shader.shader, &|path: &str| (lookup.borrow_mut())(path))
     };
     let blend = h4_blend(baked.alpha_blend_mode);
-    let opaque = blend == H3Blend::Opaque;
     // A decal shader's one technique (`techniques_decals.fxh`) writes the
     // albedo target, ahead of the lights unless the material puts it after
     // (`materialFlags` bit 1, `decal post lighting`).
     let decal = shader.shader.flags & blam_tags::material::shader_flags::IS_DECAL != 0;
+    let opaque = blend == H3Blend::Opaque;
     let (albedo, lit) = if decal {
         (None, shader.pass("_default"))
     } else if opaque {
@@ -186,8 +195,8 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
             let wanted: Vec<(String, TextureKind)> =
                 passes.into_iter().flatten().flat_map(|pass| pass.textures.iter().cloned()).collect();
             for texture in &baked.textures {
-                let uniform = format!("{}Texture", texture.parameter);
-                let Some((_, kind)) = wanted.iter().find(|(name, _)| *name == uniform) else { continue };
+                let Some((uniform, kind)) = texture_uniform(&wanted, &texture.parameter) else { continue };
+                let uniform = uniform.to_owned();
                 if h3.textures.iter().any(|known| known.uniform == uniform) {
                     continue;
                 }
@@ -235,6 +244,21 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Didact's whole suit glowed and the Chief turned to chrome while
+    /// `control_map_spglrf` missed `control_map_SpGlRfTexture` and the white
+    /// placeholder stood in for it.
+    #[test]
+    fn a_parameter_finds_its_sampler_whatever_the_source_spells_it() {
+        let wanted = vec![
+            ("color_mapTexture".to_owned(), TextureKind::Flat),
+            ("control_map_SpGlRfTexture".to_owned(), TextureKind::Flat),
+            ("reflection_mapTexture".to_owned(), TextureKind::Cube),
+        ];
+        assert_eq!(texture_uniform(&wanted, "control_map_spglrf").map(|(name, _)| name), Some("control_map_SpGlRfTexture"));
+        assert_eq!(texture_uniform(&wanted, "reflection_map").map(|(_, kind)| *kind), Some(TextureKind::Cube));
+        assert_eq!(texture_uniform(&wanted, "control_map"), None, "a prefix is not a match");
+    }
 
     #[test]
     fn blend_modes_take_the_preview_states_their_names_describe() {
