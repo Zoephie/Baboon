@@ -941,15 +941,20 @@ impl ModelGlRenderer {
     ) -> String {
         let count = material.textures.iter().find(|texture| texture.uniform == uniform);
         let count = count.map_or(0, |texture| texture.frames.len());
+        let object = batch.material_index as usize;
+        let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
+        // Halo 4: the sampler's frame-index function, on the object's values.
+        if let Some(submit) = material.h4.as_ref().filter(|_| count > 0) {
+            let drawn = super::h4_submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
+            if let Some(index) = submit.frame(uniform, &drawn) {
+                return frame_key(uniform, index);
+            }
+        }
         let animation = material.animations.iter().find(|animation| {
             animation.writes == H3Animated::Frame && animation.uniform == uniform
         });
         match animation.filter(|_| count > 0) {
-            Some(animation) => {
-                let object = batch.material_index as usize;
-                let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
-                frame_key(uniform, animation.frame(count, frame.time, owner, frame.h2_values_of(object)))
-            }
+            Some(animation) => frame_key(uniform, animation.frame(count, frame.time, owner, frame.h2_values_of(object))),
             None => uniform.to_owned(),
         }
     }

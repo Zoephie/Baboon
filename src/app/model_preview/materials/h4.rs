@@ -275,6 +275,7 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                 shield: None,
                 h4: Some(Arc::new(submit)),
             };
+            let mut submit_frames = Vec::new();
             let passes = [h3.albedo.as_ref(), Some(&lit), h3.fringe.as_ref()];
             let wanted: Vec<(String, TextureKind)> =
                 passes.into_iter().flatten().flat_map(|pass| pass.textures.iter().cloned()).collect();
@@ -290,6 +291,18 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                     _ => SamplerKind::Texture2D,
                 };
                 let Some((image, texels, mips)) = h3_image(source, &texture.bitmap, 0, kind, caches) else { continue };
+                // A frame-index function picks among the bitmap's images per draw.
+                let frames: Vec<_> = match texture.frame_index_function {
+                    Some(function) => {
+                        let tag = load_referenced_tag_from_source(source, &texture.bitmap, "bitmap", b"bitm").ok();
+                        let count = tag.as_ref().map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
+                        if count > 1 {
+                            submit_frames.push((uniform.clone(), function, count));
+                        }
+                        (0..count).filter_map(|at| h3_image(source, &texture.bitmap, at as i16, kind, caches)).map(|(image, ..)| image).collect()
+                    }
+                    None => Vec::new(),
+                };
                 h3.textures.push(H3Texture {
                     uniform,
                     image,
@@ -299,8 +312,14 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                         address: [h4_address(texture.address_u), h4_address(texture.address_v)],
                         filter: h4_filter(texture.filter),
                     }),
-                    frames: Vec::new(),
+                    frames,
                 });
+            }
+            // Still this material's alone, so the submit takes them in place.
+            if let Some(submit) = h3.h4.as_mut().and_then(Arc::get_mut) {
+                for (uniform, function, count) in submit_frames {
+                    submit.add_frames(uniform, function, count);
+                }
             }
             Ok(h3)
         }

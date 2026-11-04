@@ -86,6 +86,9 @@ pub(crate) struct H4Submit {
     hologram: Option<f32>,
     /// For a hologram, the screen materials its picture goes through.
     post: Option<Arc<H4HologramPost>>,
+    /// Samplers whose image a frame-index function picks, by uniform: the
+    /// function's queue index and the bitmap's image count.
+    frames: Vec<(String, usize, usize)>,
 }
 
 /// One of `rasterizer_globals`' explicit shaders that is a `material`: its
@@ -143,7 +146,23 @@ impl H4Submit {
             lit_phases: blam_tags::material::entry_point_phase_mask(lit_entry),
             hologram,
             post: None,
+            frames: Vec::new(),
         }
+    }
+
+    /// The sampler `uniform` shows the image a queued function picks, of
+    /// `image_count`.
+    pub(crate) fn add_frames(&mut self, uniform: String, function: usize, image_count: usize) {
+        self.frames.push((uniform, function, image_count));
+    }
+
+    /// Which image `uniform` shows this draw (`MaterialSubmitGetBitmapIndex`),
+    /// held to the bitmap's images; none for a sampler no function animates.
+    pub(crate) fn frame(&self, uniform: &str, object: &DrawnObject<'_>) -> Option<usize> {
+        let (_, function, count) = self.frames.iter().find(|(known, ..)| known == uniform)?;
+        let function = &self.baked.functions.get(*function)?.function;
+        let index = blam_tags::material::bitmap_index(function, object, *count);
+        Some(usize::try_from(index).unwrap_or(0).min(count.saturating_sub(1)))
     }
 
     /// A hologram's, with the screen materials its picture goes through.
@@ -429,5 +448,34 @@ mod tests {
         assert_eq!(packed[2], [1.0, 1.0, 1.0, 0.0]);
         assert_eq!(packed[3], [1.0, 1.0, 1.0, 0.0]);
         assert_eq!(object_parameters(colors, 0)[0], [1.0, 1.0, 1.0, 0.0]);
+    }
+
+    /// With `BLAM_TEST_H4EK`: an animated screen's frame-index function runs
+    /// on the clock and walks its bitmap's images.
+    #[test]
+    fn halo_4_frame_index_walks_a_bitmaps_images() {
+        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+            return;
+        };
+        let root = std::path::Path::new(&root);
+        let read = |path: &str| blam_tags::TagFile::read(root.join(path)).unwrap();
+        let material = blam_tags::material::Material::from_tag(&read(
+            "environments/shared/materials/cinematics/screens/cin_unsc_screen_crest_anim_b.material",
+        ));
+        let shader = read(&format!("{}.material_shader", material.shader.replace('\\', "/")));
+        let shader = blam_tags::material::MaterialShader::from_tag(&shader);
+        let baked = blam_tags::material::bake(&material, &shader, &|_: &str| Some(false));
+        let texture = baked.textures.iter().find(|texture| texture.frame_index_function.is_some()).expect("a framed texture");
+        let function = texture.frame_index_function.unwrap();
+        let bitmap = read(&format!("{}.bitmap", texture.bitmap.replace('\\', "/")));
+        let count = super::super::ce_attachments::elements(bitmap.root(), "bitmaps*").len();
+        assert!(count > 1, "{count}");
+        let mut submit = H4Submit::new(baked, 1, 8, None);
+        submit.add_frames("selfillum_mapTexture".to_owned(), function, count);
+        let at = |time: f32| submit.frame("selfillum_mapTexture", &DrawnObject { values: None, time, owner: 0 }).unwrap();
+        let frames: std::collections::HashSet<usize> = (0..40).map(|step| at(step as f32 * 0.05)).collect();
+        assert!(frames.len() > 1, "{frames:?}");
+        assert!(frames.iter().all(|frame| *frame < count));
+        assert!(submit.frame("other", &DrawnObject { values: None, time: 0.0, owner: 0 }).is_none());
     }
 }
