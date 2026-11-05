@@ -809,7 +809,7 @@ pub(in crate::app) struct H2Pass {
     pub(in crate::app) parameters: Vec<(String, H2ParameterValue)>,
     pub(in crate::app) vertex_constants: Vec<H2VertexConstant>,
     /// What the shader animates of `parameters`, by parameter.
-    pub(in crate::app) animations: HashMap<String, Vec<H2Animation>>,
+    pub(in crate::app) animations: std::collections::BTreeMap<String, Vec<H2Animation>>,
 }
 
 impl H2Pass {
@@ -2165,7 +2165,7 @@ mod tests {
                 H2VertexConstant { parameter: "map".to_owned(), bank: "Cn [0,12]".to_owned(), register: 3, components: "xyw row2 (2D affine xform)".to_owned() },
                 H2VertexConstant { parameter: "tint".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "xyzw".to_owned() },
             ],
-            animations: HashMap::new(),
+            animations: Default::default(),
         };
         let psh = "#const C1.rgb= $tint\n#const C1.a= $glow\n#const C2.rgb= $primary\n\
                    float4 c1 : register(C1);\nfloat4 c2 : register(C2);\n\
@@ -2202,7 +2202,7 @@ mod tests {
                 H2VertexConstant { parameter: "color".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "xyz/rgb (color)".to_owned() },
                 H2VertexConstant { parameter: "bright".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "w (value)".to_owned() },
             ],
-            animations: HashMap::new(),
+            animations: Default::default(),
         };
         let drawn = prepare_draw_pass(&pass, "float4 main(\n)\n{\n    return 0;\n}\n", HashMap::new(), 1.0, |_, _| None, |_| [1.0, 1.0]).unwrap();
         assert_eq!(drawn.tint_facing, [0.5, 0.0, 0.25, 0.8]);
@@ -2239,7 +2239,7 @@ mod tests {
             }],
             parameters: Vec::new(),
             vertex_constants: Vec::new(),
-            animations: HashMap::new(),
+            animations: Default::default(),
         };
         assert!(h2_pass_needs_frame_texture(&pass(TEXACCUM_TARGET), false));
         assert!(!h2_pass_needs_frame_texture(&pass(TEXACCUM_TARGET), true));
@@ -2264,7 +2264,7 @@ mod tests {
             textures: Vec::new(),
             parameters: Vec::new(),
             vertex_constants: Vec::new(),
-            animations: HashMap::new(),
+            animations: Default::default(),
         };
         assert_eq!(pass.pixel_shader_file(), "shaders_shader_passes_transparent_lit_0.psh");
     }

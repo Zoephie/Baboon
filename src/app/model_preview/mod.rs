@@ -172,7 +172,7 @@ pub(crate) struct RenderModelPreview {
     pub h4_cheap_lights: Vec<h4_lights::H4CheapLight>,
     /// Explicit 187 and 204's screen-space passes, by (physically correct,
     /// technique).
-    pub h4_light_passes: std::collections::HashMap<(bool, usize), Arc<h3_shaders::H3Pass>>,
+    pub h4_light_passes: std::collections::BTreeMap<(bool, usize), Arc<h3_shaders::H3Pass>>,
     /// Halo 4's attached `lens_flare`s, and explicit 46's pass that draws them.
     pub h4_flares: Vec<h4_flares::H4FlareAt>,
     pub h4_flare_pass: Option<Arc<h3_shaders::H3Pass>>,

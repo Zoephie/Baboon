@@ -79,7 +79,7 @@ pub(crate) struct H3Definition {
     pub(crate) entry_points: Vec<String>,
     /// Reach's shared-shader rules by entry point; Halo 3 has none, and
     /// compiles both stages with the material's options.
-    shared: HashMap<String, H3SharedStages>,
+    shared: std::collections::BTreeMap<String, H3SharedStages>,
     /// The first `vertex_types` entry, which every pixel shader compiles with.
     pixel_vertex_type: usize,
 }
@@ -108,7 +108,7 @@ pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Def
     // Reach lists entry points with no passes (glass's and mux's `default`),
     // which tool compiles nothing for and the source has no function for.
     let mut entry_points = Vec::new();
-    let mut shared = HashMap::new();
+    let mut shared = std::collections::BTreeMap::new();
     for entry in elements(root, "entry_points") {
         let passes = elements(entry, "passes");
         if dialect == H3Dialect::Reach && passes.is_empty() {

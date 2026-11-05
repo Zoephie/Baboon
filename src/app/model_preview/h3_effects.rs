@@ -1,7 +1,6 @@
 //! Halo 3's attached effects, as `effect_new_looping` runs them on an object at
 //! rest: what each event's parts are, and where they go.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
@@ -243,7 +242,7 @@ impl H3EffectTimes {
 /// the effect then, so its events run from there. What was on from the first
 /// frame has run all along.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct H3EffectOnsets(HashMap<(u8, String), (bool, f32)>);
+pub(crate) struct H3EffectOnsets(std::collections::BTreeMap<(u8, String), (bool, f32)>);
 
 impl H3EffectOnsets {
     pub(crate) fn of(&mut self, object: u8, name: &str, values: Option<&H2FunctionValues>, time: f32) -> f32 {
