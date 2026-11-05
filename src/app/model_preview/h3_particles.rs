@@ -1972,6 +1972,45 @@ struct H3Emitter {
     axis_scale: [f32; 3],
     /// Reach's `turbulence` movement, which only the card runs.
     turbulence: Option<H3ParticleTurbulence>,
+    /// Halo 4's own update terms.
+    h4: Option<H4EmitterTerms>,
+}
+
+/// What Halo 4's `particle_update.fx` adds over Reach's: its system's
+/// `particles live forever` and `disable velocity`, its `size scale`
+/// (`m_scaleMultiplier`), and the emitter's scale x and y and alpha white
+/// point.
+#[derive(Debug)]
+struct H4EmitterTerms {
+    live_forever: bool,
+    disable_velocity: bool,
+    size_scale: f32,
+    scale: Option<[H3ParticleProperty; 2]>,
+    white_point: Option<H3ParticleProperty>,
+}
+
+impl H4EmitterTerms {
+    /// `liveForever`: the age comes round, and from just short of 1 back to 0.
+    fn age(&self, age: f32) -> f32 {
+        if !self.live_forever {
+            return age;
+        }
+        let age = age.fract();
+        if age > 0.99 { 0.0 } else { age }
+    }
+
+    /// The step a frame moves a particle along its velocity.
+    fn travel(&self, dt: f32) -> f32 {
+        if self.disable_velocity { 0.0 } else { dt * self.size_scale }
+    }
+
+    /// `m_size`'s and `m_aspect`'s factors: scale y and the size scale, and
+    /// scale x over scale y.
+    fn size_and_aspect(&self, state: &H3ParticleState) -> [f32; 2] {
+        let [x, y] = self.scale.as_ref().map_or([1.0; 2], |[x, y]| [x.scalar(state), y.scalar(state)]);
+        let aspect = if y != 0.0 { x / y } else { 1.0 };
+        [y * self.size_scale, aspect]
+    }
 }
 
 /// A Halo 3 or ODST emitter's `physics` movement, when its flags name one:
@@ -2050,12 +2089,16 @@ fn read_emitter(
     emitter: TagStruct<'_>,
     system_flagged: impl Fn(&str) -> bool,
     look: &H3ParticleLook,
+    size_scale: f32,
 ) -> Option<H3Emitter> {
-    let reach = source.game() == Some(GameId::HaloReach);
+    // Halo 4 seeds and moves as Reach does, with terms of its own.
+    let halo4 = source.game() == Some(GameId::Halo4);
+    let reach = source.game() == Some(GameId::HaloReach) || halo4;
     let shape = H3EmissionShape::named(&emitter.read_enum_name("emission shape").unwrap_or_default())?;
     let mut properties = unallocated_properties(emitter, EMITTER_PROPERTIES)?;
     let movement_flags = emitter.descend("particle movement").and_then(|movement| movement.read_flag_names("flags"));
     let movement_flagged = |wanted: &str| movement_flags.iter().flatten().any(|(_, name)| name.starts_with(wanted));
+    let (live_forever, disable_velocity) = (system_flagged("particles live forever"), system_flagged("disable velocity"));
     let (update, card_at_rest) = particle_update(system_flagged, look.any_attachments, movement_flagged);
     let controllers = flagged_controllers(movement_flagged);
     let (physics, flock, collider, turbulence);
@@ -2134,6 +2177,19 @@ fn read_emitter(
             && emitter_flags.iter().any(|(_, name)| name.starts_with("volume emitter particle velocities are random")),
         axis_scale: if reach { reach_axis_scale([raw_scale.x, raw_scale.y, raw_scale.z]) } else { [1.0; 3] },
         turbulence,
+        h4: halo4.then(|| {
+            // Read past Reach's allocation [inferred: their seeds follow].
+            let property = |name: &str| emitter.descend(name).and_then(|holder| H3ParticleProperty::unallocated(holder));
+            let scale = property("particle scale x").zip(property("particle scale y")).map(|(x, y)| [x, y]);
+            H4EmitterTerms {
+                live_forever,
+                disable_velocity,
+                // `c_particle_system_definition::postprocess_block_proc`.
+                size_scale: if size_scale < 1e-4 { 1.0 } else { size_scale },
+                scale,
+                white_point: property("particle alpha white point"),
+            }
+        }),
     })
 }
 
@@ -2268,6 +2324,7 @@ fn read_h2_emitter(
         })
         .collect();
     Some(H3Emitter {
+        h4: None,
         update: H3ParticleUpdate::Cpu,
         card_at_rest: false,
         spawn_slack: 0.0001,
@@ -2371,7 +2428,8 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
         (Arc::new(look), elements(system, "emitters").iter().filter_map(read).map(Arc::new).collect())
     } else {
         let look = read_look(source, &path).map(Arc::new)?;
-        let read = |emitter: &TagStruct<'_>| read_emitter(source, *emitter, flagged, &look).map(Arc::new);
+        let size_scale = system.read_real("size scale").unwrap_or(1.0);
+        let read = |emitter: &TagStruct<'_>| read_emitter(source, *emitter, flagged, &look, size_scale).map(Arc::new);
         let emitters = elements(system, "emitters").iter().filter_map(read).collect();
         (look, emitters)
     };
@@ -3070,6 +3128,9 @@ impl H3Emitter {
             if self.persistent {
                 particle.age = particle.age.fract();
             }
+            if let Some(h4) = &self.h4 {
+                particle.age = h4.age(particle.age);
+            }
             if particle.age > 1.0 || (particle.resting && dies_at_rest) {
                 ended.push((particle.id, particle.position, particle.velocity));
                 return false;
@@ -3090,8 +3151,9 @@ impl H3Emitter {
                 return true;
             }
             particle.landed = false;
+            let travel = self.h4.as_ref().map_or(dt, |h4| h4.travel(dt));
             for axis in 0..3 {
-                particle.position[axis] += particle.velocity[axis] * dt;
+                particle.position[axis] += particle.velocity[axis] * travel;
             }
             particle.rotation = (particle.rotation + particle.rotation_rate * dt).rem_euclid(1.0);
             particle.frame = (particle.frame + particle.frame_rate * dt).rem_euclid(1.0);
@@ -3133,12 +3195,16 @@ impl H3Emitter {
     ) -> bool {
         let dt = if std::mem::take(&mut particle.spawned_this_frame) { 0.0 } else { dt };
         particle.age += particle.inverse_lifespan * dt;
+        if let Some(h4) = &self.h4 {
+            particle.age = h4.age(particle.age);
+        }
         if particle.age >= 1.0 {
             ended.push((particle.id, particle.position, particle.velocity));
             return false;
         }
         let (position, velocity) = (particle.position, particle.velocity);
-        particle.position = std::array::from_fn(|axis| position[axis] + velocity[axis] * dt);
+        let travel = self.h4.as_ref().map_or(dt, |h4| h4.travel(dt));
+        particle.position = std::array::from_fn(|axis| position[axis] + velocity[axis] * travel);
         let state = particle.state(state);
         if let (Some(turbulence), Some(xform)) = (&self.turbulence, turbulence) {
             let strength = turbulence.strength.scalar(&state);
@@ -4436,9 +4502,45 @@ mod tests {
     }
 
     /// An emitter with nothing but `shape`, for what reads its fields alone.
+    fn h4_terms(live_forever: bool, disable_velocity: bool, size_scale: f32) -> H4EmitterTerms {
+        H4EmitterTerms { live_forever, disable_velocity, size_scale, scale: None, white_point: None }
+    }
+
+    /// `liveForever` brings the age round, and from past 0.99 back to 0;
+    /// without it the age runs on to death.
+    #[test]
+    fn a_particle_that_lives_forever_comes_round() {
+        let forever = h4_terms(true, false, 1.0);
+        assert!((forever.age(1.25) - 0.25).abs() < 1e-6);
+        assert_eq!(forever.age(0.995), 0.0);
+        assert_eq!(forever.age(0.5), 0.5);
+        assert_eq!(h4_terms(false, false, 1.0).age(1.25), 1.25);
+    }
+
+    /// `disableVelocity` holds it in place; otherwise the size scale
+    /// multiplies the step.
+    #[test]
+    fn velocity_moves_by_the_size_scale_unless_disabled() {
+        assert_eq!(h4_terms(false, true, 2.0).travel(0.5), 0.0);
+        assert_eq!(h4_terms(false, false, 2.0).travel(0.5), 1.0);
+    }
+
+    /// Scale y and the size scale go into the size, scale x over scale y
+    /// into the aspect; with neither the size scale alone.
+    #[test]
+    fn scale_x_and_y_bake_into_size_and_aspect() {
+        let base = H3ParticleState::default();
+        let none = h4_terms(false, false, 3.0);
+        assert_eq!(none.size_and_aspect(&base), [3.0, 1.0]);
+        let constant = |value: f32| H3ParticleProperty::fixed(value).unwrap();
+        let scaled = H4EmitterTerms { scale: Some([constant(2.0), constant(0.5)]), ..h4_terms(false, false, 1.0) };
+        assert_eq!(scaled.size_and_aspect(&base), [0.5, 4.0]);
+    }
+
     fn test_emitter(shape: H3EmissionShape) -> H3Emitter {
         let fixed = || H3ParticleProperty::fixed(0.0).unwrap();
         H3Emitter {
+            h4: None,
             update: H3ParticleUpdate::Gpu,
             card_at_rest: false,
             spawn_slack: 0.0,
@@ -4747,11 +4849,13 @@ impl H3ParticleSystem {
                 let color = look.color.color(&state);
                 let alpha = (emitter.alpha.scalar(&state) * look.alpha.scalar(&state)).clamp(0.0, 1.0);
                 let rgb: [f32; 3] = std::array::from_fn(|axis| (tint[axis] * color[axis]).clamp(0.0, 1.0));
+                let [size_factor, aspect_factor] = emitter.h4.as_ref().map_or([1.0; 2], |h4| h4.size_and_aspect(&state));
+                let white_point = emitter.h4.as_ref().and_then(|h4| h4.white_point.as_ref()).map_or(1.0, |white| white.scalar(&state));
                 let packed = H4ParticleState {
                     position: particle.position,
-                    size: emitter.size.scalar(&state) * emitter.scale.scalar(&state),
+                    size: emitter.size.scalar(&state) * emitter.scale.scalar(&state) * size_factor,
                     velocity: particle.velocity,
-                    aspect: look.aspect.scalar(&state),
+                    aspect: look.aspect.scalar(&state) * aspect_factor,
                     random: [mirror(particle.flip[0]), mirror(particle.flip[1]), particle.seeds[0], particle.seeds[1]],
                     random2: [particle.seeds[2], particle.seeds[3], particle.seeds[4], particle.seeds[5]],
                     physical_rotation: if emitter.rotation_given { 0.0 } else { particle.rotation.rem_euclid(1.0) },
@@ -4768,7 +4872,7 @@ impl H3ParticleSystem {
                     // A black point of 1 would pick a sixth corner set, past
                     // the five; GLSL reads nothing sound there.
                     black_point: emitter.black_point.scalar(&state).clamp(0.0, 0.998),
-                    white_point: 1.0,
+                    white_point: white_point.clamp(0.0, 1.0),
                     palette: look.palette.scalar(&state).clamp(0.0, 1.0),
                     axis: particle.axis,
                     color: [rgb[0], rgb[1], rgb[2], alpha],
@@ -4783,7 +4887,10 @@ impl H3ParticleSystem {
                 to_world: [turned[0], turned[1], turned[2], offset],
                 states,
                 near: [system.near_range.recip(), system.near_cutoff],
-                black_or_white: emitter.black_point.function.as_constant().is_none_or(|value| value != 0.0),
+                black_or_white: emitter.black_point.function.as_constant().is_none_or(|value| value != 0.0)
+                    || emitter.h4.as_ref().and_then(|h4| h4.white_point.as_ref()).is_some_and(|white| {
+                        white.function.as_constant().is_none_or(|value| value != 1.0)
+                    }),
             });
         }
     }
