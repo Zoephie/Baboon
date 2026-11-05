@@ -225,14 +225,15 @@ fn object_kind(kind: &str) -> (&'static str, &'static [u8; 4]) {
     }
 }
 
-/// Takes `shot`, and gives back its pixels: RGBA, bottom row first.
+/// Takes `shot`, and gives back its pixels (RGBA, bottom row first) and the
+/// load's geometry id, which names its slot in `renderer`.
 pub(super) fn render(
     gl: &Arc<glow::Context>,
     renderer: &mut ModelGlRenderer,
     source: &TagSource,
     shot: &Shot,
     options: &ShotOptions,
-) -> Vec<u8> {
+) -> (Vec<u8>, u64) {
     let names = match source {
         TagSource::LooseFolder { definitions_root, .. } => {
             TagNameIndex::load_game(definitions_root, options.game).unwrap()
@@ -532,15 +533,33 @@ pub(super) fn render(
             glow::UNSIGNED_BYTE,
             glow::PixelPackData::Slice(Some(&mut pixels)),
         );
-        pixels
+        (pixels, data.geometry_id)
     }
 }
 
+/// What [`shoot`] gives back of a shot.
+pub(in crate::app::model_preview) struct Shown {
+    /// RGBA, bottom row first.
+    pub(in crate::app::model_preview) pixels: Vec<u8>,
+    /// A line per simulation field its slot kept: [`super::super::gates::field_lines`].
+    pub(in crate::app::model_preview) simulation: String,
+}
+
 /// Takes each shot in one headless context, from the kit `source` reads.
-pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, ShotOptions)]) -> Vec<Vec<u8>> {
+pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, ShotOptions)]) -> Vec<Shown> {
     let gl = Arc::new(headless_gl());
     let mut renderer = ModelGlRenderer::new(&gl).unwrap();
-    shots.iter().map(|(shot, options)| render(&gl, &mut renderer, source, shot, options)).collect()
+    shots
+        .iter()
+        .map(|(shot, options)| {
+            let (pixels, geometry_id) = render(&gl, &mut renderer, source, shot, options);
+            let mut simulation = String::new();
+            renderer.for_each_simulation(geometry_id, |name, state| {
+                super::super::gates::field_lines(&mut simulation, name, &state);
+            });
+            Shown { pixels, simulation }
+        })
+        .collect()
 }
 
 /// The size [`render`] shoots at.
@@ -573,7 +592,7 @@ fn h2_shot() {
             pitch: f[5].parse().unwrap(),
             kind: None,
         };
-        std::fs::write(f[1], render(&gl, &mut renderer, &source, &shot, &options)).unwrap();
+        std::fs::write(f[1], render(&gl, &mut renderer, &source, &shot, &options).0).unwrap();
     }
 }
 

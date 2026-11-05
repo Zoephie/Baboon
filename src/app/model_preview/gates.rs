@@ -136,7 +136,8 @@ fn line(out: &mut String, name: &str, text: &str) {
 /// Hashes a struct's compact `Debug` as it is written, a line per top-level
 /// field, so a difference names the field it is in without the whole text
 /// ever being held (a Halo 4 object's particles run to gigabytes). Fields are
-/// found by bracket depth, outside quoted text.
+/// found by bracket depth, outside quoted text, and only in a braced struct:
+/// anything else (a tuple struct, a map) is one line under the prefix.
 struct FieldLines<'a> {
     out: &'a mut String,
     prefix: &'a str,
@@ -148,16 +149,38 @@ struct FieldLines<'a> {
     escaped: bool,
     /// At the struct's own level, a field's name as it is read, up to `: `.
     naming: Option<String>,
+    /// The value opened with `{` after a type's name, so is a struct with
+    /// named fields (a bare map opens with `{` too).
+    braced: bool,
+    /// What came before the value's first bracket.
+    named: String,
+    /// Every byte, for a value that is not a braced struct.
+    whole: (usize, u64),
+    /// Whether any field's line was written.
+    split: bool,
 }
 
 impl FieldLines<'_> {
     fn finish_field(&mut self) {
         if let Some((name, length, hash)) = self.field.take() {
             let _ = writeln!(self.out, "{}.{name} {length} {hash:016x}", self.prefix);
+            self.split = true;
+        }
+    }
+
+    /// The last field's line, or the whole value's if it had none.
+    fn close(mut self) {
+        self.finish_field();
+        if !self.split {
+            let (length, hash) = self.whole;
+            let _ = writeln!(self.out, "{} {length} {hash:016x}", self.prefix);
         }
     }
 
     fn step(&mut self, byte: u8) {
+        let (length, hash) = &mut self.whole;
+        *length += 1;
+        *hash = (*hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
         if let Some(name) = &mut self.naming {
             if byte == b' ' && name.ends_with(':') {
                 name.pop();
@@ -182,16 +205,23 @@ impl FieldLines<'_> {
             }
             return;
         }
+        if self.depth == 0 && self.named.len() < 128 && !matches!(byte, b'{' | b'[' | b'(') {
+            self.named.push(char::from(byte));
+        }
         match byte {
             b'"' => self.quoted = true,
             b'{' | b'[' | b'(' => {
                 self.depth += 1;
-                if self.depth == 1 {
+                let name = self.named.trim();
+                let struct_name =
+                    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_');
+                if self.depth == 1 && byte == b'{' && struct_name {
+                    self.braced = true;
                     self.naming = Some(String::new());
                 }
             }
             b'}' | b']' | b')' => self.depth = self.depth.saturating_sub(1),
-            b',' if self.depth == 1 => self.naming = Some(String::new()),
+            b',' if self.depth == 1 && self.braced => self.naming = Some(String::new()),
             _ => {}
         }
     }
@@ -205,7 +235,7 @@ impl std::fmt::Write for FieldLines<'_> {
 }
 
 /// A line per top-level field of `value`'s `Debug`.
-fn field_lines(out: &mut String, prefix: &str, value: &impl std::fmt::Debug) {
+pub(super) fn field_lines(out: &mut String, prefix: &str, value: &impl std::fmt::Debug) {
     let mut lines = FieldLines {
         out,
         prefix,
@@ -214,9 +244,13 @@ fn field_lines(out: &mut String, prefix: &str, value: &impl std::fmt::Debug) {
         quoted: false,
         escaped: false,
         naming: None,
+        braced: false,
+        named: String::new(),
+        whole: (0, 0xcbf2_9ce4_8422_2325),
+        split: false,
     };
     let _ = write!(lines, "{value:?}");
-    lines.finish_field();
+    lines.close();
 }
 
 /// What a load produced, without the ids that count loads.
@@ -317,8 +351,11 @@ fn gate_load() {
             let started = std::time::Instant::now();
             let data = kit_preview(&root, *game, path, extension, group);
             let loaded = started.elapsed();
-            let _ = writeln!(snapshot, "== {path}.{extension}");
-            snapshot.push_str(&load_snapshot(&data));
+            // Each line names its object, so a report says whose field moved.
+            let object = path.rsplit('\\').next().unwrap_or(path);
+            for row in load_snapshot(&data).lines() {
+                let _ = writeln!(snapshot, "{object}.{extension} {row}");
+            }
             eprintln!(
                 "{path}: load {loaded:.1?}, snapshot {:.1?}",
                 started.elapsed() - loaded
@@ -423,8 +460,9 @@ fn save_png(path: &std::path::Path, pixels: &[u8]) {
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 }
 
-/// G-px: each object of [`PIXEL_SET`], in each of [`LOOKS`], draws the
-/// same pixels as before. Blessing keeps every shot as a PNG beside the
+/// G-px and G-sim: each object of [`PIXEL_SET`], in each of [`LOOKS`], draws
+/// the same pixels as before, and its slot keeps the same simulations (a line
+/// per field, under `sim/`). Blessing keeps every shot as a PNG beside the
 /// hashes; a shot that differs is saved under `changed/` to set against it.
 #[cfg(target_os = "macos")]
 #[test]
@@ -435,7 +473,7 @@ fn gate_pixels() {
         eprintln!("skipping: BABOON_GATE_DIR is not set");
         return;
     };
-    let dir = dir.join("px");
+    let (sim_dir, dir) = (dir.join("sim"), dir.join("px"));
     let bless = std::env::var_os("BABOON_GATE_BLESS").is_some();
     let mut failures = Vec::new();
     for (variable, game, objects) in PIXEL_SET {
@@ -475,7 +513,12 @@ fn gate_pixels() {
             started.elapsed()
         );
         let mut snapshot = String::new();
-        for (name, pixels) in names.iter().zip(&images) {
+        let mut simulations = String::new();
+        for (name, shown) in names.iter().zip(&images) {
+            for row in shown.simulation.lines() {
+                let _ = writeln!(simulations, "{name} {row}");
+            }
+            let pixels = &shown.pixels;
             let hash = pixels.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
                 (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
             });
@@ -487,8 +530,11 @@ fn gate_pixels() {
                 );
             }
         }
+        let simulated = bless_or_compare(&sim_dir, &format!("{game:?}.txt"), &simulations);
+        failures.extend(simulated.err());
         if let Err(report) = bless_or_compare(&dir, &format!("{game:?}.txt"), &snapshot) {
-            for (name, pixels) in names.iter().zip(&images) {
+            for (name, shown) in names.iter().zip(&images) {
+                let pixels = &shown.pixels;
                 if report.contains(&format!("+ {name} ")) {
                     save_png(
                         &dir.join("changed")
@@ -542,4 +588,17 @@ fn field_lines_name_each_top_level_field() {
         changed.lines().nth(2),
         "a nested change moves its field's line"
     );
+    // A tuple struct or a bare map is one line under the prefix.
+    #[derive(Debug)]
+    struct Wrapped(
+        #[allow(dead_code, reason = "read through Debug")] std::collections::BTreeMap<u8, u8>,
+    );
+    let wrapped = Wrapped([(1, 2)].into());
+    let map = std::collections::BTreeMap::from([(3, 4)]);
+    for value in [&wrapped as &dyn std::fmt::Debug, &map] {
+        let mut out = String::new();
+        field_lines(&mut out, "w", &value);
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert!(out.starts_with("w "), "{out}");
+    }
 }

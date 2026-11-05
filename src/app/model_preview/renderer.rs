@@ -4232,6 +4232,31 @@ impl Default for MaterialGlTextures {
 }
 
 impl ModelGlRenderer {
+    /// Each simulation `geometry_id`'s slot keeps between frames, by name,
+    /// for the refactor's G-sim gate. Halo CE's particle fields are left out:
+    /// they hold no `Debug`, and no full CE kit is at hand to run them.
+    #[cfg(test)]
+    pub(super) fn for_each_simulation(&self, geometry_id: u64, mut visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
+        let Some(index) = self.lru.slots.iter().position(|(id, _)| *id == geometry_id) else {
+            return;
+        };
+        let Some(slot) = self.slots.get(index) else {
+            return;
+        };
+        visit("h2_contrails", &slot.h2_contrails);
+        visit("h3_particles", &slot.h3_particles);
+        visit("reach_cheap", &slot.reach_cheap);
+        visit("ce_contrails", &slot.ce_contrails);
+        visit("ce_glows", &slot.ce_glows);
+        visit("ce_flags", &slot.ce_flags);
+        visit("h3_strips", &slot.h3_strips);
+        visit("h4_trails", &slot.h4_trails);
+        visit("h3_onsets", &slot.h3_onsets);
+        visit("h3_cloth", &slot.h3_cloth);
+        visit("reach_antennas", &slot.reach_antennas);
+        visit("h3_leaves", &slot.h3_leaves);
+    }
+
     /// `flag_render_proper` builds its mesh from where the sheet is now.
     unsafe fn move_ce_flags(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         let uploaded = &mut self.slots[slot];
