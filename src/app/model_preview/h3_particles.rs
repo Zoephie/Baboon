@@ -679,6 +679,21 @@ fn h2_controllers(source: &TagSource, movement: TagStruct<'_>) -> Vec<H3Particle
         .collect()
 }
 
+/// A particle's physical rotation at birth, in turns: random with `random
+/// starting rotation`, else Halo 4's three-quarter turn for `bitmap authored
+/// vertically` (`c_particle_definition::initialize_particle`, the 360's
+/// 0x82AFA548; `particles.md` §1.3). Halo 4's shaders never read that flag,
+/// so this is its only quarter turn; Halo 3 and Reach turn at the draw instead.
+fn starting_rotation(random_rotation: bool, halo4_vertical: bool, random: impl FnOnce() -> f32) -> f32 {
+    if random_rotation {
+        random()
+    } else if halo4_vertical {
+        0.75
+    } else {
+        0.0
+    }
+}
+
 /// `initialize_particle`'s nudge to a speed of none, which what faces its
 /// velocity needs one to have. Halo 3 gives it to everything, ODST and Reach
 /// (the 360's 0x82EE3C98) only to those.
@@ -3069,7 +3084,7 @@ impl H3Emitter {
                 inverse_lifespan,
                 position,
                 velocity,
-                rotation: if look.random_rotation { random.next() } else { 0.0 },
+                rotation: starting_rotation(look.random_rotation, look.h4.is_some() && look.vertical, || random.next()),
                 rotation_rate: self.rotation_rate.scalar(&particle_state),
                 frame: 0.0,
                 frame_rate: look.rate.scalar(&particle_state),
@@ -4705,6 +4720,16 @@ mod tests {
         assert_eq!(cheap_billboard(H3Billboard::CameraFacing), H3Billboard::CameraFacing);
         assert_eq!(cheap_billboard(H3Billboard::ScreenParallel), H3Billboard::World);
         assert_eq!(cheap_billboard(H3Billboard::LocalVertical), H3Billboard::World);
+    }
+
+    /// Halo 4 births a vertically authored sprite a three-quarter turn round,
+    /// so `parallel to direction` flames lie along their velocity, not across
+    /// the view; a random start wins, and nothing else turns.
+    #[test]
+    fn halo_4_vertical_sprites_start_three_quarters_round() {
+        assert_eq!(starting_rotation(false, true, || 0.3), 0.75);
+        assert_eq!(starting_rotation(true, true, || 0.3), 0.3);
+        assert_eq!(starting_rotation(false, false, || 0.3), 0.0);
     }
 
     /// `DOUBLE_SPRITE_TEXCOORD`: the next frame when frames blend, else a
