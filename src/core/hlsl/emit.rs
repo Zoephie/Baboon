@@ -43,6 +43,17 @@ const HELPERS: &str = "float hlsl_fmod(float a, float b) { return a - b * trunc(
 vec2 hlsl_fmod(vec2 a, vec2 b) { return a - b * trunc(a / b); }
 vec3 hlsl_fmod(vec3 a, vec3 b) { return a - b * trunc(a / b); }
 vec4 hlsl_fmod(vec4 a, vec4 b) { return a - b * trunc(a / b); }
+float hlsl_f16tof32(uint h) {
+    uint e = (h >> 10) & 31u;
+    uint m = h & 1023u;
+    float v = e == 0u ? float(m) * exp2(-24.0)
+        : e == 31u ? uintBitsToFloat(m == 0u ? 0x7F800000u : 0x7FC00000u)
+        : exp2(float(e) - 15.0) * (1.0 + float(m) / 1024.0);
+    return (h & 0x8000u) != 0u ? -v : v;
+}
+vec2 hlsl_f16tof32(uvec2 h) { return vec2(hlsl_f16tof32(h.x), hlsl_f16tof32(h.y)); }
+vec3 hlsl_f16tof32(uvec3 h) { return vec3(hlsl_f16tof32(h.x), hlsl_f16tof32(h.y), hlsl_f16tof32(h.z)); }
+vec4 hlsl_f16tof32(uvec4 h) { return vec4(hlsl_f16tof32(h.xy), hlsl_f16tof32(h.zw)); }
 ";
 
 /// Helpers that `discard`, which only a pixel stage may.
@@ -164,6 +175,7 @@ fn glsl_base(ty: &Type) -> String {
             None => format!("T_{name}"),
         },
         Type::Texture(kind) => sampler_type(*kind).to_owned(),
+        Type::Structured(_) => "usamplerBuffer".to_owned(),
         Type::Sampler => "int".to_owned(),
     }
 }
@@ -220,6 +232,8 @@ struct Emitter<'a> {
     function_text: Vec<String>,
     /// Functions being written, which HLSL forbids reaching again.
     open: HashSet<usize>,
+    /// The `StructuredBuffer`s whose loader is written.
+    loaders: HashSet<String>,
     structs: Vec<Arc<str>>,
     struct_text: Vec<String>,
     globals: HashMap<usize, Code>,
@@ -260,6 +274,7 @@ pub(crate) fn translate_with(
         functions: HashMap::new(),
         function_text: Vec::new(),
         open: HashSet::new(),
+        loaders: HashSet::new(),
         structs: Vec::new(),
         struct_text: Vec::new(),
         globals: HashMap::new(),
@@ -464,6 +479,16 @@ impl Emitter<'_> {
                 self.global_lines.push((index, format!("uniform {} {name};\n", sampler_type(*kind))));
                 self.textures.push((name.clone(), *kind));
                 let code = Code::new(name, ty);
+                self.globals.insert(index, code.clone());
+                return Ok(code);
+            }
+            // A buffer texture of 32-bit words, one to a texel, as a
+            // `ByteAddressBuffer` is.
+            Type::Structured(element) => {
+                self.use_type(element)?;
+                self.global_lines.push((index, format!("uniform usamplerBuffer {name};\n")));
+                self.textures.push((name.clone(), TextureKind::Bytes));
+                let code = Code::new(name, ty.clone());
                 self.globals.insert(index, code.clone());
                 return Ok(code);
             }
@@ -1226,6 +1251,10 @@ impl Emitter<'_> {
             Type::Matrix(scalar, _, columns) => {
                 Ok(Code::new(format!("{}[{}]", object.text, index.text), Type::Vector(*scalar, *columns)))
             }
+            Type::Structured(element) => {
+                let loader = self.structured_loader(&object.text, element)?;
+                Ok(Code::new(format!("{loader}({})", index.text), (**element).clone()))
+            }
             other => Err(format!("cannot index {other:?}")),
         }
     }
@@ -1321,6 +1350,13 @@ impl Emitter<'_> {
             return Ok(Code::new(format!("{glsl}({})", texts[0]), ty));
         }
         match name {
+            // The low half of each word, as a half float. GL 4.1 has no
+            // `unpackHalf2x16`.
+            "f16tof32" => {
+                let (texts, ty) = self.unified(values, Some(Scalar::Uint))?;
+                let ty = with_scalar(&ty, Scalar::Float);
+                Ok(Code::new(format!("hlsl_f16tof32({})", texts[0]), ty))
+            }
             "saturate" => {
                 let (texts, ty) = self.unified(values, float)?;
                 Ok(Code::new(format!("clamp({}, 0.0, 1.0)", texts[0]), ty))
@@ -1494,6 +1530,54 @@ impl Emitter<'_> {
             }
             (Type::Vector(..), Type::Vector(..)) => self.intrinsic("dot", vec![left, right]),
             (a, b) => Err(format!("mul of {a:?} and {b:?}")),
+        }
+    }
+
+    /// The function that reads element `i` of `StructuredBuffer` `buffer`: its
+    /// fields' words in order, packed as D3D packs a structured buffer
+    /// (4-byte aligned, no padding to 16).
+    fn structured_loader(&mut self, buffer: &str, element: &Type) -> Result<String, String> {
+        let name = format!("hlsl_load_{buffer}");
+        if self.loaders.contains(&name) {
+            return Ok(name);
+        }
+        let mut body = String::new();
+        let mut word = 0usize;
+        self.load_fields(buffer, element, "r", &mut word, &mut body)?;
+        let base = glsl_base(element);
+        let text = format!(
+            "{base} {name}(int i) {{\n    {base} r;\n    int w = i * {word};\n{body}    return r;\n}}\n"
+        );
+        self.function_text.push(text);
+        self.loaders.insert(name.clone());
+        Ok(name)
+    }
+
+    fn load_fields(&mut self, buffer: &str, ty: &Type, place: &str, word: &mut usize, body: &mut String) -> Result<(), String> {
+        let fetch = |at: usize| format!("texelFetch({buffer}, w + {at}).r");
+        match ty {
+            Type::Named(name) => {
+                for field in self.struct_fields(name)?.to_vec() {
+                    let field_ty = self.resolved(&field)?;
+                    let place = format!("{place}.{}", field_name(&field.name));
+                    self.load_fields(buffer, &field_ty, &place, word, body)?;
+                }
+                Ok(())
+            }
+            Type::Scalar(scalar) | Type::Vector(scalar, _) => {
+                let count = component_count(ty);
+                let words: Vec<String> = (*word..*word + count).map(fetch).collect();
+                *word += count;
+                let raw = if count == 1 { words[0].clone() } else { format!("uvec{count}({})", words.join(", ")) };
+                let value = match scalar {
+                    Scalar::Float => format!("uintBitsToFloat({raw})"),
+                    Scalar::Uint => raw,
+                    Scalar::Int | Scalar::Bool => format!("{}({raw})", glsl_base(ty)),
+                };
+                body.push_str(&format!("    {place} = {value};\n"));
+                Ok(())
+            }
+            other => Err(format!("a structured buffer of {other:?}")),
         }
     }
 
@@ -1931,6 +2015,28 @@ mod tests {
         let translated = glsl(source, "main_ps", Stage::Pixel);
         assert!(translated.source.contains("texture(l_s, l_uv)"), "{}", translated.source);
         assert_eq!(translated.textures, [("b".to_owned(), TextureKind::Flat)]);
+    }
+
+    /// A `StructuredBuffer<T>[i]` reads `T`'s fields from `i` times its
+    /// size in words, each word a texel; a field of a type it cannot hold
+    /// fails.
+    #[test]
+    fn a_structured_buffer_loads_its_struct_by_index() {
+        let source = "struct s { float4 pos; uint2 vel; int k; };\nStructuredBuffer<s> b : register(t16);\n\
+                      float4 main_vs(uint id : SV_VertexID) : SV_Position { s v = b[id / 4]; return v.pos + float4(v.vel, v.k, 0); }\n";
+        let translated = glsl(source, "main_vs", Stage::Vertex);
+        let text = &translated.source;
+        assert!(text.contains("uniform usamplerBuffer b;"), "{text}");
+        assert!(text.contains("int w = i * 7;"), "seven words to an element: {text}");
+        assert!(text.contains("r.pos = uintBitsToFloat(uvec4(texelFetch(b, w + 0).r, texelFetch(b, w + 1).r, texelFetch(b, w + 2).r, texelFetch(b, w + 3).r));"), "{text}");
+        assert!(text.contains("r.vel = uvec2(texelFetch(b, w + 4).r, texelFetch(b, w + 5).r);"), "{text}");
+        assert!(text.contains("r.k = int(texelFetch(b, w + 6).r);"), "{text}");
+        assert!(text.contains("hlsl_load_b("), "{text}");
+        assert_eq!(translated.textures, [("b".to_owned(), TextureKind::Bytes)]);
+        let mut include = |_: &str, _: &str| None;
+        let matrix = "struct m { float4x4 x; };\nStructuredBuffer<m> b;\nfloat4 main_vs(uint id : SV_VertexID) : SV_Position { return b[id].x[0]; }\n";
+        let tokens = Preprocessor::new(&[], &mut include).run(matrix).unwrap();
+        assert!(translate(&parse(&tokens).unwrap(), "main_vs", Stage::Vertex).is_err(), "a matrix field is not read");
     }
 
     #[test]

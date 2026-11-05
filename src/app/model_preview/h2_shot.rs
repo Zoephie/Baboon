@@ -563,6 +563,69 @@ fn h4_flare_pass_links() {
     }
 }
 
+/// Every kit effect material shader's vertex passes link with its `_default`
+/// pixel shader; `BLAM_TEST_H4EK` to the tags folder.
+#[test]
+fn h4_effect_passes_link() {
+    use super::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+    use crate::core::hlsl::emit::Stage;
+    let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+        return;
+    };
+    let folder = std::path::Path::new(&root).join("shaders/material_shaders/fx");
+    let source = TagSource::LooseFolder {
+        root: std::path::PathBuf::from(&root),
+        game: Some(GameId::Halo4),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let gl = headless_gl();
+    let mut failures = Vec::new();
+    let mut linked = 0;
+    for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(stem) = name.strip_suffix(".material_shader") else { continue };
+        let path = format!("shaders\\material_shaders\\fx\\{stem}");
+        let program = H4ShaderSource::read(&source, &path).and_then(|shader| shader.program(&H4_DEFINES)).unwrap();
+        let Some(technique) = program.techniques.iter().find(|technique| &*technique.name == "_default") else { continue };
+        let Ok(pixel) = translate_pass(&program, "_default", "_default", Stage::Pixel) else { continue };
+        for (pass, _) in technique.passes.iter().filter(|(pass, _)| &**pass != "_default") {
+            let vertex = translate_pass(&program, "_default", pass, Stage::Vertex).unwrap();
+            let both = super::h3_shaders::pass_of(vertex, pixel.clone());
+            unsafe {
+                let program = gl.create_program().unwrap();
+                let mut ok = true;
+                for (kind, text) in [(glow::VERTEX_SHADER, &both.vertex), (glow::FRAGMENT_SHADER, &both.pixel)] {
+                    let shader = gl.create_shader(kind).unwrap();
+                    gl.shader_source(shader, text);
+                    gl.compile_shader(shader);
+                    if !gl.get_shader_compile_status(shader) {
+                        let log = gl.get_shader_info_log(shader);
+                        let line = log.lines().next().unwrap_or("").to_owned();
+                        let at = line.split(':').nth(2).and_then(|n| n.trim().parse::<usize>().ok()).unwrap_or(0);
+                        let bad = text.lines().nth(at.saturating_sub(1)).unwrap_or("").to_owned();
+                        failures.push(format!("{stem}/{pass} {}: {line}\n    {bad}", if kind == glow::VERTEX_SHADER { "vs" } else { "ps" }));
+                        ok = false;
+                    }
+                    gl.attach_shader(program, shader);
+                }
+                if ok {
+                    gl.link_program(program);
+                    if gl.get_program_link_status(program) {
+                        linked += 1;
+                    } else {
+                        failures.push(format!("{stem}/{pass} link: {}", gl.get_program_info_log(program)));
+                    }
+                }
+            }
+        }
+    }
+    for failure in &failures {
+        eprintln!("NOTE FAIL {failure}");
+    }
+    assert!(failures.is_empty(), "{} failures", failures.len());
+    assert!(linked > 30, "linked {linked}");
+}
+
 /// What one pass reads: `H3_PASS=<family>|<template>|<entry>` and
 /// `BLAM_TEST_H3EK` to the tags folder.
 #[test]

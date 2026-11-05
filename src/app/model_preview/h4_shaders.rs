@@ -88,8 +88,39 @@ impl H4ShaderSource {
     }
 }
 
-/// The defines every PC material shader compiles with.
-pub(crate) const H4_DEFINES: [(&str, &str); 1] = [("DX_VERSION", "11")];
+/// The defines every PC material shader compiles with: the DX11 path, and
+/// `BLEND_MODE_<mode>` for each `alpha_blend_mode_enum` option by its index,
+/// which effect shaders compare `vs_alpha_blend_mode` and
+/// `ps_alpha_blend_mode` against (`blend_modes.fxh`) [inferred: the engine's
+/// compile passes them].
+pub(crate) const H4_DEFINES: [(&str, &str); 26] = [
+    ("DX_VERSION", "11"),
+    ("BLEND_MODE_opaque", "0"),
+    ("BLEND_MODE_additive", "1"),
+    ("BLEND_MODE_multiply", "2"),
+    ("BLEND_MODE_alpha_blend", "3"),
+    ("BLEND_MODE_double_multiply", "4"),
+    ("BLEND_MODE_pre_multiplied_alpha", "5"),
+    ("BLEND_MODE_maximum", "6"),
+    ("BLEND_MODE_multiply_add", "7"),
+    ("BLEND_MODE_add_src_times_dstalpha", "8"),
+    ("BLEND_MODE_add_src_times_srcalpha", "9"),
+    ("BLEND_MODE_inv_alpha_blend", "10"),
+    ("BLEND_MODE_motion_blur_static", "11"),
+    ("BLEND_MODE_motion_blur_inhibit", "12"),
+    ("BLEND_MODE_apply_shadow_into_shadow_mask", "13"),
+    ("BLEND_MODE_alpha_blend_constant", "14"),
+    ("BLEND_MODE_overdraw_apply", "15"),
+    ("BLEND_MODE_wet_screen_effect", "16"),
+    ("BLEND_MODE_minimum", "17"),
+    ("BLEND_MODE_revsubtract", "18"),
+    ("BLEND_MODE_forge_lightmap", "19"),
+    ("BLEND_MODE_forge_lightmap_inv", "20"),
+    ("BLEND_MODE_replace_all_channels", "21"),
+    ("BLEND_MODE_alpha_blend_max", "22"),
+    ("BLEND_MODE_opaque_alpha_blend", "23"),
+    ("BLEND_MODE_alpha_blend_additive_transparent", "24"),
+];
 
 /// One stage of a technique's pass, translated.
 pub(crate) fn translate_pass(program: &Program, technique: &str, pass: &str, stage: Stage) -> Result<Translated, String> {
@@ -220,6 +251,62 @@ mod tests {
             }
             assert!(translate_technique(&program, 16, "tiny_position", Stage::Pixel).is_err());
         }
+    }
+
+    /// Every effect material shader in the kit (`shaders\\material_shaders\\fx`)
+    /// translates its effect passes: particles' `particle` and
+    /// `particle_model` vertex shaders, tracers' and light volumes' own,
+    /// and the `_default` pixel shader. Their vertex shaders read their
+    /// state from a `StructuredBuffer`.
+    #[test]
+    fn every_kit_effect_material_shader_translates() {
+        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let folder = root.join("shaders/material_shaders/fx");
+        if !folder.is_dir() {
+            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
+            return;
+        }
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: Some(GameId::Halo4),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
+        };
+        let mut failures = Vec::new();
+        let mut passes = 0;
+        for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(stem) = name.strip_suffix(".material_shader") else { continue };
+            let path = format!("shaders\\material_shaders\\fx\\{stem}");
+            let program = match H4ShaderSource::read(&source, &path).and_then(|shader| shader.program(&H4_DEFINES)) {
+                Ok(program) => program,
+                Err(error) => {
+                    failures.push(format!("{stem}: {error}"));
+                    continue;
+                }
+            };
+            let Some(technique) = program.techniques.iter().find(|technique| &*technique.name == "_default") else {
+                eprintln!("NOTE {stem}: techniques {:?}", program.techniques.iter().map(|t| t.name.clone()).collect::<Vec<_>>());
+                continue;
+            };
+            let pass_names: Vec<_> = technique.passes.iter().map(|(name, _)| name.clone()).collect();
+            for pass in pass_names {
+                let stage = if &*pass == "_default" { Stage::Pixel } else { Stage::Vertex };
+                match translate_pass(&program, "_default", &pass, stage) {
+                    Ok(translated) => {
+                        passes += 1;
+                        if stage == Stage::Vertex && !translated.source.contains("usamplerBuffer") {
+                            eprintln!("NOTE {stem}/{pass}: no buffer");
+                        }
+                    }
+                    Err(error) => failures.push(format!("{stem} {pass}: {error}")),
+                }
+            }
+        }
+        for failure in &failures {
+            eprintln!("NOTE FAIL {failure}");
+        }
+        assert!(failures.is_empty(), "{} failures", failures.len());
+        assert!(passes > 40, "translated passes: {passes}");
     }
 
     #[test]

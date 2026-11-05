@@ -35,6 +35,8 @@ pub(crate) enum Type {
     Array(Box<Type>, Option<usize>),
     Named(Arc<str>),
     Texture(TextureKind),
+    /// `StructuredBuffer<T>`: elements of `T`, read by index.
+    Structured(Box<Type>),
     Sampler,
 }
 
@@ -391,6 +393,12 @@ impl Parser<'_> {
             "void" => return Ok(Type::Void),
             "sampler" | "SamplerState" | "SamplerComparisonState" => return Ok(Type::Sampler),
             "sampler2D" => return Ok(Type::Texture(TextureKind::Flat)),
+            "StructuredBuffer" | "RWStructuredBuffer" => {
+                self.expect("<")?;
+                let element = self.type_name()?;
+                self.expect(">")?;
+                return Ok(Type::Structured(Box::new(element)));
+            }
             "vector" | "matrix" => return self.template_type(name),
             _ => {}
         }
