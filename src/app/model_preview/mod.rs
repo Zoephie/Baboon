@@ -71,6 +71,7 @@ mod h4_camo;
 mod h4_shield;
 mod h4_shadow;
 mod h4_particles;
+mod h4_tracers;
 mod reach_blend_screens;
 mod reach_camo;
 mod reach_shadow;
@@ -190,6 +191,8 @@ pub(crate) struct RenderModelPreview {
     pub reach_ik_markers: Vec<reach_ik::ReachIkMarker>,
     pub h3_flares: Vec<h3_lights::H3FlareAt>,
     pub h3_light_volumes: Vec<h3_light_volumes::H3LightVolumeAt>,
+    /// Halo 4's point-to-point tracers.
+    pub h4_tracers: Vec<h4_tracers::H4TracerAt>,
     pub h3_particles: Vec<Arc<h3_particles::H3ParticleSystem>>,
     pub h3_strips: Vec<Arc<h3_strips::H3StripAt>>,
     pub h3_cloth: Vec<h3_cloth::H3ClothAt>,

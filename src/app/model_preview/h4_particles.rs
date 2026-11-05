@@ -413,11 +413,11 @@ pub(crate) fn f32_to_f16(value: f32) -> u32 {
     sign | rounded
 }
 
-fn pack_half2(x: f32, y: f32) -> u32 {
+pub(crate) fn pack_half2(x: f32, y: f32) -> u32 {
     f32_to_f16(x) | (f32_to_f16(y) << 16)
 }
 
-fn pack_ushort2n(x: f32, y: f32) -> u32 {
+pub(crate) fn pack_ushort2n(x: f32, y: f32) -> u32 {
     let unit = |value: f32| (value.clamp(0.0, 1.0) * 65535.0) as u32;
     unit(x) | (unit(y) << 16)
 }

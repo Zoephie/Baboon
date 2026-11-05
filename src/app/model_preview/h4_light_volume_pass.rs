@@ -85,11 +85,7 @@ pub(super) unsafe fn draw_h4_light_volume(
             match name.as_str() {
                 "vs_lightVolumeOverallState" => {
                     for (member, value) in overall_members(draw) {
-                        let location = state.location(gl, pass, &member);
-                        match value.len() {
-                            1 => gl.uniform_1_f32(location.as_ref(), value[0]),
-                            _ => gl.uniform_3_f32_slice(location.as_ref(), &value),
-                        }
+                        state.set_floats(gl, pass, &member, &value);
                     }
                 }
                 "vs_lightVolumeStrip" => {

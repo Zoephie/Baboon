@@ -546,6 +546,7 @@ pub(super) fn read_ends(property: TagStruct<'_>) -> [[f32; 3]; 2] {
             Some(TagFieldData::RealPoint3d(point)) => [point.x, point.y, point.z],
             Some(TagFieldData::RealVector3d(vector)) => [vector.i, vector.j, vector.k],
             Some(TagFieldData::RealPoint2d(point)) => [point.x, point.y, 0.0],
+            Some(TagFieldData::RealVector2d(vector)) => [vector.i, vector.j, 0.0],
             _ => [0.0; 3],
         }
     };

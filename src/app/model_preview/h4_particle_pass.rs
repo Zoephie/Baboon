@@ -173,13 +173,7 @@ unsafe fn set_render_state(
     .collect();
     unsafe {
         for (member, value) in members {
-            let location = state.location(gl, pass, &format!("vsRenderState.{member}"));
-            match value.len() {
-                1 => gl.uniform_1_f32(location.as_ref(), value[0]),
-                2 => gl.uniform_2_f32_slice(location.as_ref(), &value),
-                3 => gl.uniform_3_f32_slice(location.as_ref(), &value),
-                _ => gl.uniform_4_f32_slice(location.as_ref(), &value),
-            }
+            state.set_floats(gl, pass, &format!("vsRenderState.{member}"), &value);
         }
     }
 }

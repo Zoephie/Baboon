@@ -128,7 +128,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     data.textures = Some(Arc::new(textures));
     eprintln!("NOTE {} cheap particle emitters", data.preview.reach_cheap_emitters.len());
     eprintln!(
-        "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares, {} particle systems ({} on materials), {} light volumes ({} on materials)",
+        "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares, {} particle systems ({} on materials), {} light volumes ({} on materials), {} tracers",
         data.preview.h4_lights.len(),
         data.preview.h4_cheap_lights.len(),
         data.preview.h4_light_passes.len(),
@@ -136,7 +136,8 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         data.preview.h3_particles.len(),
         data.preview.h3_particles.iter().filter(|system| system.look.h4.is_some()).count(),
         data.preview.h3_light_volumes.len(),
-        data.preview.h3_light_volumes.iter().filter(|volume| volume.h4_material().is_some()).count()
+        data.preview.h3_light_volumes.iter().filter(|volume| volume.h4_material().is_some()).count(),
+        data.preview.h4_tracers.len()
     );
     // `H2_SHOT_DROP=a,b` leaves out whole features, to see one on its own.
     if let Ok(dropped) = std::env::var("H2_SHOT_DROP") {
@@ -149,6 +150,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 "gels" => preview.h2_gel_lights.clear(),
                 "volumes" => preview.h2_light_volumes.clear(),
                 "h3_volumes" => preview.h3_light_volumes.clear(),
+                "h4_tracers" => preview.h4_tracers.clear(),
                 "cheap_particles" => preview.reach_cheap_emitters.clear(),
                 "contrails" => preview.h2_contrails.clear(),
                 "prt" => preview.h3_prt = None,
@@ -265,6 +267,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         h3_lights_shown: super::h3_lights_shown(&data.preview, &state),
         reach_lights_shown: super::reach_lights_shown(&data.preview, &state),
         h3_volumes_shown: super::h3_volumes_shown(&data.preview, &state),
+        h4_tracers_shown: super::h4_tracers_shown(&data.preview, &state),
         h3_systems_shown: super::h3_systems_shown(&data.preview, &state),
         h3_strips_shown: super::h3_strips_shown(&data.preview, &state),
         reach_cheap_shown: super::reach_cheap_shown(&data.preview, &state),

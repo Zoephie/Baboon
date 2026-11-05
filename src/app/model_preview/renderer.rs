@@ -148,6 +148,7 @@ pub(super) fn draw_model_viewport(
         h3_lights_shown: h3_lights_shown(&data.preview, state),
         reach_lights_shown: reach_lights_shown(&data.preview, state),
         h3_volumes_shown: h3_volumes_shown(&data.preview, state),
+        h4_tracers_shown: h4_tracers_shown(&data.preview, state),
         h3_systems_shown: h3_systems_shown(&data.preview, state),
         h3_strips_shown: h3_strips_shown(&data.preview, state),
         reach_cheap_shown: reach_cheap_shown(&data.preview, state),
@@ -395,6 +396,12 @@ fn h3_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> V
 fn h3_volumes_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
     preview.h3_light_volumes.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+}
+
+/// The same of Halo 4's tracers.
+fn h4_tracers_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+    let shown = |only| marker_active(only, &state.region_selections);
+    preview.h4_tracers.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Reach's cheap particle emitters.
@@ -928,6 +935,7 @@ struct ModelGpuFrame {
     /// Reach's lights and then its cheap lights, as `h3_lights_shown`.
     reach_lights_shown: Vec<bool>,
     h3_volumes_shown: Vec<bool>,
+    h4_tracers_shown: Vec<bool>,
     h3_systems_shown: Vec<bool>,
     h3_strips_shown: Vec<bool>,
     reach_cheap_shown: Vec<bool>,
@@ -994,6 +1002,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let h4_flares = data.preview.h4_flares.iter().filter(|at| at.object == object);
     let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == object);
     let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == object);
+    let h4_tracers = data.preview.h4_tracers.iter().filter(|at| at.object == object);
     let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == object);
     let h3_strips = data.preview.h3_strips.iter().filter(|at| at.object == object);
     let reach_emitters = data.preview.reach_cheap_emitters.iter().filter(|at| at.object == object);
@@ -1019,6 +1028,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
         .chain(h4_flares.flat_map(|at| at.inputs()))
         .chain(h3_flares.map(|at| at.scale_name()))
         .chain(h3_volumes.flat_map(|at| at.scale_names()))
+        .chain(h4_tracers.flat_map(|at| at.scale_names()))
         .chain(h3_systems.flat_map(|at| at.scale_names()))
         .chain(h3_strips.flat_map(|at| at.scale_names()))
         .chain(reach_emitters.flat_map(|at| at.scale_names()))
@@ -1106,6 +1116,7 @@ pub(super) fn object_moves(
         || data.preview.h4_flares.iter().any(|at| at.animates())
         || data.preview.h3_flares.iter().any(|at| at.animates())
         || data.preview.h3_light_volumes.iter().any(|at| at.animates())
+        || !data.preview.h4_tracers.is_empty()
         || !data.preview.h3_particles.is_empty()
         || !data.preview.reach_cheap_emitters.is_empty()
         || !data.preview.h3_strips.is_empty()
@@ -1160,6 +1171,7 @@ pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
         && preview.h4_flares.is_empty()
         && preview.h3_flares.is_empty()
         && preview.h3_light_volumes.is_empty()
+        && preview.h4_tracers.is_empty()
         && preview.h3_particles.is_empty()
         && preview.reach_cheap_emitters.is_empty()
         && preview.h3_strips.is_empty()
@@ -1501,6 +1513,8 @@ mod h4_effect_gl;
 mod h4_particle_pass;
 #[path = "h4_light_volume_pass.rs"]
 mod h4_light_volume_pass;
+#[path = "h4_tracer_pass.rs"]
+mod h4_tracer_pass;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -4685,6 +4699,7 @@ impl ModelGlRenderer {
                 && preview.h3_flares.is_empty()
                 && preview.h4_flares.is_empty()
                 && preview.h3_light_volumes.is_empty()
+                && preview.h4_tracers.is_empty()
                 && preview.h2_light_volumes.is_empty()
                 && preview.h2_contrails.is_empty()
                 && preview.h2_liquids.is_empty()
@@ -4990,6 +5005,7 @@ impl ModelGlRenderer {
             // `c_transparency_renderer` sorts far to near, each from its location.
             enum Sprites {
                 Volume(usize),
+                Tracer(usize),
                 System(usize),
                 Strip(usize),
                 Leaves(usize),
@@ -5002,6 +5018,11 @@ impl ModelGlRenderer {
             let volumes = volumes
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
                 .map(|(at, volume)| (layered(volume.sort_layer(), eye_distance(volume.origin(bones))), Sprites::Volume(at)));
+            let tracers = frame.preview.h4_tracers.iter().enumerate();
+            let tracers = tracers.filter(|_| !matches!(stage, SpriteStage::Distortions)).map(|(at, tracer)| {
+                let distance = eye_distance(tracer.origin(bones)) - tracer.sort_bias();
+                (layered(tracer.sort_layer(), distance), Sprites::Tracer(at))
+            });
             let systems = frame.preview.h3_particles.iter().enumerate();
             let distorting = matches!(stage, SpriteStage::Distortions);
             let systems = systems
@@ -5018,7 +5039,7 @@ impl ModelGlRenderer {
             let leaves = leaves
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
                 .map(|(at, leaves)| (layered(2, eye_distance(leaves.origin())), Sprites::Leaves(at)));
-            let mut sorted: Vec<_> = volumes.chain(systems).chain(strips).chain(leaves).collect();
+            let mut sorted: Vec<_> = volumes.chain(tracers).chain(systems).chain(strips).chain(leaves).collect();
             sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
             let limit = match stage {
                 SpriteStage::FartherThan(limit) => limit,
@@ -5037,6 +5058,31 @@ impl ModelGlRenderer {
                     *cursor += 1;
                 }
                 match sprites {
+                    Sprites::Tracer(index) => {
+                        let at = &frame.preview.h4_tracers[index];
+                        if !frame.h4_tracers_shown.get(index).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        let values = frame.h2_values_of_object(at.object);
+                        let onset = uploaded.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                        if let Some(draw) = at.draw(values, bones, view.eye, frame.time, onset) {
+                            let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+                            h4_tracer_pass::draw_h4_tracer(
+                                gl,
+                                &mut uploaded.h4_effects,
+                                frame,
+                                &at.definition.material,
+                                &draw,
+                                self.h3_depth_copy,
+                                size,
+                                self.placeholder,
+                                at.object,
+                            );
+                            gl.use_program(Some(flares.program));
+                            gl.bind_vertex_array(Some(flares.vertex_array));
+                            gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                        }
+                    }
                     Sprites::Volume(index) => {
                         let at = &frame.preview.h3_light_volumes[index];
                         if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {

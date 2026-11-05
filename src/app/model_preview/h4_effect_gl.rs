@@ -81,6 +81,26 @@ impl H4EffectGl {
         linked
     }
 
+    /// Set the float uniform, or struct member, `name` to `value`: one to
+    /// four components.
+    pub(super) unsafe fn set_floats(
+        &mut self,
+        gl: &glow::Context,
+        pass: &H3Pass,
+        name: &str,
+        value: &[f32],
+    ) {
+        unsafe {
+            let location = self.location(gl, pass, name);
+            match value.len() {
+                1 => gl.uniform_1_f32(location.as_ref(), value[0]),
+                2 => gl.uniform_2_f32_slice(location.as_ref(), value),
+                3 => gl.uniform_3_f32_slice(location.as_ref(), value),
+                _ => gl.uniform_4_f32_slice(location.as_ref(), value),
+            }
+        }
+    }
+
     pub(super) unsafe fn location(
         &mut self,
         gl: &glow::Context,
