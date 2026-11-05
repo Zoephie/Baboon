@@ -72,6 +72,25 @@ struct Shot {
     lights: bool,
     yaw: f32,
     pitch: f32,
+    /// An object tag's kind, as `H2_SHOT_OBJECT` names it; else that.
+    kind: Option<String>,
+}
+
+/// `H2_SHOT_OBJECT`'s kinds: the object tag's extension and group.
+fn object_kind(kind: &str) -> (&'static str, &'static [u8; 4]) {
+    match kind {
+        "scenery" => ("scenery", b"scen"),
+        "machine" => ("device_machine", b"mach"),
+        "control" => ("device_control", b"ctrl"),
+        "crate" => ("crate", b"bloc"),
+        "giant" => ("giant", b"gint"),
+        "equipment" => ("equipment", b"eqip"),
+        "weapon" => ("weapon", b"weap"),
+        "vehicle" => ("vehicle", b"vehi"),
+        "effect_scenery" => ("effect_scenery", b"efsc"),
+        "projectile" => ("projectile", b"proj"),
+        _ => ("biped", b"bipd"),
+    }
 }
 
 fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagSource, shot: &Shot) {
@@ -84,7 +103,9 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let TagSource::LooseFolder { root, .. } = source else { unreachable!() };
     // A sky has a render_model and nothing above it.
     let file = root.join(format!("{}.model", shot.model.replace('\\', "/")));
-    let (extension, group) = if let Ok(kind) = std::env::var("H2_SHOT_OBJECT") { if kind == "scenery" { ("scenery", b"scen") } else if kind == "machine" { ("device_machine", b"mach") } else if kind == "crate" { ("crate", b"bloc") } else if kind == "giant" { ("giant", b"gint") } else if kind == "equipment" { ("equipment", b"eqip") } else if kind == "weapon" { ("weapon", b"weap") } else if kind == "vehicle" { ("vehicle", b"vehi") } else if kind == "effect_scenery" { ("effect_scenery", b"efsc") } else { ("biped", b"bipd") } } else if std::env::var_os("H2_SHOT_BIPED").is_some() {
+    let (extension, group) = if let Some(kind) = shot.kind.clone().or_else(|| std::env::var("H2_SHOT_OBJECT").ok()) {
+        object_kind(&kind)
+    } else if std::env::var_os("H2_SHOT_BIPED").is_some() {
         ("biped", b"bipd")
     } else if shot_game() == GameId::HaloCe {
         ("gbxmodel", b"mod2")
@@ -413,6 +434,7 @@ fn h2_shot() {
             lights: f[3] == "1",
             yaw: f[4].parse().unwrap(),
             pitch: f[5].parse().unwrap(),
+            kind: None,
         };
         render(&gl, &mut renderer, &source, &shot);
     }
@@ -961,9 +983,10 @@ fn h4_pass_inputs() {
     }
 }
 
-/// Every Halo 4 `.model` through the shot harness, each caught on its own.
-/// Set `H4_KIT=<limit>`, `H2_SHOT_H4=1` and `BLAM_TEST_H2EK` to the tags
-/// folder; translation and link failures print as `h3 program failed`.
+/// Every Halo 4 `.model` through the shot harness, each caught on its own,
+/// or with `H4_KIT_OBJECTS=1` every object tag by its kind. Set
+/// `H4_KIT=<limit>`, `H2_SHOT_H4=1` and `BLAM_TEST_H2EK` to the tags folder;
+/// translation and link failures print as `h3 program failed`.
 #[test]
 fn h4_kit_sweep() {
     let (Ok(limit), Ok(root)) = (std::env::var("H4_KIT"), std::env::var("BLAM_TEST_H2EK")) else {
@@ -975,17 +998,46 @@ fn h4_kit_sweep() {
         game: Some(GameId::Halo4),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
-    let mut models = Vec::new();
+    // `H4_KIT_OBJECTS=1` takes the object tags instead, each by its kind:
+    // their attachments, held weapons and effects load as well.
+    let objects = std::env::var_os("H4_KIT_OBJECTS").is_some();
+    const KINDS: [(&str, &str); 11] = [
+        ("biped", "biped"),
+        ("vehicle", "vehicle"),
+        ("weapon", "weapon"),
+        ("equipment", "equipment"),
+        ("scenery", "scenery"),
+        ("crate", "crate"),
+        ("device_machine", "machine"),
+        ("device_control", "control"),
+        ("effect_scenery", "effect_scenery"),
+        ("giant", "giant"),
+        ("projectile", "projectile"),
+    ];
+    let mut models: Vec<(String, Option<String>)> = Vec::new();
     let mut stack = vec![std::path::PathBuf::from(&root)];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).unwrap().flatten() {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().is_some_and(|extension| extension == "model") {
-                let relative = path.strip_prefix(&root).unwrap().with_extension("");
-                models.push(relative.to_string_lossy().replace('/', "\\"));
+                continue;
             }
+            let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+                continue;
+            };
+            let kind = if objects {
+                match KINDS.iter().find(|(known, _)| *known == extension) {
+                    Some((_, kind)) => Some((*kind).to_owned()),
+                    None => continue,
+                }
+            } else if extension == "model" {
+                None
+            } else {
+                continue;
+            };
+            let relative = path.strip_prefix(&root).unwrap().with_extension("");
+            models.push((relative.to_string_lossy().replace('/', "\\"), kind));
         }
     }
     models.sort();
@@ -993,8 +1045,16 @@ fn h4_kit_sweep() {
     let mut renderer = ModelGlRenderer::new(&gl).unwrap();
     let out = std::env::temp_dir().join("baboon_h4_kit_sweep.raw");
     let (mut good, mut failed) = (0, Vec::new());
-    for model in models.iter().take(limit) {
-        let shot = Shot { model: model.clone(), out: out.to_string_lossy().into_owned(), shaders: true, lights: true, yaw: -1.57, pitch: 0.3 };
+    for (model, kind) in models.iter().take(limit) {
+        let shot = Shot {
+            model: model.clone(),
+            out: out.to_string_lossy().into_owned(),
+            shaders: true,
+            lights: true,
+            yaw: -1.57,
+            pitch: 0.3,
+            kind: kind.clone(),
+        };
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(&gl, &mut renderer, &source, &shot)));
         match caught {
             Ok(()) => good += 1,
