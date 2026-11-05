@@ -727,7 +727,10 @@ fn load_tag_preview(
     let source = source.filter(|source| {
         matches!(
             source,
-            TagSource::LooseFolder { game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach), .. }
+            TagSource::LooseFolder {
+                game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
+                ..
+            }
         )
     });
     if let Some(source) = source.filter(|_| opened) {
@@ -4661,21 +4664,26 @@ pub(super) mod kit_object_tests {
     }
 
     /// A `.model` opened on its own shows what its variants attach, as its
-    /// object does: the warthog's turret and the rest.
+    /// object does: the warthog's turret and the rest, in Halo 3 and Halo 4.
     #[test]
-    fn a_halo_3_model_opened_alone_brings_its_variants_children() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
-        let path = "objects\\vehicles\\warthog\\warthog";
-        let model = kit_preview(&root, GameId::Halo3, path, "model", b"hlmt");
-        let vehicle = kit_preview(&root, GameId::Halo3, path, "vehicle", b"vehi");
-        assert!(!model.h2_attached.is_empty(), "the model's children");
-        let owners = |data: &ModelPreviewData| {
-            data.h2_attached.iter().map(|attached| attached.owner).collect::<Vec<_>>()
-        };
-        assert_eq!(owners(&model), owners(&vehicle), "the same children, once each");
+    fn a_model_opened_alone_brings_its_variants_children() {
+        let kits = [
+            ("BLAM_TEST_H3EK", GameId::Halo3, "objects\\vehicles\\warthog\\warthog"),
+            ("BLAM_TEST_H4EK", GameId::Halo4, "objects\\vehicles\\human\\storm_warthog\\storm_warthog"),
+        ];
+        for (variable, game, path) in kits {
+            let Ok(root) = std::env::var(variable) else {
+                eprintln!("skipping: {variable} is not set");
+                continue;
+            };
+            let model = kit_preview(&root, game, path, "model", b"hlmt");
+            let vehicle = kit_preview(&root, game, path, "vehicle", b"vehi");
+            assert!(!model.h2_attached.is_empty(), "{path}: the model's children");
+            let owners = |data: &ModelPreviewData| {
+                data.h2_attached.iter().map(|attached| attached.owner).collect::<Vec<_>>()
+            };
+            assert_eq!(owners(&model), owners(&vehicle), "{path}: the same children, once each");
+        }
     }
 
     /// The phantom carries two plasma cannons of one tag: each has regions of
