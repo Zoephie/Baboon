@@ -10,7 +10,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 use super::ce::attachments::elements;
 use super::h2::functions::H2FunctionValues;
 use super::dx9::passes::tag_function_at;
-use super::h3_shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
+use super::gen3::shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
 use super::materials::decode_h2_image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::export::geometry::load_referenced_tag_from_source;

@@ -13,7 +13,7 @@ use blam_tags::TagFile;
 
 use super::ce::attachments::elements;
 use super::h2::functions::H2FunctionValues;
-use super::h3_shaders::{H3Pass, H3Texture};
+use super::gen3::shaders::{H3Pass, H3Texture};
 use super::reach_shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::hlsl::emit::Stage;
@@ -136,7 +136,7 @@ pub(crate) fn h4_shield_pass(source: &TagSource, technique: usize) -> Result<H3P
         super::h4_shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
     let pixel =
         super::h4_shaders::translate_technique(&program, technique, "_default", Stage::Pixel)?;
-    let mut pass = super::h3_shaders::pass_of(vertex, pixel);
+    let mut pass = super::gen3::shaders::pass_of(vertex, pixel);
     rewire_depth_fade(&mut pass)?;
     Ok(pass)
 }

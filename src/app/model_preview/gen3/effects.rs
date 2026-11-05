@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::attachment::{MarkerFrame, cross, perpendicular, unit};
-use super::ce::attachments::{elements, object_block};
-use super::h2::functions::H2FunctionValues;
-use super::*;
+use super::super::attachment::{MarkerFrame, cross, perpendicular, unit};
+use super::super::ce::attachments::{elements, object_block};
+use super::super::h2::functions::H2FunctionValues;
+use super::super::*;
 use crate::core::source::TagSource;
 
 /// `effect_build_locations`: a location of this name takes the attachment's marker.
@@ -21,7 +21,7 @@ const AIR: &str = "air only";
 const PART_SCALE: &str = "type-specific scale";
 const DISABLED: &str = "disabled for debugging";
 /// `k_maximum_effect_location_markers`.
-pub(super) const MOST_MARKERS: usize = 16;
+pub(in crate::app::model_preview) const MOST_MARKERS: usize = 16;
 
 /// `effect_compute_event_runtime_data`'s shortest duration, a tick.
 const ONE_TICK: f32 = 1.0 / 60.0;
@@ -81,7 +81,7 @@ impl H3EventTime {
 
 /// An effect's events, as `effect_new_looping` runs them: always looping.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct H3EffectTimes {
+pub(in crate::app::model_preview) struct H3EffectTimes {
     events: Vec<H3EventTime>,
     loop_start: usize,
     parallel: bool,
@@ -90,7 +90,7 @@ pub(super) struct H3EffectTimes {
 }
 
 impl H3EffectTimes {
-    pub(super) fn read(effect: TagStruct<'_>) -> Self {
+    pub(in crate::app::model_preview) fn read(effect: TagStruct<'_>) -> Self {
         let flags = effect.read_flag_names("flags").unwrap_or_default();
         // Reach's effect gathers its looping sound into `looping sounds`, which
         // Halo 3's and ODST's lack; only Reach's postprocess leaves durations
@@ -107,7 +107,7 @@ impl H3EffectTimes {
     /// `event_update_time`: event `index`'s age at `time`, or none while
     /// something else runs. Parallel events restart once all have finished.
     /// Otherwise one follows another, returning to the loop start.
-    pub(super) fn age(&self, index: usize, time: f32) -> Option<f32> {
+    pub(in crate::app::model_preview) fn age(&self, index: usize, time: f32) -> Option<f32> {
         let event = *self.events.get(index)?;
         if self.once && !(0.0..self.once()).contains(&time) {
             return None;
@@ -137,13 +137,13 @@ impl H3EffectTimes {
 
     /// Event `index`'s duration in seconds, with the bake of one that can be 0
     /// (a tick) given back as the 0 it stands for.
-    pub(super) fn duration(&self, index: usize) -> Option<f32> {
+    pub(in crate::app::model_preview) fn duration(&self, index: usize) -> Option<f32> {
         let event = self.events.get(index)?;
         Some(if event.duration <= ONE_TICK { 0.0 } else { event.duration })
     }
 
     /// Seconds since `index` began, ended or not, for what outlives its event.
-    pub(super) fn since_begun(&self, index: usize, time: f32) -> Option<f32> {
+    pub(in crate::app::model_preview) fn since_begun(&self, index: usize, time: f32) -> Option<f32> {
         let event = *self.events.get(index)?;
         let before: f32 = if self.parallel {
             0.0
@@ -157,7 +157,7 @@ impl H3EffectTimes {
     }
 
     /// A run that never ends of itself, for what something else times.
-    pub(super) fn lasting() -> Self {
+    pub(in crate::app::model_preview) fn lasting() -> Self {
         Self {
             events: vec![H3EventTime { delay: 0.0, duration: f32::MAX }],
             loop_start: 0,
@@ -169,7 +169,7 @@ impl H3EffectTimes {
     /// Events of these `(delay, duration)` bounds, one after another, as
     /// Reach's postprocess leaves them (`reach`) or Halo 3's.
     #[cfg(test)]
-    pub(super) fn of_events(events: &[([f32; 2], [f32; 2])], reach: bool) -> Self {
+    pub(in crate::app::model_preview) fn of_events(events: &[([f32; 2], [f32; 2])], reach: bool) -> Self {
         let time = |&(delay, duration): &([f32; 2], [f32; 2])| {
             if reach { H3EventTime::unbaked(delay, duration) } else { H3EventTime::of(delay, duration) }
         };
@@ -177,7 +177,7 @@ impl H3EffectTimes {
     }
 
     #[cfg(test)]
-    pub(super) fn read_nothing() -> Self {
+    pub(in crate::app::model_preview) fn read_nothing() -> Self {
         Self {
             events: vec![H3EventTime::of([0.0, 0.0], [100.0, 100.0])],
             loop_start: 0,
@@ -187,12 +187,12 @@ impl H3EffectTimes {
     }
 
     /// Whether a run that does not loop has finished.
-    pub(super) fn is_over(&self, time: f32) -> bool {
+    pub(in crate::app::model_preview) fn is_over(&self, time: f32) -> bool {
         self.once && time >= self.once()
     }
 
     /// How long a run that does not loop takes.
-    pub(super) fn once(&self) -> f32 {
+    pub(in crate::app::model_preview) fn once(&self) -> f32 {
         let lengths = self.events.iter().map(|event| event.length());
         if self.parallel { lengths.fold(0.0, f32::max) } else { lengths.sum() }
     }
@@ -200,7 +200,7 @@ impl H3EffectTimes {
     /// A time inside `index`, if it first begins after `from` and by `to`: a
     /// step can be longer than a whole event, and must not pass over it. Half a
     /// tick in, as rounding can put its very start before it.
-    pub(super) fn begins_within(&self, index: usize, from: f32, to: f32) -> Option<f32> {
+    pub(in crate::app::model_preview) fn begins_within(&self, index: usize, from: f32, to: f32) -> Option<f32> {
         let event = *self.events.get(index)?;
         let before: f32 = if self.parallel {
             0.0
@@ -213,7 +213,7 @@ impl H3EffectTimes {
 
     /// Seconds since `index` began, for what outlasts its normalized age. An
     /// effect that only ticks over has been running all along.
-    pub(super) fn elapsed(&self, index: usize, time: f32) -> Option<f32> {
+    pub(in crate::app::model_preview) fn elapsed(&self, index: usize, time: f32) -> Option<f32> {
         self.age(index, time)?;
         if !self.moves() {
             return Some(time);
@@ -233,7 +233,7 @@ impl H3EffectTimes {
     }
 
     /// Whether the event's age or its being on changes as time passes.
-    pub(super) fn moves(&self) -> bool {
+    pub(in crate::app::model_preview) fn moves(&self) -> bool {
         self.once || self.events.len() > 1 || self.events.iter().any(|event| event.delay > 0.0 || event.duration > ONE_TICK)
     }
 }
@@ -263,26 +263,26 @@ impl H3EffectOnsets {
 }
 
 /// An event's part on an attachment's effect.
-pub(super) struct H3EffectPart<'a> {
-    pub(super) effect: &'a H3ObjectEffect,
-    pub(super) part: TagStruct<'a>,
-    pub(super) group: u32,
-    pub(super) path: String,
+pub(in crate::app::model_preview) struct H3EffectPart<'a> {
+    pub(in crate::app::model_preview) effect: &'a H3ObjectEffect,
+    pub(in crate::app::model_preview) part: TagStruct<'a>,
+    pub(in crate::app::model_preview) group: u32,
+    pub(in crate::app::model_preview) path: String,
     /// The marker its location resolves to, by name.
-    pub(super) marker: String,
+    pub(in crate::app::model_preview) marker: String,
     /// `secondary location (beams)`, by name.
-    pub(super) secondary_marker: Option<String>,
+    pub(in crate::app::model_preview) secondary_marker: Option<String>,
     /// `use parent position but world orientation`, of its effect.
-    pub(super) world_oriented: bool,
+    pub(in crate::app::model_preview) world_oriented: bool,
     /// `never attached to object`: it stays where it began.
-    pub(super) unattached: bool,
+    pub(in crate::app::model_preview) unattached: bool,
     /// `A scales values` takes in the attachment's scale.
-    pub(super) scaled: bool,
+    pub(in crate::app::model_preview) scaled: bool,
     /// `B scales values` does, for the secondary scale.
-    pub(super) b_scaled: bool,
-    pub(super) times: Arc<H3EffectTimes>,
+    pub(in crate::app::model_preview) b_scaled: bool,
+    pub(in crate::app::model_preview) times: Arc<H3EffectTimes>,
     /// Which of the effect's events it belongs to.
-    pub(super) event: usize,
+    pub(in crate::app::model_preview) event: usize,
 }
 
 /// Whether `event_generate_parts` makes a part on an object in third person:
@@ -301,7 +301,7 @@ fn part_violence(part: TagStruct<'_>) -> &'static str {
 
 /// `part_runs`, for parts and particle systems, which name these two apart.
 /// Each is a field path, so a `#ordinal` picks one of two of a name.
-pub(super) fn part_runs_by(part: TagStruct<'_>, environment: &str, violence: &str) -> bool {
+pub(in crate::app::model_preview) fn part_runs_by(part: TagStruct<'_>, environment: &str, violence: &str) -> bool {
     let named = |path: &str| match part.field_path(path).and_then(|field| field.value()) {
         Some(
             TagFieldData::CharEnum { name, .. }
@@ -325,7 +325,7 @@ fn part_disabled(part: TagStruct<'_>) -> bool {
 }
 
 /// A `cheap_particle_emitter` part's group.
-pub(super) const CHEAP_PARTICLE_EMITTER: u32 = u32::from_be_bytes(*b"cpem");
+pub(in crate::app::model_preview) const CHEAP_PARTICLE_EMITTER: u32 = u32::from_be_bytes(*b"cpem");
 
 /// Whether a part of `group` is made, given whether it passes `part_runs`
 /// (`generated`: environment, violence, camera and the scrub) and whether it
@@ -337,7 +337,7 @@ fn part_made(group: u32, generated: bool, disabled: bool) -> bool {
 }
 
 /// Every part of every effect `object` attaches, with its effect held open.
-pub(super) fn for_each_attached_part(
+pub(in crate::app::model_preview) fn for_each_attached_part(
     source: &TagSource,
     object: &TagFile,
     mut visit: impl for<'a> FnMut(H3EffectPart<'a>),
@@ -391,7 +391,7 @@ pub(super) fn for_each_attached_part(
 
 impl H3EffectPart<'_> {
     /// Where a marker puts this part: its frame and the node it follows.
-    pub(super) fn placed(&self, place: MarkerFrame, node: usize) -> (MarkerFrame, usize) {
+    pub(in crate::app::model_preview) fn placed(&self, place: MarkerFrame, node: usize) -> (MarkerFrame, usize) {
         let place = if self.world_oriented { MarkerFrame { axes: WORLD_AXES, ..place } } else { place };
         (place, if self.unattached { NO_NODE } else { node })
     }
@@ -400,14 +400,14 @@ impl H3EffectPart<'_> {
 /// An effect an object runs: an attachment, on while its function is, or one
 /// an event plays, which the preview gives a function of its own to start it.
 #[derive(Debug, Clone)]
-pub(super) struct H3ObjectEffect {
-    pub(super) path: String,
+pub(in crate::app::model_preview) struct H3ObjectEffect {
+    pub(in crate::app::model_preview) path: String,
     marker: String,
-    pub(super) scale_by: String,
-    pub(super) secondary_by: String,
-    pub(super) change_color: i128,
+    pub(in crate::app::model_preview) scale_by: String,
+    pub(in crate::app::model_preview) secondary_by: String,
+    pub(in crate::app::model_preview) change_color: i128,
     /// Plays through once, as an event's does; attachments and `looping effect`s loop.
-    pub(super) once: bool,
+    pub(in crate::app::model_preview) once: bool,
     /// Made with `gravity` and `up` vectors at its marker, as Reach's
     /// `effect_new_attached_from_marker_name` (the 360's 0x82EA7CF8) makes an
     /// attachment's.
@@ -416,18 +416,18 @@ pub(super) struct H3ObjectEffect {
 
 impl H3ObjectEffect {
     /// `effect_build_locations`' marker for a location.
-    pub(super) fn marker_of(&self, location: TagStruct<'_>) -> String {
+    pub(in crate::app::model_preview) fn marker_of(&self, location: TagStruct<'_>) -> String {
         let marker = marker_name(location, "marker name");
         if marker == REPLACE { self.marker.clone() } else { marker }
     }
 
     /// `use parent position but world orientation`.
-    pub(super) fn world_oriented(effect: TagStruct<'_>) -> bool {
+    pub(in crate::app::model_preview) fn world_oriented(effect: TagStruct<'_>) -> bool {
         let flags = effect.read_flag_names("flags").unwrap_or_default();
         flags.iter().any(|(_, name)| name.starts_with(WORLD_ORIENTATION))
     }
 
-    pub(super) fn times_of(&self, effect: TagStruct<'_>) -> H3EffectTimes {
+    pub(in crate::app::model_preview) fn times_of(&self, effect: TagStruct<'_>) -> H3EffectTimes {
         H3EffectTimes { once: self.once, ..H3EffectTimes::read(effect) }
     }
 
@@ -438,7 +438,7 @@ impl H3ObjectEffect {
     /// marker. Anything else is `part_markers`'. A `replace` location is the
     /// marker itself and asks for no vector; after `marker_of` it reads as the
     /// marker's name, which no Reach attachment marker shares with a vector.
-    pub(super) fn locations<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+    pub(in crate::app::model_preview) fn locations<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         &self,
         markers: &[RenderModelPreviewMarker],
         name: &str,
@@ -482,7 +482,7 @@ fn vector_marker<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         found.map_or(([0.0; 3], 0, None), |marker| (marker.position, marker.node_index, marker.only_under.clone()));
     let probe = RenderModelPreviewMarker { node_index, axes: WORLD_AXES, scale: 1.0, ..Default::default() };
     let (world, _) = frame(&probe);
-    let forward = unit(std::array::from_fn(|index| super::attachment::dot(world.axes[index], direction)));
+    let forward = unit(std::array::from_fn(|index| super::super::attachment::dot(world.axes[index], direction)));
     let up = unit(perpendicular(forward));
     RenderModelPreviewMarker {
         name: name.to_owned(),
@@ -497,7 +497,7 @@ fn vector_marker<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
 /// What a location of this name lands on: its markers, or, for what no marker
 /// answers, the effect's own point. `build_common_effect_vectors` names those
 /// directions at the point an event happened, and `root` is the object's.
-pub(super) fn part_markers(
+pub(in crate::app::model_preview) fn part_markers(
     markers: &[RenderModelPreviewMarker],
     name: &str,
     once: bool,
@@ -541,7 +541,7 @@ fn axes_of_vector(forward: [f32; 3]) -> [[f32; 3]; 3] {
 }
 
 /// Every effect `object` and its `.model` name, attachments first.
-pub(super) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3ObjectEffect> {
+pub(in crate::app::model_preview) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3ObjectEffect> {
     let mut effects = Vec::new();
     let effect_group = u32::from_be_bytes(*b"effe");
     let reach = source.game() == Some(crate::core::game::GameId::HaloReach);
@@ -593,13 +593,13 @@ const NO_NODE: usize = usize::MAX / 8;
 const WORLD_ORIENTATION: &str = "use parent position but world orientation";
 
 /// Whether a function is one the preview made to start an event's effect.
-pub(super) fn is_event_function(name: &str) -> bool {
+pub(in crate::app::model_preview) fn is_event_function(name: &str) -> bool {
     name.rsplit_once(": ").is_some_and(|(field, _)| field.contains("effect") || field.contains("detonation"))
 }
 
 /// Hand an attached object's event effect to the object it is on, under its
 /// name, so that one panel plays them all.
-pub(super) fn adopt_event_function(name: &str, function: &mut String, object: &mut u8) {
+pub(in crate::app::model_preview) fn adopt_event_function(name: &str, function: &mut String, object: &mut u8) {
     if is_event_function(function) {
         *function = format!("{name}: {function}");
         *object = 0;
@@ -645,14 +645,14 @@ fn with_nested_effects(source: &TagSource, mut effects: Vec<H3ObjectEffect>) -> 
 }
 
 /// The name an event's effect goes by among the object's functions.
-pub(super) fn event_function_name(field: &str, path: &str) -> String {
+pub(in crate::app::model_preview) fn event_function_name(field: &str, path: &str) -> String {
     let stem = path.rsplit('\\').next().unwrap_or(path);
     format!("{field}: {stem}")
 }
 
 /// Every effect reference under `holder`, by the field that names it, leaving
 /// out `attachments`, which run on their own.
-pub(super) fn collect_event_effects(holder: TagStruct<'_>, found: &mut Vec<(String, String)>) {
+pub(in crate::app::model_preview) fn collect_event_effects(holder: TagStruct<'_>, found: &mut Vec<(String, String)>) {
     let effect_group = u32::from_be_bytes(*b"effe");
     for field in holder.fields() {
         let name = field.name();
@@ -676,7 +676,7 @@ pub(super) fn collect_event_effects(holder: TagStruct<'_>, found: &mut Vec<(Stri
     }
 }
 
-pub(super) fn marker_name(holder: TagStruct<'_>, field: &str) -> String {
+pub(in crate::app::model_preview) fn marker_name(holder: TagStruct<'_>, field: &str) -> String {
     holder.read_string_id(field).or_else(|| holder.read_string(field)).unwrap_or_default()
 }
 
@@ -692,7 +692,7 @@ fn part_rotation(yaw: f32, pitch: f32) -> [[f32; 3]; 3] {
 }
 
 /// `effect_get_part_to_node`: a part's own frame within its location's.
-pub(super) fn part_frame(location: &MarkerFrame, offset: [f32; 3], yaw: f32, pitch: f32) -> MarkerFrame {
+pub(in crate::app::model_preview) fn part_frame(location: &MarkerFrame, offset: [f32; 3], yaw: f32, pitch: f32) -> MarkerFrame {
     let of_location = |vector: [f32; 3]| -> [f32; 3] {
         std::array::from_fn(|axis| (0..3).map(|at| location.axes[at][axis] * vector[at]).sum())
     };
@@ -705,7 +705,7 @@ pub(super) fn part_frame(location: &MarkerFrame, offset: [f32; 3], yaw: f32, pit
 }
 
 /// The offset and turn `part_frame` wants, from the tag.
-pub(super) fn read_part_placement(part: TagStruct<'_>) -> ([f32; 3], f32, f32) {
+pub(in crate::app::model_preview) fn read_part_placement(part: TagStruct<'_>) -> ([f32; 3], f32, f32) {
     let offset = part.read_point3d("relative offset");
     let angles = part.read_euler2d("relative orientation (yaw, pitch)");
     ([offset.x, offset.y, offset.z], angles.yaw, angles.pitch)

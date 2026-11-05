@@ -27,15 +27,10 @@ mod attachment;
 mod ce;
 pub(in crate::app) mod dx9;
 pub(in crate::app) mod h2;
-mod h3_effects;
 pub(crate) mod cloth;
+pub(crate) mod gen3;
 pub(crate) mod h3;
-pub(crate) mod h3_light_volumes;
 pub(crate) mod particles;
-pub(crate) mod h3_screen_effects;
-pub(crate) mod h3_strips;
-pub(in crate::app) mod h3_prt;
-pub(crate) mod h3_shaders;
 pub(crate) mod h4_shaders;
 mod h4_lighting;
 mod h4_submit;
@@ -136,9 +131,9 @@ pub(crate) struct RenderModelPreview {
     pub h2_light_volumes: Vec<h2::light_volumes::H2LightVolume>,
     pub h2_contrails: Vec<h2::contrails::H2ContrailAt>,
     pub h2_liquids: Vec<h2::liquid::H2LiquidAt>,
-    pub h3_prt: Option<h3_prt::H3Prt>,
+    pub h3_prt: Option<gen3::prt::H3Prt>,
     /// The model's own `shield impact parameter override`.
-    pub h3_shield: Option<Arc<h3_shaders::H3ShieldSettings>>,
+    pub h3_shield: Option<Arc<gen3::shaders::H3ShieldSettings>>,
     pub h3_lights: Vec<h3::lights::H3Light>,
     /// Reach's attached `light`s and `cheap_light`s.
     pub reach_lights: Vec<reach_lights::ReachLight>,
@@ -147,16 +142,16 @@ pub(crate) struct RenderModelPreview {
     pub reach_cheap_emitters: Vec<reach_cheap_particles::ReachCheapEmitterAt>,
     /// `light_apply`, `_frustum`, `_specular` and `_frustum_specular`, by
     /// `combo` (frustum 1, specular 2), for its screen-space lights.
-    pub reach_light_passes: Vec<Option<Arc<h3_shaders::H3Pass>>>,
+    pub reach_light_passes: Vec<Option<Arc<gen3::shaders::H3Pass>>>,
     /// Halo 4's attached `light`s and `cheap_light`s.
     pub h4_lights: Vec<h4_lights::H4Light>,
     pub h4_cheap_lights: Vec<h4_lights::H4CheapLight>,
     /// Explicit 187 and 204's screen-space passes, by (physically correct,
     /// technique).
-    pub h4_light_passes: std::collections::BTreeMap<(bool, usize), Arc<h3_shaders::H3Pass>>,
+    pub h4_light_passes: std::collections::BTreeMap<(bool, usize), Arc<gen3::shaders::H3Pass>>,
     /// Halo 4's attached `lens_flare`s, and explicit 46's pass that draws them.
     pub h4_flares: Vec<h4_flares::H4FlareAt>,
-    pub h4_flare_pass: Option<Arc<h3_shaders::H3Pass>>,
+    pub h4_flare_pass: Option<Arc<gen3::shaders::H3Pass>>,
     /// `globals`' active camo, for a Halo 4 object.
     pub h4_camo: Option<Arc<h4_camo::H4Camo>>,
     /// A Halo 4 object's shield impact.
@@ -173,14 +168,14 @@ pub(crate) struct RenderModelPreview {
     /// held weapons', in bind space on the nodes they ride.
     pub reach_ik_markers: Vec<reach_ik::ReachIkMarker>,
     pub h3_flares: Vec<h3::lights::H3FlareAt>,
-    pub h3_light_volumes: Vec<h3_light_volumes::H3LightVolumeAt>,
+    pub h3_light_volumes: Vec<gen3::light_volumes::H3LightVolumeAt>,
     /// Halo 4's point-to-point tracers.
     pub h4_tracers: Vec<h4_tracers::H4TracerAt>,
     pub h3_particles: Vec<Arc<particles::H3ParticleSystem>>,
-    pub h3_strips: Vec<Arc<h3_strips::H3StripAt>>,
+    pub h3_strips: Vec<Arc<gen3::strips::H3StripAt>>,
     pub h3_cloth: Vec<cloth::H3ClothAt>,
     pub h3_leaves: Vec<Arc<h3::leaves::H3LeavesAt>>,
-    pub h3_screen_effects: Vec<h3_screen_effects::H3ScreenEffectAt>,
+    pub h3_screen_effects: Vec<gen3::screen_effects::H3ScreenEffectAt>,
     /// ODST's VISR, for an object with an effect that turns it on.
     pub h3_vision: Option<Arc<h3::vision::H3Vision>>,
     /// ODST's motion blur, for an object with an effect that moves the view.

@@ -15,7 +15,7 @@ use super::ce::attachments::{elements, object_block};
 use super::ce::lights::posed_on;
 use super::h2::functions::H2FunctionValues;
 use super::dx9::passes::{H2Image, tag_function_at};
-use super::h3_effects::{adopt_event_function, marker_name, part_markers};
+use super::gen3::effects::{adopt_event_function, marker_name, part_markers};
 use super::materials::{H3Bitmap, read_h3_bitmap};
 use super::reach_lights::object_value;
 use super::*;
@@ -826,7 +826,7 @@ pub(crate) fn read_h4_flares(
 /// technique's `screen` pass draws every reflection.
 const LENS_FLARE: usize = 46;
 
-pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::h3_shaders::H3Pass, String> {
+pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::gen3::shaders::H3Pass, String> {
     use crate::core::hlsl::emit::Stage;
     let globals = load_referenced_tag_from_source(
         source,
@@ -859,7 +859,7 @@ pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::h3_shaders::H3P
         "screen",
         Stage::Pixel,
     )?;
-    Ok(super::h3_shaders::pass_of(vertex, pixel))
+    Ok(super::gen3::shaders::pass_of(vertex, pixel))
 }
 
 #[cfg(test)]

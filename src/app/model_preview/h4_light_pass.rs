@@ -4,7 +4,7 @@
 
 use super::h4_lights::{H4LightBlend, H4LitLight};
 use super::*;
-use h3_shaders::H3Dialect;
+use gen3::shaders::H3Dialect;
 
 impl ModelGlRenderer {
     /// Every Halo 4 light of the frame, on the preview's clock as game time.
@@ -72,7 +72,7 @@ impl ModelGlRenderer {
         let eye = h2_eye_position(&frame.camera);
         let view_projection = h3_draw::view_projection(&frame.camera);
         let exposure = match super::h4_lighting::h4_frame_value("ps_view_exposure") {
-            Some(super::h3_shaders::H3Value::Floats(exposure)) => exposure[0],
+            Some(super::gen3::shaders::H3Value::Floats(exposure)) => exposure[0],
             _ => return,
         };
         unsafe {
@@ -142,7 +142,7 @@ impl ModelGlRenderer {
                         }
                         // Its blend state is additive (1).
                         let value = if name == "ps_material_blend_constant" {
-                            Some(super::h3_shaders::H3Value::Floats(
+                            Some(super::gen3::shaders::H3Value::Floats(
                                 super::h4_submit::blend_constant(1),
                             ))
                         } else {

@@ -6,7 +6,7 @@
 
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::h3_shaders::{H3Sampler, H3Value};
+use super::gen3::shaders::{H3Sampler, H3Value};
 use super::h4_flares::{H4FlareDraw, H4FlareView};
 use super::*;
 
@@ -243,7 +243,7 @@ impl ModelGlRenderer {
                                 "ps_scale" => floats([1.0; 4]),
                                 other => h3_draw::frame_value(
                                     frame,
-                                    h3_shaders::H3Dialect::Halo4,
+                                    gen3::shaders::H3Dialect::Halo4,
                                     other,
                                     size,
                                     0.0,

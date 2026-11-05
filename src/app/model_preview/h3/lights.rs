@@ -7,10 +7,10 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::{MarkerFrame, unit};
-use super::super::h3_effects::adopt_event_function;
+use super::super::gen3::effects::adopt_event_function;
 use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::{CeFlareView, CeSprite, posed_on};
-use super::super::h3_effects::{
+use super::super::gen3::effects::{
     H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
 };
 use super::super::h2::functions::H2FunctionValues;

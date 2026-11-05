@@ -715,19 +715,19 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
 ) {
     let lights = super::super::h3::lights::read_h3_lights(source, object, owner, markers, frame);
     let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
-    let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
     let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
     let carried = super::super::particles::carried_strips(&particles);
     preview.h3_particles.extend(particles);
     preview.h3_strips.extend(carried);
-    let strips = super::super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
+    let strips = super::super::gen3::strips::read_h3_strips(source, object, owner, markers, frame);
     preview.h3_strips.extend(named!(strips, name).map(Arc::new));
     super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
-    let screens = super::super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
+    let screens = super::super::gen3::screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
-    super::super::h3_screen_effects::add_screen_shader_materials(preview);
+    super::super::gen3::screen_effects::add_screen_shader_materials(preview);
     let lights: Vec<_> = named!(lights, name).collect();
     preview.h3_flares.extend(named!(flares, name));
     preview.h3_flares.extend(super::super::h3::lights::light_flares(&lights));
@@ -756,7 +756,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     let (lights, cheap) = super::super::reach_lights::read_reach_lights(source, object, owner, markers, frame);
     preview.reach_lights.extend(named!(lights, name));
     preview.reach_cheap_lights.extend(named!(cheap, name));
-    let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
     let cheap = super::super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
     preview.reach_cheap_emitters.extend(named!(cheap, name));
@@ -765,17 +765,17 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     let carried = super::super::particles::carried_strips(&particles);
     preview.h3_particles.extend(particles);
     preview.h3_strips.extend(carried);
-    let strips = super::super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
+    let strips = super::super::gen3::strips::read_h3_strips(source, object, owner, markers, frame);
     preview.h3_strips.extend(named!(strips, name).map(Arc::new));
-    let screens = super::super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
+    let screens = super::super::gen3::screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
-    super::super::h3_screen_effects::add_screen_shader_materials(preview);
+    super::super::gen3::screen_effects::add_screen_shader_materials(preview);
     preview.h2_antennas.extend(super::lights::read_reach_antennas(source, object, markers, frame, name));
     super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
     let lit = !(preview.reach_lights.is_empty() && preview.reach_cheap_lights.is_empty());
     if lit && preview.reach_light_passes.is_empty() {
-        let mut sources = super::super::h3_shaders::H3Sources::new(source);
+        let mut sources = super::super::gen3::shaders::H3Sources::new(source);
         let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
         preview.reach_light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
     }
@@ -806,7 +806,7 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderMode
     super::super::h4_lights::read_h4_light_passes(source, preview);
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
     preview.h3_particles.extend(named!(particles, name).map(Arc::new));
-    let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
     let tracers = super::super::h4_tracers::read_h4_tracers(source, object, owner, markers, frame);
     preview.h4_tracers.extend(named!(tracers, name));

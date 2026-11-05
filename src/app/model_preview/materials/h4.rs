@@ -110,7 +110,7 @@ impl H4Shader {
                     },
                     Err(_) => return None,
                 };
-                Some(Arc::new(super::super::h3_shaders::pass_of(vertex, pixel)))
+                Some(Arc::new(super::super::gen3::shaders::pass_of(vertex, pixel)))
             })
             .clone()
     }
@@ -412,7 +412,7 @@ mod tests {
 pub(crate) struct H4EffectMaterial {
     pub(crate) pass: Arc<H3Pass>,
     pub(crate) submit: H4Submit,
-    pub(crate) values: crate::app::model_preview::h3_shaders::H3Values,
+    pub(crate) values: crate::app::model_preview::gen3::shaders::H3Values,
     /// Each sampler's bitmap; a texture array's carries every image in
     /// `frames`, its layers in order.
     pub(crate) textures: Vec<H3Texture>,
@@ -451,7 +451,7 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
     let shader = read_shader(source, &material.shader)?;
     let vertex = translate_pass(&shader.program, "_default", vertex_pass, Stage::Vertex)?;
     let pixel = translate_pass(&shader.program, "_default", "_default", Stage::Pixel)?;
-    let mut pass = super::super::h3_shaders::pass_of(vertex, pixel);
+    let mut pass = super::super::gen3::shaders::pass_of(vertex, pixel);
     // The depth fade reads the preview's depth, where the pixel shader has one.
     if pass.pixel.contains("psDepthConstants") {
         super::super::h4_shield::rewire_depth_fade(&mut pass)?;

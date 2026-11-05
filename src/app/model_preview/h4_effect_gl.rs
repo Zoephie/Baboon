@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use super::h3_shaders::{H3Pass, H3Value, H3Values};
+use super::gen3::shaders::{H3Pass, H3Value, H3Values};
 use super::materials::H4EffectMaterial;
 use super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
@@ -366,7 +366,7 @@ fn shared_value(
             eye,
         ]),
         super::h4_shield::WORLD_SCALE => floats([camera.scale; 4]),
-        other => h3_draw::frame_value(frame, h3_shaders::H3Dialect::Halo4, other, size, 0.0)
+        other => h3_draw::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
             .or_else(|| functions.get(other).cloned())
             .or_else(|| material.values.get(other).cloned()),
     }
@@ -376,8 +376,8 @@ fn shared_value(
 unsafe fn upload_array(
     gl: &glow::Context,
     layers: &[&H2Image],
-    texels: h3_shaders::H3Texels,
-    sampler: Option<h3_shaders::H3Sampler>,
+    texels: gen3::shaders::H3Texels,
+    sampler: Option<gen3::shaders::H3Sampler>,
 ) -> Option<glow::NativeTexture> {
     let flats: Vec<&TextureImage> = layers
         .iter()
@@ -399,7 +399,7 @@ unsafe fn upload_array(
         return None;
     }
     let format = match texels {
-        h3_shaders::H3Texels::Srgb => glow::SRGB8_ALPHA8,
+        gen3::shaders::H3Texels::Srgb => glow::SRGB8_ALPHA8,
         _ => glow::RGBA8,
     };
     let mut rgba = Vec::with_capacity(flats.len() * (width * height * 4));

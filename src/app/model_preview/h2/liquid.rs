@@ -14,7 +14,7 @@ use super::functions::H2FunctionValues;
 use super::light_volumes::{read_glow, read_h2_bitmap};
 use super::lights::attachment_value;
 use super::super::dx9::passes::{H2Image, tag_function_at};
-use super::super::h3_effects::marker_name;
+use super::super::gen3::effects::marker_name;
 use super::super::*;
 use crate::core::source::TagSource;
 

@@ -7,24 +7,24 @@ use std::sync::Arc;
 
 use blam_tags::{TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::h3_effects::adopt_event_function;
-use super::ce::attachments::elements;
-use super::ce::lights::{CeFlareView, posed_on};
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::tag_function_at;
-use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, read_part_placement};
-use super::particles::{
+use super::super::attachment::MarkerFrame;
+use super::effects::adopt_event_function;
+use super::super::ce::attachments::elements;
+use super::super::ce::lights::{CeFlareView, posed_on};
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::tag_function_at;
+use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, read_part_placement};
+use super::super::particles::{
     H3ParticleVertex, H3SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader, slerped,
 };
-use super::*;
+use super::super::*;
 use crate::core::source::TagSource;
 
 /// `beams.inl`'s limit, and what a contrail's rows hold.
 const MOST_PROFILES: usize = 128;
 const FEWEST_PROFILES: f32 = 2.0;
 /// `k_real_epsilon`.
-pub(super) const EPSILON: f32 = 0.0001;
+pub(in crate::app::model_preview) const EPSILON: f32 = 0.0001;
 /// Reach's beam uv scroll clock, `g_render_time+0x10`: the frames' time,
 /// wrapped at a minute (`c_beam_gpu::set_shader_state<render>`, the 360's
 /// 0x826B2F98, MCC sub_14088B5B0).
@@ -463,7 +463,7 @@ fn seeds_of(index: usize) -> [f32; OWN_SEEDS] {
 
 /// The beams and contrails of an object's attached effects, one at each marker
 /// of a location.
-pub(super) fn read_h3_strips(
+pub(in crate::app::model_preview) fn read_h3_strips(
     source: &TagSource,
     object: &blam_tags::TagFile,
     owner: u8,
@@ -525,7 +525,7 @@ pub(super) fn read_h3_strips(
 }
 
 /// The contrails an effect holds, as a particle starts them.
-pub(super) fn read_carried_strips(source: &TagSource, path: &str) -> Vec<H3StripAt> {
+pub(in crate::app::model_preview) fn read_carried_strips(source: &TagSource, path: &str) -> Vec<H3StripAt> {
     let mut strips = Vec::new();
     let Ok(effect) = load_referenced_tag_from_source(source, path, "effect", b"effe") else {
         return strips;
@@ -1185,8 +1185,8 @@ impl H3StripField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::h3_shaders::H3Blend;
-    use super::super::renderer::{H3_EXPOSURE, reach_alt_exposure, reach_exposure};
+    use super::super::shaders::H3Blend;
+    use super::super::super::renderer::{H3_EXPOSURE, reach_alt_exposure, reach_exposure};
 
     #[test]
     fn a_beam_always_has_two_profiles_and_never_more_than_its_rows() {
@@ -1489,7 +1489,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return None;
         };
-        Some(super::super::particles::loose_kit(&root, GameId::HaloReach))
+        Some(super::super::super::particles::loose_kit(&root, GameId::HaloReach))
     }
 
     fn looks_of(source: &TagSource, path: &str, group: &str, code: &[u8; 4], blocks: &str) -> Vec<StripLook> {
@@ -1507,7 +1507,7 @@ mod tests {
             return;
         };
         let beams = looks_of(&source, "objects\\weapons\\rifle\\focus_rifle\\fx\\projectile_3p", "beam_system", b"beam", "beams");
-        use super::super::particles::H3ParticleAlbedo;
+        use super::super::super::particles::H3ParticleAlbedo;
         assert_eq!(beams[1].shader.albedo, H3ParticleAlbedo::Palette2dPlasma);
         assert_eq!(beams[2].shader.albedo, H3ParticleAlbedo::PalettePlasma);
         for plasma in &beams[1..3] {
@@ -1532,7 +1532,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H3EK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::Halo3);
+        let source = super::super::super::particles::loose_kit(&root, GameId::Halo3);
         let beams = looks_of(&source, "objects\\equipment\\autoturret\\fx\\projectile", "beam_system", b"beam", "beams");
         assert!(!beams.is_empty());
         for beam in &beams {

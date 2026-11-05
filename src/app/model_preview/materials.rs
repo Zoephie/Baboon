@@ -14,7 +14,7 @@ use super::ce::passes::{
     read_ce_camo_settings,
 };
 use super::ce::attachments::elements;
-use super::h3_shaders::{
+use super::gen3::shaders::{
     H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
     H3Dialect, H3Sampler, H3Texels, H3Texture, H3Value,
 };
@@ -1001,7 +1001,7 @@ pub(super) fn read_h3_shield_settings(source: &TagSource, path: &str) -> Option<
         let (color, intensity) = (root.read_rgb(color), real(intensity));
         H3Value::Floats([color.red * intensity, color.green * intensity, color.blue * intensity, 0.0])
     };
-    let mut values = super::h3_shaders::H3Values::new();
+    let mut values = super::gen3::shaders::H3Values::new();
     let mut set = |name: &str, value: H3Value| {
         values.insert(name.to_owned(), value);
     };

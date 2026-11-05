@@ -861,16 +861,16 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
     preview.h3_flares = super::h3::lights::read_h3_flares(source, model_tag, 0, &preview.markers, frame);
     preview.h3_flares.extend(super::h3::lights::light_flares(&preview.h3_lights));
     preview.h3_light_volumes =
-        super::h3_light_volumes::read_h3_light_volumes(source, model_tag, 0, &preview.markers, frame);
+        super::gen3::light_volumes::read_h3_light_volumes(source, model_tag, 0, &preview.markers, frame);
     let systems = super::particles::read_h3_particles(source, model_tag, 0, &preview.markers, frame);
     preview.h3_particles = systems.into_iter().map(Arc::new).collect();
-    let strips = super::h3_strips::read_h3_strips(source, model_tag, 0, &preview.markers, frame);
+    let strips = super::gen3::strips::read_h3_strips(source, model_tag, 0, &preview.markers, frame);
     preview.h3_strips = strips.into_iter().map(Arc::new).collect();
     let carried = super::particles::carried_strips(&preview.h3_particles);
     preview.h3_strips.extend(carried);
     preview.h3_screen_effects =
-        super::h3_screen_effects::read_h3_screen_effects(source, model_tag, 0, &preview.markers, frame);
-    super::h3_screen_effects::add_screen_shader_materials(preview);
+        super::gen3::screen_effects::read_h3_screen_effects(source, model_tag, 0, &preview.markers, frame);
+    super::gen3::screen_effects::add_screen_shader_materials(preview);
     if preview.h3_screen_effects.iter().any(|effect| effect.turns_on_vision()) {
         preview.h3_vision = super::h3::vision::read_h3_vision(source, model_tag).map(Arc::new);
     }
@@ -878,7 +878,7 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
         preview.h3_motion_blur = super::h3::vision::read_h3_motion_blur(source);
     }
     if preview.h3_screen_effects.iter().any(|effect| effect.adds_noise()) {
-        preview.reach_screen_noise = super::h3_screen_effects::read_reach_screen_noise(source);
+        preview.reach_screen_noise = super::gen3::screen_effects::read_reach_screen_noise(source);
     }
     preview.h2_antennas = super::h2::lights::read_h2_antennas(source, model_tag, &preview.markers);
     let markers = preview.markers.clone();
@@ -1100,7 +1100,7 @@ pub(in crate::app) fn build_render_preview(
         .filter(|prt| prt.vertices.len() == preview.vertices.len());
     // Instances draw `static_lighting_sh`, with no transfer of their own.
     let instance_vertices = preview.instances.vertex_count;
-    preview.h3_prt = super::h3_prt::read_h3_prt(render_tag, &render_model, &render_meshes)
+    preview.h3_prt = super::gen3::prt::read_h3_prt(render_tag, &render_model, &render_meshes)
         .map(|mut prt| {
             prt.pad(instance_vertices);
             prt
@@ -3248,13 +3248,13 @@ mod tests {
             let tag = TagFile::read(tags.join(path)).unwrap();
             let model = RenderModel::from_tag(&tag).unwrap();
             let meshes = RenderModel::derive_render_meshes(&tag).unwrap();
-            super::super::h3_prt::read_h3_prt(&tag, &model, &meshes).unwrap()
+            super::super::gen3::prt::read_h3_prt(&tag, &model, &meshes).unwrap()
         };
         // Its meshes bake quadratic transfer, which Reach's tool no longer lights by.
         let quadratic = read("objects/test/test_fbx_characters/test_fbx_civilian_female_custom_animation/test_fbx_civilian_female_custom_animation.render_model");
-        assert!((0..quadratic.vertices.len() as u32).all(|vertex| quadratic.kind_at(vertex) == super::super::h3_prt::H3PrtKind::None));
+        assert!((0..quadratic.vertices.len() as u32).all(|vertex| quadratic.kind_at(vertex) == super::super::gen3::prt::H3PrtKind::None));
         let ambient = read("objects/characters/spartans/spartans.render_model");
-        assert!((0..ambient.vertices.len() as u32).any(|vertex| ambient.kind_at(vertex) == super::super::h3_prt::H3PrtKind::Ambient));
+        assert!((0..ambient.vertices.len() as u32).any(|vertex| ambient.kind_at(vertex) == super::super::gen3::prt::H3PrtKind::Ambient));
         // The client's clamp to 0..1 is kept, but no object in the kit has an
         // ambient value outside it (all 1,549 render models scanned), so
         // nothing here can show it.

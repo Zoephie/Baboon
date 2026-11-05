@@ -4,7 +4,7 @@
 //! `light_volume` pass with `SetMaterialState`'s overall state
 //! (X360 0x82B96320) and a strip of rows in order.
 
-use super::h3_light_volumes::H4VolumeDraw;
+use super::gen3::light_volumes::H4VolumeDraw;
 use super::h4_effect_gl::{H4EffectGl, material_functions};
 use super::materials::H4EffectMaterial;
 use super::*;

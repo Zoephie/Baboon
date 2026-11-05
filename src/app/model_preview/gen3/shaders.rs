@@ -15,10 +15,10 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, BLEND_MODES,
 use blam_tags::TagStruct;
 use blam_tags::tag_function::FunctionType;
 
-use super::ce::attachments::elements;
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::H2Image;
-use super::*;
+use super::super::ce::attachments::elements;
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::H2Image;
+use super::super::*;
 use crate::core::hlsl::emit::{Stage, Translated, translate};
 use crate::core::hlsl::parse::{TextureKind, Type, parse};
 use crate::core::hlsl::pre::Preprocessor;
@@ -860,7 +860,7 @@ pub(crate) struct H3Material {
     pub(crate) animations: Vec<H3Animation>,
     pub(crate) shield: Option<Arc<H3Shield>>,
     /// Halo 4's per-draw functions and hologram rig.
-    pub(crate) h4: Option<Arc<super::h4_submit::H4Submit>>,
+    pub(crate) h4: Option<Arc<super::super::h4_submit::H4Submit>>,
 }
 
 /// Uniform values by name. Ordered only so the loader's snapshot prints them

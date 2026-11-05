@@ -14,7 +14,7 @@ use super::super::ce::lights::{
 };
 use super::super::ce::passes::argb;
 use super::functions::H2FunctionValues;
-use super::super::h3_effects::{H3EffectTimes, adopt_event_function, for_each_attached_part, part_markers};
+use super::super::gen3::effects::{H3EffectTimes, adopt_event_function, for_each_attached_part, part_markers};
 use blam_tags::tag_function::h2::transition_evaluate;
 use super::super::dx9::passes::{
     H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
@@ -196,7 +196,7 @@ pub(crate) struct H2PartLight {
 const SHORTEST_FADING_EVENT: f32 = 0.033_433_337;
 
 impl H2EffectPart {
-    pub(in crate::app::model_preview) fn new(part: &super::super::h3_effects::H3EffectPart<'_>) -> Self {
+    pub(in crate::app::model_preview) fn new(part: &super::super::gen3::effects::H3EffectPart<'_>) -> Self {
         Self {
             times: Arc::clone(&part.times),
             event: part.event,

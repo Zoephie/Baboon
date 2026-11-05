@@ -10,7 +10,7 @@ use super::dx9::passes::{
 use super::h2::bloom::H2Bloom;
 use super::dx9::passes::{H2Clock, h2_prt_lights};
 use super::dx9::stage::H2VertexStage;
-use super::h3_shaders::{H3Blend, H3Sampler};
+use super::gen3::shaders::{H3Blend, H3Sampler};
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
@@ -2093,10 +2093,10 @@ struct ModelGpuSlot {
     ce_secondary_textures: HashMap<usize, glow::NativeTexture>,
     ce_flags: ce::flags::CeFlagField,
     ce_glow_textures: Vec<Option<glow::NativeTexture>>,
-    h3_strips: h3_strips::H3StripField,
+    h3_strips: gen3::strips::H3StripField,
     /// Halo 4's trailing tracers between frames.
     h4_trails: h4_tracers::H4TracerField,
-    h3_onsets: h3_effects::H3EffectOnsets,
+    h3_onsets: gen3::effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
     h3_vision_clock: Option<(f32, f32)>,
     h3_cloth: cloth::H3ClothField,
@@ -2274,7 +2274,7 @@ impl ModelGpuSlot {
                 Some(prt) => {
                     gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
                     gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&prt.vertices), glow::STATIC_DRAW);
-                    let stride = std::mem::size_of::<[f32; h3_prt::COEFFICIENTS]>() as i32;
+                    let stride = std::mem::size_of::<[f32; gen3::prt::COEFFICIENTS]>() as i32;
                     for (index, attribute) in h3_draw::PRT_ATTRIBUTES.into_iter().enumerate() {
                         gl.enable_vertex_attrib_array(attribute);
                         // The first holds a fourth for the linear shader, in the
@@ -3857,7 +3857,7 @@ impl H3ParticleGl {
             gl.uniform_1_i32(self.alpha_test.as_ref(), i32::from(look.alpha_test));
             gl.depth_mask(look.alpha_test);
             gl.uniform_4_f32_slice(self.lighting.as_ref(), lighting.as_flattened());
-            let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| *texels != h3_shaders::H3Texels::Signed);
+            let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| *texels != gen3::shaders::H3Texels::Signed);
             gl.uniform_1_i32(self.unsigned.as_ref(), i32::from(unsigned));
             if look.distortion.is_some() {
                 gl.blend_equation(glow::FUNC_ADD);
@@ -4121,7 +4121,7 @@ struct ModelGlRenderer {
     h3_light: Option<(h3::lights::H3LitLight, Option<glow::NativeTexture>)>,
     /// Linked passes by their address, or the pass that failed to link: each
     /// holds its pass, so no other pass can come to have its address.
-    h3_programs: HashMap<usize, Result<h3_draw::H3Program, Arc<h3_shaders::H3Pass>>>,
+    h3_programs: HashMap<usize, Result<h3_draw::H3Program, Arc<gen3::shaders::H3Pass>>>,
     h3_composite_program: Option<glow::NativeProgram>,
     reach_composite_program: Option<glow::NativeProgram>,
     h4_composite_program: Option<glow::NativeProgram>,
@@ -5022,7 +5022,7 @@ impl ModelGlRenderer {
             if !cursor_advanced && !frame.preview.h3_strips.is_empty() {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
                 let (systems, particles) = (&frame.preview.h3_particles, &uploaded.h3_particles);
-                let tracks = |strip: &Arc<h3_strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
+                let tracks = |strip: &Arc<gen3::strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
                     particles.tracks_of(systems, strip).into_iter().map(|track| (track.id, track.place)).collect()
                 };
                 uploaded.h3_strips.advance(&frame.preview.h3_strips, values, &mut uploaded.h3_onsets, tracks, bones, frame.time);
@@ -5296,7 +5296,7 @@ impl ModelGlRenderer {
                     // ps_view_self_illum_exposure.y, alpha)`.
                     let exposures = if first.library().halo4() {
                         let channel = |name: &str, at: usize| match h4_lighting::h4_frame_value(name) {
-                            Some(h3_shaders::H3Value::Floats(value)) => value[at],
+                            Some(gen3::shaders::H3Value::Floats(value)) => value[at],
                             _ => 1.0,
                         };
                         [channel("ps_view_exposure", 0), channel("ps_view_self_illum_exposure", 1)]

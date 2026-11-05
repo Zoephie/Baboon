@@ -6,14 +6,14 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::elements;
-use super::ce::lights::{CeFlareView, posed_on};
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::tag_function_at;
-use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part};
-use super::*;
-use super::renderer::REACH_SCREEN_NOISE_BITMAP;
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::elements;
+use super::super::ce::lights::{CeFlareView, posed_on};
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::tag_function_at;
+use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part};
+use super::super::*;
+use super::super::renderer::REACH_SCREEN_NOISE_BITMAP;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -516,7 +516,7 @@ impl H3ScreenEffectAt {
     }
 }
 
-pub(super) fn read_h3_screen_effects(
+pub(in crate::app::model_preview) fn read_h3_screen_effects(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -559,18 +559,18 @@ pub(super) fn read_h3_screen_effects(
 
 /// `rasterizer_globals`' default bitmap that Reach's final composite reads
 /// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
-pub(super) fn read_reach_screen_noise(source: &TagSource) -> Option<super::materials::H3Bitmap> {
+pub(in crate::app::model_preview) fn read_reach_screen_noise(source: &TagSource) -> Option<super::super::materials::H3Bitmap> {
     let globals =
         load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let defaults = elements(globals.root(), "default bitmaps");
     let noise = defaults.get(REACH_SCREEN_NOISE_BITMAP)?;
     let path = noise.read_tag_ref_path("default bitmaps").filter(|path| !path.is_empty())?;
-    super::materials::read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
+    super::super::materials::read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
 }
 
 /// Every `shader_screen` these can draw, as materials of no batch, which gives
 /// them the textures and passes of any other.
-pub(super) fn add_screen_shader_materials(preview: &mut RenderModelPreview) {
+pub(in crate::app::model_preview) fn add_screen_shader_materials(preview: &mut RenderModelPreview) {
     let group = u32::from_be_bytes(*b"rmss");
     let wanted: Vec<String> = preview
         .h3_screen_effects
@@ -800,7 +800,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
         for (path, layer) in [
             ("fx\\screen_fx\\camera_fx\\dead_static_overlay", ScreenLayer::PostUi),
             ("objects\\characters\\spartans\\fx\\night_vision\\night_vision", ScreenLayer::PreTransparents),
@@ -820,7 +820,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
         let path = "objects\\characters\\spartans\\fx\\damage_feedback\\body_damage_screen_distortion";
         let tag = load_referenced_tag_from_source(&source, path, "area_screen_effect", b"sefc").expect(path);
         assert!(!elements(tag.root(), "screen effects").is_empty());

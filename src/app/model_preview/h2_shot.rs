@@ -751,7 +751,7 @@ fn reach_light_passes_link() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = headless_gl();
-    let mut sources = super::h3_shaders::H3Sources::new(&source);
+    let mut sources = super::gen3::shaders::H3Sources::new(&source);
     for file in ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"] {
         let pass = sources.reach_light_pass(file).unwrap_or_else(|error| panic!("{file}: {error}"));
         for (name, _) in &pass.uniforms {
@@ -867,7 +867,7 @@ fn h4_effect_passes_link() {
         let Ok(pixel) = translate_pass(&program, "_default", "_default", Stage::Pixel) else { continue };
         for (pass, _) in technique.passes.iter().filter(|(pass, _)| &**pass != "_default") {
             let vertex = translate_pass(&program, "_default", pass, Stage::Vertex).unwrap();
-            let both = super::h3_shaders::pass_of(vertex, pixel.clone());
+            let both = super::gen3::shaders::pass_of(vertex, pixel.clone());
             unsafe {
                 let program = gl.create_program().unwrap();
                 let mut ok = true;
@@ -907,7 +907,7 @@ fn h4_effect_passes_link() {
 /// `BLAM_TEST_H3EK` to the tags folder.
 #[test]
 fn h3_pass_inputs() {
-    use super::h3_shaders::{H3Sources, VERTEX_SKINNED, read_h3_definition};
+    use super::gen3::shaders::{H3Sources, VERTEX_SKINNED, read_h3_definition};
     let Ok(spec) = std::env::var("H3_PASS") else {
         return;
     };
@@ -942,7 +942,7 @@ fn h3_pass_inputs() {
 /// `H3_SWEEP=<limit>` and `BLAM_TEST_H3EK` to the tags folder.
 #[test]
 fn h3_sweep() {
-    use super::h3_shaders::{H3Sources, VERTEX_RIGID, VERTEX_SKINNED, read_h3_definition};
+    use super::gen3::shaders::{H3Sources, VERTEX_RIGID, VERTEX_SKINNED, read_h3_definition};
     let Ok(limit) = std::env::var("H3_SWEEP") else {
         return;
     };

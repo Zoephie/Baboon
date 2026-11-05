@@ -18,7 +18,7 @@ use std::sync::Arc;
 use eframe::glow::{self, HasContext};
 
 use super::h3_draw::{frame_value, h3_set_cull, set_value, target_texture, upload_h2_image_linear};
-use super::h3_shaders::{H3Dialect, H3Material, H3Pass, H3Value};
+use super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value};
 use super::h4_bloom::H4BloomSettings;
 use super::h4_submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
 use super::*;
@@ -357,7 +357,7 @@ impl ModelGlRenderer {
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             for (batch, material) in holograms.iter().filter(|(_, material)| post_bloom(material)) {
-                let blends = material.blend != super::h3_shaders::H3Blend::Opaque;
+                let blends = material.blend != super::gen3::shaders::H3Blend::Opaque;
                 if blends {
                     gl.enable(glow::BLEND);
                     super::h3_draw::h3_set_blend(gl, material.blend);

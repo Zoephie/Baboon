@@ -6,7 +6,7 @@
 use super::reach_lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
 use super::reach_lights::{CHEAP_ALBEDO_BLEND, ReachLightMethod, ReachLitLight, inline_rows};
 use super::*;
-use h3_shaders::H3Value;
+use gen3::shaders::H3Value;
 
 type Matrix = [[f32; 4]; 4];
 

@@ -3,12 +3,12 @@
 //! accumulation target, and the final composite's tone curve onto the scene.
 
 use super::h3_bloom::H3Bloom;
-use super::h3_prt::{H3PrtKind, second_order_rotation};
+use super::gen3::prt::{H3PrtKind, second_order_rotation};
 use std::borrow::Cow;
 
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::h3_shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
+use super::gen3::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
 use super::reach_lighting::{
     REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_composite_gamma, reach_frame_value, reach_noise_offset,
     reach_noise_params,
@@ -1320,7 +1320,7 @@ impl ModelGlRenderer {
                 let view = ce_flare_view(&frame.camera);
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let effects = &frame.preview.h3_screen_effects;
-                h3_screen_effects::h3_screen_settings(effects, values, &mut uploaded.h3_onsets, bones, &view, frame.time)
+                gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.h3_onsets, bones, &view, frame.time)
             };
             self.reach_stops = if reach { screen.stops() } else { 0.0 };
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
@@ -1856,7 +1856,7 @@ impl ModelGlRenderer {
         gl: &glow::Context,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
-        screen: h3_screen_effects::H3ScreenSettings,
+        screen: gen3::screen_effects::H3ScreenSettings,
     ) {
         unsafe {
             if self.h3_composite_program.is_none() {
@@ -1926,7 +1926,7 @@ impl ModelGlRenderer {
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
         depth: Option<glow::NativeTexture>,
-        screen: h3_screen_effects::H3ScreenSettings,
+        screen: gen3::screen_effects::H3ScreenSettings,
     ) {
         use super::super::h4_lighting::{H4_COMPOSITE_FRAGMENT, H4_DARK_MULTIPLIER};
         unsafe {
@@ -2052,7 +2052,7 @@ impl ModelGlRenderer {
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
         depth: Option<glow::NativeTexture>,
-        screen: h3_screen_effects::H3ScreenSettings,
+        screen: gen3::screen_effects::H3ScreenSettings,
         noise: Option<&materials::H3Bitmap>,
     ) {
         unsafe {
@@ -2120,13 +2120,13 @@ impl ModelGlRenderer {
         slot: usize,
         framebuffer: glow::NativeFramebuffer,
         size: [i32; 2],
-        screen: &h3_screen_effects::H3ScreenSettings,
-        shaders: &[h3_screen_effects::H3ScreenShader],
+        screen: &gen3::screen_effects::H3ScreenSettings,
+        shaders: &[gen3::screen_effects::H3ScreenShader],
     ) {
         let blur = screen.blur();
         let vision = frame.preview.h3_vision.clone().filter(|_| screen.vision() > 0.0);
         let suck = frame.preview.h3_motion_blur.zip(screen.suck());
-        if !shaders.iter().any(h3_screen_effects::H3ScreenShader::at_frame_end)
+        if !shaders.iter().any(gen3::screen_effects::H3ScreenShader::at_frame_end)
             && blur.is_none()
             && vision.is_none()
             && suck.is_none()

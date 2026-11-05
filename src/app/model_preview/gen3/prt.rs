@@ -8,8 +8,8 @@
 
 use blam_tags::TagFile;
 
-use super::ce::attachments::elements;
-use super::*;
+use super::super::ce::attachments::elements;
+use super::super::*;
 
 /// The most any vertex carries: quadratic's nine.
 pub(crate) const COEFFICIENTS: usize = 9;
@@ -161,7 +161,7 @@ fn second_order_basis() -> [[[f32; 3]; 3]; 5] {
 
 /// What carries the last five coefficients through a rotation, the row and
 /// column of each function being its inner product with the turned other.
-pub(super) fn second_order_rotation(rotation: [[f32; 3]; 3]) -> [[f32; 5]; 5] {
+pub(in crate::app::model_preview) fn second_order_rotation(rotation: [[f32; 3]; 3]) -> [[f32; 5]; 5] {
     let product = |a: [[f32; 3]; 3], b: [[f32; 3]; 3]| -> [[f32; 3]; 3] {
         std::array::from_fn(|row| {
             std::array::from_fn(|column| (0..3).map(|at| a[row][at] * b[at][column]).sum())

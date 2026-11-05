@@ -13,7 +13,7 @@ use super::ce::attachments::{elements, object_block};
 use super::ce::lights::posed_on;
 use super::h2::functions::H2FunctionValues;
 use super::dx9::passes::tag_function_at;
-use super::h3_effects::{adopt_event_function, marker_name, part_markers};
+use super::gen3::effects::{adopt_event_function, marker_name, part_markers};
 use super::*;
 use crate::core::source::TagSource;
 

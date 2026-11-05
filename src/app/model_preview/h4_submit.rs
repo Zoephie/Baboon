@@ -10,7 +10,7 @@ use blam_tags::material::{
 
 use std::sync::Arc;
 
-use super::h3_shaders::{H3Pass, H3Texture, H3Value, H3Values};
+use super::gen3::shaders::{H3Pass, H3Texture, H3Value, H3Values};
 
 /// `e_material_extern`s 35 to 41: a hologram's key, fill and rim light
 /// directions (odd) and the scalars beside them (even).

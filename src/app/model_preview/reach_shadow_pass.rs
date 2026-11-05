@@ -5,7 +5,7 @@
 
 use super::reach_shadow::{ReachShadowCamera, ReachShadowFilter, hull_planes};
 use super::*;
-use h3_shaders::H3Material;
+use gen3::shaders::H3Material;
 
 /// `shadow_apply.hlsl`'s `default_ps` with no level: `CHANNEL_TRANSFORM` is
 /// (1, 1, 0.2, 1), and the pixels it touches are those of the scene inside
@@ -222,7 +222,7 @@ impl ModelGlRenderer {
         let camera = Self::reach_shadow_camera(frame, size);
         let casters: Vec<_> = batches
             .iter()
-            .filter(|(_, material)| material.blend == h3_shaders::H3Blend::Opaque && !material.decal)
+            .filter(|(_, material)| material.blend == gen3::shaders::H3Blend::Opaque && !material.decal)
             .filter_map(|(batch, material)| Some((batch, material, Arc::clone(material.shadow_generate.as_ref()?))))
             .collect();
         if casters.is_empty() {

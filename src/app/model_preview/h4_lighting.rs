@@ -3,7 +3,7 @@
 //! setup_default_lighting(true)` leaves in the constants (X360 0x82A72368,
 //! MCC `sub_1408C3E60`), exposure, and the final composite.
 
-use super::h3_shaders::H3Value;
+use super::gen3::shaders::H3Value;
 use super::*;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 

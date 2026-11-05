@@ -8,23 +8,23 @@ use std::sync::Arc;
 
 use blam_tags::{TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::h3_effects::adopt_event_function;
-use super::ce::attachments::elements;
-use super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::tag_function_at;
-use super::h3_effects::{
+use super::super::attachment::MarkerFrame;
+use super::effects::adopt_event_function;
+use super::super::ce::attachments::elements;
+use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::tag_function_at;
+use super::effects::{
     H3EffectTimes, for_each_attached_part, part_frame, read_part_placement,
 };
-use super::particles::inline_real;
-use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
-use super::h3_strips::EPSILON;
-use super::h4_particles::{f32_to_f16, pack_argb8};
-use super::materials::{H4EffectMaterial, resolve_h4_effect_material};
-use super::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
-use super::renderer::{H3_EXPOSURE, reach_alt_exposure};
-use super::*;
+use super::super::particles::inline_real;
+use super::shaders::{H3Blend, H3Sampler, read_h3_definition};
+use super::strips::EPSILON;
+use super::super::h4_particles::{f32_to_f16, pack_argb8};
+use super::super::materials::{H4EffectMaterial, resolve_h4_effect_material};
+use super::super::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
+use super::super::renderer::{H3_EXPOSURE, reach_alt_exposure};
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -516,7 +516,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         let map = base.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
         let baked = resolved
             .as_ref()
-            .and_then(|resolved| super::materials::read_resolved_map(source, resolved, "base_map"));
+            .and_then(|resolved| super::super::materials::read_resolved_map(source, resolved, "base_map"));
         match baked {
             Some((bitmap, sampler)) => (Some(bitmap), Some(sampler)),
             None => (Some(read_h3_bitmap(source, &map, 0, SamplerKind::Texture2D)?), None),
@@ -539,7 +539,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         blend,
         sampler,
         bitmap,
-        sort_layer: super::particles::h3_sort_layer(shader),
+        sort_layer: super::super::particles::h3_sort_layer(shader),
         reach,
         circular,
         depth_fade,
@@ -665,7 +665,7 @@ impl VolumeProperties {
 
 /// The volumes an object's attached effects run, one at each marker of a
 /// location.
-pub(super) fn read_h3_light_volumes(
+pub(in crate::app::model_preview) fn read_h3_light_volumes(
     source: &TagSource,
     object: &blam_tags::TagFile,
     owner: u8,
@@ -1289,7 +1289,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
         let first = |path: &str| {
             let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
             read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path)
@@ -1312,7 +1312,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H3EK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::Halo3);
+        let source = super::super::super::particles::loose_kit(&root, GameId::Halo3);
         let path = "objects\\characters\\masterchief\\fx\\flashlight";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
         let volume = read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path);
@@ -1390,7 +1390,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H4EK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::Halo4);
+        let source = super::super::super::particles::loose_kit(&root, GameId::Halo4);
         let path = "objects\\vehicles\\covenant\\turrets\\plasma_turret\\fx\\tripod_light_volume";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
         let volume = read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path);

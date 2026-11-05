@@ -9,15 +9,15 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, ParameterSou
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::h3_effects::adopt_event_function;
+use super::gen3::effects::adopt_event_function;
 use super::ce::attachments::elements;
 use super::ce::lights::CeFlareView;
 use super::h2::functions::H2FunctionValues;
 use super::dx9::passes::tag_function_at;
-use super::h3_effects::H3EffectOnsets;
-use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_runs_by};
-use super::h3_strips::{H3StripAt, read_carried_strips};
-use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
+use super::gen3::effects::H3EffectOnsets;
+use super::gen3::effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_runs_by};
+use super::gen3::strips::{H3StripAt, read_carried_strips};
+use super::gen3::shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::dx9::passes::H2Image;
 use super::materials::{H3Bitmap, TextureImage, decode_h2_image, read_h3_bitmap, read_resolved_map, resolve_embedded_method};
 use super::renderer::{H3_EXPOSURE, reach_alt_exposure, reach_exposure, reach_lightmap_tint, reach_particle_light};

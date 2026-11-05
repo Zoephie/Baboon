@@ -7,7 +7,7 @@
 
 use super::h4_shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};
 use super::*;
-use h3_shaders::H3Material;
+use gen3::shaders::H3Material;
 
 /// `HorizontalBlurVariancePS`: five depths across, weighted by
 /// `ps_gaussian_parameters[0]`, and their squares.
@@ -276,7 +276,7 @@ impl ModelGlRenderer {
         let casters: Vec<_> = batches
             .iter()
             .filter(|(_, material)| {
-                material.blend == h3_shaders::H3Blend::Opaque && !material.decal
+                material.blend == gen3::shaders::H3Blend::Opaque && !material.decal
             })
             .filter_map(|(batch, material)| {
                 Some((

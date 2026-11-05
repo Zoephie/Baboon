@@ -15,7 +15,7 @@ use super::ce::attachments::elements;
 use super::ce::lights::{CeFlareView, posed_on};
 use super::h2::functions::H2FunctionValues;
 use super::dx9::passes::tag_function_at;
-use super::h3_effects::{
+use super::gen3::effects::{
     CHEAP_PARTICLE_EMITTER, H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
     read_part_placement,
 };

@@ -690,7 +690,7 @@ pub(in crate::app::model_preview) fn draw_h2_function_controls(
         }
     }
     let (events, names): (Vec<&str>, Vec<&str>) =
-        names.into_iter().partition(|name| super::super::h3_effects::is_event_function(name));
+        names.into_iter().partition(|name| super::super::gen3::effects::is_event_function(name));
     draw_event_effects(ui, &events, key, set);
     if names.is_empty() {
         return;
@@ -767,7 +767,7 @@ mod tests {
 
     #[test]
     fn an_events_function_goes_by_its_field_and_a_region_name_does_not() {
-        use super::super::super::h3_effects::is_event_function;
+        use super::super::super::gen3::effects::is_event_function;
         assert!(is_event_function("firing effect: firing"));
         assert!(is_event_function("transition effect (generic): human_explosion_large"));
         assert!(!is_event_function("headlights"));

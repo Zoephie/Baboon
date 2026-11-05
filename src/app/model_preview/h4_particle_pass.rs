@@ -6,7 +6,7 @@
 //! `docs/h4-preview-research/particles.md`.
 
 use super::particles::H4EmitterDraw;
-use super::h3_shaders::{H3Pass, H3Value};
+use super::gen3::shaders::{H3Pass, H3Value};
 use super::h4_effect_gl::{H4EffectGl, material_functions};
 use super::h4_particles::{H4ParticleRender, custom_vert_registers};
 use super::*;
