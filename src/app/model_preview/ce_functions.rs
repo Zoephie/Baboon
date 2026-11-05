@@ -9,6 +9,7 @@
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 use eframe::egui::{self, Ui};
 
+use super::ce_attachments::has_flag;
 use super::ce_passes::{option_index, periodic_evaluate};
 
 const INPUTS: [&str; 4] = ["A in", "B in", "C in", "D in"];
@@ -90,12 +91,12 @@ impl CeFunction {
             Some(TagFieldData::FractionBounds(bounds)) => [bounds.lower, bounds.upper],
             _ => [0.0; 2],
         };
-        let flags = block.read_flag_names("flags").unwrap_or_default();
+        let flagged = |option: &str| has_flag(block, "flags", option);
         let real = |field: &str| block.read_real(field).unwrap_or(0.0);
         Self {
-            invert: flags.iter().any(|(_, name)| name == "invert"),
-            additive: flags.iter().any(|(_, name)| name == "additive"),
-            always_active: flags.iter().any(|(_, name)| name.starts_with("always active")),
+            invert: flagged("invert"),
+            additive: flagged("additive"),
+            always_active: flagged("always active"),
             turn_off_with: usize::try_from(block.read_int_any("turn off with").unwrap_or(-1)).ok(),
             rate: Some(real("period")).filter(|period| *period > 0.0).map_or(1.0, |period| 1.0 / period),
             scale_period_by: source("scale period by"),
@@ -483,6 +484,27 @@ mod tests {
     use crate::app::model_preview::load_referenced_tag_from_source;
     use crate::core::source::TagSource;
 
+    /// With `BLAM_TEST_HCEEK`: a function's `invert` is read by the option's
+    /// name as shown, though the tag stores it as `invert#…`. Matched raw, it
+    /// never read, and 17 of the kit's functions lost their inversion.
+    #[test]
+    fn kit_functions_read_their_invert_flag() {
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::HaloCe),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let tag = load_referenced_tag_from_source(&source, "weapons\\plasma rifle\\plasma rifle", "weapon", b"weap")
+            .unwrap();
+        let functions = read_ce_object_functions(&tag).unwrap();
+        assert!(functions.functions.iter().any(|function| function.invert), "the plasma rifle inverts a function");
+        assert!(functions.functions.iter().any(|function| !function.invert));
+    }
+
     /// With `BLAM_TEST_HCEEK`: real objects at rest, by what their tags say.
     #[test]
     fn kit_objects_rest_where_their_inputs_put_them() {
@@ -658,3 +680,4 @@ mod tests {
         assert!(objects.move_at_rest());
     }
 }
+

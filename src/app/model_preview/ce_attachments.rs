@@ -214,9 +214,10 @@ pub(super) fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'
         .collect()
 }
 
-/// Whether the flags field `name` has its option `option` set.
+/// Whether the flags field `name` has its option `option` set, the option
+/// named as the editors show it (its `#help` left out).
 pub(super) fn has_flag(holder: TagStruct<'_>, name: &str, option: &str) -> bool {
-    holder.read_flag_names(name).is_some_and(|set| set.iter().any(|(_, named)| named == option))
+    holder.field(name).and_then(|field| field.flag(option)).is_some_and(|flag| flag.is_set())
 }
 
 /// What the animations say of a held weapon.
