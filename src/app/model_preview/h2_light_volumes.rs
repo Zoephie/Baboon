@@ -10,7 +10,7 @@ use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_lights::H2EffectPart;
-use super::h3_effects::{for_each_attached_part, part_markers};
+use super::h3_effects::{adopt_event_function, for_each_attached_part, part_markers};
 use super::h2_passes::{H2Image, tag_function_at};
 use super::h3_effects::marker_name;
 use super::materials::decode_h2_image;
@@ -439,8 +439,11 @@ impl H2LightVolume {
         self.only_under.as_ref()
     }
 
-    /// Follow the regions `merge_attached` renames for what `name` brings.
+    /// Follow the regions `merge_attached` renames for what `name` brings,
+    /// and an effect event's function to the owner that plays it, as the
+    /// event's flares and lights do.
     pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        adopt_event_function(name, &mut self.scale_by, &mut self.object);
         if let Some((region, _)) = &mut self.only_under {
             *region = format!("{name}: {region}");
         }
@@ -574,6 +577,30 @@ impl H2LightVolume {
 mod tests {
     use super::*;
     use crate::core::game::GameId;
+
+    /// A held weapon's firing-effect volume answers its owner's panel under
+    /// the weapon's name, as its flares and lights do; a volume an ordinary
+    /// function scales stays with the weapon.
+    #[test]
+    fn an_attached_event_volume_moves_to_its_owner() {
+        let volume = |scale_by: &str| H2LightVolume {
+            object: 1,
+            only_under: None,
+            node: 0,
+            position: [0.0; 3],
+            forward: [1.0, 0.0, 0.0],
+            falloff: [0.0; 2],
+            scale_by: scale_by.to_owned(),
+            marker_scale: 1.0,
+            change_color: None,
+            volumes: Arc::new(Vec::new()),
+            effect: None,
+        };
+        let fired = volume("firing effect: firing").on_attached("gun");
+        assert_eq!((fired.scale_by.as_str(), fired.object), ("gun: firing effect: firing", 0));
+        let steady = volume("heat").on_attached("gun");
+        assert_eq!((steady.scale_by.as_str(), steady.object), ("heat", 1));
+    }
 
     #[test]
     fn geometric_sprites_run_from_the_start_to_the_end() {
