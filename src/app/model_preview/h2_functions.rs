@@ -11,6 +11,8 @@ use blam_tags::tag_function::FunctionType;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 use eframe::egui::{self, Ui};
 
+use crate::app::ui_kit::ThemedCheckbox;
+
 use super::ce_attachments::{elements, object_block};
 use super::h2_passes::{object_input, tag_function_at};
 
@@ -729,7 +731,7 @@ pub(super) fn draw_h2_function_controls(
         ui.add_enabled_ui(drawn(export), |ui| {
             ui.horizontal(|ui| {
                 let mut scripted = set.contains_key(&held);
-                let toggle = ui.checkbox(&mut scripted, "").on_hover_text(SCRIPTED);
+                let toggle = ui.add(ThemedCheckbox::without_text(&mut scripted)).on_hover_text(SCRIPTED);
                 if toggle.changed() {
                     if scripted {
                         set.insert(held.clone(), computed);
