@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
+use super::attachment::{MarkerFrame, unit};
 use super::h3_effects::adopt_event_function;
 use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeFlareView, CeSprite, posed_on};
@@ -411,7 +411,7 @@ pub(crate) struct H3Flare {
     /// labels its enum in reverse, so 4 reads "very early" and is very late.
     falloff: u8,
     occlusion_offset: f32,
-    occlusion_toward_eye: bool,
+    occlusion_offset_direction: OcclusionOffset,
     inner: FlareInner,
     /// Reach's reflection curves; none for Halo 3's bounds.
     curves: Option<ReachFlareCurves>,
@@ -546,8 +546,25 @@ struct H3EffectScale {
 
 const NO_OCCLUSION_TEST: i128 = 2;
 const ONLY_FIRST_PERSON_FLARE: i128 = 4;
-/// `occlusion offset direction` toward the eye.
-const OFFSET_TOWARD_EYE: i128 = 1;
+/// `occlusion offset direction`: where the occlusion quad moves
+/// `occlusion offset distance` to (`lens_flare_render_internal`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OcclusionOffset {
+    /// Along the flare-to-eye line.
+    TowardViewer,
+    MarkerForward,
+    None,
+}
+
+impl OcclusionOffset {
+    fn read(root: TagStruct<'_>) -> Self {
+        match root.read_enum_option("occlusion offset direction").as_deref() {
+            Some("marker forward") => Self::MarkerForward,
+            Some("none") => Self::None,
+            _ => Self::TowardViewer,
+        }
+    }
+}
 
 fn block_function(root: TagStruct<'_>, block: &str) -> Option<Arc<TagFunction>> {
     let first = elements(root, block).into_iter().next()?;
@@ -599,7 +616,7 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         tests_occlusion: flags & NO_OCCLUSION_TEST == 0,
         falloff: root.read_int_any("falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
         occlusion_offset: fade("occlusion offset distance"),
-        occlusion_toward_eye: root.read_int_any("occlusion offset direction") == Some(OFFSET_TOWARD_EYE),
+        occlusion_offset_direction: OcclusionOffset::read(root),
         inner,
         curves,
         rotation_offset: reflection.read_real("rotation offset").unwrap_or(0.0).to_radians(),
@@ -849,8 +866,11 @@ impl H3FlareAt {
             return None;
         }
         let (position, forward) = posed_on(self.node, self.position, self.forward, bones);
-        let toward_eye = view.forward.map(|axis| -axis);
-        let offset = if flare.occlusion_toward_eye { toward_eye } else { forward };
+        let offset = match flare.occlusion_offset_direction {
+            OcclusionOffset::TowardViewer => unit(std::array::from_fn(|axis| view.eye[axis] - position[axis])),
+            OcclusionOffset::MarkerForward => forward,
+            OcclusionOffset::None => [0.0; 3],
+        };
         let radius = self.radius(scale);
         let across = pixels(position, [radius * flare.aspect[0], radius * flare.aspect[1]]);
         let radius = radius * flare.inner.share(across);
@@ -1019,6 +1039,33 @@ mod tests {
             let flare = read_h3_flare(&halo3, path).unwrap();
             assert!(flare.curves.is_none());
             assert!(matches!(flare.inner, FlareInner::Halved(_)), "{:?}", flare.inner);
+        }
+    }
+
+    /// `BLAM_TEST_H3EK`: each `occlusion offset direction` reads by its
+    /// option's name, as `lens_flare_render_internal` uses it: toward the
+    /// viewer, along the marker, or not moved. 0 is toward the viewer.
+    #[test]
+    fn halo_3_flares_read_their_occlusion_offset_direction() {
+        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+            eprintln!("skipping: BLAM_TEST_H3EK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::Halo3),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        for (path, direction) in [
+            ("fx\\cinematics\\010la_jungle_intro\\01\\hatch", OcclusionOffset::TowardViewer),
+            (
+                "levels\\multi\\s3d_sky_bridgenew\\shaders\\lighting\\flare_projector_illum",
+                OcclusionOffset::MarkerForward,
+            ),
+            ("levels\\multi\\s3d_avalanche\\sky\\shaders\\flare_sun_ava_01", OcclusionOffset::None),
+        ] {
+            let flare = read_h3_flare(&source, path).unwrap();
+            assert_eq!(flare.occlusion_offset_direction, direction, "{path}");
         }
     }
 
