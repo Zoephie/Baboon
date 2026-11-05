@@ -479,11 +479,10 @@ fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) 
             widest = widest.max(((right - left) * width).max((bottom - top) * height)).floor();
         }
     }
-    let (mut fade_start, mut fade_end) = (root.read_real("fade start size").unwrap_or(0.0), root.read_real("fade end size").unwrap_or(0.0));
-    if fade_end <= 0.0 || fade_start <= 0.0 {
-        (fade_start, fade_end) = (5.0, 4.0);
-    }
-    let _ = fade_start;
+    // Either size unset, and both take their defaults (start 5, end 4); only
+    // the end size is drawn by.
+    let (fade_start, fade_end) = (root.read_real("fade start size").unwrap_or(0.0), root.read_real("fade end size").unwrap_or(0.0));
+    let fade_end = if fade_end <= 0.0 || fade_start <= 0.0 { 4.0 } else { fade_end };
     let physics = root
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
@@ -1128,13 +1127,6 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 fn unit(a: [f32; 3]) -> [f32; 3] {
     let length = dot(a, a).sqrt();
     if length > 0.0 { a.map(|axis| axis / length) } else { a }
-}
-
-/// A location's point and axes, in its node's space, turned onto `local`.
-fn from_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|at| {
-        location.position[at] + (0..3).map(|row| location.axes[row][at] * local[row]).sum::<f32>()
-    })
 }
 
 fn turn_by_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
@@ -2073,7 +2065,6 @@ fn generate_particles(
             }
         }
     }
-    let _ = from_location;
     running.last_fraction = fraction;
 }
 

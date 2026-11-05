@@ -118,29 +118,16 @@ fn ensure_preview_region_permutation(
     region_name: &str,
     permutation_name: &str,
 ) {
-    if let Some(region) = preview
-        .regions
-        .iter_mut()
-        .find(|region| region.name == region_name)
-    {
-        if !region
-            .permutations
-            .iter()
-            .any(|name| name == permutation_name)
-        {
-            region.permutations.push(permutation_name.to_owned());
+    match preview.regions.iter_mut().find(|region| region.name == region_name) {
+        Some(region) => {
+            if !region.permutations.iter().any(|name| name == permutation_name) {
+                region.permutations.push(permutation_name.to_owned());
+            }
         }
-        return;
-    }
-    if !preview
-        .regions
-        .iter()
-        .any(|region| region.name == region_name)
-    {
-        preview.regions.push(RenderModelPreviewRegion {
+        None => preview.regions.push(RenderModelPreviewRegion {
             name: region_name.to_owned(),
             permutations: vec![permutation_name.to_owned()],
-        });
+        }),
     }
 }
 
@@ -2470,8 +2457,7 @@ mod tests {
         }
 
         let mut built = 0usize;
-        let collect = |extension: &str, group: &[u8; 4], take: usize| -> Vec<std::path::PathBuf> {
-            let _ = group;
+        let collect = |extension: &str, take: usize| -> Vec<std::path::PathBuf> {
             walkdir::WalkDir::new(&tags_root)
                 .into_iter()
                 .filter_map(Result::ok)
@@ -2487,7 +2473,7 @@ mod tests {
                 .collect()
         };
 
-        for path in collect("collision_model", b"coll", 10) {
+        for path in collect("collision_model", 10) {
             let Ok(tag) =
                 crate::core::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"coll"))
             else {
@@ -2498,7 +2484,7 @@ mod tests {
                 built += 1;
             }
         }
-        for path in collect("physics_model", b"phmo", 10) {
+        for path in collect("physics_model", 10) {
             let Ok(tag) =
                 crate::core::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"phmo"))
             else {
@@ -2509,7 +2495,7 @@ mod tests {
                 built += 1;
             }
         }
-        for path in collect("scenario_structure_bsp", b"sbsp", 2) {
+        for path in collect("scenario_structure_bsp", 2) {
             let Ok(tag) =
                 crate::core::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"sbsp"))
             else {

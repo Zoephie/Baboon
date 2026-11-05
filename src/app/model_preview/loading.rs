@@ -1324,49 +1324,6 @@ fn build_campaign_evolved_preview(
     let (render_model, render_meshes) =
         RenderModel::from_ue_meshes(&parts, &static_parts, &world_parts, &skel)
             .map_err(|e| e.to_string())?;
-    if std::env::var("CE_DEBUG").is_ok() {
-        let skel_nodes = skel
-            .root()
-            .field_path("nodes")
-            .and_then(|f| f.as_block())
-            .map(|b| b.len())
-            .unwrap_or(0);
-        eprintln!("[CE] skel_ref='{skel_ref}' skel_nodes={skel_nodes}");
-        eprintln!(
-            "[CE] skeletal parts: {}, static parts: {}",
-            parts.len(),
-            static_parts.len()
-        );
-        for (i, m) in render_meshes.iter().enumerate() {
-            let (mut mn, mut mx) = ([f32::MAX; 3], [f32::MIN; 3]);
-            for v in &m.vertices {
-                let p = [v.position.x, v.position.y, v.position.z];
-                for k in 0..3 {
-                    mn[k] = mn[k].min(p[k]);
-                    mx[k] = mx[k].max(p[k]);
-                }
-            }
-            eprintln!(
-                "[CE] mesh[{i}] {} verts center[{:.2} {:.2} {:.2}] extent[{:.2} {:.2} {:.2}] rigid_node={:?}",
-                m.vertices.len(),
-                (mn[0] + mx[0]) / 2.0,
-                (mn[1] + mx[1]) / 2.0,
-                (mn[2] + mx[2]) / 2.0,
-                mx[0] - mn[0],
-                mx[1] - mn[1],
-                mx[2] - mn[2],
-                m.rigid_node_index,
-            );
-        }
-        for r in &render_model.regions {
-            for p in &r.permutations {
-                eprintln!(
-                    "[CE] region '{}' perm '{}' idx={} count={}",
-                    r.name, p.name, p.mesh_index, p.mesh_count
-                );
-            }
-        }
-    }
     let preview = render_model_to_preview(&render_model, &render_meshes);
     if preview.batches.is_empty() {
         return Err("Reconstructed CE model has no previewable geometry.".to_owned());
@@ -1661,14 +1618,12 @@ fn ce_stem(path: &str) -> String {
 /// Build the mesh-sync binding index for a container set (see [`CeMeshSyncIndex`]).
 fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex {
     let (da_class, comp_class, comp_base_class) = *CE_CLASSES;
-    let t0 = std::time::Instant::now();
 
     // Single header-only pass over every `.uasset`.
     // `da_to_models`: DA stem → the `-model` package names it imports (its ModelTag).
     // `actors`: actor refs that own a mesh-sync component, with the DA stems they import.
     let mut da_to_models: HashMap<String, Vec<String>> = HashMap::new();
     let mut actors: Vec<(ActorRef, Vec<String>)> = Vec::new();
-    let mut scanned = 0usize;
     for (ci, c) in containers.iter().enumerate() {
         for e in c.archive.entries() {
             if !e.path.to_ascii_lowercase().ends_with(".uasset") {
@@ -1677,7 +1632,6 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
             let Some(hdr) = ce_read_header(&c.archive, &e.path) else {
                 continue;
             };
-            scanned += 1;
             let is_da = hdr.exports_class(da_class);
             let has_comp = hdr.exports_class(comp_class) || hdr.exports_class(comp_base_class);
             if !is_da && !has_comp {
@@ -1735,15 +1689,6 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
     }
 
     let by_model: Vec<(String, Vec<ActorRef>)> = model_to_actors.into_iter().collect();
-    if std::env::var("CE_DEBUG").is_ok() {
-        eprintln!(
-            "[CE] mesh-sync index: {} DAs, {} component-actors, {} models, from {scanned} headers in {:.1}s",
-            da_to_models.len(),
-            actors.len(),
-            by_model.len(),
-            t0.elapsed().as_secs_f32(),
-        );
-    }
     CeMeshSyncIndex { by_model }
 }
 
@@ -2545,15 +2490,6 @@ fn ce_collect_parts_from_regions(
             }
         }
     }
-    if std::env::var("CE_DEBUG").is_ok() {
-        let sk_ok = sk_cache.values().filter(|v| v.is_some()).count();
-        let sm_ok = sm_cache.values().filter(|v| v.is_some()).count();
-        eprintln!(
-            "[CE] cache: {sk_ok} unique SK decoded (of {} sk parts), {sm_ok} unique SM decoded (of {} sm parts)",
-            out.skeletal.len(),
-            out.statics.len()
-        );
-    }
     out
 }
 
@@ -2963,9 +2899,6 @@ mod tests {
             std::mem::discriminant(&entry.location)
         );
         let tag = read_entry(source, &entry).expect("read Campaign Evolved model");
-        unsafe {
-            std::env::set_var("CE_DEBUG", "1");
-        }
         let data = load_campaign_evolved_preview(
             &tag,
             &entry,
