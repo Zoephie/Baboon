@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use blam_tags::{TagFile, TagStruct};
+use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::attachment::{MarkerFrame, cross, perpendicular, unit};
 use super::ce_attachments::{elements, object_block};
@@ -289,12 +289,28 @@ pub(super) struct H3EffectPart<'a> {
 /// Whether `event_generate_parts` makes a part on an object in third person:
 /// out of the water, and not asked to be nonviolent.
 fn part_runs(part: TagStruct<'_>) -> bool {
-    part_runs_by(part, "create in", "violence mode")
+    part_runs_by(part, "create in", part_violence(part))
+}
+
+/// Where a part keeps its violence mode. Halo 2 names both of its part's
+/// settings `create in`, and the second is the violence (`halo2_tag_test`
+/// 0x515FC0 reads the part's second short). Only where there is no `violence
+/// mode`: an ordinal that misses falls back to the first `create in`.
+fn part_violence(part: TagStruct<'_>) -> &'static str {
+    if part.field("violence mode").is_some() { "violence mode" } else { "create in#1" }
 }
 
 /// `part_runs`, for parts and particle systems, which name these two apart.
+/// Each is a field path, so a `#ordinal` picks one of two of a name.
 pub(super) fn part_runs_by(part: TagStruct<'_>, environment: &str, violence: &str) -> bool {
-    let named = |field: &str| part.read_enum_name(field).unwrap_or_default();
+    let named = |path: &str| match part.field_path(path).and_then(|field| field.value()) {
+        Some(
+            TagFieldData::CharEnum { name, .. }
+            | TagFieldData::ShortEnum { name, .. }
+            | TagFieldData::LongEnum { name, .. },
+        ) => name.unwrap_or_default(),
+        _ => String::new(),
+    };
     let environment = named(environment);
     matches!(environment.as_str(), "" | ANYWHERE | AIR)
         && named(violence) != ONLY_NONVIOLENT
@@ -712,6 +728,33 @@ mod tests {
     fn times(events: &[([f32; 2], [f32; 2])], loop_start: usize, parallel: bool) -> H3EffectTimes {
         let events = events.iter().map(|(delay, duration)| H3EventTime::of(*delay, *duration)).collect();
         H3EffectTimes { events, loop_start, parallel, once: false }
+    }
+
+    /// A part asked to be nonviolent is not made, whether it says so in its
+    /// `violence mode` or, in Halo 2, in its second `create in`.
+    #[test]
+    fn a_nonviolent_part_is_not_made_in_either_naming() {
+        for (game, violence) in [("halo2_mcc", "create in#1"), ("halo3_mcc", "violence mode")] {
+            let mut tag = TagFile::new(crate::core::bundled::locate_definitions_root().join(game).join("effect.json"))
+                .unwrap_or_else(|error| panic!("{game} effect: {error:?}"));
+            for block in ["events", "events[0]/parts"] {
+                let mut root = tag.root_mut();
+                let mut field = root.field_path_mut(block).unwrap_or_else(|| panic!("{game}: {block}"));
+                field.as_block_mut().unwrap().add_element();
+            }
+            let runs = |tag: &TagFile| {
+                let part = tag.root().descend("events[0]/parts[0]").unwrap();
+                assert_eq!(part_violence(part), violence, "{game}");
+                part_runs(part)
+            };
+            for (value, made) in [(2, false), (0, true)] {
+                let path = format!("events[0]/parts[0]/{violence}");
+                let mut root = tag.root_mut();
+                let mut field = root.field_path_mut(&path).unwrap_or_else(|| panic!("{game}: {path}"));
+                field.set(TagFieldData::ShortEnum { value, name: None }).unwrap();
+                assert_eq!(runs(&tag), made, "{game}: violence {value}");
+            }
+        }
     }
 
     #[test]
