@@ -1033,7 +1033,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     // `sub_6C18F0` gates the shield overlay on this itself.
     let h3_shield = owned.iter().filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
     let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(H2Layer::ShieldDamaged));
-    let reach_shield = object == 0 && data.preview.reach_shield.is_some();
+    let reach_shield = object == 0 && (data.preview.reach_shield.is_some() || data.preview.h4_shield.is_some());
     let gate = (shield || h3_shield || reach_shield).then_some("current_shield_damage");
     let gate = gate.into_iter().chain(h3_shield.then_some(h3_draw::H3_OVERSHIELD));
     for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares).chain(gate) {

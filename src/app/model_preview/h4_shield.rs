@@ -1,0 +1,203 @@
+//! Halo 4's shield impact: the `shield_impact` an object's damage sections
+//! give it, drawn through `rasterizer_globals`' explicit shader 61 (`c_render_shield::render_object_internal`,
+//! X360 0x83AE5FD8, MCC 0x1408EE840). The tag reads as Reach's does by name,
+//! and the section is chosen as Reach chooses it; what differs is the shader,
+//! which applies its own exposure, and `shield_vitality`, which the game takes
+//! from the shield's damage section. See
+//! `docs/h4-preview-research/shadow-camo-shields.md` §3.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use blam_tags::TagFile;
+
+use super::ce_attachments::elements;
+use super::h2_functions::H2FunctionValues;
+use super::h3_shaders::{H3Pass, H3Texture};
+use super::reach_shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
+use crate::app::export::geometry::load_referenced_tag_from_source;
+use crate::core::hlsl::emit::Stage;
+use crate::core::hlsl::parse::{Scalar, Type};
+use crate::core::source::TagSource;
+
+/// `rasterizer_globals`' explicit shader 61, `shield_impact`.
+const SHIELD_IMPACT: usize = 61;
+/// What the preview's depth reads back as world distance with: as Reach's.
+pub(crate) const DEPTH_DECODE: &str = super::reach_shield::DEPTH_DECODE;
+pub(crate) const WORLD_SCALE: &str = super::reach_shield::WORLD_SCALE;
+
+/// The shield's settings, its textures under Halo 4's names, and its pass.
+#[derive(Debug)]
+pub(crate) struct H4Shield {
+    pub(crate) settings: ReachShieldSettings,
+    pub(crate) textures: Vec<H3Texture>,
+    pub(crate) pass: Arc<H3Pass>,
+}
+
+impl H4Shield {
+    /// The constants `render_object_callback` submits at shield damage
+    /// `damage`, with no hit landed: `shield_vitality` is the shield
+    /// section's own, full at rest.
+    pub(crate) fn values(
+        &self,
+        damage: f32,
+        time: f32,
+        values: Option<&H2FunctionValues>,
+        center: [f32; 3],
+    ) -> HashMap<&'static str, [f32; 4]> {
+        let mut object = values.cloned().unwrap_or_default();
+        object.insert("shield_vitality".to_owned(), 1.0);
+        let state = self.settings.state(damage, time, Some(&object));
+        self.settings.values(&state, center)
+    }
+}
+
+/// The model's shield and its pass, if it has one: technique 0, as no hit
+/// lands in the preview for the hit blob (technique 1) to shape.
+pub(crate) fn read_h4_shield(source: &TagSource, model: &TagFile) -> Option<Arc<H4Shield>> {
+    let path = shield_impact_path(model)?;
+    let settings = ReachShieldSettings::read(source, &path)?;
+    let pass = Arc::new(h4_shield_pass(source, 0).ok()?);
+    let rename = |name: &str| {
+        match name {
+            name if name == PLASMA[0] => "shield_impact_noise_texture1_texture",
+            name if name == PLASMA[1] => "shield_impact_noise_texture2_texture",
+            name if name == OSCILLATION[0] => "vs_shield_impact_noise_texture1_texture",
+            name if name == OSCILLATION[1] => "vs_shield_impact_noise_texture2_texture",
+            other => other,
+        }
+        .to_owned()
+    };
+    let textures = settings
+        .textures
+        .iter()
+        .map(|texture| H3Texture {
+            uniform: rename(&texture.uniform),
+            image: Arc::clone(&texture.image),
+            texels: texture.texels,
+            mips: Arc::clone(&texture.mips),
+            sampler: texture.sampler,
+            frames: Vec::new(),
+        })
+        .collect();
+    Some(Arc::new(H4Shield {
+        settings,
+        textures,
+        pass,
+    }))
+}
+
+/// Explicit 61's `technique` on the preview's skinned vertices, made to read
+/// the preview's depth: `ComputeDepthFade`'s `psDepthConstants` decode is
+/// the game's reversed depth, here the preview's window depth to world units.
+pub(crate) fn h4_shield_pass(source: &TagSource, technique: usize) -> Result<H3Pass, String> {
+    let globals = load_referenced_tag_from_source(
+        source,
+        "globals\\rasterizer_globals",
+        "rasterizer_globals",
+        b"rasg",
+    )
+    .map_err(|error| error.to_string())?;
+    let explicit = elements(globals.root(), "explicit shaders");
+    let entry = explicit.get(SHIELD_IMPACT).ok_or("no explicit shader 61")?;
+    let path = entry
+        .read_tag_ref_path("explicit pixel shader")
+        .filter(|path| !path.is_empty())
+        .ok_or("no pixel shader")?;
+    let program = super::h4_shaders::H4ShaderSource::read(source, &path)?
+        .program(&super::h4_shaders::H4_DEFINES)?;
+    let vertex =
+        super::h4_shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
+    let pixel =
+        super::h4_shaders::translate_technique(&program, technique, "_default", Stage::Pixel)?;
+    const DECODE: &str = "float l_sceneDepth = (1.0 / ((psDepthConstants.x + psDepthConstants.y) - (psDepthConstants.y * l_depthValue.x)));";
+    if !pixel.source.contains(DECODE) {
+        return Err("the depth fade's decode is not where it was".to_owned());
+    }
+    let mut pass = super::h3_shaders::pass_of(vertex, pixel);
+    pass.pixel = pass.pixel.replace(
+        DECODE,
+        &format!(
+            "float l_window_ndc = l_depthValue.x * 2.0 - 1.0;
+float l_sceneDepth = ((l_window_ndc - {DEPTH_DECODE}.y) / ({DEPTH_DECODE}.x - l_window_ndc * {DEPTH_DECODE}.z) + {DEPTH_DECODE}.w) / {WORLD_SCALE};"
+        ),
+    );
+    pass.pixel = pass.pixel.replacen(
+        "uniform vec4 psDepthConstants;",
+        &format!("uniform vec4 psDepthConstants;\nuniform vec4 {DEPTH_DECODE};\nuniform float {WORLD_SCALE};"),
+        1,
+    );
+    pass.uniforms
+        .push((DEPTH_DECODE.to_owned(), Type::Vector(Scalar::Float, 4)));
+    pass.uniforms
+        .push((WORLD_SCALE.to_owned(), Type::Scalar(Scalar::Float)));
+    Ok(pass)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kit() -> Option<TagSource> {
+        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        if !root.join("objects").is_dir() {
+            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
+            return None;
+        }
+        Some(TagSource::LooseFolder {
+            root,
+            game: Some(crate::core::game::GameId::Halo4),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
+        })
+    }
+
+    fn model(source: &TagSource, path: &str) -> TagFile {
+        load_referenced_tag_from_source(source, path, "model", b"hlmt").unwrap()
+    }
+
+    /// The Chief and the Elite take their live `shield` sections' impacts,
+    /// past the Elite's armour lock and engineer sections that start
+    /// inactive; neither shows at rest, and both show once hit. A Grunt has
+    /// no shield.
+    #[test]
+    fn the_kits_bipeds_take_their_live_shield() {
+        let Some(source) = kit() else { return };
+        let chief = model(
+            &source,
+            "objects\\characters\\storm_masterchief\\storm_masterchief",
+        );
+        assert_eq!(
+            shield_impact_path(&chief).as_deref(),
+            Some("fx\\reach\\shield_impacts\\spartan_3p")
+        );
+        let elite = model(
+            &source,
+            "objects\\characters\\storm_elite_ai\\storm_elite_ai",
+        );
+        assert_eq!(
+            shield_impact_path(&elite).as_deref(),
+            Some("fx\\reach\\shield_impacts\\elite_3p")
+        );
+        let grunt = model(&source, "objects\\characters\\storm_grunt\\storm_grunt");
+        assert_eq!(shield_impact_path(&grunt), None);
+        let shield = read_h4_shield(&source, &chief).expect("the Chief's shield");
+        assert!(!shield.settings.showing(0.0));
+        assert!(shield.settings.showing(0.5));
+        assert_eq!(shield.textures.len(), 4);
+        assert!(
+            shield
+                .textures
+                .iter()
+                .any(|texture| texture.uniform == "vs_shield_impact_noise_texture1_texture")
+        );
+        // `shield_vitality` reads full: the edge glow's intensity is on it.
+        let values = shield.values(1.0, 0.5, None, [0.0; 3]);
+        assert!(
+            values["edge_glow"][..3]
+                .iter()
+                .any(|channel| *channel > 0.0),
+            "{:?}",
+            values["edge_glow"]
+        );
+    }
+}

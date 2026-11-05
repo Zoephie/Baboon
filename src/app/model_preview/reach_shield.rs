@@ -25,8 +25,8 @@ const SMALLEST: f32 = 1e-4;
 
 /// The vertex stage's two noise maps, which the source names as the pixel
 /// stage's but the game binds the oscillation textures to.
-const OSCILLATION: [&str; 2] = ["ReachShieldOscillation_texture1", "ReachShieldOscillation_texture2"];
-const PLASMA: [&str; 2] =
+pub(crate) const OSCILLATION: [&str; 2] = ["ReachShieldOscillation_texture1", "ReachShieldOscillation_texture2"];
+pub(crate) const PLASMA: [&str; 2] =
     ["GlobalTexture_shield_impact_noise_texture1", "GlobalTexture_shield_impact_noise_texture2"];
 /// What the preview's depth reads back as world distance with.
 pub(crate) const DEPTH_DECODE: &str = "reach_shield_depth_decode";

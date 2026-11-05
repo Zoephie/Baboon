@@ -251,3 +251,4 @@ mod tests {
         assert!(source.resolve("missing.fxh", materials).is_none());
     }
 }
+
