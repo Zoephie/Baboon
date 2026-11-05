@@ -12,6 +12,7 @@ use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_light_volumes::{read_glow, read_h2_bitmap};
+use super::h2_lights::attachment_value;
 use super::h2_passes::{H2Image, tag_function_at};
 use super::h3_effects::marker_name;
 use super::*;
@@ -306,11 +307,7 @@ impl H2LiquidAt {
         // `sub_515280`: what an effect's part of no duration asks for is all
         // of it. `rasterizer_liquid_draw` keeps the scale as a byte and dims
         // the whole arc by it.
-        let scale = if self.scale_by.is_empty() {
-            1.0
-        } else {
-            values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0).clamp(0.0, 1.0)
-        };
+        let scale = attachment_value(&self.scale_by, values).clamp(0.0, 1.0);
         if scale <= 0.0 {
             return Vec::new();
         }

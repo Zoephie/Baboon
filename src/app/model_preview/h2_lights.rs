@@ -1629,6 +1629,17 @@ impl H2FlareAt {
 mod tests {
     use super::*;
 
+    /// What every kind of attachment reads for its `scale by`: full with no
+    /// name, the object's value, and with none an idle object's input.
+    #[test]
+    fn an_attachment_scale_reads_the_object_then_its_idle_input() {
+        let values = H2FunctionValues::from([("throttle".to_owned(), 0.25)]);
+        assert_eq!(attachment_value("", None), 1.0);
+        assert_eq!(attachment_value("throttle", Some(&values)), 0.25);
+        assert_eq!(attachment_value("alive", None), 1.0, "nothing to ask: the idle object is alive");
+        assert_eq!(attachment_value("boost", None), 0.0);
+    }
+
     #[test]
     fn a_frustum_takes_the_combined_pass_only_with_specular_to_show() {
         let light = |specular| H2DefaultLight { position: [0.0; 3], color: [1.0; 3], specular, radius: 1.0 };

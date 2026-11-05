@@ -10,6 +10,7 @@ use super::attachment::MarkerFrame;
 use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
+use super::h2_lights::attachment_value;
 use super::h2_passes::H2Image;
 use super::h3_effects::marker_name;
 use super::h3_shaders::H3Blend;
@@ -353,10 +354,11 @@ impl H2ContrailField {
         let now = resume_point(self.time.unwrap_or(time), time, PRE_ROLL);
         for step in frame_steps(now, time) {
             for (contrail, running) in contrails.iter().zip(&mut self.running) {
+                // Only asked for a name: each answer is a fresh map.
                 let scale = if contrail.scale_by.is_empty() {
                     1.0
                 } else {
-                    values(contrail.object).and_then(|values| values.get(&contrail.scale_by).copied()).unwrap_or(0.0)
+                    attachment_value(&contrail.scale_by, values(contrail.object).as_ref())
                 };
                 if scale > 0.0 {
                     running.owed += contrail.rate * step;
