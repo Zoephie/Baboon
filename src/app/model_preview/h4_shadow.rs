@@ -22,7 +22,7 @@ pub(crate) const VSM: [f32; 3] = [0.002, 1.51, 4.0];
 pub(crate) const FADE: [f32; 2] = [2.0, -0.5];
 /// `ps_bsp_lightmap_scale_constants.y`, the floor under the shadowed direct
 /// light: `setup_object_lighting_for_pass` writes it only with a level, and
-/// 0.3 is its in-level default and the shader's own fallback [inferred].
+/// 0.3 is its in-level default and the shader's own fallback \[inferred\].
 pub(crate) const DIRECT_FLOOR: f32 = 0.3;
 
 /// `RenderObjectGetShadowTypeFromObjectDefinition` (X360 0x83ABF928, MCC

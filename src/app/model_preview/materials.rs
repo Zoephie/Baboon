@@ -583,9 +583,6 @@ pub(super) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: S
     })
 }
 
-/// The template a Reach shader names as its `reference`, which Reach's tool
-/// (`postprocess_as_child`, 0x141166270) lays under it before the bake. A
-/// shader naming itself has none, as tool refuses it.
 /// `c_render_method_shader::version_update`, which Reach runs on every
 /// `shader` it loads: older tags' options and parameters as the game draws
 /// them. Old Spartan helmets keep a `misc` option that would otherwise turn
@@ -596,6 +593,9 @@ fn reach_version_update(method: &mut RenderMethod, definition: &RenderMethodDefi
     }
 }
 
+/// The template a Reach shader names as its `reference`, which Reach's tool
+/// (`postprocess_as_child`, 0x141166270) lays under it before the bake. A
+/// shader naming itself has none, as tool refuses it.
 fn reach_reference(
     source: &TagSource,
     method: &RenderMethod,

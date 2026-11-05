@@ -180,10 +180,10 @@ impl Baboon {
         if state.preview_load_id != Some(request_id) {
             return true;
         }
-        // The request is answered before the staleness check. A result dropped
-        // for a generation bump used to leave the id set, and with no data and
-        // a request "in flight" nothing asked again: the pane sat on its
-        // loading shells, repainting every frame, until the tag was closed.
+        // The request is answered before the staleness check, so a result
+        // dropped for a generation bump still lets the pane ask again, rather
+        // than sit on its loading shells, repainting every frame, with a
+        // request "in flight" that never lands.
         state.preview_load_id = None;
         if stale {
             return true;
@@ -572,7 +572,7 @@ fn load_tag_preview(
     // checked — each selected BSP loads render-only and lands as one region,
     // so the region list doubles as the per-BSP toggle. Nothing loads until
     // something is checked: a campaign scenario's full BSP set is far too
-    // much to parse unasked on the UI thread.
+    // much to parse unasked.
     if &group == b"scnr" {
         let bsps = scenario_bsp_paths(model_tag);
         if bsps.is_empty() {
@@ -711,11 +711,11 @@ fn load_tag_preview(
             });
         }
     }
-    // The collision/physics overlays are NOT built here: this parse runs on
-    // the UI thread, and walking the collision BSP plus tessellating the
-    // physics shapes froze the frame every time a toggle rebuilt the merge.
-    // `maybe_request_model_overlays` builds them once on a worker after this
-    // load lands, and the toggles are draw-time filters from then on.
+    // The collision/physics overlays are not built here: walking the
+    // collision BSP and tessellating the physics shapes is slow, and a
+    // toggle would rebuild the merge each time. `maybe_request_model_overlays`
+    // builds them once on a worker after this load lands, and the toggles are
+    // draw-time filters from then on.
     // Halo 4 shows every instance for a NONE group as Reach does (the 360's
     // 0x8325C1B8).
     let reach = source.is_some_and(|source| matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4)));
@@ -962,14 +962,6 @@ pub(super) fn preview_model_tag(source: &TagSource, tag: &TagFile) -> Result<Opt
         .map_err(|error| format!("Could not load {reference}.model: {error}"))
 }
 
-/// Build preview geometry from a render-geometry tag — a `render_model`
-/// (`mode`), a Halo CE `gbxmodel` (`mod2`), or a Halo 2 `render_model`.
-///
-/// One tag→geometry path for every engine: blam-tags' `RenderModel::from_tag`
-/// / `derive_render_meshes` game-dispatch (H3 reads `render geometry`, H2 the
-/// `sections`, Halo CE the gbxmodel `geometries`), so batches carry the render
-/// model's own region/permutation names and stay in sync with the variant
-/// selection. JMS is export-only — never used for rendering.
 /// Tag basename, used to name gen3 particle objects (`pmdf` stores no
 /// object names — see `blam_tags::particle_model`). Falls back to the
 /// entry key when the display path has no usable leaf.
@@ -1069,6 +1061,14 @@ pub(super) fn build_particle_model_preview(
 /// selectable entry per region, so every object gets this single one.
 const PARTICLE_OBJECT_PERMUTATION: &str = "default";
 
+/// Build preview geometry from a render-geometry tag — a `render_model`
+/// (`mode`), a Halo CE `gbxmodel` (`mod2`), or a Halo 2 `render_model`.
+///
+/// One tag→geometry path for every engine: blam-tags' `RenderModel::from_tag`
+/// / `derive_render_meshes` game-dispatch (H3 reads `render geometry`, H2 the
+/// `sections`, Halo CE the gbxmodel `geometries`), so batches carry the render
+/// model's own region/permutation names and stay in sync with the variant
+/// selection. JMS is export-only — never used for rendering.
 pub(in crate::app) fn build_render_preview(
     render_tag: &TagFile,
 ) -> Result<RenderModelPreview, String> {
@@ -1416,9 +1416,6 @@ fn copy_chimp_jms_uvs(
     Ok(())
 }
 
-/// Find a character's UE asset root by locating the `*MeshSynchronization`
-/// data asset that imports this model's package, returning a
-/// `.../characters/<name>` path prefix.
 /// Heuristic: is this a first-person hand/body model (`spartans_fp`,
 /// `.../fp_body`)? Those are `FirstPersonHands`/`FirstPersonBody`
 /// representations sourced outside the world mesh-sync path.
@@ -1427,6 +1424,9 @@ fn is_first_person_model(model_key: &str) -> bool {
     k.contains("_fp/") || k.contains("/fp_") || k.contains("fp_body") || k.ends_with("_fp")
 }
 
+/// Find a character's UE asset root by locating the `*MeshSynchronization`
+/// data asset that imports this model's package, returning a
+/// `.../characters/<name>` path prefix.
 fn ce_find_character_root(containers: &[MountedContainer], model_key: &str) -> Option<String> {
     let index = ce_path_index(containers);
     for (norm, container, entry) in &index.mesh_sync {
@@ -1712,9 +1712,8 @@ fn ce_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CeMeshSyncIndex> {
 /// Build a Campaign Evolved container set's mesh-sync index in the background
 /// as soon as it is mounted.
 ///
-/// The first model preview used to build it on the UI thread, which scans
-/// every package header in the install: about five seconds with the app
-/// frozen. Built here, the first preview finds it ready (or waits on this
+/// Building it scans every package header in the install, about five
+/// seconds. Built here, the first preview finds it ready (or waits on this
 /// build rather than starting its own).
 pub(in crate::app) fn prewarm_ce_mesh_sync_index(containers: Vec<MountedContainer>) {
     spawn_background("Campaign Evolved mesh index prewarm", move || {
@@ -1800,7 +1799,7 @@ fn ce_find_uasset_by_basename(containers: &[MountedContainer], basename: &str) -
     })
 }
 
-/// Export[0]'s serial byte slice within a package.
+/// The first export's serial byte slice within a package.
 fn ce_export0_bytes<'a>(bytes: &'a [u8], hdr: &FZenPackageHeader) -> Option<&'a [u8]> {
     let ex = hdr.export_map.first()?;
     let start = hdr.summary.header_size as usize + ex.cooked_serial_offset as usize;
@@ -2499,8 +2498,6 @@ fn ce_collect_parts_from_regions(
 ///
 /// Answered from the file-name index: a path with that tail has the tail's
 /// last segment as its file name, so only those few entries are compared.
-/// This used to lowercase and rewrite every path in the install, several
-/// times per mesh.
 fn ce_package_entries<'c>(
     containers: &'c [MountedContainer],
     package: &str,

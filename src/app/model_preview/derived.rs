@@ -1654,9 +1654,9 @@ impl Baboon {
         let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
             return true;
         };
-        // The in-flight marker is cleared before the staleness check: a result
-        // dropped for a generation bump used to leave it set, and the preview
-        // then waited for it for good (the overlays never arrived).
+        // The in-flight marker is cleared before the staleness check, so a
+        // result dropped for a generation bump still lets the overlays be
+        // asked for again rather than waited on for good.
         state.overlays_pending = false;
         if stale {
             return true;

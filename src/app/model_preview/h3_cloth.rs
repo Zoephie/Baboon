@@ -54,7 +54,7 @@ pub(crate) enum ClothGame {
     Reach,
 }
 
-/// Reach's game ticks a second, for its cloth and its antennas. [inferred]
+/// Reach's game ticks a second, for its cloth and its antennas. \[inferred\]
 /// The rate comes from `game_options +12` (the 360's
 /// `game_time_initialize_for_new_map`, 0x82D7A998), which was not read for
 /// MCC. 30 is the 360's, and the antennas' fixed step, 0.0333 a tick, is a

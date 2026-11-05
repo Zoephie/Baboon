@@ -46,7 +46,7 @@ impl ModelGlRenderer {
     /// copy of the depth by pixel. The game bounds each with a stencilled
     /// volume (explicit 52, an icosahedron at 1.1 times the light's end);
     /// the falloff reaches zero within it, so the picture's whole is the same
-    /// [inferred], save a physically correct light whose radius from its
+    /// \[inferred\], save a physically correct light whose radius from its
     /// colour outreaches its end, which the volume would cut.
     pub(super) unsafe fn draw_h4_lights(
         &mut self,

@@ -62,7 +62,7 @@ pub(crate) fn reach_particle_light() -> ReachParticleLight {
 /// sub_1405CE1B0) of the default sample, as `tint from lightmap` comes out
 /// in `default_vs`: the ambient over its exponent in 255ths of a stop (of at
 /// most one), back up by it as `initial.rgb · exp2(initial.w)`. The colour
-/// goes out as an `argb_color`, so it holds at most 1 [inferred].
+/// goes out as an `argb_color`, so it holds at most 1 \[inferred\].
 pub(crate) fn reach_lightmap_tint() -> [f32; 3] {
     let ambient = reach_particle_light().ambient;
     let brightest = ambient[0].max(ambient[1]).max(ambient[2]).max(1e-4);

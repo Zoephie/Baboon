@@ -475,7 +475,7 @@ impl TracerLod {
     }
 
     /// `ComputeLod` (X 0x834DA128) at `distance`, the camera's scale taken
-    /// as 1 [open].
+    /// as 1 \[open\].
     fn at(&self, distance: f32) -> f32 {
         let span = self.end - self.start;
         let t = if span == 0.0 {

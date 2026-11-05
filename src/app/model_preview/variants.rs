@@ -591,7 +591,7 @@ pub(super) fn draw_variant_controls(
     }
 }
 
-/// Search variants without losing the <None> reset or wheel navigation.
+/// Search variants without losing the `<None>` reset or wheel navigation.
 fn draw_variant_picker(
     ui: &mut Ui,
     source_key: &str,

@@ -477,7 +477,7 @@ pub(crate) struct H4ParticleState {
     pub(crate) initial_color: [f32; 4],
 }
 
-/// f32 to f16, rounding to nearest even (HLSL `f32tof16` [inferred]).
+/// f32 to f16, rounding to nearest even (HLSL `f32tof16` \[inferred\]).
 pub(crate) fn f32_to_f16(value: f32) -> u32 {
     let bits = value.to_bits();
     let sign = (bits >> 16) & 0x8000;

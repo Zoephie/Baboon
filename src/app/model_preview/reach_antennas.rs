@@ -57,7 +57,7 @@ fn scaled(a: [f32; 3], by: f32) -> [f32; 3] {
 impl RunningAntenna {
     /// Both ends where the spring rests them. The game starts the far end
     /// straight up from the world's origin and lets it fall into place; that
-    /// first transient is not something to reproduce. [inferred]
+    /// first transient is not something to reproduce. \[inferred\]
     fn at_rest(marker: [f32; 3], forward: [f32; 3], spring: &ReachAntennaSpring) -> Self {
         Self { attach: marker, near: marker, far: plus(marker, scaled(forward, spring.length)), velocity: [0.0; 3] }
     }

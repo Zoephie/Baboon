@@ -507,7 +507,8 @@ impl H2VertexStage {
         }
     }
 
-    /// Only the offset variant moves the drawn surface.
+    /// The offset and Halo CE plasma variants move the drawn surface out along
+    /// the normal; the rest draw it where it is.
     fn drawn_position(self) -> &'static str {
         match self {
             Self::Offset => "position + normal * u_texture_rows[8].w",

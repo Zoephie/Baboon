@@ -281,7 +281,7 @@ impl ReachVolumeLod {
 
 /// `c_light_volume_definition::calc_lod_amount` (the 360's 0x82EC77D0, MCC
 /// sub_14029B0D0) at `distance` from the eye. `lod same in splitscreen`
-/// only skips `x_distance_lod_scale`, which is 1 for one view [inferred].
+/// only skips `x_distance_lod_scale`, which is 1 for one view \[inferred\].
 fn lod_amount(lod: Option<&ReachVolumeLod>, distance: f32) -> f32 {
     let Some(lod) = lod else {
         return 1.0;

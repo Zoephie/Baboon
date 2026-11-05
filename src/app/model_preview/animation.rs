@@ -1806,8 +1806,6 @@ impl Baboon {
     }
 }
 
-/// Whether a kit is Halo CE, whose objects stand in for the `.model`.
-///
 /// Worker half of the list request.
 fn list_model_animations(
     source: &TagSource,
@@ -1948,8 +1946,7 @@ fn ce_rest_pose(skeleton: &Skeleton, gbxmodel: Option<&TagFile>) -> Vec<NodeTran
         .collect()
 }
 
-/// Worker half of the decode request: the extractor's exact composition
-/// recipe (`write_group_jma`), minus the file write.
+/// [`decode_held_animation`] with no weapon held, for the tests.
 #[cfg(test)]
 fn decode_model_animation(
     source: &TagSource,
@@ -2000,7 +1997,9 @@ fn lay_over(
     }
 }
 
-/// [`decode_model_animation`] with what a held weapon lays over the clip.
+/// Worker half of the decode request: the extractor's exact composition
+/// recipe (`write_group_jma`), minus the file write, with what a held weapon
+/// lays over the clip.
 fn decode_held_animation(
     source: &TagSource,
     entry: &TagEntry,
@@ -2117,9 +2116,6 @@ fn decode_held_animation(
     })
 }
 
-/// The Halo CE half of [`decode_model_animation`]: the extractor's skeleton
-/// and the gbxmodel's rest pose, with overlays applied as the game applies
-/// them.
 /// A clip with its rotations turned to run forward; see [`decode_ce_animation`].
 fn ce_inverted_clip(animation: &CeAnimation<'_>) -> blam_tags::AnimationClip {
     let mut clip = animation.decode();
@@ -2146,6 +2142,9 @@ fn ce_idle_beneath<'a, 'tag>(
     })
 }
 
+/// The Halo CE half of [`decode_held_animation`]: the extractor's skeleton
+/// and the gbxmodel's rest pose, with overlays applied as the game applies
+/// them.
 fn decode_ce_animation(
     source: &TagSource,
     object: &TagFile,

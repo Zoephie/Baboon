@@ -988,7 +988,8 @@ pub(super) fn attach_variant_objects(
     attached_objects
 }
 
-/// A weapon in a Halo 2 unit's hand.
+/// An object attached to the opened one, in any game from Halo 2 on: a held
+/// weapon, or what one of its variants attaches.
 #[derive(Debug, Clone)]
 pub(crate) struct H2AttachedObject {
     /// What its materials carry as `object`.

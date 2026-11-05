@@ -278,6 +278,17 @@ pub(super) fn draw_model_viewport(
     }
 }
 
+/// Leave out what only a shield draws, once the materials are known.
+pub(super) fn without_shield_parts(visible: &mut Vec<usize>, preview: &RenderModelPreview, textures: Option<&[MaterialTextures]>) {
+    let Some(textures) = textures else {
+        return;
+    };
+    visible.retain(|&batch| {
+        let material = preview.batches.get(batch).map_or(0, |batch| batch.material_index as usize);
+        !textures.get(material).is_some_and(|texture| texture.shield_only)
+    });
+}
+
 /// The batches the current toggles and region selections draw.
 ///
 /// The overlay toggles are draw-time filters: the collision and physics
@@ -293,17 +304,6 @@ pub(super) fn draw_model_viewport(
 /// permutations `monitor`/`lightning-100` while the collision model's only
 /// one is `__base` — the selected name matches no overlay batch, and the
 /// overlay draws its region's first permutation instead of vanishing.
-/// Leave out what only a shield draws, once the materials are known.
-pub(super) fn without_shield_parts(visible: &mut Vec<usize>, preview: &RenderModelPreview, textures: Option<&[MaterialTextures]>) {
-    let Some(textures) = textures else {
-        return;
-    };
-    visible.retain(|&batch| {
-        let material = preview.batches.get(batch).map_or(0, |batch| batch.material_index as usize);
-        !textures.get(material).is_some_and(|texture| texture.shield_only)
-    });
-}
-
 pub(super) fn visible_batch_indices(
     preview: &RenderModelPreview,
     state: &ModelPreviewState,
@@ -1471,8 +1471,6 @@ fn paint_model_gl(
     });
 }
 
-/// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
-/// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
 #[cfg(all(test, target_os = "macos"))]
 #[path = "h2_shot.rs"]
 pub(super) mod h2_shot;
@@ -1512,6 +1510,8 @@ mod h4_light_volume_pass;
 #[path = "h4_tracer_pass.rs"]
 mod h4_tracer_pass;
 
+/// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
+/// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
     "u_tex_detail",
@@ -1988,10 +1988,9 @@ const MODEL_GPU_SLOTS: usize = 4;
 
 /// Which slot each model draws from, least recently drawn out first.
 ///
-/// The renderer used to hold one model. With two previews on screen each
-/// frame drew one model, then the other, and each draw replaced what the other
-/// had just uploaded: every frame re-sent both models' vertices, indices and
-/// textures to the GPU.
+/// A slot per model keeps two previews on screen from replacing each other's
+/// upload every frame, which would re-send both models' vertices, indices
+/// and textures to the GPU each time.
 #[derive(Default)]
 struct ModelSlotLru {
     /// `(geometry id, last drawn)`, one per slot in use.
@@ -5444,9 +5443,6 @@ impl ModelGlRenderer {
             .map_or(&[], |material| material.h2_layers[layer as usize].as_slice())
     }
 
-    /// Whether a material's passes stand in for the slots. Transparent ones
-    /// always do. Opaque ones need game shaders on, and a template with a
-    /// lightmap layer needs that layer to have prepared.
     /// Whether the model is camouflaged: camo needs the model's shader for it.
     fn h2_camo_on(&self, frame: &ModelGpuFrame) -> bool {
         frame.active_camo
@@ -5454,6 +5450,9 @@ impl ModelGlRenderer {
                 .any(|material| self.h2_material_ready(frame, material, H2Layer::ActiveCamo))
     }
 
+    /// Whether a material's passes stand in for the slots. Transparent ones
+    /// always do. Opaque ones need game shaders on, and a template with a
+    /// lightmap layer needs that layer to have prepared.
     fn h2_replaces_slots(&self, frame: &ModelGpuFrame, material: usize) -> bool {
         if frame.game_shaders && self.h3_material(frame, material).is_some() {
             return true;
@@ -7809,12 +7808,6 @@ unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeT
     }
 }
 
-/// Upload one decoded texture, with mipmaps and the wrap modes the shader
-/// authored.
-///
-/// Mipmaps matter here beyond quality: a detail map tiling twenty times across
-/// a model aliases into noise without them, which is exactly where a preview
-/// looks worst.
 /// Halo 2's, 3's and Reach's antennas, whose maps follow Halo CE's in the
 /// slot's, each with whether it is Reach's; Reach's far ends are at `tips`.
 /// Those on a permutation not shown are left out.
@@ -8108,8 +8101,7 @@ unsafe fn upload_normalization_cube(gl: &glow::Context) -> Option<glow::NativeTe
     }
 }
 
-/// A 1x1 black cube, for passes whose cube map is not read: a reflection
-/// that adds nothing.
+/// A 1x1 black 2D texture: the bloom a pass reads when none was drawn.
 unsafe fn upload_black_flat(gl: &glow::Context) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
@@ -8123,6 +8115,8 @@ unsafe fn upload_black_flat(gl: &glow::Context) -> Option<glow::NativeTexture> {
     }
 }
 
+/// A 1x1 black cube, for passes whose cube map is not read: a reflection
+/// that adds nothing.
 unsafe fn upload_black_cube(gl: &glow::Context) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
@@ -8180,6 +8174,12 @@ unsafe fn upload_solid_volume(gl: &glow::Context, target: u32, color: [u8; 4]) -
     }
 }
 
+/// Upload one decoded texture, with mipmaps and the wrap modes the shader
+/// authored.
+///
+/// Mipmaps matter here beyond quality: a detail map tiling twenty times across
+/// a model aliases into noise without them, which is exactly where a preview
+/// looks worst.
 unsafe fn upload_texture(gl: &glow::Context, image: &TextureImage) -> Option<glow::NativeTexture> {
     if image.width == 0 || image.height == 0 || !image.whole() {
         return None;

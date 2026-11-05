@@ -40,6 +40,7 @@ const NOT_AFFECTED_BY_INNER_OCCLUSION: i128 = 0x20;
 /// `flags` of a `light`.
 const NO_ILLUMINATION: i128 = 1;
 const LIGHT_ONLY_FIRST_PERSON: i128 = 0x20;
+const NO_SPECULAR: i128 = 2;
 /// `ignore parent object` and `ignore all parents`: `sub_6BA660` leaves the
 /// object unlit only with both.
 const IGNORES_PARENTS: i128 = 0x2800;
@@ -61,7 +62,6 @@ const FIELD_OF_VIEW: [f32; 2] = [1.0, 120.0];
 const BRIGHTEST: f32 = 4.0;
 /// `default lightmap setting`: the game makes no such light.
 const LIGHTMAPS_ONLY: i128 = 2;
-const NO_SPECULAR: i128 = 2;
 /// Tool's postprocess takes bounds all under this as unset.
 const UNSET: f32 = 0.0001;
 
@@ -760,8 +760,6 @@ impl H2FlareAt {
     }
 }
 
-/// `object_attachment_scale`: no name is 1, and a name nothing answers to is 0,
-/// as `object_get_function_value` leaves it.
 /// The second of two fields that share a name, by its place in the struct.
 fn second_field_int(root: TagStruct<'_>, name: &str) -> Option<i128> {
     let field = root.fields().filter(|field| field.name() == name).nth(1)?;
@@ -865,9 +863,6 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
     })
 }
 
-/// `sub_8EB720`, and what tool's postprocess gives a tag for the game: the
-/// light, whether it lights the model on the sphere path, and its flare. `None`
-/// for a light the game makes nothing of in a third person view.
 /// Whether a `light` can ever be on in a third person view: nothing else sets
 /// the bit `sub_8ED2A0` turns a light on through.
 pub(super) fn light_can_shine(root: TagStruct<'_>) -> bool {
@@ -876,6 +871,9 @@ pub(super) fn light_can_shine(root: TagStruct<'_>) -> bool {
         && root.read_int_any("default lightmap setting") != Some(LIGHTMAPS_ONLY)
 }
 
+/// `sub_8EB720`, and what tool's postprocess gives a tag for the game: the
+/// light, whether it lights the model on the sphere path, and its flare. `None`
+/// for a light the game makes nothing of in a third person view.
 fn read_h2_light(
     source: &TagSource,
     path: &str,

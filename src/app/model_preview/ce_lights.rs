@@ -233,7 +233,7 @@ const LIGHT_SPARES_OWNER: i128 = 4;
 #[derive(Debug, Clone)]
 pub(crate) struct CeReflection {
     flags: i128,
-    /// Which of [`CeFlare::image`]s it draws.
+    /// Which of [`CeFlare::images`] it draws.
     pub(crate) image: usize,
     position: f32,
     rotation: f32,

@@ -24,10 +24,11 @@ use crate::core::hlsl::parse::{TextureKind, Type, parse};
 use crate::core::hlsl::pre::Preprocessor;
 use crate::core::source::TagSource;
 
-/// tool's tables of entry point, vertex type and deform names.
+/// Indices into [`VERTEX_TYPES`].
 #[cfg(test)]
 pub(crate) const VERTEX_RIGID: usize = 1;
 pub(crate) const VERTEX_SKINNED: usize = 2;
+/// tool's tables of entry point, vertex type and deform names.
 const VERTEX_TYPES: [(&str, &str); 3] = [
     ("s_world_vertex", "deform_world"),
     ("s_rigid_vertex", "deform_rigid"),

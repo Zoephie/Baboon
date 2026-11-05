@@ -1,7 +1,7 @@
-//! Halo 3's particle systems on an attached effect. The game updates most of
-//! these on the card, but nothing in the update needs it, so they run here, a
-//! fixed step at a time, and draw as quads. Models, distortion and collision
-//! are left out: a preview has no level to hit.
+//! The particle systems on an attached effect, for Halo 2, Halo 3, ODST, Reach
+//! and Halo 4. The game updates most of these on the card, but nothing in the
+//! update needs it, so they run here, a fixed step at a time, with their
+//! movement controllers, and draw as sprites, particle models or distortion.
 
 use std::sync::Arc;
 

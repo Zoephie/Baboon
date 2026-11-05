@@ -1652,9 +1652,6 @@ impl ModelGlRenderer {
         }
     }
 
-    /// `c_render_shield::render_object_internal`: every part that takes the
-    /// shield, through 61 or 119, added over what lies behind with no depth
-    /// written and no face culled.
     /// Halo 4's `c_render_shield::render_object_internal`: every part that
     /// takes the shield through explicit 61, added (`ONE, ONE`) over what
     /// lies behind, no depth written, no face culled. The pass applies its
@@ -1720,6 +1717,9 @@ impl ModelGlRenderer {
         }
     }
 
+    /// `c_render_shield::render_object_internal`: every part that takes the
+    /// shield, through 61 or 119, added over what lies behind with no depth
+    /// written and no face culled.
     unsafe fn draw_reach_shield(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         let Some(shield) = frame.preview.reach_shield.clone() else {
             return;
@@ -2374,14 +2374,11 @@ fn batch_distance(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch) -> f32
     (0..3).map(|axis| (middle[axis] - view.eye[axis]) * view.forward[axis]).sum()
 }
 
-/// `c_object_renderer::render_albedo` and its like: `_cull_mode_cw` throughout.
-/// Tags lean on it, storing some faces twice with opposite winding, and with
-/// both drawn the back one takes the depth tie and its lighting with it.
 /// Whether Reach draws this part with no face culled: `render_mesh_part_default`
 /// takes its cull mode from `c_render_method::get_culling_mode` (X360
 /// 0x826E9E40), none for `shader_foliage` (`rmfl`, 0x726D666C) and back faces
-/// for every other group. Only the material's own passes; a shield or shadow drawn over the
-/// part keeps its own culling.
+/// for every other group. Only the material's own passes; a shield or shadow
+/// drawn over the part keeps its own culling.
 fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Option<u32>) -> bool {
     let foliage = group == Some(u32::from_be_bytes(*b"rmfl"));
     let own = [material.albedo.as_ref(), Some(&material.lit), material.camo.as_ref(), material.dynamic_light.as_ref()]
@@ -2392,6 +2389,9 @@ fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Optio
     material.dialect == H3Dialect::Reach && foliage && own
 }
 
+/// `c_object_renderer::render_albedo` and its like: `_cull_mode_cw` throughout.
+/// Tags lean on it, storing some faces twice with opposite winding, and with
+/// both drawn the back one takes the depth tie and its lighting with it.
 pub(super) unsafe fn h3_set_cull(gl: &glow::Context, frame: &ModelGpuFrame) {
     unsafe {
         if frame.show_backfaces {

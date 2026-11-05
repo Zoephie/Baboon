@@ -262,7 +262,7 @@ pub(crate) struct RenderModelInstances {
 
 /// One vertex as the GL program consumes it. `#[repr(C)]` because the whole
 /// buffer is uploaded as raw bytes; the attribute offsets in
-/// [`renderer::ModelGlRenderer::new`] are hand-written to match this order and
+/// `ModelGlRenderer::new` are hand-written to match this order and
 /// a test pins them.
 ///
 /// `tangent` and `binormal` are carried rather than reconstructed: a normal map
@@ -898,8 +898,7 @@ pub(super) fn draw_model_preview_panel(
             // At wide sizes the persisted preview scale controls the entire
             // preview card. Reserve enough room for Model Setup, then let the
             // card grow around its 470×300 viewport until it reaches that
-            // limit. Previously only the image changed size inside a fixed
-            // 40% column, which made the control feel disconnected.
+            // limit.
             let preview_width = wide_model_preview_section_width(page_width, *model_preview_size);
             let setup_width = (page_width - preview_width - gap).max(WIDE_MODEL_SETUP_MIN_WIDTH);
             let preview_viewport_size = model_viewport_size(preview_width, *model_preview_size);
