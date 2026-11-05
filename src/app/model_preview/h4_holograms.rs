@@ -466,44 +466,42 @@ impl ModelGlRenderer {
             }
             let uploaded = holograms.uploaded.as_ref().map(|(_, map)| map.clone()).unwrap_or_default();
             let pass: &Arc<H3Pass> = &material.pass;
-            let Some(mut program) = self.h3_program(gl, pass) else {
-                return;
-            };
-            gl.use_program(Some(program.program));
-            let drawn = DrawnObject { values: frame.h2_values_of_object(owner), time: frame.time, owner };
-            let node = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
-            let functions = material.submit.draw_values(H4Draw::Lit, &drawn, node);
-            for (name, ty) in &pass.uniforms {
-                let location = program.location(gl, name);
-                if location.is_none() {
-                    continue;
+            self.with_h3_program(gl, pass, |this, program| {
+                gl.use_program(Some(program.program));
+                let drawn = DrawnObject { values: frame.h2_values_of_object(owner), time: frame.time, owner };
+                let node = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+                let functions = material.submit.draw_values(H4Draw::Lit, &drawn, node);
+                for (name, ty) in &pass.uniforms {
+                    let location = program.location(gl, name);
+                    if location.is_none() {
+                        continue;
+                    }
+                    let value = engine
+                        .iter()
+                        .find(|(known, _)| known == name)
+                        .map(|(_, value)| value.clone())
+                        .or_else(|| frame_value(frame, H3Dialect::Halo4, name, size, 0.0))
+                        .or_else(|| functions.get(name).cloned())
+                        .or_else(|| material.values.get(name).cloned());
+                    if let Some(value) = value {
+                        set_value(gl, location.as_ref(), ty, &value);
+                    }
                 }
-                let value = engine
-                    .iter()
-                    .find(|(known, _)| known == name)
-                    .map(|(_, value)| value.clone())
-                    .or_else(|| frame_value(frame, H3Dialect::Halo4, name, size, 0.0))
-                    .or_else(|| functions.get(name).cloned())
-                    .or_else(|| material.values.get(name).cloned());
-                if let Some(value) = value {
-                    set_value(gl, location.as_ref(), ty, &value);
+                for (unit, (name, _)) in pass.textures.iter().enumerate() {
+                    gl.active_texture(glow::TEXTURE0 + unit as u32);
+                    let texture = targets
+                        .iter()
+                        .find(|(known, _)| known == name)
+                        .map(|(_, texture)| *texture)
+                        .unwrap_or_else(|| uploaded.get(name).copied())
+                        .or(this.placeholder);
+                    gl.bind_texture(glow::TEXTURE_2D, texture);
+                    gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
                 }
-            }
-            for (unit, (name, _)) in pass.textures.iter().enumerate() {
-                gl.active_texture(glow::TEXTURE0 + unit as u32);
-                let texture = targets
-                    .iter()
-                    .find(|(known, _)| known == name)
-                    .map(|(_, texture)| *texture)
-                    .unwrap_or_else(|| uploaded.get(name).copied())
-                    .or(self.placeholder);
-                gl.bind_texture(glow::TEXTURE_2D, texture);
-                gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
-            }
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
-            gl.draw_arrays(glow::TRIANGLES, 0, 3);
-            self.h3_programs.insert(Arc::as_ptr(pass) as usize, Ok(program));
+                gl.active_texture(glow::TEXTURE0);
+                gl.bind_vertex_array(Some(this.h3_empty_array(gl)));
+                gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            });
         }
     }
 }

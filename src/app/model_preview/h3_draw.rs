@@ -826,7 +826,23 @@ impl ModelGlRenderer {
             && frame.textures.iter().any(|textures| textures.iter().any(|texture| texture.h3.is_some()))
     }
 
-    pub(super) unsafe fn h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<H3Program> {
+    /// Run `draw` with `pass`'s program, linking it the first time, and keep
+    /// it for the next frame whatever `draw` returns. `None` when the pass
+    /// does not link. The program leaves the cache while `draw` runs, so
+    /// `draw` can use the renderer too.
+    pub(super) unsafe fn with_h3_program<R>(
+        &mut self,
+        gl: &glow::Context,
+        pass: &Arc<H3Pass>,
+        draw: impl FnOnce(&mut Self, &mut H3Program) -> R,
+    ) -> Option<R> {
+        let mut program = unsafe { self.take_h3_program(gl, pass) }?;
+        let drawn = draw(self, &mut program);
+        self.h3_programs.insert(Arc::as_ptr(pass) as usize, Ok(program));
+        Some(drawn)
+    }
+
+    unsafe fn take_h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<H3Program> {
         let key = Arc::as_ptr(pass) as usize;
         match self.h3_programs.remove(&key) {
             Some(Ok(program)) => return Some(program),
@@ -976,202 +992,203 @@ impl ModelGlRenderer {
             return;
         }
         unsafe {
-            let Some(mut program) = self.h3_program(gl, pass) else {
-                return;
-            };
-            gl.use_program(Some(program.program));
-            let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
-            let h4_values = material.h4.as_ref().map(|submit| {
-                let object = batch.material_index as usize;
-                let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
-                let drawn = super::h4_submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
-                let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
-                let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
-                let draw = match self.h4_draw {
-                    Some(draw) => draw,
-                    None if albedo => super::h4_submit::H4Draw::Albedo,
-                    None if fringe => super::h4_submit::H4Draw::Fringe,
-                    None => super::h4_submit::H4Draw::Lit,
-                };
-                let mut values = submit.draw_values(draw, &drawn, h4_hologram_node(frame));
-                // Only the opened object's count is read; attached Halo 4
-                // objects bring geometry alone.
-                let count = if owner == 0 { frame.preview.h4_change_color_count } else { 0 };
-                let colors = super::h4_submit::object_parameters(frame.change_colors_of(object), count);
-                values.insert("ps_material_object_parameters".to_owned(), H3Value::FloatArray(colors));
-                values
-            });
-            for (name, ty) in &pass.uniforms {
-                let location = program.location(gl, name);
-                if location.is_none() {
-                    continue;
-                }
-                match name.as_str() {
-                    "View_Projection" => {
-                        let matrix = self.reach_view_projection.unwrap_or_else(|| view_projection(&frame.camera));
+            self.with_h3_program(gl, pass, |this, program| {
+                gl.use_program(Some(program.program));
+                let size = this.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+                let h4_values = material.h4.as_ref().map(|submit| {
+                    let object = batch.material_index as usize;
+                    let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
+                    let drawn =
+                        super::h4_submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
+                    let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
+                    let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
+                    let draw = match this.h4_draw {
+                        Some(draw) => draw,
+                        None if albedo => super::h4_submit::H4Draw::Albedo,
+                        None if fringe => super::h4_submit::H4Draw::Fringe,
+                        None => super::h4_submit::H4Draw::Lit,
+                    };
+                    let mut values = submit.draw_values(draw, &drawn, h4_hologram_node(frame));
+                    // Only the opened object's count is read; attached Halo 4
+                    // objects bring geometry alone.
+                    let count = if owner == 0 { frame.preview.h4_change_color_count } else { 0 };
+                    let colors = super::h4_submit::object_parameters(frame.change_colors_of(object), count);
+                    values.insert("ps_material_object_parameters".to_owned(), H3Value::FloatArray(colors));
+                    values
+                });
+                for (name, ty) in &pass.uniforms {
+                    let location = program.location(gl, name);
+                    if location.is_none() {
+                        continue;
+                    }
+                    match name.as_str() {
+                        "View_Projection" => {
+                            let matrix = this.reach_view_projection.unwrap_or_else(|| view_projection(&frame.camera));
+                            gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
+                            continue;
+                        }
+                        "View" => {
+                            gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &view_matrix(frame));
+                            continue;
+                        }
+                        "Camera_To_World" => {
+                            gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &camera_to_world(frame));
+                            continue;
+                        }
+                        "Nodes" | "vs_model_skinning_matrices" => {
+                            this.h3_nodes(gl, frame, location.as_ref(), ty);
+                            continue;
+                        }
+                        "simple_lights" => {
+                            if let Some((lit, _)) = &this.h3_light {
+                                gl.uniform_4_f32_slice(location.as_ref(), lit.rows.as_flattened());
+                            } else if material.dialect == H3Dialect::Reach && !this.reach_inline.is_empty() {
+                                let inline = this.reach_inline.as_flattened().as_flattened();
+                                gl.uniform_4_f32_slice(location.as_ref(), inline);
+                            }
+                            continue;
+                        }
+                        "Shadow_Projection" => {
+                            if let Some((lit, _)) = &this.h3_light {
+                                gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &lit.projection);
+                            }
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    // The shadow's generate draws from the light.
+                    if material.dialect == H3Dialect::Halo4
+                        && name == "vs_view_view_projection_matrix"
+                        && let Some(matrix) = this.reach_view_projection
+                    {
                         gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                         continue;
                     }
-                    "View" => {
-                        gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &view_matrix(frame));
-                        continue;
-                    }
-                    "Camera_To_World" => {
-                        gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &camera_to_world(frame));
-                        continue;
-                    }
-                    "Nodes" | "vs_model_skinning_matrices" => {
-                        self.h3_nodes(gl, frame, location.as_ref(), ty);
-                        continue;
-                    }
-                    "simple_lights" => {
-                        if let Some((lit, _)) = &self.h3_light {
-                            gl.uniform_4_f32_slice(location.as_ref(), lit.rows.as_flattened());
-                        } else if material.dialect == H3Dialect::Reach && !self.reach_inline.is_empty() {
-                            gl.uniform_4_f32_slice(location.as_ref(), self.reach_inline.as_flattened().as_flattened());
+                    if material.dialect == H3Dialect::Halo4
+                        && let Some(matrix) = h4_matrix(frame, name)
+                    {
+                        match matrix.len() {
+                            9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
+                            _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
                         }
                         continue;
                     }
-                    "Shadow_Projection" => {
-                        if let Some((lit, _)) = &self.h3_light {
-                            gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &lit.projection);
-                        }
+                    // The dynamic pass borrows this constant for its gel's xform.
+                    if name == "p_lighting_constant_4" && this.h3_light.is_some() {
+                        gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 0.0, 0.0);
                         continue;
                     }
-                    _ => {}
-                }
-                // The shadow's generate draws from the light.
-                if material.dialect == H3Dialect::Halo4
-                    && name == "vs_view_view_projection_matrix"
-                    && let Some(matrix) = self.reach_view_projection
-                {
-                    gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
-                    continue;
-                }
-                if material.dialect == H3Dialect::Halo4
-                    && let Some(matrix) = h4_matrix(frame, name)
-                {
-                    match matrix.len() {
-                        9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
-                        _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
+                    let change_color = material.change_colors.iter().find(|(uniform, _)| uniform == name);
+                    let change_color = change_color.map(|(_, channel)| {
+                        let [r, g, b] = frame.change_colors_of(batch.material_index as usize)[*channel];
+                        H3Value::Floats([r, g, b, 1.0])
+                    });
+                    let reach_light =
+                        (material.dialect == H3Dialect::Reach).then(|| this.reach_simple_light(name)).flatten();
+                    let mut value = change_color
+                        .or(reach_light)
+                        .or_else(|| frame_value(frame, material.dialect, name, size, this.reach_stops))
+                        .or_else(|| h4_values.as_ref().and_then(|values| values.get(name)).cloned())
+                        .or_else(|| material.values.get(name).cloned());
+                    let object = batch.material_index as usize;
+                    let screen_values = this.h3_screen_alpha.map(|alpha| {
+                        let mut values = frame.h2_values_of(object).cloned().unwrap_or_default();
+                        values.insert("alpha".to_owned(), alpha);
+                        values
+                    });
+                    let values = screen_values.as_ref().or(frame.h2_values_of(object));
+                    let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
+                    for animation in material.animations.iter().filter(|animation| animation.uniform == *name) {
+                        let mut slot = match value {
+                            Some(H3Value::Floats(slot)) => slot,
+                            _ => [0.0; 4],
+                        };
+                        animation.apply(&mut slot, frame.time, owner, values);
+                        value = Some(H3Value::Floats(slot));
                     }
-                    continue;
+                    if let Some(value) = value {
+                        set_value(gl, location.as_ref(), ty, &value);
+                    }
+                    if let Some(value) = this.reach_pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
+                        set_value(gl, location.as_ref(), ty, &H3Value::Floats(*value));
+                    }
+                    let settings = frame.preview.h3_shield.as_ref().or(shield.map(|shield| &shield.settings));
+                    if let Some(value) = shield.and(settings).and_then(|settings| settings.values.get(name)) {
+                        set_value(gl, location.as_ref(), ty, value);
+                    }
+                    if name == "shield_dynamic_quantities" {
+                        let reading = |name: &str| {
+                            frame.h2_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+                        };
+                        // `render_object_context`: the overshield in fifths of a byte.
+                        let quantities = [frame.time, reading(H3_SHIELD_DAMAGE), reading(H3_OVERSHIELD), 0.0];
+                        gl.uniform_4_f32_slice(location.as_ref(), &quantities);
+                    }
+                    if name == "bound_sphere" {
+                        let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
+                        let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
+                        let reach: [f32; 3] = std::array::from_fn(|axis| high[axis] - center[axis]);
+                        let radius = (reach[0] * reach[0] + reach[1] * reach[1] + reach[2] * reach[2]).sqrt();
+                        gl.uniform_4_f32(location.as_ref(), center[0], center[1], center[2], radius);
+                    }
                 }
-                // The dynamic pass borrows this constant for its gel's xform.
-                if name == "p_lighting_constant_4" && self.h3_light.is_some() {
-                    gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 0.0, 0.0);
-                    continue;
-                }
-                let change_color = material.change_colors.iter().find(|(uniform, _)| uniform == name);
-                let change_color = change_color.map(|(_, channel)| {
-                    let [r, g, b] = frame.change_colors_of(batch.material_index as usize)[*channel];
-                    H3Value::Floats([r, g, b, 1.0])
-                });
-                let reach_light = (material.dialect == H3Dialect::Reach).then(|| self.reach_simple_light(name)).flatten();
-                let mut value = change_color
-                    .or(reach_light)
-                    .or_else(|| frame_value(frame, material.dialect, name, size, self.reach_stops))
-                    .or_else(|| h4_values.as_ref().and_then(|values| values.get(name)).cloned())
-                    .or_else(|| material.values.get(name).cloned());
-                let object = batch.material_index as usize;
-                let screen_values = self.h3_screen_alpha.map(|alpha| {
-                    let mut values = frame.h2_values_of(object).cloned().unwrap_or_default();
-                    values.insert("alpha".to_owned(), alpha);
-                    values
-                });
-                let values = screen_values.as_ref().or(frame.h2_values_of(object));
-                let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
-                for animation in material.animations.iter().filter(|animation| animation.uniform == *name) {
-                    let mut slot = match value {
-                        Some(H3Value::Floats(slot)) => slot,
-                        _ => [0.0; 4],
+                let targets = this.h3_targets.as_ref();
+                let uploaded = this.slots[slot].h3_textures.materials.get(batch.material_index as usize);
+                for (unit, (name, kind)) in pass.textures.iter().enumerate() {
+                    gl.active_texture(glow::TEXTURE0 + unit as u32);
+                    let texture = match name.as_str() {
+                        "albedo_texture" | "ps_view_albedo" => targets.map(|targets| targets.albedo),
+                        "normal_texture" | "ps_view_normal" => targets.map(|targets| targets.normal),
+                        // No level casts shadows into Halo 4's mask: white.
+                        "ps_view_shadow_mask" => this.h4_shadow_mask.or(this.placeholder),
+                        "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
+                        // Halo 4's camo: what the object hides.
+                        "sceneTexture_texture" => this.h4_camo_scene.or(targets.map(|targets| targets.behind)),
+                        "depth_buffer" | "psDepthSampler_texture" => this.h3_depth_copy,
+                        "shadow_mask_texture" => this.reach_shadow_mask,
+                        other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
+                            targets.map(|targets| targets.behind)
+                        }
+                        "UserParameterTexture_dynamic_light_gel_texture" => {
+                            this.h3_light.as_ref().and_then(|(_, gel)| *gel)
+                        }
+                        other => uploaded.and_then(|map| {
+                            map.get(&this.h3_frame_key(frame, batch, material, other)).or_else(|| map.get(other))
+                        }).copied().or_else(|| {
+                            let noise = other.strip_prefix("LocalTexture_").unwrap_or(other);
+                            this.slots[slot].h3_textures.shield.get(noise).copied()
+                        }),
                     };
-                    animation.apply(&mut slot, frame.time, owner, values);
-                    value = Some(H3Value::Floats(slot));
-                }
-                if let Some(value) = value {
-                    set_value(gl, location.as_ref(), ty, &value);
-                }
-                if let Some(value) = self.reach_pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
-                    set_value(gl, location.as_ref(), ty, &H3Value::Floats(*value));
-                }
-                let settings = frame.preview.h3_shield.as_ref().or(shield.map(|shield| &shield.settings));
-                if let Some(value) = shield.and(settings).and_then(|settings| settings.values.get(name)) {
-                    set_value(gl, location.as_ref(), ty, value);
-                }
-                if name == "shield_dynamic_quantities" {
-                    let reading = |name: &str| {
-                        frame.h2_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
-                    };
-                    // `render_object_context`: the overshield in fifths of a byte.
-                    let quantities = [frame.time, reading(H3_SHIELD_DAMAGE), reading(H3_OVERSHIELD), 0.0];
-                    gl.uniform_4_f32_slice(location.as_ref(), &quantities);
-                }
-                if name == "bound_sphere" {
-                    let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
-                    let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
-                    let reach: [f32; 3] = std::array::from_fn(|axis| high[axis] - center[axis]);
-                    let radius = (reach[0] * reach[0] + reach[1] * reach[1] + reach[2] * reach[2]).sqrt();
-                    gl.uniform_4_f32(location.as_ref(), center[0], center[1], center[2], radius);
-                }
-            }
-            let targets = self.h3_targets.as_ref();
-            let uploaded = self.slots[slot].h3_textures.materials.get(batch.material_index as usize);
-            for (unit, (name, kind)) in pass.textures.iter().enumerate() {
-                gl.active_texture(glow::TEXTURE0 + unit as u32);
-                let texture = match name.as_str() {
-                    "albedo_texture" | "ps_view_albedo" => targets.map(|targets| targets.albedo),
-                    "normal_texture" | "ps_view_normal" => targets.map(|targets| targets.normal),
-                    // No level casts shadows into Halo 4's mask: white.
-                    "ps_view_shadow_mask" => self.h4_shadow_mask.or(self.placeholder),
-                    "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
-                    // Halo 4's camo: what the object hides.
-                    "sceneTexture_texture" => self.h4_camo_scene.or(targets.map(|targets| targets.behind)),
-                    "depth_buffer" | "psDepthSampler_texture" => self.h3_depth_copy,
-                    "shadow_mask_texture" => self.reach_shadow_mask,
-                    other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
-                        targets.map(|targets| targets.behind)
+                    match kind {
+                        TextureKind::Line => gl.bind_texture(glow::TEXTURE_1D, texture),
+                        TextureKind::Flat => gl.bind_texture(glow::TEXTURE_2D, texture.or(this.placeholder)),
+                        TextureKind::Cube => gl.bind_texture(glow::TEXTURE_CUBE_MAP, texture.or(this.h2_black_cube)),
+                        TextureKind::Volume => gl.bind_texture(glow::TEXTURE_3D, texture.or(this.h2_black_volume)),
+                        // The kit's arrays (light probes, the dominant light's
+                        // intensity, water) are built by the game, never authored.
+                        TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, this.h3_black_array),
+                        // Reach's per-vertex light probes, which only level
+                        // geometry's `static_per_vertex` reads.
+                        TextureKind::Bytes => gl.bind_texture(glow::TEXTURE_BUFFER, None),
                     }
-                    "UserParameterTexture_dynamic_light_gel_texture" => {
-                        self.h3_light.as_ref().and_then(|(_, gel)| *gel)
+                    let location = program.location(gl, name);
+                    gl.uniform_1_i32(location.as_ref(), unit as i32);
+                }
+                let group = frame.preview.materials.get(batch.material_index as usize).map(|known| known.shader_group);
+                let two_sided = !frame.show_backfaces && reach_draws_two_sided(material, pass, group);
+                if two_sided {
+                    gl.disable(glow::CULL_FACE);
+                }
+                match range {
+                    Some((offset, count)) if !pass.fullscreen => {
+                        gl.draw_elements(glow::TRIANGLES, count, glow::UNSIGNED_INT, offset);
                     }
-                    other => uploaded.and_then(|map| {
-                        map.get(&self.h3_frame_key(frame, batch, material, other)).or_else(|| map.get(other))
-                    }).copied().or_else(|| {
-                        let noise = other.strip_prefix("LocalTexture_").unwrap_or(other);
-                        self.slots[slot].h3_textures.shield.get(noise).copied()
-                    }),
-                };
-                match kind {
-                    TextureKind::Line => gl.bind_texture(glow::TEXTURE_1D, texture),
-                    TextureKind::Flat => gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder)),
-                    TextureKind::Cube => gl.bind_texture(glow::TEXTURE_CUBE_MAP, texture.or(self.h2_black_cube)),
-                    TextureKind::Volume => gl.bind_texture(glow::TEXTURE_3D, texture.or(self.h2_black_volume)),
-                    // The kit's arrays (light probes, the dominant light's
-                    // intensity, water) are built by the game, never authored.
-                    TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, self.h3_black_array),
-                    // Reach's per-vertex light probes, which only level
-                    // geometry's `static_per_vertex` reads.
-                    TextureKind::Bytes => gl.bind_texture(glow::TEXTURE_BUFFER, None),
+                    _ => gl.draw_arrays(glow::TRIANGLES, 0, 3),
                 }
-                let location = program.location(gl, name);
-                gl.uniform_1_i32(location.as_ref(), unit as i32);
-            }
-            let group = frame.preview.materials.get(batch.material_index as usize).map(|known| known.shader_group);
-            let two_sided = !frame.show_backfaces && reach_draws_two_sided(material, pass, group);
-            if two_sided {
-                gl.disable(glow::CULL_FACE);
-            }
-            match range {
-                Some((offset, count)) if !pass.fullscreen => {
-                    gl.draw_elements(glow::TRIANGLES, count, glow::UNSIGNED_INT, offset);
+                if two_sided {
+                    gl.enable(glow::CULL_FACE);
                 }
-                _ => gl.draw_arrays(glow::TRIANGLES, 0, 3),
-            }
-            if two_sided {
-                gl.enable(glow::CULL_FACE);
-            }
-            self.h3_programs.insert(Arc::as_ptr(pass) as usize, Ok(program));
+            });
         }
     }
 

@@ -117,57 +117,57 @@ impl ModelGlRenderer {
                 ) else {
                     continue;
                 };
-                let Some(mut program) = self.h3_program(gl, &pass) else {
-                    continue;
-                };
-                gl.blend_equation(match light.blend() {
-                    H4LightBlend::Add => glow::FUNC_ADD,
-                    H4LightBlend::Subtract => glow::FUNC_REVERSE_SUBTRACT,
-                });
-                gl.use_program(Some(program.program));
-                let constants = light.constants(&matrix, eye, exposure);
-                for (name, ty) in &pass.uniforms {
-                    let location = program.location(gl, name);
-                    if location.is_none() {
-                        continue;
-                    }
-                    if name == "ps_screen_space_light_constants" {
-                        gl.uniform_4_f32_slice(location.as_ref(), constants.as_flattened());
-                        continue;
-                    }
-                    if let Some(matrix) = h3_draw::h4_matrix(frame, name) {
-                        match matrix.len() {
-                            9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
-                            _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
+                let linked = self.with_h3_program(gl, &pass, |this, program| {
+                    gl.blend_equation(match light.blend() {
+                        H4LightBlend::Add => glow::FUNC_ADD,
+                        H4LightBlend::Subtract => glow::FUNC_REVERSE_SUBTRACT,
+                    });
+                    gl.use_program(Some(program.program));
+                    let constants = light.constants(&matrix, eye, exposure);
+                    for (name, ty) in &pass.uniforms {
+                        let location = program.location(gl, name);
+                        if location.is_none() {
+                            continue;
                         }
-                        continue;
+                        if name == "ps_screen_space_light_constants" {
+                            gl.uniform_4_f32_slice(location.as_ref(), constants.as_flattened());
+                            continue;
+                        }
+                        if let Some(matrix) = h3_draw::h4_matrix(frame, name) {
+                            match matrix.len() {
+                                9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
+                                _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
+                            }
+                            continue;
+                        }
+                        // Its blend state is additive (1).
+                        let value = if name == "ps_material_blend_constant" {
+                            Some(super::h3_shaders::H3Value::Floats(
+                                super::h4_submit::blend_constant(1),
+                            ))
+                        } else {
+                            h3_draw::frame_value(frame, H3Dialect::Halo4, name, size, 0.0)
+                        };
+                        if let Some(value) = value {
+                            h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                        }
                     }
-                    // Its blend state is additive (1).
-                    let value = if name == "ps_material_blend_constant" {
-                        Some(super::h3_shaders::H3Value::Floats(
-                            super::h4_submit::blend_constant(1),
-                        ))
-                    } else {
-                        h3_draw::frame_value(frame, H3Dialect::Halo4, name, size, 0.0)
-                    };
-                    if let Some(value) = value {
-                        h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                    for (unit, (name, _)) in pass.textures.iter().enumerate() {
+                        gl.active_texture(glow::TEXTURE0 + unit as u32);
+                        let texture = match name.as_str() {
+                            "depth_samplerTexture" => Some(depth_copy),
+                            "albedo_samplerTexture" => Some(albedo),
+                            "normal_samplerTexture" => Some(normal),
+                            _ => this.placeholder,
+                        };
+                        gl.bind_texture(glow::TEXTURE_2D, texture);
+                        gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
                     }
+                    gl.draw_arrays(glow::TRIANGLES, 0, 3);
+                });
+                if linked.is_none() {
+                    continue;
                 }
-                for (unit, (name, _)) in pass.textures.iter().enumerate() {
-                    gl.active_texture(glow::TEXTURE0 + unit as u32);
-                    let texture = match name.as_str() {
-                        "depth_samplerTexture" => Some(depth_copy),
-                        "albedo_samplerTexture" => Some(albedo),
-                        "normal_samplerTexture" => Some(normal),
-                        _ => self.placeholder,
-                    };
-                    gl.bind_texture(glow::TEXTURE_2D, texture);
-                    gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
-                }
-                gl.draw_arrays(glow::TRIANGLES, 0, 3);
-                self.h3_programs
-                    .insert(Arc::as_ptr(&pass) as usize, Ok(program));
             }
             gl.active_texture(glow::TEXTURE0);
             gl.blend_equation(glow::FUNC_ADD);

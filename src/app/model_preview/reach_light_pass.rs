@@ -150,51 +150,56 @@ impl ModelGlRenderer {
                 if fade <= 1e-4 {
                     continue;
                 }
-                let Some(mut program) = self.h3_program(gl, &pass) else {
-                    continue;
-                };
-                gl.use_program(Some(program.program));
-                // Tag lights come down by the HDR target's stops; cheap
-                // lights only by exposure (`render_cheap_screenspace_lights`).
-                let exposure = if light.cheap { REACH_EXPOSURE } else { REACH_EXPOSURE / REACH_HDR_DIVISOR };
-                let [r, g, b] = light.color.map(|channel| channel * exposure * fade);
-                let to_light: [f32; 3] = std::array::from_fn(|axis| light.origin[axis] - eye[axis]);
-                for (name, ty) in &pass.uniforms {
-                    let location = program.location(gl, name);
-                    if location.is_none() {
-                        continue;
-                    }
-                    match name.as_str() {
-                        "screen_to_relative_world" => {
-                            gl.uniform_matrix_4_f32_slice(location.as_ref(), false, matrix.as_flattened());
+                let linked = self.with_h3_program(gl, &pass, |this, program| {
+                    gl.use_program(Some(program.program));
+                    // Tag lights come down by the HDR target's stops; cheap
+                    // lights only by exposure (`render_cheap_screenspace_lights`).
+                    let exposure = if light.cheap { REACH_EXPOSURE } else { REACH_EXPOSURE / REACH_HDR_DIVISOR };
+                    let [r, g, b] = light.color.map(|channel| channel * exposure * fade);
+                    let to_light: [f32; 3] = std::array::from_fn(|axis| light.origin[axis] - eye[axis]);
+                    for (name, ty) in &pass.uniforms {
+                        let location = program.location(gl, name);
+                        if location.is_none() {
+                            continue;
                         }
-                        "light_rotation" => {
-                            gl.uniform_matrix_3_f32_slice(location.as_ref(), true, light.rotation.as_flattened());
-                        }
-                        "light_colour_falloff_power" => gl.uniform_4_f32(location.as_ref(), r, g, b, light.falloff_power),
-                        "light_attenuation" => gl.uniform_4_f32_slice(location.as_ref(), &light.attenuation),
-                        "camera_to_light" => gl.uniform_4_f32(location.as_ref(), to_light[0], to_light[1], to_light[2], 0.0),
-                        "material_coeff" => gl.uniform_4_f32(location.as_ref(), CHEAP_ALBEDO_BLEND, 0.0, 0.0, 0.0),
-                        other => {
-                            if let Some(value) = reach_frame_value(frame, other, self.reach_stops) {
-                                h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                        match name.as_str() {
+                            "screen_to_relative_world" => {
+                                gl.uniform_matrix_4_f32_slice(location.as_ref(), false, matrix.as_flattened());
+                            }
+                            "light_rotation" => {
+                                gl.uniform_matrix_3_f32_slice(location.as_ref(), true, light.rotation.as_flattened());
+                            }
+                            "light_colour_falloff_power" => {
+                                gl.uniform_4_f32(location.as_ref(), r, g, b, light.falloff_power)
+                            }
+                            "light_attenuation" => gl.uniform_4_f32_slice(location.as_ref(), &light.attenuation),
+                            "camera_to_light" => {
+                                gl.uniform_4_f32(location.as_ref(), to_light[0], to_light[1], to_light[2], 0.0)
+                            }
+                            "material_coeff" => gl.uniform_4_f32(location.as_ref(), CHEAP_ALBEDO_BLEND, 0.0, 0.0, 0.0),
+                            other => {
+                                if let Some(value) = reach_frame_value(frame, other, this.reach_stops) {
+                                    h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                                }
                             }
                         }
                     }
+                    for (unit, (name, _)) in pass.textures.iter().enumerate() {
+                        gl.active_texture(glow::TEXTURE0 + unit as u32);
+                        let texture = match name.as_str() {
+                            "GlobalTexture_depth_sampler" => depth_copy,
+                            "GlobalTexture_albedo_sampler" => albedo,
+                            "GlobalTexture_normal_sampler" => normal,
+                            _ => continue,
+                        };
+                        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                        gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
+                    }
+                    gl.draw_arrays(glow::TRIANGLES, 0, 3);
+                });
+                if linked.is_none() {
+                    continue;
                 }
-                for (unit, (name, _)) in pass.textures.iter().enumerate() {
-                    gl.active_texture(glow::TEXTURE0 + unit as u32);
-                    let texture = match name.as_str() {
-                        "GlobalTexture_depth_sampler" => depth_copy,
-                        "GlobalTexture_albedo_sampler" => albedo,
-                        "GlobalTexture_normal_sampler" => normal,
-                        _ => continue,
-                    };
-                    gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                    gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
-                }
-                gl.draw_arrays(glow::TRIANGLES, 0, 3);
-                self.h3_programs.insert(std::sync::Arc::as_ptr(&pass) as usize, Ok(program));
             }
             gl.active_texture(glow::TEXTURE0);
             gl.color_mask(true, true, true, true);

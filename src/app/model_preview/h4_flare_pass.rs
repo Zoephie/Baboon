@@ -163,114 +163,114 @@ impl ModelGlRenderer {
             if drawn.is_empty() {
                 return;
             }
-            let Some(mut program) = self.h3_program(gl, &pass) else {
-                return;
-            };
-            // `draw_textured_screen_quad`'s corners and texture coordinates.
-            let (vertex_array, buffer) = match self.h4_flare_geometry {
-                Some(geometry) => geometry,
-                None => {
-                    let (Ok(vertex_array), Ok(buffer)) =
-                        (gl.create_vertex_array(), gl.create_buffer())
-                    else {
-                        return;
-                    };
-                    self.h4_flare_geometry = Some((vertex_array, buffer));
-                    (vertex_array, buffer)
-                }
-            };
-            gl.bind_vertex_array(Some(vertex_array));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
-            for (attribute, offset) in [("a_POSITION", 0), ("a_TEXCOORD0", 8)] {
-                if let Some(location) = gl.get_attrib_location(program.program, attribute) {
-                    gl.enable_vertex_attrib_array(location);
-                    gl.vertex_attrib_pointer_f32(location, 2, glow::FLOAT, false, 16, offset);
-                }
-            }
-            gl.use_program(Some(program.program));
-            // `set_alpha_blend_mode(1)`: added.
-            gl.enable(glow::BLEND);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.blend_func(glow::ONE, glow::ONE);
-            let size = self
-                .h3_targets
-                .as_ref()
-                .map_or([1, 1], |targets| targets.size);
-            let textures = self.slots[slot].flare_textures.clone();
-            let first = frame.preview.ce_lights.len()
-                + frame.preview.h2_flares.len()
-                + frame.preview.h3_flares.len();
-            for (index, draws) in drawn {
-                let images = textures.get(first + index);
-                for draw in draws {
-                    let Some(texture) = images
-                        .and_then(|images| images.get(draw.image))
-                        .copied()
-                        .flatten()
-                    else {
-                        continue;
-                    };
-                    let [flip_u, flip_v] = draw.flip.map(f32::from);
-                    let corner = |x: f32, y: f32| {
-                        let u = (x + 1.0) * 0.5;
-                        let v = (1.0 - y) * 0.5;
-                        [x, y, (u - flip_u).abs(), (v - flip_v).abs()]
-                    };
-                    let quad = [
-                        corner(-1.0, -1.0),
-                        corner(1.0, -1.0),
-                        corner(-1.0, 1.0),
-                        corner(1.0, 1.0),
-                    ];
-                    gl.buffer_data_u8_slice(
-                        glow::ARRAY_BUFFER,
-                        slice_bytes(&quad),
-                        glow::STREAM_DRAW,
-                    );
-                    for (name, ty) in &pass.uniforms {
-                        let location = program.location(gl, name);
-                        if location.is_none() {
-                            continue;
-                        }
-                        let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
-                        let value = match name.as_str() {
-                            "centerRotation" => floats(draw.center_rotation),
-                            "flareScale" => floats(draw.scale),
-                            "flareOrigin_offsetBounds" => floats(draw.origin_bounds),
-                            "transformedAxes" => floats(draw.axes),
-                            "mirrorReflectionAcrossFlare" => Some(H3Value::Integer(0)),
-                            "modulationFactor" => floats(draw.modulation),
-                            "tintColor" => floats(draw.tint),
-                            // `c_surface::get_alpha_multiplier`: 1 here.
-                            "ps_scale" => floats([1.0; 4]),
-                            other => h3_draw::frame_value(
-                                frame,
-                                h3_shaders::H3Dialect::Halo4,
-                                other,
-                                size,
-                                0.0,
-                            ),
+            let linked = self.with_h3_program(gl, &pass, |this, program| {
+                // `draw_textured_screen_quad`'s corners and texture coordinates.
+                let (vertex_array, buffer) = match this.h4_flare_geometry {
+                    Some(geometry) => geometry,
+                    None => {
+                        let (Ok(vertex_array), Ok(buffer)) =
+                            (gl.create_vertex_array(), gl.create_buffer())
+                        else {
+                            return;
                         };
-                        if let Some(value) = value {
-                            h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
-                        }
+                        this.h4_flare_geometry = Some((vertex_array, buffer));
+                        (vertex_array, buffer)
                     }
-                    for (unit, (name, _)) in pass.textures.iter().enumerate() {
-                        gl.active_texture(glow::TEXTURE0 + unit as u32);
-                        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                        gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
-                    }
-                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
-                    // `mirror across flare`: again, reflected through it.
-                    if draw.mirror {
-                        let location = program.location(gl, "mirrorReflectionAcrossFlare");
-                        gl.uniform_1_i32(location.as_ref(), 1);
-                        gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                };
+                gl.bind_vertex_array(Some(vertex_array));
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+                for (attribute, offset) in [("a_POSITION", 0), ("a_TEXCOORD0", 8)] {
+                    if let Some(location) = gl.get_attrib_location(program.program, attribute) {
+                        gl.enable_vertex_attrib_array(location);
+                        gl.vertex_attrib_pointer_f32(location, 2, glow::FLOAT, false, 16, offset);
                     }
                 }
+                gl.use_program(Some(program.program));
+                // `set_alpha_blend_mode(1)`: added.
+                gl.enable(glow::BLEND);
+                gl.blend_equation(glow::FUNC_ADD);
+                gl.blend_func(glow::ONE, glow::ONE);
+                let size = this
+                    .h3_targets
+                    .as_ref()
+                    .map_or([1, 1], |targets| targets.size);
+                let textures = this.slots[slot].flare_textures.clone();
+                let first = frame.preview.ce_lights.len()
+                    + frame.preview.h2_flares.len()
+                    + frame.preview.h3_flares.len();
+                for (index, draws) in drawn {
+                    let images = textures.get(first + index);
+                    for draw in draws {
+                        let Some(texture) = images
+                            .and_then(|images| images.get(draw.image))
+                            .copied()
+                            .flatten()
+                        else {
+                            continue;
+                        };
+                        let [flip_u, flip_v] = draw.flip.map(f32::from);
+                        let corner = |x: f32, y: f32| {
+                            let u = (x + 1.0) * 0.5;
+                            let v = (1.0 - y) * 0.5;
+                            [x, y, (u - flip_u).abs(), (v - flip_v).abs()]
+                        };
+                        let quad = [
+                            corner(-1.0, -1.0),
+                            corner(1.0, -1.0),
+                            corner(-1.0, 1.0),
+                            corner(1.0, 1.0),
+                        ];
+                        gl.buffer_data_u8_slice(
+                            glow::ARRAY_BUFFER,
+                            slice_bytes(&quad),
+                            glow::STREAM_DRAW,
+                        );
+                        for (name, ty) in &pass.uniforms {
+                            let location = program.location(gl, name);
+                            if location.is_none() {
+                                continue;
+                            }
+                            let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+                            let value = match name.as_str() {
+                                "centerRotation" => floats(draw.center_rotation),
+                                "flareScale" => floats(draw.scale),
+                                "flareOrigin_offsetBounds" => floats(draw.origin_bounds),
+                                "transformedAxes" => floats(draw.axes),
+                                "mirrorReflectionAcrossFlare" => Some(H3Value::Integer(0)),
+                                "modulationFactor" => floats(draw.modulation),
+                                "tintColor" => floats(draw.tint),
+                                // `c_surface::get_alpha_multiplier`: 1 here.
+                                "ps_scale" => floats([1.0; 4]),
+                                other => h3_draw::frame_value(
+                                    frame,
+                                    h3_shaders::H3Dialect::Halo4,
+                                    other,
+                                    size,
+                                    0.0,
+                                ),
+                            };
+                            if let Some(value) = value {
+                                h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                            }
+                        }
+                        for (unit, (name, _)) in pass.textures.iter().enumerate() {
+                            gl.active_texture(glow::TEXTURE0 + unit as u32);
+                            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                            gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
+                        }
+                        gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                        // `mirror across flare`: again, reflected through it.
+                        if draw.mirror {
+                            let location = program.location(gl, "mirrorReflectionAcrossFlare");
+                            gl.uniform_1_i32(location.as_ref(), 1);
+                            gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                        }
+                    }
+                }
+            });
+            if linked.is_none() {
+                return;
             }
-            self.h3_programs
-                .insert(std::sync::Arc::as_ptr(&pass) as usize, Ok(program));
             gl.active_texture(glow::TEXTURE0);
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             gl.use_program(Some(self.program));
