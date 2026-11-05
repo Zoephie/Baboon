@@ -98,7 +98,18 @@ impl H4Shader {
                     return None;
                 }
                 let vertex = translate_pass(program, technique, "skinned", Stage::Vertex).ok()?;
-                let pixel = translate_pass(program, technique, "_default", Stage::Pixel).ok()?;
+                // `MAKE_TECHNIQUE_VS_ONLY`: the plain `shadow_generate` writes
+                // depth alone; the textured override clips in its own.
+                let pixel = match translate_pass(program, technique, "_default", Stage::Pixel) {
+                    Ok(pixel) => pixel,
+                    Err(_) if technique == "shadow_generate" => crate::core::hlsl::emit::Translated {
+                        source: "#version 410 core\nvoid main() {}\n".to_owned(),
+                        uniforms: Vec::new(),
+                        textures: Vec::new(),
+                        attributes: Vec::new(),
+                    },
+                    Err(_) => return None,
+                };
                 Some(Arc::new(super::super::h3_shaders::pass_of(vertex, pixel)))
             })
             .clone()
@@ -270,7 +281,7 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                 sort_layer: i32::from(baked.sort_layer),
                 prt: [None, None, None],
                 camo: shader.pass("active_camo"),
-                shadow_generate: None,
+                shadow_generate: shader.pass("shadow_generate").filter(|_| opaque),
                 dynamic_light: None,
                 blend,
                 values: submit.baked_values(),

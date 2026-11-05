@@ -1040,6 +1040,14 @@ impl ModelGlRenderer {
                     }
                     _ => {}
                 }
+                // The shadow's generate draws from the light.
+                if material.dialect == H3Dialect::Halo4
+                    && name == "vs_view_view_projection_matrix"
+                    && let Some(matrix) = self.reach_view_projection
+                {
+                    gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
+                    continue;
+                }
                 if material.dialect == H3Dialect::Halo4
                     && let Some(matrix) = h4_matrix(frame, name)
                 {
@@ -1115,7 +1123,7 @@ impl ModelGlRenderer {
                     "albedo_texture" | "ps_view_albedo" => targets.map(|targets| targets.albedo),
                     "normal_texture" | "ps_view_normal" => targets.map(|targets| targets.normal),
                     // No level casts shadows into Halo 4's mask: white.
-                    "ps_view_shadow_mask" => self.placeholder,
+                    "ps_view_shadow_mask" => self.h4_shadow_mask.or(self.placeholder),
                     "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
                     // Halo 4's camo: what the object hides.
                     "sceneTexture_texture" => self.h4_camo_scene.or(targets.map(|targets| targets.behind)),
@@ -1349,6 +1357,13 @@ impl ModelGlRenderer {
             // albedo and the static lighting that reads it.
             let reach_mask =
                 if reach && frame.self_shadow { self.draw_reach_shadow(gl, frame, slot, &batches) } else { None };
+            // `render_fullscreen_shadow_buffer`: Halo 4's mask, between the
+            // albedo and the static lighting that reads it.
+            let h4_mask = if halo4 && frame.self_shadow && h4_camo.is_none_or(|draw| draw.has_base) {
+                self.draw_h4_shadow(gl, frame, slot, &batches)
+            } else {
+                None
+            };
             // Generated from the light, for the apply pass below.
             let shadowed = self_shadow && {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
@@ -1377,11 +1392,17 @@ impl ModelGlRenderer {
                 self.reach_shadow_mask = Some(mask);
                 self.reach_pass_values = Some([("shadow_mask_enabled", [1.0; 4])].into_iter().collect());
             }
+            if let Some(mask) = h4_mask {
+                self.h4_shadow_mask = Some(mask);
+                let floor = [0.0, super::super::h4_shadow::DIRECT_FLOOR, 0.0, 0.0];
+                self.reach_pass_values = Some([("ps_bsp_lightmap_scale_constants", floor)].into_iter().collect());
+            }
             for (batch, material) in opaque {
                 let pass = h3_lit_pass(frame, batch, material);
                 self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
             }
             self.reach_shadow_mask = None;
+            self.h4_shadow_mask = None;
             self.reach_pass_values = None;
             if shadowed {
                 self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowApply, None);

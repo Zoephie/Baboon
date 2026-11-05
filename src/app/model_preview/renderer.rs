@@ -1493,6 +1493,8 @@ mod reach_light_pass;
 mod h4_light_pass;
 #[path = "h4_flare_pass.rs"]
 mod h4_flare_pass;
+#[path = "h4_shadow_pass.rs"]
+mod h4_shadow_pass;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -4114,6 +4116,11 @@ struct ModelGlRenderer {
     h4_flare_geometry: Option<(glow::NativeVertexArray, glow::NativeBuffer)>,
     /// The picture as Halo 4's camo reads it, bytes as they are.
     h4_camo_scene: Option<glow::NativeTexture>,
+    /// Halo 4's self shadow: its map, blurs and mask, the three screen
+    /// programs, and the mask while the static pass reads it.
+    h4_shadow: Option<h4_shadow_pass::H4ShadowTargets>,
+    h4_shadow_programs: Option<[Option<glow::NativeProgram>; 3]>,
+    h4_shadow_mask: Option<glow::NativeTexture>,
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
     h4_draw: Option<h4_submit::H4Draw>,
@@ -4280,6 +4287,9 @@ impl ModelGlRenderer {
                 h4_holograms: None,
                 h4_flare_geometry: None,
                 h4_camo_scene: None,
+                h4_shadow: None,
+                h4_shadow_programs: None,
+                h4_shadow_mask: None,
                 h4_draw: None,
                 reach_shadow: None,
                 reach_shadow_program: None,

@@ -69,6 +69,7 @@ mod h4_lights;
 mod h4_flares;
 mod h4_camo;
 mod h4_shield;
+mod h4_shadow;
 mod reach_blend_screens;
 mod reach_camo;
 mod reach_shadow;
@@ -175,6 +176,8 @@ pub(crate) struct RenderModelPreview {
     pub h4_camo: Option<Arc<h4_camo::H4Camo>>,
     /// A Halo 4 object's shield impact.
     pub h4_shield: Option<Arc<h4_shield::H4Shield>>,
+    /// Whether a Halo 4 object shadows itself, and how.
+    pub h4_shadow_caster: Option<h4_shadow::H4ShadowCaster>,
     /// Reach's shield impact, as its damage sections choose it.
     pub reach_shield: Option<Arc<reach_shield::ReachShield>>,
     /// `globals`' active camo curves, for a Reach object.
