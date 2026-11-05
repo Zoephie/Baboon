@@ -333,13 +333,186 @@ fn gate_load() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// What G-px shoots of each game: a biped, a vehicle, and something that
+/// moves at rest (the phantom does for Halo 3), each in every [`LOOKS`].
+#[cfg(target_os = "macos")]
+const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
+    (
+        "BLAM_TEST_H2EK",
+        GameId::Halo2,
+        &[
+            ("objects\\characters\\masterchief\\masterchief", "biped"),
+            ("objects\\vehicles\\warthog\\warthog", "vehicle"),
+            (
+                "objects\\weapons\\rifle\\plasma_rifle\\plasma_rifle",
+                "weapon",
+            ),
+        ],
+    ),
+    (
+        "BLAM_TEST_H3EK",
+        GameId::Halo3,
+        &[
+            ("objects\\characters\\masterchief\\masterchief", "biped"),
+            ("objects\\vehicles\\phantom\\phantom", "vehicle"),
+        ],
+    ),
+    (
+        "BLAM_TEST_HREK",
+        GameId::HaloReach,
+        &[
+            ("objects\\characters\\spartans\\spartans", "biped"),
+            ("objects\\vehicles\\covenant\\banshee\\banshee", "vehicle"),
+            ("objects\\characters\\cortana\\cortana", "biped"),
+        ],
+    ),
+    (
+        "BLAM_TEST_H4EK",
+        GameId::Halo4,
+        &[
+            (
+                "objects\\characters\\storm_masterchief\\storm_masterchief",
+                "biped",
+            ),
+            (
+                "objects\\vehicles\\human\\storm_warthog\\storm_warthog",
+                "vehicle",
+            ),
+            ("objects\\characters\\storm_cortana\\storm_cortana", "biped"),
+        ],
+    ),
+];
+
+/// Each way G-px shoots an object, from a plain shot in the dark theme at rest.
+#[cfg(target_os = "macos")]
+type Look = fn(&mut super::renderer::h2_shot::ShotOptions);
+
+#[cfg(target_os = "macos")]
+const LOOKS: &[(&str, Look)] = &[
+    ("plain", |_| {}),
+    ("light_grid", |options| {
+        options.light_theme = true;
+        options.grid = true;
+    }),
+    ("close", |options| options.scale = Some(0.35)),
+    ("t0.5", |options| options.time = 0.5),
+    ("t3", |options| options.time = 3.0),
+    ("t10", |options| options.time = 10.0),
+    // Over the grid, so the camo has something behind it to bend.
+    ("camo", |options| {
+        options.camo = true;
+        options.grid = true;
+    }),
+    ("bloom", |options| options.bloom = true),
+    ("shadow", |options| options.shadow = true),
+];
+
+/// Saves a shot as a PNG, upright.
+#[cfg(target_os = "macos")]
+fn save_png(path: &std::path::Path, pixels: &[u8]) {
+    use super::renderer::h2_shot::SHOT_SIZE;
+    let row = SHOT_SIZE[0] as usize * 4;
+    let upright: Vec<u8> = pixels.chunks_exact(row).rev().flatten().copied().collect();
+    let image =
+        image::RgbaImage::from_raw(SHOT_SIZE[0], SHOT_SIZE[1], upright).expect("a whole shot");
+    if let Some(folder) = path.parent() {
+        let _ = std::fs::create_dir_all(folder);
+    }
+    image
+        .save(path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+}
+
+/// G-px: each object of [`PIXEL_SET`], in each of [`LOOKS`], draws the
+/// same pixels as before. Blessing keeps every shot as a PNG beside the
+/// hashes; a shot that differs is saved under `changed/` to set against it.
+#[cfg(target_os = "macos")]
+#[test]
+fn gate_pixels() {
+    use super::renderer::h2_shot::{Shot, ShotOptions, shoot};
+    use crate::core::source::TagSource;
+    let Some(dir) = gate_dir() else {
+        eprintln!("skipping: BABOON_GATE_DIR is not set");
+        return;
+    };
+    let dir = dir.join("px");
+    let bless = std::env::var_os("BABOON_GATE_BLESS").is_some();
+    let mut failures = Vec::new();
+    for (variable, game, objects) in PIXEL_SET {
+        let Ok(root) = std::env::var(variable) else {
+            eprintln!("skipping {game:?}: {variable} is not set");
+            continue;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(*game),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let mut names = Vec::new();
+        let mut shots = Vec::new();
+        for (path, kind) in *objects {
+            for (look, adjust) in LOOKS {
+                let shot = Shot {
+                    model: (*path).to_owned(),
+                    shaders: true,
+                    lights: true,
+                    yaw: 0.6,
+                    pitch: 0.25,
+                    kind: Some((*kind).to_owned()),
+                };
+                let mut options = ShotOptions::new(*game);
+                adjust(&mut options);
+                let object = path.rsplit('\\').next().unwrap_or(path);
+                names.push(format!("{object}_{kind}_{look}"));
+                shots.push((shot, options));
+            }
+        }
+        let started = std::time::Instant::now();
+        let images = shoot(&source, &shots);
+        eprintln!(
+            "{game:?}: {} shots in {:.1?}",
+            images.len(),
+            started.elapsed()
+        );
+        let mut snapshot = String::new();
+        for (name, pixels) in names.iter().zip(&images) {
+            let hash = pixels.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+            });
+            let _ = writeln!(snapshot, "{name} {hash:016x}");
+            if bless {
+                save_png(
+                    &dir.join(format!("{game:?}")).join(format!("{name}.png")),
+                    pixels,
+                );
+            }
+        }
+        if let Err(report) = bless_or_compare(&dir, &format!("{game:?}.txt"), &snapshot) {
+            for (name, pixels) in names.iter().zip(&images) {
+                if report.contains(&format!("+ {name} ")) {
+                    save_png(
+                        &dir.join("changed")
+                            .join(format!("{game:?}"))
+                            .join(format!("{name}.png")),
+                        pixels,
+                    );
+                }
+            }
+            failures.push(report);
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn field_lines_name_each_top_level_field() {
     #[derive(Debug)]
+    #[allow(dead_code, reason = "read through Debug")]
     struct Inner {
         deep: u8,
     }
     #[derive(Debug)]
+    #[allow(dead_code, reason = "read through Debug")]
     struct Outer {
         first: Vec<u8>,
         quoted: &'static str,
