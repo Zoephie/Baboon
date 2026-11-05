@@ -128,13 +128,15 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     data.textures = Some(Arc::new(textures));
     eprintln!("NOTE {} cheap particle emitters", data.preview.reach_cheap_emitters.len());
     eprintln!(
-        "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares, {} particle systems ({} on materials)",
+        "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares, {} particle systems ({} on materials), {} light volumes ({} on materials)",
         data.preview.h4_lights.len(),
         data.preview.h4_cheap_lights.len(),
         data.preview.h4_light_passes.len(),
         data.preview.h4_flares.len(),
         data.preview.h3_particles.len(),
-        data.preview.h3_particles.iter().filter(|system| system.look.h4.is_some()).count()
+        data.preview.h3_particles.iter().filter(|system| system.look.h4.is_some()).count(),
+        data.preview.h3_light_volumes.len(),
+        data.preview.h3_light_volumes.iter().filter(|volume| volume.h4_material().is_some()).count()
     );
     // `H2_SHOT_DROP=a,b` leaves out whole features, to see one on its own.
     if let Ok(dropped) = std::env::var("H2_SHOT_DROP") {
@@ -181,6 +183,8 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     state.pitch = shot.pitch;
     state.perspective = true;
     // `H2_SHOT_FOCUS=x,y,z` orbits that point, at `H2_SHOT_SCALE` times the fit.
+    let (center, radius) = preview_center_radius(&data.preview);
+    eprintln!("NOTE center {center:?} radius {radius}");
     if let Ok(focus) = std::env::var("H2_SHOT_FOCUS") {
         let point: Vec<f32> = focus.split(',').map(|axis| axis.parse().unwrap()).collect();
         let (center, _) = preview_center_radius(&data.preview);

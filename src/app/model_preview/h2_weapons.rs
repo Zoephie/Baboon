@@ -783,9 +783,9 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
 
 /// What a Halo 4 object brings of its own so far: its lights, cheap lights
 /// and lens flares and the passes they draw with
-/// (`docs/h4-preview-research/lights.md`), and antennas and cloth, whose
-/// definitions are Reach's (`objects.md` §3.10). Its effects wait on their
-/// own readers.
+/// (`docs/h4-preview-research/lights.md`), its particles and light volumes,
+/// which draw through their materials (`particles.md`), and antennas and
+/// cloth, whose definitions are Reach's (`objects.md` §3.10).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
@@ -805,6 +805,8 @@ pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (Mar
     super::h4_lights::read_h4_light_passes(source, preview);
     let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
     preview.h3_particles.extend(named!(particles, name).map(Arc::new));
+    let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    preview.h3_light_volumes.extend(named!(volumes, name));
     let flares = super::h4_flares::read_h4_flares(source, object, owner, markers, frame);
     preview.h4_flares.extend(named!(flares, name));
     if !preview.h4_flares.is_empty() && preview.h4_flare_pass.is_none() {

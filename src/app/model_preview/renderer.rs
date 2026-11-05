@@ -1495,8 +1495,12 @@ mod h4_light_pass;
 mod h4_flare_pass;
 #[path = "h4_shadow_pass.rs"]
 mod h4_shadow_pass;
+#[path = "h4_effect_gl.rs"]
+mod h4_effect_gl;
 #[path = "h4_particle_pass.rs"]
 mod h4_particle_pass;
+#[path = "h4_light_volume_pass.rs"]
+mod h4_light_volume_pass;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -2091,7 +2095,7 @@ struct ModelGpuSlot {
     strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     /// Halo 4's particle programs, bitmaps and state buffer.
-    h4_particles: h4_particle_pass::H4ParticleGl,
+    h4_effects: h4_effect_gl::H4EffectGl,
 }
 
 impl ModelGpuSlot {
@@ -2169,7 +2173,7 @@ impl ModelGpuSlot {
                 leaf_textures: Vec::new(),
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
-                h4_particles: Default::default(),
+                h4_effects: Default::default(),
             })
         }
     }
@@ -2285,7 +2289,7 @@ impl ModelGpuSlot {
             return;
         }
         unsafe {
-            self.h4_particles.clear(gl);
+            self.h4_effects.clear(gl);
             let drained = self
                 .particle_textures
                 .drain(..)
@@ -5038,6 +5042,29 @@ impl ModelGlRenderer {
                         if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
                             continue;
                         }
+                        // Halo 4's: through their material, from packed state.
+                        if let Some(material) = at.h4_material() {
+                            let values = frame.h2_values_of_object(at.object);
+                            let onset = uploaded.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                            if let Some(draw) = at.h4_draw(values, bones, &view, frame.time, onset) {
+                                let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+                                h4_light_volume_pass::draw_h4_light_volume(
+                                    gl,
+                                    &mut uploaded.h4_effects,
+                                    frame,
+                                    material,
+                                    &draw,
+                                    self.h3_depth_copy,
+                                    size,
+                                    self.placeholder,
+                                    at.object,
+                                );
+                                gl.use_program(Some(flares.program));
+                                gl.bind_vertex_array(Some(flares.vertex_array));
+                                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                            }
+                            continue;
+                        }
                         let texture = uploaded.volume_textures.get(index).copied().flatten();
                         let circular = at.circular();
                         if texture.is_none() && circular.is_none() {
@@ -5094,7 +5121,7 @@ impl ModelGlRenderer {
                                 let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
                                 h4_particle_pass::draw_h4_particles(
                                     gl,
-                                    &mut uploaded.h4_particles,
+                                    &mut uploaded.h4_effects,
                                     frame,
                                     render,
                                     &draws,

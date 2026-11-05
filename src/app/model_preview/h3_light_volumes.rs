@@ -1,6 +1,8 @@
 //! Halo 3's light volumes: a row of camera-facing profiles along a direction.
 //! The game works these out on the card every frame, but nothing in one
 //! depends on the last, so they are worked out here a frame at a time.
+//! Halo 4 draws them through their material from each profile's packed
+//! state (`h4_light_volume_pass`), which is worked out here the same way.
 
 use std::sync::Arc;
 
@@ -18,6 +20,8 @@ use super::h3_effects::{
 use super::h3_particles::inline_real;
 use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::h3_strips::EPSILON;
+use super::h4_particles::{f32_to_f16, pack_argb8};
+use super::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
 use super::renderer::{H3_EXPOSURE, reach_alt_exposure};
 use super::*;
@@ -339,6 +343,9 @@ pub(crate) struct H3VolumeDefinition {
     /// `max profile count`: each profile's colour times its intensity
     /// squared times its alpha, and its thickness.
     precompiled: Option<Vec<([f32; 3], f32)>>,
+    /// Halo 4's: the `actual material` it draws through, and its
+    /// `appearance flags`.
+    h4: Option<(H4EffectMaterial, u32)>,
 }
 
 impl H3VolumeDefinition {
@@ -394,6 +401,74 @@ impl H3VolumeDefinition {
     }
 }
 
+/// What a volume's frame lays out before its profiles.
+struct VolumeLayout {
+    state: H3VolumeState,
+    origin: [f32; 3],
+    direction: [f32; 3],
+    count: i32,
+    /// `length × density`, whole or not.
+    profiles: f32,
+    /// `1 / density`.
+    distance: f32,
+    offset: f32,
+    side_length: f32,
+}
+
+/// `light_volume_state_input_enum`'s order, the order of
+/// `LightVolumeOverallState.inputs`; `allocate_random_seed` leaves nothing
+/// reading `random`.
+const H4_STATE_ORDER: [H3VolumeInput; 10] = [
+    H3VolumeInput::Percentile,
+    H3VolumeInput::GameTime,
+    H3VolumeInput::Age,
+    H3VolumeInput::Random,
+    H3VolumeInput::Seed(0),
+    H3VolumeInput::Seed(1),
+    H3VolumeInput::Lod,
+    H3VolumeInput::EffectA,
+    H3VolumeInput::EffectB,
+    H3VolumeInput::Invalid,
+];
+
+/// `ProfileMemexportedState`, as `light_volume_main` writes it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct H4ProfileState {
+    position: [f32; 3],
+    percentile: f32,
+    /// Unclamped; the packing saturates it.
+    color: [f32; 4],
+    thickness: f32,
+    intensity: f32,
+}
+
+/// `WriteProfileMemexportedState`: `RawProfileState`'s eight words, the
+/// thickness and intensity as halves, the colour as ARGB8, the pad 0.
+fn pack_profile_state(state: &H4ProfileState) -> [u32; 8] {
+    let [x, y, z] = state.position.map(f32::to_bits);
+    let misc = f32_to_f16(state.thickness) | (f32_to_f16(state.intensity) << 16);
+    [x, y, z, state.percentile.to_bits(), misc, pack_argb8(state.color), 0, 0]
+}
+
+/// One Halo 4 volume's frame: `LightVolumeOverallState` and its profiles'
+/// packed states, in row order.
+#[derive(Debug, Clone)]
+pub(crate) struct H4VolumeDraw {
+    pub(crate) appearance: f32,
+    pub(crate) brightness_ratio: f32,
+    pub(crate) offset: f32,
+    /// `numProfiles`: `length × density`, whole or not.
+    pub(crate) profiles: f32,
+    /// `profileDistance`.
+    pub(crate) distance: f32,
+    /// `profileLength`.
+    pub(crate) side_length: f32,
+    pub(crate) origin: [f32; 3],
+    pub(crate) direction: [f32; 3],
+    pub(crate) inputs: [f32; 10],
+    pub(crate) states: Vec<[u32; 8]>,
+}
+
 /// A volume at a marker of the object it is attached to.
 #[derive(Debug, Clone)]
 pub(crate) struct H3LightVolumeAt {
@@ -414,6 +489,9 @@ pub(crate) struct H3LightVolumeAt {
 }
 
 fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3VolumeDefinition> {
+    if source.game() == Some(GameId::Halo4) {
+        return read_h4_definition(source, element);
+    }
     let reach = source.game() == Some(GameId::HaloReach);
     let shader = element.descend("actual shader?")?;
     let definition = shader.read_tag_ref_path("definition").filter(|path| !path.is_empty())?;
@@ -452,42 +530,12 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
     let flags = element.read_flag_names("flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     let lod = if reach { ReachVolumeLod::read(element, flagged) } else { None };
-    let each = |name: &str| H3VolumeProperty::read(element, name);
-    let (length, offset, density, profile_length) =
-        (each("length")?, each("offset")?, each("profile_density")?, each("profile_length")?);
-    let (mut thickness, mut color, mut alpha, mut intensity) = (
-        each("profile_thickness")?,
-        each("profile_color")?,
-        each("profile_alpha")?,
-        each("profile_intensity")?,
-    );
-    // `postprocess`: with none given, what the functions themselves make of it.
-    // A tag older than the field has none either.
-    let brightness_ratio = element
-        .read_real("brightness ratio")
-        .filter(|ratio| *ratio != 0.0)
-        .unwrap_or_else(|| alpha.peak_over_mean() * intensity.peak_over_mean());
+    let properties = VolumeProperties::read(element)?;
     // The postprocess tests what the properties read before it narrows the
     // per-volume four's inputs.
-    let most = max_profile_count(&density, &length);
-    let all = [&length, &offset, &density, &profile_length, &thickness, &color, &alpha, &intensity];
-    let precompiled = reach && precompiles(flagged, &all, most);
-    let [length, offset, density, profile_length] =
-        [length, offset, density, profile_length].map(H3VolumeProperty::per_volume);
-    let mut next = first_free_seed(&[&length, &offset, &density, &profile_length, &thickness, &color, &alpha, &intensity]);
-    for property in [&mut thickness, &mut color, &mut alpha, &mut intensity] {
-        property.allocate_seeds(&mut next);
-    }
-    let mut volume = H3VolumeDefinition {
-        length,
-        offset,
-        density,
-        profile_length,
-        thickness,
-        color,
-        alpha,
-        intensity,
-        brightness_ratio,
+    let most = max_profile_count(&properties.density, &properties.length);
+    let precompiled = reach && precompiles(flagged, &properties.all(), most);
+    let mut volume = properties.postprocessed(element, |properties| H3VolumeDefinition {
         blend,
         sampler,
         bitmap,
@@ -497,11 +545,122 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         depth_fade,
         lod,
         precompiled: None,
-    };
+        h4: None,
+        ..properties
+    });
     if precompiled {
         volume.precompiled = Some(volume.bake(most));
     }
     Some(volume)
+}
+
+/// Halo 4's `c_light_volume_definition::postprocess_block_proc` (MCC
+/// 0x1403ABF50): Reach's, through the `actual material`, and never
+/// precompiled, which MCC clears every time and could not draw ("not
+/// implemented for D3D11").
+fn read_h4_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3VolumeDefinition> {
+    let material = blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
+    let resolved = resolve_h4_effect_material(source, &material, "light_volume")
+        .map_err(|error| eprintln!("h4 light volume material: {error}"))
+        .ok()?;
+    let flags = element.read_flag_names("flags").unwrap_or_default();
+    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let lod = ReachVolumeLod::read(element, flagged);
+    let appearance = element.read_int_any("appearance flags").unwrap_or(0) as u32;
+    let properties = VolumeProperties::read(element)?;
+    Some(properties.postprocessed(element, |properties| H3VolumeDefinition {
+        // The material blends; this only sorts.
+        blend: H3Blend::Additive,
+        sampler: None,
+        bitmap: None,
+        sort_layer: i32::from(material.sort_layer).clamp(1, 3),
+        reach: true,
+        circular: None,
+        depth_fade: None,
+        lod,
+        precompiled: None,
+        h4: Some((resolved, appearance)),
+        ..properties
+    }))
+}
+
+/// The eight properties of a `light_volumes` element, as read.
+struct VolumeProperties {
+    length: H3VolumeProperty,
+    offset: H3VolumeProperty,
+    density: H3VolumeProperty,
+    profile_length: H3VolumeProperty,
+    thickness: H3VolumeProperty,
+    color: H3VolumeProperty,
+    alpha: H3VolumeProperty,
+    intensity: H3VolumeProperty,
+}
+
+impl VolumeProperties {
+    fn read(element: TagStruct<'_>) -> Option<Self> {
+        let each = |name: &str| H3VolumeProperty::read(element, name);
+        Some(Self {
+            length: each("length")?,
+            offset: each("offset")?,
+            density: each("profile_density")?,
+            profile_length: each("profile_length")?,
+            thickness: each("profile_thickness")?,
+            color: each("profile_color")?,
+            alpha: each("profile_alpha")?,
+            intensity: each("profile_intensity")?,
+        })
+    }
+
+    fn all(&self) -> [&H3VolumeProperty; 8] {
+        [
+            &self.length, &self.offset, &self.density, &self.profile_length,
+            &self.thickness, &self.color, &self.alpha, &self.intensity,
+        ]
+    }
+
+    /// `postprocess`'s brightness ratio, narrowed inputs and seeds, into
+    /// the definition `rest` fills out.
+    fn postprocessed(
+        self,
+        element: TagStruct<'_>,
+        rest: impl FnOnce(H3VolumeDefinition) -> H3VolumeDefinition,
+    ) -> H3VolumeDefinition {
+        let Self { length, offset, density, profile_length, mut thickness, mut color, mut alpha, mut intensity } = self;
+        // With none given, what the functions themselves make of it. A tag
+        // older than the field has none either.
+        let brightness_ratio = element
+            .read_real("brightness ratio")
+            .filter(|ratio| *ratio != 0.0)
+            .unwrap_or_else(|| alpha.peak_over_mean() * intensity.peak_over_mean());
+        let [length, offset, density, profile_length] =
+            [length, offset, density, profile_length].map(H3VolumeProperty::per_volume);
+        let mut next =
+            first_free_seed(&[&length, &offset, &density, &profile_length, &thickness, &color, &alpha, &intensity]);
+        for property in [&mut thickness, &mut color, &mut alpha, &mut intensity] {
+            property.allocate_seeds(&mut next);
+        }
+        rest(H3VolumeDefinition {
+            length,
+            offset,
+            density,
+            profile_length,
+            thickness,
+            color,
+            alpha,
+            intensity,
+            brightness_ratio,
+            blend: H3Blend::Additive,
+            bitmap: None,
+            sampler: None,
+            sort_layer: 2,
+            reach: false,
+            circular: None,
+            depth_fade: None,
+            lod: None,
+            precompiled: None,
+            h4: None,
+        })
+    }
 }
 
 /// The volumes an object's attached effects run, one at each marker of a
@@ -673,6 +832,117 @@ impl H3LightVolumeAt {
         })
     }
 
+    /// What `c_light_volume_gpu::render` works out once a frame, or none
+    /// while it draws nothing.
+    fn layout(
+        &self,
+        values: Option<&H2FunctionValues>,
+        bones: Option<&[[f32; 4]]>,
+        view: &CeFlareView,
+        time: f32,
+        onset: f32,
+    ) -> Option<VolumeLayout> {
+        let mut state = self.state(values, time, onset)?;
+        let volume = &*self.definition;
+        let (origin, turned) = posed_on(self.node, self.position, self.forward, bones);
+        if volume.reach {
+            // `c_light_volume_gpu::render` (Reach: the 360's 0x826B80B8, MCC
+            // sub_140887B70; Halo 4: MCC 0x1408ECFD0): by the eye's whole
+            // distance from the location, nothing at no amount, and the
+            // amount is state 6.
+            let from_eye = std::array::from_fn(|axis| origin[axis] - view.eye[axis]);
+            let amount = lod_amount(volume.lod.as_ref(), length_of(from_eye));
+            if amount <= 0.0 {
+                return None;
+            }
+            state.lod = amount;
+        }
+        let length = volume.length.scalar(&state);
+        let density = volume.density.scalar(&state);
+        let (count, profiles, distance) = profile_layout(length, density);
+        let direction = if self.world_oriented { self.forward } else { turned };
+        Some(VolumeLayout {
+            state,
+            origin,
+            direction: unit(direction),
+            count,
+            profiles,
+            distance,
+            offset: volume.offset.scalar(&state),
+            side_length: volume.profile_length.scalar(&state),
+        })
+    }
+
+    /// Halo 4's draw this frame: `SetMaterialState`'s overall state and,
+    /// for each profile, the state `light_volume_update.fx` writes, packed.
+    pub(crate) fn h4_draw(
+        &self,
+        values: Option<&H2FunctionValues>,
+        bones: Option<&[[f32; 4]]>,
+        view: &CeFlareView,
+        time: f32,
+        onset: f32,
+    ) -> Option<H4VolumeDraw> {
+        let (_, appearance) = self.definition.h4.as_ref()?;
+        self.h4_frame(*appearance, values, bones, view, time, onset)
+    }
+
+    /// [`Self::h4_draw`] with `appearance flags` of `appearance`.
+    fn h4_frame(
+        &self,
+        appearance: u32,
+        values: Option<&H2FunctionValues>,
+        bones: Option<&[[f32; 4]]>,
+        view: &CeFlareView,
+        time: f32,
+        onset: f32,
+    ) -> Option<H4VolumeDraw> {
+        let volume = &*self.definition;
+        let VolumeLayout { mut state, origin, direction, count, profiles, distance, offset, side_length } =
+            self.layout(values, bones, view, time, onset)?;
+        if count <= 0 {
+            return None;
+        }
+        // `inputs[]`: every state but the profile's own place, which the
+        // update reads from the profile.
+        let inputs = H4_STATE_ORDER.map(|input| match input {
+            H3VolumeInput::Percentile => 0.0,
+            other => other.of(&state),
+        });
+        let states = (0..count)
+            .map(|index| {
+                state.percentile = percentile(index, profiles);
+                let along = offset + distance * index as f32;
+                let position: [f32; 3] = std::array::from_fn(|axis| origin[axis] + direction[axis] * along);
+                let [red, green, blue] = volume.color.color(&state);
+                pack_profile_state(&H4ProfileState {
+                    position,
+                    percentile: state.percentile,
+                    color: [red, green, blue, volume.alpha.scalar(&state)],
+                    thickness: volume.thickness.scalar(&state),
+                    intensity: volume.intensity.scalar(&state),
+                })
+            })
+            .collect();
+        Some(H4VolumeDraw {
+            appearance: appearance as f32,
+            brightness_ratio: volume.brightness_ratio,
+            offset,
+            profiles,
+            distance,
+            side_length,
+            origin,
+            direction,
+            inputs,
+            states,
+        })
+    }
+
+    /// Halo 4's material, when it is Halo 4's.
+    pub(crate) fn h4_material(&self) -> Option<&H4EffectMaterial> {
+        self.definition.h4.as_ref().map(|(material, _)| material)
+    }
+
     /// Each profile's quad this frame, nearest the marker first, at the area
     /// screen effects' exposure `stops`.
     pub(crate) fn quads(
@@ -684,34 +954,17 @@ impl H3LightVolumeAt {
         onset: f32,
         stops: f32,
     ) -> Vec<CeAntennaQuad> {
-        let Some(mut state) = self.state(values, time, onset) else {
+        let Some(VolumeLayout { mut state, origin, direction, count, profiles, distance, offset, side_length }) =
+            self.layout(values, bones, view, time, onset)
+        else {
             return Vec::new();
         };
         let volume = &*self.definition;
-        let (origin, turned) = posed_on(self.node, self.position, self.forward, bones);
-        if volume.reach {
-            // `c_light_volume_gpu::render` (the 360's 0x826B80B8, MCC
-            // sub_140887B70): by the eye's whole distance from the location,
-            // nothing at no amount, and the amount is state 6.
-            let from_eye = std::array::from_fn(|axis| origin[axis] - view.eye[axis]);
-            let amount = lod_amount(volume.lod.as_ref(), length_of(from_eye));
-            if amount <= 0.0 {
-                return Vec::new();
-            }
-            state.lod = amount;
-        }
-        let length = volume.length.scalar(&state);
-        let density = volume.density.scalar(&state);
-        let (count, profiles, distance) = profile_layout(length, density);
         // A baked volume draws `max profile count` rows, spaced and overdrawn
         // by the live settings; that it draws none where they make none was
         // not traced.
         let baked = volume.precompiled.as_deref().filter(|_| count > 0);
         let count = baked.map_or(count, |rows| rows.len() as i32);
-        let direction = if self.world_oriented { self.forward } else { turned };
-        let direction = unit(direction);
-        let offset = volume.offset.scalar(&state);
-        let side_length = volume.profile_length.scalar(&state);
         let mut quads = Vec::with_capacity(count.max(0) as usize);
         for index in 0..count {
             state.percentile = percentile(index, profiles);
@@ -870,6 +1123,7 @@ mod tests {
             depth_fade: None,
             lod: None,
             precompiled: None,
+            h4: None,
         }
     }
 
@@ -1065,6 +1319,115 @@ mod tests {
         assert!(!volume.reach && volume.bitmap.is_some());
         assert!(volume.circular.is_none() && volume.depth_fade.is_none() && volume.lod.is_none());
         assert!(volume.precompiled.is_none());
+    }
+
+    /// `WriteProfileMemexportedState`: the position and percentile as they
+    /// are, thickness and intensity as halves, the colour saturated into
+    /// ARGB8 (`PackARGB8`), which an intensity over 1 survives.
+    #[test]
+    fn a_profile_packs_as_the_update_writes_it() {
+        let state = H4ProfileState {
+            position: [1.0, -2.0, 3.5],
+            percentile: 0.25,
+            color: [2.0, 0.5, -1.0, 1.0],
+            thickness: 0.5,
+            intensity: 3.0,
+        };
+        let words = pack_profile_state(&state);
+        assert_eq!(words[..4], [1.0f32, -2.0, 3.5, 0.25].map(f32::to_bits));
+        // Half 0.5 is 0x3800, half 3 is 0x4200.
+        assert_eq!(words[4], 0x3800 | (0x4200 << 16));
+        // Red saturates to 255, blue to 0; green truncates 127.5 to 127.
+        assert_eq!(words[5], (255 << 24) | (255 << 16) | (127 << 8));
+        assert_eq!(words[6..], [0, 0]);
+        let dimmer = pack_profile_state(&H4ProfileState { intensity: 1.0, ..state });
+        assert_ne!(dimmer[4], words[4], "intensity rides in the halves, not the colour");
+        assert_eq!(dimmer[5], words[5]);
+    }
+
+    /// Halo 4's frame: profiles placed along the direction from the offset a
+    /// spacing apart, each with its own place, and the overall state the
+    /// whole product of length and density, the LOD amount in state 6.
+    #[test]
+    fn a_halo_4_frame_places_its_profiles_and_fills_its_inputs() {
+        let color = reading(H3VolumeInput::Percentile, 0.0, 1.0);
+        let base = H3VolumeDefinition {
+            length: fixed(3.5),
+            offset: fixed(0.5),
+            density: fixed(2.0),
+            color,
+            reach: true,
+            ..definition(true, fixed(1.0))
+        };
+        assert!(at(definition(true, fixed(1.0))).h4_draw(None, None, &view(10.0), 0.5, 0.0).is_none(), "not Halo 4's");
+        let volume = at(base);
+        let draw = volume.h4_frame(3, None, None, &view(10.0), 0.5, 0.0).expect("a frame");
+        // 3.5 × 2 = 7 profiles, 0.5 apart.
+        assert_eq!(draw.profiles, 7.0);
+        assert_eq!(draw.distance, 0.5);
+        assert_eq!(draw.states.len(), 7);
+        assert_eq!(draw.appearance, 3.0);
+        let x = |words: &[u32; 8]| f32::from_bits(words[0]);
+        assert_eq!(x(&draw.states[0]), 0.5);
+        assert_eq!(x(&draw.states[6]), 0.5 + 0.5 * 6.0);
+        let place = |words: &[u32; 8]| f32::from_bits(words[3]);
+        assert_eq!(place(&draw.states[0]), 0.0);
+        assert_eq!(place(&draw.states[6]), 1.0);
+        // The colour reads the place: red rises along the row.
+        let red = |words: &[u32; 8]| (words[5] >> 16) & 0xFF;
+        assert!(red(&draw.states[6]) > red(&draw.states[0]));
+        assert_eq!(draw.inputs[0], 0.0, "the place is the profile's");
+        assert_eq!(draw.inputs[6], 1.0, "no lod enabled: the full amount");
+        assert_eq!(draw.inputs[7], 1.0, "no scale named: effect a is 1");
+    }
+
+    /// With `BLAM_TEST_H4EK`: Halo 4's volumes draw through their
+    /// material's `light_volume` pass and sort by its layer, with none of
+    /// Reach's map, disc or baked rows.
+    #[test]
+    fn kit_halo_4_volumes_draw_through_their_material() {
+        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+            eprintln!("skipping: BLAM_TEST_H4EK is not set");
+            return;
+        };
+        let source = super::super::h3_particles::loose_kit(&root, GameId::Halo4);
+        let path = "objects\\vehicles\\covenant\\turrets\\plasma_turret\\fx\\tripod_light_volume";
+        let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
+        let volume = read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path);
+        let (material, _) = volume.h4.as_ref().expect("a material");
+        assert!(material.pass.vertex.contains("vs_light_volume_state_buffer"));
+        assert!(material.pass.vertex.contains("vs_lightVolumeOverallState"));
+        assert!(volume.bitmap.is_none() && volume.circular.is_none() && volume.precompiled.is_none());
+        let draw = at(volume).h4_draw(None, None, &view(2.0), 0.5, 0.0).expect("it draws at rest");
+        assert!(!draw.states.is_empty());
+        // Every volume in the kit reads onto its material.
+        let mut failures = Vec::new();
+        let mut read = 0;
+        let mut stack = vec![std::path::PathBuf::from(&root)];
+        while let Some(folder) = stack.pop() {
+            for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|extension| extension != "light_volume_system") {
+                    continue;
+                }
+                let relative = path.strip_prefix(&root).unwrap().with_extension("");
+                let relative = relative.to_string_lossy().replace('/', "\\");
+                let tag = load_referenced_tag_from_source(&source, &relative, "light_volume_system", b"ltvl").unwrap();
+                for element in elements(tag.root(), "light_volumes") {
+                    match read_definition(&source, element) {
+                        Some(volume) if volume.h4.is_some() => read += 1,
+                        _ => failures.push(relative.clone()),
+                    }
+                }
+            }
+        }
+        eprintln!("NOTE KIT {read} Halo 4 volumes read, {} failed: {failures:?}", failures.len());
+        assert!(failures.is_empty());
+        assert!(read > 150, "volumes read: {read}");
     }
 
     #[test]

@@ -427,7 +427,7 @@ fn pack_dec3n(x: f32, y: f32, z: f32) -> u32 {
     signed(x) | (signed(y) << 10) | (signed(z) << 20)
 }
 
-fn pack_argb8([r, g, b, a]: [f32; 4]) -> u32 {
+pub(crate) fn pack_argb8([r, g, b, a]: [f32; 4]) -> u32 {
     let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0) as u32;
     byte(b) | (byte(g) << 8) | (byte(r) << 16) | (byte(a) << 24)
 }
