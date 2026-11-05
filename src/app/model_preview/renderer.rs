@@ -1479,7 +1479,7 @@ fn paint_model_gl(
 /// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
 #[cfg(all(test, target_os = "macos"))]
 #[path = "h2_shot.rs"]
-mod h2_shot;
+pub(super) mod h2_shot;
 #[path = "h3_bloom.rs"]
 mod h3_bloom;
 pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;

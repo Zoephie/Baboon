@@ -49,6 +49,7 @@ fn headless_gl() -> glow::Context {
     }
 }
 
+/// The `H2_SHOT_*` game flag.
 fn shot_game() -> GameId {
     if std::env::var_os("H2_SHOT_CE").is_some() {
         GameId::HaloCe
@@ -65,15 +66,146 @@ fn shot_game() -> GameId {
     }
 }
 
-struct Shot {
-    model: String,
-    out: String,
-    shaders: bool,
-    lights: bool,
-    yaw: f32,
-    pitch: f32,
-    /// An object tag's kind, as `H2_SHOT_OBJECT` names it; else that.
-    kind: Option<String>,
+/// How a shot is taken beyond its model and angle: what [`h2_shot`] reads
+/// from its `H2_SHOT_*` variables, and what the gates set themselves.
+#[derive(Debug, Clone)]
+pub(in crate::app::model_preview) struct ShotOptions {
+    pub(in crate::app::model_preview) game: GameId,
+    /// An object tag's kind (`H2_SHOT_OBJECT`), for every shot without its own.
+    pub(in crate::app::model_preview) kind: Option<String>,
+    pub(in crate::app::model_preview) biped: bool,
+    pub(in crate::app::model_preview) weapon: Option<String>,
+    pub(in crate::app::model_preview) secondary_weapon: Option<String>,
+    /// `H4_TEXTURES`: each pass's samplers, and whether one is bound.
+    pub(in crate::app::model_preview) report_textures: bool,
+    /// Whole features left out (`H2_SHOT_DROP`).
+    pub(in crate::app::model_preview) dropped: Vec<String>,
+    pub(in crate::app::model_preview) fixed_light: bool,
+    pub(in crate::app::model_preview) variant: Option<String>,
+    /// The point to orbit, in the model's space.
+    pub(in crate::app::model_preview) focus: Option<[f32; 3]>,
+    /// Times the fit.
+    pub(in crate::app::model_preview) scale: Option<f32>,
+    pub(in crate::app::model_preview) clip: Option<String>,
+    /// Materials whose shaders end in these are left out.
+    pub(in crate::app::model_preview) hidden: Vec<String>,
+    pub(in crate::app::model_preview) time: f32,
+    /// `solid`, `wire`, `solid_wire` or `textured_wire`.
+    pub(in crate::app::model_preview) mode: Option<String>,
+    pub(in crate::app::model_preview) light_theme: bool,
+    pub(in crate::app::model_preview) grid: bool,
+    pub(in crate::app::model_preview) camo: bool,
+    pub(in crate::app::model_preview) bloom: bool,
+    pub(in crate::app::model_preview) shadow: bool,
+    pub(in crate::app::model_preview) no_prt: bool,
+    /// The opened Halo CE object's four inputs.
+    pub(in crate::app::model_preview) inputs: Option<[f32; 4]>,
+    /// Named Halo 2 function inputs.
+    pub(in crate::app::model_preview) functions: Vec<(String, f32)>,
+    /// What functions export, set over what they make.
+    pub(in crate::app::model_preview) forced: Vec<(String, f32)>,
+    /// VISR's ping counts from when it comes on, a frame before.
+    pub(in crate::app::model_preview) vision: bool,
+    /// `<text>@<seconds>`: plays each Halo CE event effect named with the text.
+    pub(in crate::app::model_preview) play: Option<String>,
+    /// `<trigger>@<seconds>`: fires the held weapon's trigger.
+    pub(in crate::app::model_preview) fire: Option<String>,
+}
+
+impl ShotOptions {
+    /// A plain shot of `game`: dark theme, at rest, nothing set or left out.
+    pub(in crate::app::model_preview) fn new(game: GameId) -> Self {
+        Self {
+            game,
+            kind: None,
+            biped: false,
+            weapon: None,
+            secondary_weapon: None,
+            report_textures: false,
+            dropped: Vec::new(),
+            fixed_light: false,
+            variant: None,
+            focus: None,
+            scale: None,
+            clip: None,
+            hidden: Vec::new(),
+            time: 0.0,
+            mode: None,
+            light_theme: false,
+            grid: false,
+            camo: false,
+            bloom: false,
+            shadow: false,
+            no_prt: false,
+            inputs: None,
+            functions: Vec::new(),
+            forced: Vec::new(),
+            vision: false,
+            play: None,
+            fire: None,
+        }
+    }
+
+    fn from_env() -> Self {
+        let var = |name: &str| std::env::var(name).ok();
+        let set = |name: &str| std::env::var_os(name).is_some();
+        let list = |name: &str| var(name).map_or_else(Vec::new, |list| list.split(',').map(str::to_owned).collect());
+        let pairs = |name: &str| {
+            list(name)
+                .iter()
+                .map(|pair| {
+                    let (name, value) = pair.split_once('=').unwrap();
+                    (name.to_owned(), value.parse().unwrap())
+                })
+                .collect()
+        };
+        let floats = |text: String| text.split(',').map(|value| value.parse().unwrap()).collect::<Vec<f32>>();
+        Self {
+            game: shot_game(),
+            kind: var("H2_SHOT_OBJECT"),
+            biped: set("H2_SHOT_BIPED"),
+            weapon: var("H2_SHOT_WEAPON"),
+            secondary_weapon: var("H2_SHOT_SECONDARY"),
+            report_textures: set("H4_TEXTURES"),
+            dropped: list("H2_SHOT_DROP"),
+            fixed_light: set("H2_SHOT_FIXED_LIGHT"),
+            variant: var("H2_SHOT_VARIANT"),
+            focus: var("H2_SHOT_FOCUS").map(|focus| {
+                let point = floats(focus);
+                std::array::from_fn(|axis| point[axis])
+            }),
+            scale: var("H2_SHOT_SCALE").map(|scale| scale.parse().unwrap()),
+            clip: var("H2_SHOT_CLIP"),
+            hidden: list("H2_SHOT_HIDE"),
+            time: var("H2_SHOT_TIME").map_or(0.0, |time| time.parse().unwrap()),
+            mode: var("H2_SHOT_MODE"),
+            light_theme: set("H2_SHOT_LIGHT"),
+            grid: set("H2_SHOT_GRID"),
+            camo: set("H2_SHOT_CAMO"),
+            bloom: set("H2_SHOT_BLOOM"),
+            shadow: set("H2_SHOT_SHADOW"),
+            no_prt: set("H2_SHOT_NO_PRT"),
+            inputs: var("H2_SHOT_INPUTS").map(|values| {
+                let values = floats(values);
+                std::array::from_fn(|index| values[index])
+            }),
+            functions: pairs("H2_SHOT_FUNCTIONS"),
+            forced: pairs("H2_SHOT_FORCE"),
+            vision: set("H2_SHOT_VISION"),
+            play: var("H2_SHOT_PLAY"),
+            fire: var("H2_SHOT_FIRE"),
+        }
+    }
+}
+
+pub(in crate::app::model_preview) struct Shot {
+    pub(in crate::app::model_preview) model: String,
+    pub(in crate::app::model_preview) shaders: bool,
+    pub(in crate::app::model_preview) lights: bool,
+    pub(in crate::app::model_preview) yaw: f32,
+    pub(in crate::app::model_preview) pitch: f32,
+    /// An object tag's kind; else the options'.
+    pub(in crate::app::model_preview) kind: Option<String>,
 }
 
 /// `H2_SHOT_OBJECT`'s kinds: the object tag's extension and group.
@@ -93,21 +225,28 @@ fn object_kind(kind: &str) -> (&'static str, &'static [u8; 4]) {
     }
 }
 
-fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagSource, shot: &Shot) {
+/// Takes `shot`, and gives back its pixels: RGBA, bottom row first.
+pub(super) fn render(
+    gl: &Arc<glow::Context>,
+    renderer: &mut ModelGlRenderer,
+    source: &TagSource,
+    shot: &Shot,
+    options: &ShotOptions,
+) -> Vec<u8> {
     let names = match source {
         TagSource::LooseFolder { definitions_root, .. } => {
-            TagNameIndex::load_game(definitions_root, shot_game()).unwrap()
+            TagNameIndex::load_game(definitions_root, options.game).unwrap()
         }
         _ => unreachable!(),
     };
     let TagSource::LooseFolder { root, .. } = source else { unreachable!() };
     // A sky has a render_model and nothing above it.
     let file = root.join(format!("{}.model", shot.model.replace('\\', "/")));
-    let (extension, group) = if let Some(kind) = shot.kind.clone().or_else(|| std::env::var("H2_SHOT_OBJECT").ok()) {
+    let (extension, group) = if let Some(kind) = shot.kind.clone().or_else(|| options.kind.clone()) {
         object_kind(&kind)
-    } else if std::env::var_os("H2_SHOT_BIPED").is_some() {
+    } else if options.biped {
         ("biped", b"bipd")
-    } else if shot_game() == GameId::HaloCe {
+    } else if options.game == GameId::HaloCe {
         ("gbxmodel", b"mod2")
     } else if file.exists() {
         ("model", b"hlmt")
@@ -123,8 +262,8 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         location: TagEntryLocation::LooseFile(file.with_extension(extension)),
     };
     let settings = PreviewLoadSettings {
-        weapon: std::env::var("H2_SHOT_WEAPON").ok(),
-        secondary_weapon: std::env::var("H2_SHOT_SECONDARY").ok(),
+        weapon: options.weapon.clone(),
+        secondary_weapon: options.secondary_weapon.clone(),
         h2_equippable: None,
         ..Default::default()
     };
@@ -135,7 +274,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     for (material, texture) in data.preview.materials.iter().zip(textures.iter()) {
         eprintln!("NOTE MAT {} h3 {} {:?}", material.shader_path, texture.h3.is_some(), texture.error);
         // `H4_TEXTURES=1`: each pass's samplers, and whether one is bound.
-        if std::env::var_os("H4_TEXTURES").is_some()
+        if options.report_textures
             && let Some(h3) = &texture.h3
         {
             let passes = h3.albedo.iter().chain(std::iter::once(&h3.lit));
@@ -160,11 +299,11 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         data.preview.h3_light_volumes.iter().filter(|volume| volume.h4_material().is_some()).count(),
         data.preview.h4_tracers.len()
     );
-    // `H2_SHOT_DROP=a,b` leaves out whole features, to see one on its own.
-    if let Ok(dropped) = std::env::var("H2_SHOT_DROP") {
+    // Whole features left out, to see one on its own.
+    if !options.dropped.is_empty() {
         let preview = Arc::make_mut(&mut data.preview);
-        for feature in dropped.split(',') {
-            match feature {
+        for feature in &options.dropped {
+            match feature.as_str() {
                 "particles" => preview.h3_particles.clear(),
                 "flares" => preview.h2_flares.clear(),
                 "lights" => preview.h2_point_lights.clear(),
@@ -196,53 +335,47 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         }
     }
     let mut state = ModelPreviewState::default();
-    state.h2_light_follows_camera = std::env::var_os("H2_SHOT_FIXED_LIGHT").is_none();
-    let variant = std::env::var("H2_SHOT_VARIANT").ok();
-    let variant = variant.and_then(|name| data.variants.iter().position(|variant| variant.name == name));
+    state.h2_light_follows_camera = !options.fixed_light;
+    let variant = options.variant.as_ref();
+    let variant = variant.and_then(|name| data.variants.iter().position(|variant| &variant.name == name));
     reset_model_preview_selection(&mut state, &data, variant.or(default_variant_index(&data)));
     state.h2_game_shaders = shot.shaders;
     state.h2_default_lights = shot.lights;
     state.yaw = shot.yaw;
     state.pitch = shot.pitch;
     state.perspective = true;
-    // `H2_SHOT_FOCUS=x,y,z` orbits that point, at `H2_SHOT_SCALE` times the fit.
+    // The focus is orbited, at the scale times the fit.
     let (center, radius) = preview_center_radius(&data.preview);
     eprintln!("NOTE center {center:?} radius {radius}");
-    if let Ok(focus) = std::env::var("H2_SHOT_FOCUS") {
-        let point: Vec<f32> = focus.split(',').map(|axis| axis.parse().unwrap()).collect();
-        let (center, _) = preview_center_radius(&data.preview);
+    if let Some(point) = options.focus {
         state.focus = std::array::from_fn(|axis| point[axis] - center[axis]);
     }
-    if let Ok(scale) = std::env::var("H2_SHOT_SCALE") {
-        state.scale = scale.parse().unwrap();
+    if let Some(scale) = options.scale {
+        state.scale = scale;
     }
     state.weapon = settings.weapon.clone();
     state.secondary_weapon = settings.secondary_weapon.clone();
-    if let Ok(clip) = std::env::var("H2_SHOT_CLIP") {
-        animation::pose_for_shot(source, &entry, &mut data, &mut state, &clip);
+    if let Some(clip) = &options.clip {
+        animation::pose_for_shot(source, &entry, &mut data, &mut state, clip);
     }
 
-    let (width, height) = (1000i32, 760i32);
+    let (width, height) = (SHOT_SIZE[0] as i32, SHOT_SIZE[1] as i32);
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
     let camera = PreviewCamera::new(&data, &state, rect);
     let preview = Arc::clone(&data.preview);
     let mut visible_batches = visible_batch_indices(&preview, &state);
     let shield_batches = visible_batches.clone();
     without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
-    // `H2_SHOT_HIDE=a,b` leaves out the materials whose shaders end in these.
-    if let Ok(hidden) = std::env::var("H2_SHOT_HIDE") {
-        visible_batches.retain(|&batch| {
-            let material = preview.batches[batch].material_index as usize;
-            !hidden.split(',').any(|name| preview.materials[material].shader_path.ends_with(name))
-        });
-    }
-    let time = std::env::var("H2_SHOT_TIME").map_or(0.0, |time| time.parse().unwrap());
-    // `H2_SHOT_MODE=solid|wire|solid_wire|textured|textured_wire`.
-    let render_mode = match std::env::var("H2_SHOT_MODE").as_deref() {
-        Ok("solid") => ModelRenderMode::Solid,
-        Ok("wire") => ModelRenderMode::Wireframe,
-        Ok("solid_wire") => ModelRenderMode::SolidWireframe,
-        Ok("textured_wire") => ModelRenderMode::TexturedWireframe,
+    visible_batches.retain(|&batch| {
+        let material = preview.batches[batch].material_index as usize;
+        !options.hidden.iter().any(|name| preview.materials[material].shader_path.ends_with(name.as_str()))
+    });
+    let time = options.time;
+    let render_mode = match options.mode.as_deref() {
+        Some("solid") => ModelRenderMode::Solid,
+        Some("wire") => ModelRenderMode::Wireframe,
+        Some("solid_wire") => ModelRenderMode::SolidWireframe,
+        Some("textured_wire") => ModelRenderMode::TexturedWireframe,
         _ => state.render_mode,
     };
     let frame = ModelGpuFrame {
@@ -254,30 +387,28 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         shield_batches,
         camera: camera.gpu_uniforms(),
         render_mode,
-        // `H2_SHOT_LIGHT` takes the light theme's backdrop.
-        background: preview_background(&if std::env::var_os("H2_SHOT_LIGHT").is_some() {
+        background: preview_background(&if options.light_theme {
             egui::Visuals::light()
         } else {
             egui::Visuals::dark()
         }),
         show_backfaces: state.show_backfaces,
-        show_grid: std::env::var_os("H2_SHOT_GRID").is_some(),
+        show_grid: options.grid,
         textures: render_mode.uses_textures().then(|| data.textures.clone()).flatten(),
         bones: animation_skinning_rows(&data, &state).map(Arc::new),
         game_shaders: state.h2_game_shaders,
         default_lights: state.h2_default_lights,
-        active_camo: std::env::var_os("H2_SHOT_CAMO").is_some(),
-        bloom: std::env::var_os("H2_SHOT_BLOOM").is_some() && !data.halo_ce,
-        self_shadow: std::env::var_os("H2_SHOT_SHADOW").is_some(),
-        prt: std::env::var_os("H2_SHOT_NO_PRT").is_none(),
+        active_camo: options.camo,
+        bloom: options.bloom && !data.halo_ce,
+        self_shadow: options.shadow,
+        prt: !options.no_prt,
         light_follows_camera: state.h2_light_follows_camera,
         time,
         h2_prt_clusters: None,
         object_states: {
             let mut set = state.ce_function_inputs.clone();
-            if let Ok(values) = std::env::var("H2_SHOT_INPUTS") {
-                let values: Vec<f32> = values.split(',').map(|value| value.parse().unwrap()).collect();
-                set.insert((data.geometry_id, 0), std::array::from_fn(|index| values[index]));
+            if let Some(values) = options.inputs {
+                set.insert((data.geometry_id, 0), values);
             }
             object_states(&data, &set, &state.ce_shots, time)
         },
@@ -296,19 +427,15 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         h2_shown: super::H2Shown::of(&data.preview, &state),
         h2_values: {
             let mut set = state.h2_function_inputs.clone();
-            if let Ok(pairs) = std::env::var("H2_SHOT_FUNCTIONS") {
-                for pair in pairs.split(',') {
-                    let (name, value) = pair.split_once('=').unwrap();
-                    set.insert((data.geometry_id, name.to_owned()), value.parse().unwrap());
-                }
+            for (name, value) in &options.functions {
+                set.insert((data.geometry_id, name.clone()), *value);
             }
             let mut values = h2_function_values_for(&data, &set, time);
-            // `H2_SHOT_FORCE=name=value,..` sets what a function exports, which
-            // its inputs cannot reach: a scripted value, say.
-            if let (Ok(pairs), Some(values)) = (std::env::var("H2_SHOT_FORCE"), values.as_mut()) {
-                for pair in pairs.split(',') {
-                    let (name, value) = pair.split_once('=').unwrap();
-                    values.insert(name.to_owned(), value.parse().unwrap());
+            // What a function exports, which its inputs cannot reach: a
+            // scripted value, say.
+            if let Some(values) = values.as_mut() {
+                for (name, value) in &options.forced {
+                    values.insert(name.clone(), *value);
                 }
             }
             values
@@ -350,16 +477,16 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         gl.clear_depth_f32(1.0);
         gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         // VISR's ping counts from when it comes on, which takes a frame before.
-        if std::env::var_os("H2_SHOT_VISION").is_some() {
+        if options.vision {
             let end = std::mem::replace(&mut frame.time, 0.0);
             renderer.paint(gl, &frame);
             frame.time = end;
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
-        let play = std::env::var("H2_SHOT_PLAY").ok().map(|play| (play, false));
-        if let Some((play, fire)) = play.or_else(|| std::env::var("H2_SHOT_FIRE").ok().map(|fire| (fire, true))) {
-            let (text, before) = play.split_once('@').expect("H2_SHOT_PLAY or H2_SHOT_FIRE is <what>@<seconds>");
+        let play = options.play.as_ref().map(|play| (play, false));
+        if let Some((play, fire)) = play.or_else(|| options.fire.as_ref().map(|fire| (fire, true))) {
+            let (text, before) = play.split_once('@').expect("a play or fire is <what>@<seconds>");
             let end = frame.time;
             frame.time = end - before.parse::<f32>().unwrap();
             renderer.paint(gl, &frame);
@@ -405,9 +532,19 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
             glow::UNSIGNED_BYTE,
             glow::PixelPackData::Slice(Some(&mut pixels)),
         );
-        std::fs::write(&shot.out, &pixels).unwrap();
+        pixels
     }
 }
+
+/// Takes each shot in one headless context, from the kit `source` reads.
+pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, ShotOptions)]) -> Vec<Vec<u8>> {
+    let gl = Arc::new(headless_gl());
+    let mut renderer = ModelGlRenderer::new(&gl).unwrap();
+    shots.iter().map(|(shot, options)| render(&gl, &mut renderer, source, shot, options)).collect()
+}
+
+/// The size [`render`] shoots at.
+pub(in crate::app::model_preview) const SHOT_SIZE: [u32; 2] = [1000, 760];
 
 #[test]
 fn h2_shot() {
@@ -419,6 +556,7 @@ fn h2_shot() {
         game: Some(shot_game()),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
+    let options = ShotOptions::from_env();
     let gl = Arc::new(headless_gl());
     unsafe {
         eprintln!("GL {}", gl.get_parameter_string(glow::VERSION));
@@ -429,14 +567,13 @@ fn h2_shot() {
         let f: Vec<&str> = spec.split('|').collect();
         let shot = Shot {
             model: f[0].to_owned(),
-            out: f[1].to_owned(),
             shaders: f[2] == "1",
             lights: f[3] == "1",
             yaw: f[4].parse().unwrap(),
             pitch: f[5].parse().unwrap(),
             kind: None,
         };
-        render(&gl, &mut renderer, &source, &shot);
+        std::fs::write(f[1], render(&gl, &mut renderer, &source, &shot, &options)).unwrap();
     }
 }
 
@@ -1043,21 +1180,20 @@ fn h4_kit_sweep() {
     models.sort();
     let gl = Arc::new(headless_gl());
     let mut renderer = ModelGlRenderer::new(&gl).unwrap();
-    let out = std::env::temp_dir().join("baboon_h4_kit_sweep.raw");
+    let options = ShotOptions::new(GameId::Halo4);
     let (mut good, mut failed) = (0, Vec::new());
     for (model, kind) in models.iter().take(limit) {
         let shot = Shot {
             model: model.clone(),
-            out: out.to_string_lossy().into_owned(),
             shaders: true,
             lights: true,
             yaw: -1.57,
             pitch: 0.3,
             kind: kind.clone(),
         };
-        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(&gl, &mut renderer, &source, &shot)));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(&gl, &mut renderer, &source, &shot, &options)));
         match caught {
-            Ok(()) => good += 1,
+            Ok(_) => good += 1,
             Err(panic) => {
                 let detail = crate::app::shell::worker::panic_detail(&*panic);
                 eprintln!("NOTE FAIL {model}: {}", detail.chars().take(200).collect::<String>());
@@ -1067,14 +1203,13 @@ fn h4_kit_sweep() {
             }
         }
     }
-    let _ = std::fs::remove_file(&out);
     eprintln!("NOTE KIT {} models: good {good}, failed {}", models.len().min(limit), failed.len());
 }
 
 /// The Chief biped, with the AR, posed at `clip`, from the kit at `root`.
 fn h4_chief_with_rifle(root: &str, clip: &str) -> (ModelPreviewData, ModelPreviewState) {
     let source = TagSource::LooseFolder {
-        root: root.clone().into(),
+        root: root.into(),
         game: Some(GameId::Halo4),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
