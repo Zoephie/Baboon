@@ -147,6 +147,26 @@ pub(in crate::app) fn draw_fields_with_docs(
     edit: &mut FieldEditContext<'_>,
     skip_field: Option<&str>,
 ) {
+    if super::hud_layout::draw_hud_struct(ui, *tag_struct, names, depth, expert_mode, path_prefix, edit) {
+        return;
+    }
+    draw_fields_with_docs_inner(ui, tag_struct, names, depth, expert_mode, path_prefix, edit, skip_field, None);
+}
+
+/// Render original field ordinals with their definition metadata. A custom
+/// presentation owns the section documentation, so it is not injected again.
+pub(super) fn draw_selected_fields(
+    ui: &mut Ui, tag_struct: &TagStruct<'_>, names: &TagNameIndex, depth: usize,
+    expert_mode: bool, path_prefix: &str, edit: &mut FieldEditContext<'_>, ordinals: &[usize],
+) {
+    draw_fields_with_docs_inner(ui, tag_struct, names, depth, expert_mode, path_prefix, edit, None, Some(ordinals));
+}
+
+fn draw_fields_with_docs_inner(
+    ui: &mut Ui, tag_struct: &TagStruct<'_>, names: &TagNameIndex, depth: usize,
+    expert_mode: bool, path_prefix: &str, edit: &mut FieldEditContext<'_>,
+    skip_field: Option<&str>, selected: Option<&[usize]>,
+) {
     let previous_row_gap = ui.spacing().item_spacing.y;
     ui.spacing_mut().item_spacing.y = 4.0;
     let entries: &[DefEntry] = edit
@@ -170,7 +190,7 @@ pub(in crate::app) fn draw_fields_with_docs(
                 matches!(&entries[i], DefEntry::Field { clean_name, .. } if clean_name == name)
             }) {
                 for (offset, entry) in entries[cursor..match_idx].iter().enumerate() {
-                    if let DefEntry::Explanation { title, body } = entry {
+                    if selected.is_none() && let DefEntry::Explanation { title, body } = entry {
                         draw_injected_explanation_row(
                             ui,
                             title,
@@ -209,6 +229,9 @@ pub(in crate::app) fn draw_fields_with_docs(
                 }
                 cursor = match_idx + 1;
             }
+        }
+        if selected.is_some_and(|ordinals| !ordinals.contains(&field.ordinal())) {
+            continue;
         }
         let field_path = append_field_path_for(path_prefix, &field);
         // A row wholly out of view stands in as the space it took last time.
@@ -260,7 +283,7 @@ pub(in crate::app) fn draw_fields_with_docs(
     }
     // Any explanations after the last matched field.
     for (offset, entry) in entries[cursor..].iter().enumerate() {
-        if let DefEntry::Explanation { title, body } = entry {
+        if selected.is_none() && let DefEntry::Explanation { title, body } = entry {
             draw_injected_explanation_row(
                 ui,
                 title,
@@ -465,7 +488,8 @@ pub(in crate::app) fn draw_field(
         if is_h2_hud_function_tag(edit.game, edit.group_tag)
             && (meta.label.trim().is_empty()
                 || matches!(nested.definition().name(),
-                    "hud_widget_effect_function_struct_2" | "scalar_function_struct_2"))
+                    "hud_widget_effect_function_struct_2" | "scalar_function_struct_2"
+                        | "screen_effect_bonus_struct_2"))
         {
             draw_struct_fields_inline(ui, nested, names, depth, expert_mode, &field_path, edit);
             return;
@@ -621,7 +645,7 @@ pub(in crate::app) fn draw_foundation_explanation_row(
         );
 }
 
-fn draw_injected_explanation_row(
+pub(super) fn draw_injected_explanation_row(
     ui: &mut Ui,
     title: &str,
     body: &str,

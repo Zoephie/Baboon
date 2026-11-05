@@ -357,6 +357,9 @@ fn draw_editable_inline_field_function(
         .filter(|gesture| gesture.matches_document(&view))
         .unwrap_or_else(|| InlineFunctionGesture::new(&view));
     view = gesture.view.clone();
+    if is_h2_hud_function_tag(edit.game, edit.group_tag) && view.function.encoding() == FunctionEncoding::H2 {
+        view.color_types = ColorTypeChoices::ScalarOnly;
+    }
     let mut color = None;
     draw_inline_mapping_function_editor(
         ui, &mut view, editable, &mut graph, &mut point, &mut color,
@@ -681,7 +684,7 @@ mod tests {
                 assert!(!texts.contains(&"Function"), "no collapsible function heading");
                 assert_eq!(texts.iter().filter(|text| **text == "function").count(), 5,
                     "one static label per function, without an extra wrapper heading");
-                for section in ["horizontal and vertical scale", "theta", "horizontal and vertical offset"] {
+                for section in ["Scale", "Horizontal Scale", "Vertical Scale", "Theta", "Offset", "Horizontal Offset", "Vertical Offset"] {
                     assert!(texts.contains(&section), "keep meaningful effect sections: {section}");
                 }
                 for label in ["input name", "range name", "time period in seconds", "Function Type"] {
@@ -729,7 +732,7 @@ mod tests {
                 Some((text.galley.text(), text.galley.rect.translate(text.pos.to_vec2()))),
             _ => None,
         }).collect::<Vec<_>>();
-        for title in ["widget inputs", "widget state"] {
+        for title in ["widget inputs", "Widget States"] {
             assert!(titles.iter().any(|(text, _)| *text == title), "keep the definition's section: {title}");
         }
         for shape in &output.shapes {
@@ -768,24 +771,29 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::app::foundation_fonts());
         let mut pending = Vec::new();
+        let docs = Box::leak(Box::new(crate::app::help::build_def_docs(
+            &locate_definitions_root(), GameId::Halo2, "new_hud_definition",
+        )));
         let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
-            events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 1000.0))),
+            events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 7000.0))),
             ..Default::default()
         }, |ui| {
             with_test_edit_context(|edit| {
                 edit.game = Some(GameId::Halo2);
                 edit.group_tag = u32::from_be_bytes(*b"nhdt");
-                draw_foundation_inline_function_row(ui, "function".to_owned(), view.clone(), 0, &data_path, edit);
+                edit.docs = Some(docs);
+                draw_struct_fields_inline(ui, tag.root().descend(&effect_path).unwrap(),
+                    &TagNameIndex::default(), 0, false, &effect_path, edit);
                 assert!(edit.function_request.is_none());
                 pending.extend(edit.h2_shader_param_ops.iter().cloned());
             });
         });
         frame(vec![]);
         let output = frame(vec![]);
-        let plot = output.shapes.iter().find_map(|shape| match &shape.shape {
+        let plot = output.shapes.iter().filter_map(|shape| match &shape.shape {
             egui::Shape::Rect(rect) if rect.fill == function_plot_bg() && (rect.rect.width() - 445.0).abs() < 1.0 => Some(rect.rect),
             _ => None,
-        }).unwrap();
+        }).nth(1).unwrap();
         let start = egui::pos2(egui::lerp(plot.left()..=plot.right(), initial.0), egui::lerp(plot.bottom()..=plot.top(), initial.1));
         let end = egui::pos2(start.x, plot.center().y);
         frame(vec![egui::Event::PointerMoved(start)]);
@@ -809,6 +817,220 @@ mod tests {
         }
         assert!(matches!(reloaded.root().field_path(&format!("{wrapper_path}/time period in seconds")).unwrap().value(),
             Some(TagFieldData::Real(value)) if value == 2.5));
+    }
+
+    fn hud_group_frame(
+        ctx: &egui::Context, tag: &TagFile, path: &str,
+        docs: &'static crate::app::help::DefDocs, events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        crate::app::run_ui_test(ctx, egui::RawInput {
+            events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 8000.0))),
+            ..Default::default()
+        }, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                with_test_edit_context(|edit| {
+                    edit.game = Some(GameId::Halo2);
+                    edit.group_tag = u32::from_be_bytes(*b"nhdt");
+                    edit.docs = Some(docs);
+                    draw_struct_fields_inline(ui, tag.root().descend(path).unwrap(),
+                        &TagNameIndex::default(), 0, false, path, edit);
+                    assert!(edit.pending.is_empty() && edit.h2_shader_param_ops.is_empty(), "layout controls must not edit tag data");
+                });
+            });
+        })
+    }
+
+    fn hud_texts(output: &egui::FullOutput) -> Vec<&str> {
+        output.shapes.iter().filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.text()), _ => None,
+        }).collect()
+    }
+
+    fn hud_click_text(
+        ctx: &egui::Context, tag: &TagFile, path: &str, docs: &'static crate::app::help::DefDocs, title: &str,
+    ) -> egui::FullOutput {
+        let output = hud_group_frame(ctx, tag, path, docs, vec![]);
+        let pos = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == title => Some(text.pos + text.galley.size() * 0.5),
+            _ => None,
+        }).unwrap_or_else(|| panic!("missing clickable label: {title}"));
+        hud_group_frame(ctx, tag, path, docs, vec![egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+        hud_group_frame(ctx, tag, path, docs, vec![])
+    }
+
+    #[test]
+    fn h2_hud_lookup_opens_without_focus_after_scrolling_past_cached_rows() {
+        let (tag, path) = new_h2_hud_effect("bitmap widgets");
+        let docs = Box::leak(Box::new(crate::app::help::build_def_docs(
+            &locate_definitions_root(), GameId::Halo2, "new_hud_definition")));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let heights = Box::leak(Box::<RowHeights>::default());
+        with_test_edit_context(|edit| {
+            edit.game = Some(GameId::Halo2);
+            edit.group_tag = u32::from_be_bytes(*b"nhdt");
+            edit.docs = Some(docs);
+            edit.row_heights = Some(heights);
+            let mut time = 0.0;
+            let mut frame = |events| {
+                time += 0.1;
+                let editing = ctx.memory(|memory| memory.focused().is_some());
+                edit.row_heights.as_deref_mut().unwrap().begin(RowHeightsBasis {
+                    layout: (0, 0), width: 1200.0, pixels_per_point: 1.0,
+                    expert_mode: false, filtering: false,
+                }, !editing);
+                crate::app::run_ui_test(&ctx, egui::RawInput {
+                    events, time: Some(time), screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 600.0))),
+                    ..Default::default()
+                }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        crate::app::ScrollArea::vertical().auto_shrink([false, false]).vertical_scroll_offset(750.0).show(ui, |ui| {
+                            draw_struct_fields_inline(ui, tag.root().descend(&path).unwrap(), &TagNameIndex::default(), 0, false, &path, edit);
+                        });
+                    });
+                })
+            };
+            for _ in 0..4 { frame(vec![]); }
+            let output = frame(vec![]);
+            let input = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if (rect.rect.width() - 180.0).abs() < 1.0
+                    && (rect.rect.height() - 24.0).abs() < 1.0 && shape.clip_rect.contains(rect.rect.center())
+                    && rect.rect.center().y > 100.0 => Some(rect.rect), _ => None,
+            }).expect("a visible effect input after scrolling");
+            assert!(ctx.memory(|memory| memory.focused().is_none()));
+            let pos = input.right_center() + egui::vec2(ctx.global_style().spacing.item_spacing.x + 24.0, 0.0);
+            frame(vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]);
+            }
+            for _ in 0..6 {
+                let output = frame(vec![]);
+                assert!(hud_texts(&output).contains(&"Search Functions"), "the lookup must stay open with cached offscreen rows");
+            }
+        });
+    }
+
+    #[test]
+    fn h2_hud_input_and_range_lookup_commit_exact_ids_to_the_selected_wrapper() {
+        for name in ["input name", "range name"] {
+            let (mut tag, effect_path) = new_h2_hud_effect("bitmap widgets");
+            let wrapper_field = tag.root().descend(&effect_path).unwrap().fields()
+                .filter(|field| field.as_struct().is_some_and(|st| st.definition().name() == "hud_widget_effect_function_struct_2"))
+                .nth(1).unwrap();
+            let wrapper_path = append_field_path_for(&effect_path, &wrapper_field);
+            let wrapper = wrapper_field.as_struct().unwrap();
+            let field = wrapper.field(name).unwrap();
+            let path = append_field_path_for(&wrapper_path, &field);
+            let ctx = egui::Context::default();
+            ctx.set_fonts(crate::app::foundation_fonts());
+            let mut pending = Vec::new();
+            let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
+                events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0))),
+                ..Default::default()
+            }, |ui| {
+                with_test_edit_context(|edit| {
+                    edit.game = Some(GameId::Halo2);
+                    edit.group_tag = u32::from_be_bytes(*b"nhdt");
+                    draw_field(ui, field, path.clone(), wrapper.raw(), &TagNameIndex::default(),
+                        0, false, &wrapper_path, edit, None, None, 300.0);
+                    pending.extend(edit.pending.iter().cloned());
+                });
+            });
+            let click = |frame: &mut dyn FnMut(Vec<egui::Event>) -> egui::FullOutput, pos| {
+                frame(vec![egui::Event::PointerMoved(pos)]);
+                for pressed in [true, false] {
+                    frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]);
+                }
+                frame(vec![])
+            };
+            frame(vec![]);
+            let output = frame(vec![]);
+            let input = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if (rect.rect.width() - 180.0).abs() < 1.0
+                    && (rect.rect.height() - 24.0).abs() < 1.0 => Some(rect.rect), _ => None,
+            }).expect("native string-id input");
+            assert!(ctx.memory(|memory| memory.focused().is_none()), "open the picker without an active field");
+            click(&mut frame, input.right_center() + egui::vec2(ctx.global_style().spacing.item_spacing.x + 24.0, 0.0));
+            let output = frame(vec![]);
+            assert!(hud_texts(&output).contains(&"Search Functions"));
+            frame(vec![egui::Event::Text("HUD_INPUT4".into())]);
+            let output = frame(vec![]);
+            let target = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "hud_input4" => Some(text.pos + text.galley.size() * 0.5), _ => None,
+            }).expect("HUD functions are searchable");
+            click(&mut frame, target);
+            frame(vec![]);
+            drop(frame);
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].path, path);
+            assert_eq!(pending[0].input, "hud_input4");
+            crate::core::document::apply::apply_field_edit(&mut tag, &path, &pending[0].input).unwrap();
+            let reloaded = blam_tags::classic::read_classic_tag_file(&tag.write_to_bytes().unwrap(),
+                blam_tags::layout::TagLayout::from_json(test_definition_path("halo2_mcc/new_hud_definition.json")).unwrap()).unwrap();
+            assert_eq!(reloaded.root().descend(&wrapper_path).unwrap().read_string_id(name).as_deref(), Some("hud_input4"));
+        }
+    }
+
+    #[test]
+    fn h2_hud_state_section_collapses_flags_and_documentation_but_not_cutoffs() {
+        let (tag, _) = new_h2_hud_effect("bitmap widgets");
+        let widget_path = "bitmap widgets[0]";
+        let field = tag.root().descend(widget_path).unwrap().fields().find(|field|
+            field.as_struct().is_some_and(|st| st.definition().name() == "hud_widget_state_definition_struct_2")).unwrap();
+        let path = append_field_path_for(widget_path, &field);
+        let docs = Box::leak(Box::new(crate::app::help::build_def_docs(&locate_definitions_root(), GameId::Halo2, "new_hud_definition")));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let before = tag.write_to_bytes().unwrap();
+        let open = hud_group_frame(&ctx, &tag, &path, docs, vec![]);
+        assert_eq!(hud_texts(&open).iter().filter(|text| text.starts_with("[Y]") || text.starts_with("[N]")).count(), 8);
+        assert!(hud_texts(&open).iter().any(|text| text.contains("this section is split up")));
+        let closed = hud_click_text(&ctx, &tag, &path, docs, "Widget States");
+        assert!(!hud_texts(&closed).iter().any(|text| text.starts_with("[Y]") || text.starts_with("[N]") || text.contains("this section is split up")));
+        for cutoff in ["age cutoff", "clip cutoff", "total cutoff"] { assert!(hud_texts(&closed).contains(&cutoff)); }
+        let reopened = hud_click_text(&ctx, &tag, &path, docs, "Widget States");
+        assert_eq!(hud_texts(&reopened).iter().filter(|text| text.starts_with("[Y]") || text.starts_with("[N]")).count(), 8);
+        assert_eq!(tag.write_to_bytes().unwrap(), before);
+    }
+
+    #[test]
+    fn h2_hud_effect_sections_collapse_independently_with_static_axis_headers() {
+        let (tag, path) = new_h2_hud_effect("bitmap widgets");
+        let docs = Box::leak(Box::new(crate::app::help::build_def_docs(&locate_definitions_root(), GameId::Halo2, "new_hud_definition")));
+        for (section, remaining, hidden) in [
+            ("Scale", 3, &["Horizontal Scale", "Vertical Scale"][..]),
+            ("Theta", 4, &[][..]),
+            ("Offset", 3, &["Horizontal Offset", "Vertical Offset"][..]),
+        ] {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(crate::app::foundation_fonts());
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            hud_group_frame(&ctx, &tag, &path, docs, vec![]);
+            let closed = hud_click_text(&ctx, &tag, &path, docs, section);
+            assert_eq!(hud_texts(&closed).iter().filter(|text| **text == "Function Type").count(), remaining, "{section}");
+            for title in hidden { assert!(!hud_texts(&closed).contains(title)); }
+            let reopened = hud_click_text(&ctx, &tag, &path, docs, section);
+            assert_eq!(hud_texts(&reopened).iter().filter(|text| **text == "Function Type").count(), 5);
+            let static_header = hud_click_text(&ctx, &tag, &path, docs, "Horizontal Scale");
+            assert_eq!(hud_texts(&static_header).iter().filter(|text| **text == "Function Type").count(), 5);
+        }
+    }
+
+    #[test]
+    fn h2_hud_effect_output_picker_offers_only_scalar_intensity() {
+        let (tag, path) = new_h2_hud_effect("bitmap widgets");
+        let docs = Box::leak(Box::new(crate::app::help::build_def_docs(&locate_definitions_root(), GameId::Halo2, "new_hud_definition")));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        hud_group_frame(&ctx, &tag, &path, docs, vec![]);
+        let output = hud_click_text(&ctx, &tag, &path, docs, "scalar (intensity)");
+        let texts = hud_texts(&output);
+        assert!(texts.iter().filter(|text| **text == "scalar (intensity)").count() > 5, "the output picker opens: {texts:?}");
+        for color in ["constant", "2-color", "3-color", "4-color"] { assert!(!texts.contains(&color), "HUD output must be scalar: {texts:?}"); }
     }
 
     #[test]

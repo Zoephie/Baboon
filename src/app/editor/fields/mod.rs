@@ -8,6 +8,7 @@ mod traversal;
 pub(in crate::app) use traversal::*;
 mod containers;
 pub(in crate::app) use containers::*;
+mod hud_layout;
 mod value_rows;
 
 pub(in crate::app) mod string_editors;
