@@ -308,6 +308,7 @@ impl<'a> KitMut<'a> {
     /// every frame, so remapping only the list is overwritten immediately and
     /// the panes keep pointing at keys their source no longer has.
     pub(in crate::app) fn remap_tag_keys(&mut self, map: &HashMap<String, String>) {
+        self.view.browser.remap_tag_selection(|key| map.get(key).cloned());
         for (_, tile) in self.view.tag_tree.tiles.iter_mut() {
             if let egui_tiles::Tile::Pane(key) = tile
                 && let Some(new_key) = map.get(key)
@@ -382,21 +383,35 @@ impl<'a> KitMut<'a> {
         self.kit.current_pane = Some(key);
     }
 
-    /// Add `key` as a pane if it is not already laid out, and select it.
+    /// Open `key` in the current pane's tab group, or focus its existing tab.
     pub(in crate::app) fn open_tag_pane(&mut self, key: &str) {
         if let Some(tile_id) = self.view.tile_for_key(key) {
             self.view.tag_tree.make_active(|id, _| id == tile_id);
         } else {
+            let target = self.kit.current_pane.as_deref()
+                .and_then(|key| self.view.tile_for_key(key))
+                .filter(|&tile| self.view.is_shown(tile))
+                .or_else(|| self.view.first_shown_pane().and_then(|key| self.view.tile_for_key(&key)));
             let tree = &mut self.view.tag_tree;
             let tile_id = tree.tiles.insert_pane(key.to_owned());
-            match tree.root() {
-                Some(root) => {
-                    if let Some(egui_tiles::Tile::Container(container)) = tree.tiles.get_mut(root) {
-                        container.add_child(tile_id);
+            match target {
+                Some(target) => {
+                    let parent = tree.tiles.parent_of(target);
+                    if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
+                        parent.and_then(|parent| tree.tiles.get_mut(parent))
+                    {
+                        tabs.children.push(tile_id);
                     } else {
-                        // A bare pane at the root: wrap both in a tab group.
-                        let tabs = tree.tiles.insert_tab_tile(vec![root, tile_id]);
-                        tree.root = Some(tabs);
+                        // A bare pane in a split needs a tab group in that same
+                        // position; adding to the split would create another pane.
+                        let tabs = tree.tiles.insert_tab_tile(vec![target, tile_id]);
+                        if let Some(egui_tiles::Tile::Container(container)) =
+                            parent.and_then(|parent| tree.tiles.get_mut(parent))
+                        {
+                            let _ = container.replace_child(target, tabs);
+                        } else {
+                            tree.root = Some(tabs);
+                        }
                     }
                 }
                 None => tree.root = Some(tile_id),
@@ -529,6 +544,62 @@ mod tests {
     /// The tags on screen, read off the tree the way it draws.
     fn shown(view: &KitView) -> Vec<String> {
         view.tag_tree.root().map(|root| view.shown_panes_under(root)).unwrap_or_default()
+    }
+
+    #[test]
+    fn opening_tags_in_a_split_adds_tabs_to_the_last_focused_pane() {
+        for focused in [0, 1] {
+            let mut kit = Kit::empty(KitId(0), Default::default());
+            let mut view = KitView::for_test(&kit);
+            let mut both = KitMut::new(&mut kit, &mut view);
+            both.open_tag_pane(&tag(0));
+            both.open_tag_pane_beside(&tag(1));
+            both.focus_pane(tag(focused));
+            for next in [2, 3] {
+                both.open_tag_pane(&tag(next));
+                let expected = if focused == 0 { vec![tag(next), tag(1)] } else { vec![tag(0), tag(next)] };
+                assert_eq!(shown(both.view), expected, "opening a tag must keep two visible panes");
+                let opened = both.view.tile_for_key(&tag(next)).unwrap();
+                let original = both.view.tile_for_key(&tag(focused)).unwrap();
+                assert_eq!(both.view.tag_tree.tiles.parent_of(opened), both.view.tag_tree.tiles.parent_of(original));
+                assert_eq!(both.kit.current_pane, Some(tag(next)));
+            }
+        }
+    }
+
+    #[test]
+    fn opening_tags_preserves_nested_splits_and_existing_tab_groups() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        both.open_tag_pane(&tag(0));
+        both.open_tag_pane(&tag(1));
+        both.open_tag_pane_beside(&tag(2));
+        both.open_tag_pane_beside(&tag(3));
+        both.open_tag_pane(&tag(0));
+        both.open_tag_pane(&tag(4));
+        assert_eq!(shown(both.view), vec![tag(4), tag(2), tag(3)]);
+        let original = both.view.tile_for_key(&tag(0)).unwrap();
+        let opened = both.view.tile_for_key(&tag(4)).unwrap();
+        assert_eq!(both.view.tag_tree.tiles.parent_of(original), both.view.tag_tree.tiles.parent_of(opened));
+        // Reopening an existing tag focuses its original pane without moving it.
+        both.open_tag_pane(&tag(2));
+        both.open_tag_pane(&tag(5));
+        assert_eq!(shown(both.view), vec![tag(4), tag(5), tag(3)]);
+        assert_eq!(both.kit.open_tabs.len(), 6);
+    }
+
+    #[test]
+    fn opening_after_closing_the_current_split_uses_the_remaining_pane() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        both.open_tag_pane(&tag(0));
+        both.open_tag_pane_beside(&tag(1));
+        both.close_tag_pane(&tag(1));
+        both.open_tag_pane(&tag(2));
+        assert_eq!(shown(both.view), vec![tag(2)]);
+        assert_eq!(both.kit.open_tabs, vec![tag(0), tag(2)]);
     }
 
     #[test]

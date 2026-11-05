@@ -628,7 +628,7 @@ fn preview_and_setup_cards_match_outer_height_at_both_header_breakpoints() {
                                     Some(setup_body_height),
                                     |ui, part| {
                                         if part == ModelPreviewSectionPart::Body {
-                                            egui::ScrollArea::vertical()
+                                            crate::app::ScrollArea::vertical()
                                                 .auto_shrink([false, false])
                                                 .max_height(setup_body_height)
                                                 .show(ui, |ui| {
@@ -985,4 +985,67 @@ fn the_weapon_picker_filters_only_a_list_that_scrolls() {
     assert!(weapon_matches(&few[0], ""));
     assert!(weapon_matches(&few[1], "rifle"));
     assert!(!weapon_matches(&few[1], "pistol"));
+}
+
+#[test]
+fn icon_checkbox_label_has_no_text_cursor() {
+    let ctx = egui::Context::default();
+    Baboon::configure_context(&ctx);
+    let mut checked = false;
+    let mut frame = |events, time| {
+        crate::app::run_ui_test(&ctx, crate::app::loose_fixture::screen(events, time), |ui| {
+            model_view_icon_checkbox(ui, &mut checked, ModelViewCheckboxIcon::Markers, "Markers", None);
+        })
+    };
+    let first = frame(vec![], 0.0);
+    let at = first.shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Text(text) if text.galley.text() == "Markers" =>
+            Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center()),
+        _ => None,
+    }).expect("checkbox label");
+    let hover = frame(vec![egui::Event::PointerMoved(at)], 0.1);
+    assert_ne!(hover.platform_output.cursor_icon, egui::CursorIcon::Text);
+    for (time, pressed) in [(0.2, true), (0.3, false)] {
+        frame(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary,
+            pressed, modifiers: Default::default() }], time);
+    }
+    assert!(checked, "clicking the label still toggles its checkbox");
+}
+
+#[test]
+fn menu_checkbox_glyphs_align_with_option_icons() {
+    let ctx = egui::Context::default();
+    Baboon::configure_context(&ctx);
+    let mut checked = false;
+    let mut output = None;
+    for time in [0.0, 0.1] {
+        output = Some(crate::app::run_ui_test(&ctx, crate::app::loose_fixture::screen(vec![], time), |ui| {
+            ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::new(egui::UiKind::Menu)), |ui| {
+                crate::app::browser::style_list_menu(ui);
+                selectable_icon_text_button(ui, ButtonIcon::FolderOpen, "Folders", true);
+                model_view_icon_checkbox(ui, &mut checked, ModelViewCheckboxIcon::Markers, "Markers", None);
+                ui.baboon_checkbox(&mut checked, "Show prefixes");
+                ui.baboon_radio_value(&mut checked, true, "Textured");
+            });
+        }));
+    }
+    let output = output.unwrap();
+    let images: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+        egui::Shape::Mesh(mesh) => Some(mesh.calc_bounds()),
+        egui::Shape::Circle(circle) => Some(egui::Rect::from_center_size(circle.center, Vec2::splat(circle.radius * 2.0))),
+        egui::Shape::Rect(rect) if rect.brush.is_some() => Some(rect.rect),
+        _ => None,
+    }).filter(|rect| (14.0..=16.1).contains(&rect.width()) && (rect.height() - rect.width()).abs() < 0.1).collect();
+    let glyph_x = |label| {
+        let y = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == label =>
+                Some(text.pos.y + text.galley.size().y * 0.5),
+            _ => None,
+        }).expect("row label");
+        images.iter().filter(|rect| (rect.center().y - y).abs() < 1.0)
+            .map(|rect| rect.left()).min_by(f32::total_cmp).expect("row glyph")
+    };
+    assert_eq!(glyph_x("Markers"), glyph_x("Folders"), "icon-checkbox row inset");
+    assert_eq!(glyph_x("Show prefixes"), glyph_x("Folders"), "plain checkbox inset");
+    assert_eq!(glyph_x("Textured"), glyph_x("Folders"), "radio row inset");
 }

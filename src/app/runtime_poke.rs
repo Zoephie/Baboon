@@ -3008,7 +3008,7 @@ impl Dialog for PokeDialog {
                         });
                     }
                     ui.separator();
-                    ui.checkbox(&mut dont_ask, "Don't ask again (changeable in Settings)");
+                    ui.baboon_checkbox(&mut dont_ask, "Don't ask again (changeable in Settings)");
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         if ui

@@ -707,7 +707,7 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
                                         );
                                 });
                                 ui.separator();
-                                egui::ScrollArea::vertical()
+                                crate::app::ScrollArea::vertical()
                                     .id_salt(("git_review_revisions", kit))
                                     .show(ui, |ui| {
                                     let local_selected =
@@ -764,7 +764,7 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
                                     );
                             });
                             ui.separator();
-                            egui::ScrollArea::vertical()
+                            crate::app::ScrollArea::vertical()
                                 .id_salt(("git_review_files", kit))
                                 .show(ui, |ui| {
                                     if visible_files.is_empty() {

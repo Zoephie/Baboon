@@ -871,7 +871,7 @@ fn draw_shader_grid_row_inner(
             ui.spacing_mut().item_spacing.y = 0.0;
             for (bit, option) in options.iter().enumerate() {
                 let mut checked = mask & (1 << bit) != 0;
-                ui.add_enabled(false, egui::Checkbox::new(&mut checked, option));
+                ui.add_enabled(false, ThemedCheckbox::new(&mut checked, option));
             }
         });
     } else {
@@ -1012,7 +1012,7 @@ fn draw_shader_grid_row_inner(
             *color_popup = row.value_cell.color.clone();
         }
         if !editable && let Some([r, g, b, _]) = parse_shader_rgba(&row_edit.current) {
-            paint_shader_color_preview(ui, preview_rect, Color32::from_rgb(
+            paint_color_preview(ui, preview_rect, Color32::from_rgb(
                 float_channel_to_u8(r), float_channel_to_u8(g), float_channel_to_u8(b),
             ));
         }
@@ -1195,7 +1195,7 @@ fn shader_grid_row_height(ui: &mut Ui, row: &ShaderGridRow, value_width: f32) ->
         );
         measure.spacing_mut().item_spacing.y = 0.0;
         for option in options {
-            measure.checkbox(&mut false, option);
+            measure.baboon_checkbox(&mut false, option);
         }
         (measure.min_rect().height() + 16.0).max(BUTTON_HEIGHT + 8.0)
     } else {
@@ -1530,7 +1530,7 @@ fn draw_shader_range_checkbox(
     let mut editor = TagFunctionEditor::from_function(control.function.clone());
     let mut ranged = editor.is_ranged();
     let response = shader_cell_scope(ui, rect, |ui| {
-        ui.add_enabled(edit.editable, egui::Checkbox::new(&mut ranged, "range:"))
+        ui.add_enabled(edit.editable, ThemedCheckbox::new(&mut ranged, "range:"))
     })
     .inner;
     if response.changed() && set_function_ranged(&mut editor, ranged) {
@@ -1815,7 +1815,7 @@ fn draw_shader_editable_value_with_color_preview(
             shader_cell_scope(ui, rect, |ui| {
                 let (_, wheel_delta) = combo_box_with_scroll(
                     ui,
-                    egui::ComboBox::from_id_salt((
+                    crate::app::ui_kit::ValueComboBox::from_id_salt((
                         edit.view_scope,
                         edit.tag_key,
                         &buffer_key,
@@ -1855,7 +1855,7 @@ fn draw_shader_editable_value_with_color_preview(
                         let mut checked = current_mask & (1u64 << bit) != 0;
                         let response = ui.add_enabled(
                             edit.editable,
-                            egui::Checkbox::new(&mut checked, option.as_str()),
+                            ThemedCheckbox::new(&mut checked, option.as_str()),
                         );
                         if response.changed() {
                             let mut next_mask = current_mask;
@@ -2029,7 +2029,7 @@ fn draw_shader_editable_value_with_color_preview(
             let current_raw = row_edit.current.trim().parse::<i32>().unwrap_or(0);
             let mut checked = current_raw != 0;
             let response = shader_cell_scope(ui, rect, |ui| {
-                ui.add_enabled(edit.editable, egui::Checkbox::new(&mut checked, ""))
+                ui.add_enabled(edit.editable, ThemedCheckbox::new(&mut checked, ""))
             })
             .inner;
             if response.changed() {
@@ -2898,12 +2898,6 @@ pub(super) fn shader_color_swatch_rect(rect: egui::Rect) -> egui::Rect {
     )
 }
 
-pub(in crate::app) fn paint_shader_color_preview(ui: &Ui, rect: egui::Rect, color: Color32) {
-    ui.painter().rect_filled(rect, 3.0, material_input());
-    ui.painter().rect_filled(rect.shrink(3.0), 0.0, Color32::from_rgb(color.r(), color.g(), color.b()));
-    ui.painter().rect_stroke(rect, 3.0, Stroke::new(1.0, material_input_edge()), egui::StrokeKind::Inside);
-}
-
 fn draw_shader_color_value(
     ui: &mut Ui,
     rect: egui::Rect,
@@ -2912,7 +2906,7 @@ fn draw_shader_color_value(
     label: bool,
 ) {
     if preview {
-        paint_shader_color_preview(ui, rect, color);
+        paint_color_preview(ui, rect, color);
     } else {
         draw_shader_color_swatch(ui, rect, color);
         if label {

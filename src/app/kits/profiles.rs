@@ -287,6 +287,7 @@ impl Baboon {
             return;
         }
         self.model.kits[self.model.active].profile = profile;
+        self.model.kits[self.model.active].loading_label = Some(label.clone());
         let tx = self.tx.clone();
         let kit = self.model.active_kit_id();
         let names = self.model.default_names.clone();

@@ -81,7 +81,7 @@ impl Dialog for ChimpMeshTexturePrompt {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     for choice in ChimpTextureFormat::ALL {
-                        ui.radio_value(&mut texture_export.format, choice, choice.label())
+                        ui.baboon_radio_value(&mut texture_export.format, choice, choice.label())
                             .on_hover_text(choice.summary());
                     }
                 });
@@ -92,7 +92,7 @@ impl Dialog for ChimpMeshTexturePrompt {
                         .small(),
                 );
                 ui.add_space(6.0);
-                ui.checkbox(
+                ui.baboon_checkbox(
                     &mut texture_export.split_udim,
                     "Split UDIM blocks into separate files",
                 )
@@ -159,7 +159,7 @@ impl Dialog for ChimpTextureExportPrompt {
                 ui.label(RichText::new(&name).color(text_dark()));
                 ui.add_space(10.0);
                 for choice in ChimpTextureFormat::ALL {
-                    ui.radio_value(&mut export.format, choice, choice.label());
+                    ui.baboon_radio_value(&mut export.format, choice, choice.label());
                     ui.indent(choice.label(), |ui| {
                         ui.label(RichText::new(choice.summary()).color(subtle_dark()).small());
                     });
@@ -168,7 +168,7 @@ impl Dialog for ChimpTextureExportPrompt {
                 ui.add_space(6.0);
                 ui.separator();
                 ui.add_space(6.0);
-                ui.checkbox(
+                ui.baboon_checkbox(
                     &mut export.split_udim,
                     "Split UDIM blocks into separate files",
                 );
@@ -249,7 +249,7 @@ impl Dialog for ChimpLevelExportPrompt {
                 ui.label(RichText::new(format_summary).color(text_dark()));
                 ui.add_space(12.0);
 
-                ui.checkbox(&mut nanite, "Full Nanite geometry");
+                ui.baboon_checkbox(&mut nanite, "Full Nanite geometry");
                 ui.label(
                     RichText::new(
                         "Off exports the cooked fallback instead - a coarse proxy built for \
@@ -260,7 +260,7 @@ impl Dialog for ChimpLevelExportPrompt {
                 );
                 ui.add_space(10.0);
 
-                ui.checkbox(&mut split, "Split into segments");
+                ui.baboon_checkbox(&mut split, "Split into segments");
                 ui.add_space(4.0);
                 if split {
                     ui.label(

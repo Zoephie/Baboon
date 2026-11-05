@@ -117,6 +117,22 @@ pub(in crate::app) struct EditingKitFavorites {
     pub(in crate::app) folders: Vec<PathBuf>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) struct EditingKitRecents {
+    pub(in crate::app) tags_root: PathBuf,
+    /// Most recently closed first; paths are relative to tags_root.
+    pub(in crate::app) tags: Vec<PathBuf>,
+}
+
+/// Expanded sidebar categories, saved independently for each editing kit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub(in crate::app) struct BrowserSectionState {
+    pub(in crate::app) favorites: bool,
+    pub(in crate::app) shortcuts: bool,
+    pub(in crate::app) recents: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::app) struct EditingKitShortcut {
     pub(in crate::app) label: &'static str,
@@ -219,6 +235,15 @@ pub(in crate::app) enum CustomEditingKitIconDraft {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) enum CustomEditingKitInput {
+    Name,
+    Root,
+    Tags,
+    Data,
+    Icon,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct CustomEditingKitDraft {
     pub(in crate::app) read_only: bool,
     pub(in crate::app) git_tracked: bool,
@@ -236,6 +261,7 @@ pub(in crate::app) struct CustomEditingKitDraft {
     pub(in crate::app) data_folder_auto: bool,
     pub(in crate::app) icon: CustomEditingKitIconDraft,
     pub(in crate::app) error: Option<String>,
+    pub(in crate::app) error_input: Option<CustomEditingKitInput>,
     pub(in crate::app) icon_warning: Option<String>,
 }
 
@@ -265,6 +291,7 @@ impl CustomEditingKitDraft {
             data_folder_auto: true,
             icon: CustomEditingKitIconDraft::Default,
             error: None,
+            error_input: None,
             icon_warning: None,
         }
     }
@@ -287,6 +314,7 @@ impl CustomEditingKitDraft {
                 .map(CustomEditingKitIconDraft::Existing)
                 .unwrap_or(CustomEditingKitIconDraft::Default),
             error: None,
+            error_input: None,
             icon_warning: None,
         }
     }
@@ -500,6 +528,9 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) tool_commands_collapsed_categories: HashSet<String>,
     pub(in crate::app) recent_folders: Vec<PathBuf>,
     pub(in crate::app) editing_kit_favorites: Vec<EditingKitFavorites>,
+    pub(in crate::app) editing_kit_recents: Vec<EditingKitRecents>,
+    pub(in crate::app) browser_section_states: HashMap<String, BrowserSectionState>,
+    pub(in crate::app) recents_handled_session: Option<String>,
     pub(in crate::app) custom_color_swatches: Vec<Option<ColorPaletteSwatch>>,
     pub(in crate::app) palette_last_dir: Option<PathBuf>,
     /// Editing-kit profiles and folder aliases naming a game this build does
@@ -542,7 +573,7 @@ impl Default for GuiPrefs {
             nested_default: NestedDefault::default(),
             show_browser_prefixes: false,
             folders_before_tags: false,
-            double_click_to_open_tags: false,
+            double_click_to_open_tags: true,
             reveal_active_tab_in_browser: false,
             show_block_sizes: false,
             string_list_checkboxes: false,
@@ -576,6 +607,9 @@ impl Default for GuiPrefs {
             tool_commands_collapsed_categories: HashSet::new(),
             recent_folders: Vec::new(),
             editing_kit_favorites: Vec::new(),
+            editing_kit_recents: Vec::new(),
+            browser_section_states: HashMap::new(),
+            recents_handled_session: None,
             custom_color_swatches: default_color_swatches(),
             palette_last_dir: None,
             unusable_kit_entries: UnusableKitEntries::default(),

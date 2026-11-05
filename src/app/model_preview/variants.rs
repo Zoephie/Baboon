@@ -574,7 +574,7 @@ pub(super) fn draw_variant_controls(
                 permutation: default_permutation(region),
             });
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut selection.enabled, "");
+            ui.baboon_checkbox(&mut selection.enabled, "");
             ui.add_sized(
                 Vec2::new(region_name_width, BUTTON_HEIGHT),
                 egui::Label::new(

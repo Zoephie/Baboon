@@ -147,6 +147,28 @@ pub(in crate::app) fn draw_fields_with_docs(
     edit: &mut FieldEditContext<'_>,
     skip_field: Option<&str>,
 ) {
+    if super::hud_layout::draw_hud_struct(ui, *tag_struct, names, depth, expert_mode, path_prefix, edit) {
+        return;
+    }
+    draw_fields_with_docs_inner(ui, tag_struct, names, depth, expert_mode, path_prefix, edit, skip_field, None);
+}
+
+/// Render original field ordinals with their definition metadata. A custom
+/// presentation owns the section documentation, so it is not injected again.
+pub(super) fn draw_selected_fields(
+    ui: &mut Ui, tag_struct: &TagStruct<'_>, names: &TagNameIndex, depth: usize,
+    expert_mode: bool, path_prefix: &str, edit: &mut FieldEditContext<'_>, ordinals: &[usize],
+) {
+    draw_fields_with_docs_inner(ui, tag_struct, names, depth, expert_mode, path_prefix, edit, None, Some(ordinals));
+}
+
+fn draw_fields_with_docs_inner(
+    ui: &mut Ui, tag_struct: &TagStruct<'_>, names: &TagNameIndex, depth: usize,
+    expert_mode: bool, path_prefix: &str, edit: &mut FieldEditContext<'_>,
+    skip_field: Option<&str>, selected: Option<&[usize]>,
+) {
+    let previous_row_gap = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 4.0;
     let entries: &[DefEntry] = edit
         .docs
         .map(|docs| docs.entries_for_struct(tag_struct))
@@ -168,7 +190,7 @@ pub(in crate::app) fn draw_fields_with_docs(
                 matches!(&entries[i], DefEntry::Field { clean_name, .. } if clean_name == name)
             }) {
                 for (offset, entry) in entries[cursor..match_idx].iter().enumerate() {
-                    if let DefEntry::Explanation { title, body } = entry {
+                    if selected.is_none() && let DefEntry::Explanation { title, body } = entry {
                         draw_injected_explanation_row(
                             ui,
                             title,
@@ -208,16 +230,22 @@ pub(in crate::app) fn draw_fields_with_docs(
                 cursor = match_idx + 1;
             }
         }
+        if selected.is_some_and(|ordinals| !ordinals.contains(&field.ordinal())) {
+            continue;
+        }
         let field_path = append_field_path_for(path_prefix, &field);
         // A row wholly out of view stands in as the space it took last time.
-        if let Some(height) = edit
+        if let Some((height, trailing_gap)) = edit
             .row_heights
             .as_deref()
             .and_then(|heights| heights.skip(ui, &field_path))
         {
             // Allocated like a row, so the spacing after it lies outside what
             // the enclosing section measures, just as after a drawn row.
-            ui.allocate_space(egui::vec2(0.0, height - ui.spacing().item_spacing.y));
+            let previous_gap = ui.spacing().item_spacing.y;
+            ui.spacing_mut().item_spacing.y = trailing_gap;
+            ui.allocate_space(egui::vec2(0.0, height - trailing_gap));
+            ui.spacing_mut().item_spacing.y = previous_gap;
             continue;
         }
         let top = ui.cursor().min.y;
@@ -248,13 +276,14 @@ pub(in crate::app) fn draw_fields_with_docs(
             reference_value_width,
         );
         let height = ui.cursor().min.y - top;
+        let trailing_gap = (ui.cursor().top() - ui.min_rect().bottom()).max(0.0);
         if let Some(heights) = edit.row_heights.as_deref_mut() {
-            heights.record(&field_path, height);
+            heights.record(&field_path, height, trailing_gap);
         }
     }
     // Any explanations after the last matched field.
     for (offset, entry) in entries[cursor..].iter().enumerate() {
-        if let DefEntry::Explanation { title, body } = entry {
+        if selected.is_none() && let DefEntry::Explanation { title, body } = entry {
             draw_injected_explanation_row(
                 ui,
                 title,
@@ -266,6 +295,7 @@ pub(in crate::app) fn draw_fields_with_docs(
             );
         }
     }
+    ui.spacing_mut().item_spacing.y = previous_row_gap;
 }
 
 /// The value rows a structure-locked tag can't change. Blocks are held back at
@@ -452,6 +482,18 @@ pub(in crate::app) fn draw_field(
             );
             return;
         }
+        // Guerilla lays out these HUD wrappers inline. Their unnamed and
+        // placeholder struct names are not user-facing section headings;
+        // the definition's explanation fields supply the useful sections.
+        if is_h2_hud_function_tag(edit.game, edit.group_tag)
+            && (meta.label.trim().is_empty()
+                || matches!(nested.definition().name(),
+                    "hud_widget_effect_function_struct_2" | "scalar_function_struct_2"
+                        | "screen_effect_bonus_struct_2"))
+        {
+            draw_struct_fields_inline(ui, nested, names, depth, expert_mode, &field_path, edit);
+            return;
+        }
         // A struct is a single fixed sub-structure (not a paginated collection
         // like a block/array), so show it expanded by default — matching
         // Foundation/Guerilla. The user can still collapse it, and that choice
@@ -550,8 +592,8 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     // from the loaded layout (the schema `definition`), with a hardcoded
     // fallback for the few explanations whose text isn't in the definition.
     //
-    // Rendered like Foundation's explanation panel: a collapsible (default-open)
-    // bold header bar with a wrapped monospace body — not the previous tiny text.
+    // Section titles use an underline; explanations add a subtly tinted,
+    // wrapped body beneath the same collapsible heading.
     let title = clean_field_name(name);
     let body = body
         .map(str::to_owned)
@@ -566,13 +608,7 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     } else {
         title
     };
-    // Each explanation scrolls on its own: one id for all of them clashed,
-    // and they shared one scroll position.
-    let scroll_id = ui.make_persistent_id(("explanation_text", &id_salt));
-
-    ui.scope(|ui| {
-        // Full-width header bar (see draw_foundation_group), matching Foundation.
-        draw_foundation_collapsing_header(
+    draw_foundation_collapsing_header(
             ui,
             header,
             ("foundation_explanation", id_salt),
@@ -587,37 +623,29 @@ pub(in crate::app) fn draw_foundation_explanation_row(
                 if has_body {
                     Frame::NONE
                         .fill(foundation_documentation_bg())
-                        .corner_radius(foundation_body_rounding())
                         .inner_margin(egui::Margin::same(20))
                         .show(ui, |ui| {
                             // The box spans the full parent width (Foundation's
                             // border is Width=Auto in a stretch StackPanel).
                             ui.set_min_width(ui.available_width());
-                            // Explanations are laid out by hand for a fixed-pitch
-                            // face (rows of asterisks, aligned columns), so they're
-                            // drawn in one, upright as Foundation draws them, and
-                            // never wrapped: a line wider than the box scrolls.
-                            let galley = findable_galley(
+                            // Wrap to the current pane width while retaining the
+                            // definition's explicit line breaks and Find highlights.
+                            // egui caches this layout until its text/style/width changes.
+                            let galley = findable_wrapped_galley(
                                 ui,
                                 body.trim_end(),
                                 FontId::monospace(12.0),
                                 text_dark(),
                                 FindTargetKind::Documentation,
                             );
-                            egui::ScrollArea::horizontal()
-                                .id_salt(scroll_id)
-                                .auto_shrink([false, true])
-                                .show(ui, |ui| {
-                                    ui.add(egui::Label::new(galley).wrap_mode(egui::TextWrapMode::Extend));
-                                });
+                            ui.add(egui::Label::new(galley));
                         });
                 }
             },
         );
-    });
 }
 
-fn draw_injected_explanation_row(
+pub(super) fn draw_injected_explanation_row(
     ui: &mut Ui,
     title: &str,
     body: &str,
@@ -809,8 +837,7 @@ pub(in crate::app) fn draw_foundation_group(
     open_override: Option<bool>,
     add_contents: impl FnOnce(&mut Ui),
 ) {
-    ui.scope(|ui| {
-        draw_foundation_collapsing_header(
+    draw_foundation_collapsing_header(
             ui,
             title,
             id_salt,
@@ -825,26 +852,30 @@ pub(in crate::app) fn draw_foundation_group(
                 Frame::NONE
                     .fill(foundation_group_bg())
                     .corner_radius(foundation_body_rounding())
-                    .inner_margin(egui::Margin {
-                        left: (8.0 + depth as f32 * 4.0) as i8,
-                        right: 8,
-
-                        top: 6,
-                        bottom: 6,
-                    })
+                    .inner_margin(foundation_body_margin())
                     .show(ui, add_contents);
             },
         );
-    });
 }
 
 /// Draw a full-width modern collapsing header with the same rounded chevron
 /// control used by block headers. Keeping this in one helper ensures groups,
 /// explanations, and section bars share the same affordance.
 fn add_foundation_header_spacing(ui: &mut Ui) {
-    // egui has already advanced by `item_spacing.y` after the previous item.
-    // Add only the remainder so adjacent header bars have an 8pt visual gap.
-    ui.add_space((8.0 - ui.spacing().item_spacing.y).max(0.0));
+    // A preceding container may already have left an 8pt gap. Count that
+    // space as well as the normal row gap rather than adding them together.
+    let existing_gap = (ui.cursor().top() - ui.min_rect().bottom())
+        .max(ui.spacing().item_spacing.y);
+    ui.add_space((8.0 - existing_gap).max(0.0));
+}
+
+fn finish_foundation_container_spacing(ui: &mut Ui, rect: egui::Rect) {
+    // Advance with an 8pt trailing gap without including it in the container's
+    // measured bounds, so the next heading can reuse the same gap.
+    let previous_gap = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 8.0;
+    ui.advance_cursor_after_rect(rect);
+    ui.spacing_mut().item_spacing.y = previous_gap;
 }
 
 pub(in crate::app) const FOUNDATION_CONTAINER_RADIUS: f32 = 5.0;
@@ -871,6 +902,10 @@ fn foundation_body_rounding() -> egui::CornerRadius {
     }
 }
 
+fn foundation_body_margin() -> egui::Margin {
+    egui::Margin { left: 16, right: 16, top: 8, bottom: 8 }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn draw_foundation_collapsing_header(
     ui: &mut Ui,
@@ -885,14 +920,22 @@ pub(in crate::app) fn draw_foundation_collapsing_header(
     leading_icon: Option<ButtonIcon>,
     add_contents: impl FnOnce(&mut Ui),
 ) -> bool {
-    draw_foundation_collapsing_header_inner(ui, title, id_salt, depth, default_open, open_override,
-        bar_fill, find_kind, collapsible, leading_icon, false, add_contents)
+    add_foundation_header_spacing(ui);
+    let header = ui.scope(|ui| {
+        draw_foundation_collapsing_header_inner(ui, title, id_salt, depth, default_open, open_override,
+            bar_fill, find_kind, collapsible, leading_icon, false, add_contents)
+    });
+    if find_kind != FindTargetKind::Documentation {
+        finish_foundation_container_spacing(ui, header.response.rect);
+    }
+    header.inner
 }
 
 pub(in crate::app) fn draw_foundation_clipped_shader_header(
     ui: &mut Ui, title: String, id_salt: impl std::hash::Hash + std::fmt::Debug,
     contents: impl FnOnce(&mut Ui),
 ) -> bool {
+    add_foundation_header_spacing(ui);
     draw_foundation_collapsing_header_inner(ui, title, id_salt, 0, true, None,
         foundation_block_bar(), FindTargetKind::Block, true, None, true, contents)
 }
@@ -902,7 +945,7 @@ fn draw_foundation_collapsing_header_inner(
     ui: &mut Ui,
     title: String,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
-    depth: usize,
+    _depth: usize,
     default_open: bool,
     open_override: Option<bool>,
     bar_fill: Color32,
@@ -912,6 +955,7 @@ fn draw_foundation_collapsing_header_inner(
     clip_body: bool,
     add_contents: impl FnOnce(&mut Ui),
 ) -> bool {
+    let documentation = find_kind == FindTargetKind::Documentation;
     let id = ui.make_persistent_id(("foundation_collapsing_header", id_salt));
     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
@@ -922,19 +966,27 @@ fn draw_foundation_collapsing_header_inner(
         state.set_open(open);
     }
 
-    add_foundation_header_spacing(ui);
     let row_width = ui.available_width();
-    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, 40.0), Sense::hover());
+    let header_height = if documentation { 32.0 } else { 40.0 };
+    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, header_height), Sense::hover());
     let header_background = ui.painter().add(egui::Shape::Noop);
     // This child paints into the reserved row without advancing the parent
     // cursor. `allocate_new_ui` would advance it to the child's 24pt content
     // boundary, effectively discarding the row's bottom padding.
-    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink(8.0)));
+    let header_inset = Vec2::new(8.0, (header_height - ICON_BUTTON_SIZE.y) * 0.5);
+    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink2(header_inset)));
     header_ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
     header_ui.horizontal_centered(|ui| {
-        ui.add_space(depth as f32 * 4.0);
         if collapsible {
-            let toggle = foundation_header_toggle_cell(ui, state.is_open(), true);
+            let toggle = if documentation {
+                ui.scope(|ui| {
+                    ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
+                    ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                    foundation_header_toggle_cell(ui, state.is_open(), true)
+                }).inner
+            } else {
+                foundation_header_toggle_cell(ui, state.is_open(), true)
+            };
             if toggle.clicked() {
                 state.toggle(ui);
             }
@@ -986,8 +1038,7 @@ fn draw_foundation_collapsing_header_inner(
     let layer = ui.layer_id();
     let body_start = ui.ctx().graphics_mut(|g| g.entry(layer).next_idx());
     let body_response = if open {
-        // Widget allocation leaves the normal inter-item gap after the header.
-        // Retract it so the body begins flush against the header bar.
+        // Join the body to the heading; text padding belongs inside the body.
         ui.add_space(-ui.spacing().item_spacing.y);
         state.show_body_unindented(ui, add_contents)
     } else {
@@ -999,7 +1050,7 @@ fn draw_foundation_collapsing_header_inner(
         egui::Shape::rect_filled(
             row_rect,
             foundation_header_rounding(joined_to_body),
-            bar_fill,
+            if documentation { Color32::TRANSPARENT } else { bar_fill },
         ),
     );
     let container_rect = body_response.map_or(row_rect, |body| {
@@ -1038,12 +1089,17 @@ fn draw_foundation_collapsing_header_inner(
             }
         });
     }
-    ui.painter().rect_stroke(
-        container_rect,
-        FOUNDATION_CONTAINER_RADIUS,
-        Stroke::new(1.0_f32, foundation_block_edge()),
-        if clip_body { egui::StrokeKind::Inside } else { egui::StrokeKind::Middle },
-    );
+    if documentation {
+        ui.painter().hline(row_rect.x_range(), row_rect.bottom(),
+            Stroke::new(1.0, foundation_block_edge()));
+    } else {
+        ui.painter().rect_stroke(
+            container_rect,
+            FOUNDATION_CONTAINER_RADIUS,
+            Stroke::new(1.0_f32, foundation_block_edge()),
+            if clip_body { egui::StrokeKind::Inside } else { egui::StrokeKind::Middle },
+        );
+    }
     open
 }
 
@@ -1785,18 +1841,14 @@ pub(in crate::app) fn draw_foundation_array(
     }
 }
 
-/// The parent block/array path for a block path, for "jump to parent". Strips
-/// the last `/segment` and a trailing element index, e.g.
-/// `regions[0]/permutations` → `regions`. `None` for a top-level block.
+/// Nearest ancestor block/array, identified by its element index. Struct
+/// segments have no header to jump to, so skip them (or return `None`).
 pub(in crate::app) fn parent_block_path(path: &str) -> Option<String> {
     let cut = path.rfind('/')?;
-    let mut parent = path[..cut].to_string();
-    if parent.ends_with(']') {
-        if let Some(open) = parent.rfind('[') {
-            parent.truncate(open);
-        }
-    }
-    Some(parent)
+    let ancestors = &path[..cut];
+    let close = ancestors.rfind(']')?;
+    let open = ancestors[..close].rfind('[')?;
+    Some(ancestors[..open].to_owned())
 }
 
 /// A readable breadcrumb for a block path: cleaned segments (index/ordinal
@@ -1810,6 +1862,12 @@ pub(super) fn breadcrumb_for_path(path: &str) -> String {
 /// scroll into view on the next frame.
 pub(in crate::app) fn jump_target_id() -> egui::Id {
     egui::Id::new("foundation_jump_to_block")
+}
+
+/// A parent jump belongs to the exact tag pane that initiated it. Matching
+/// block paths in another pane or editing kit must never consume this request.
+pub(in crate::app) fn parent_block_jump_id(view_scope: &str, tag_key: &str) -> egui::Id {
+    egui::Id::new(("foundation_parent_block_jump", view_scope, tag_key))
 }
 
 const BLOCK_JUMP_SCROLL_LEAD: f32 = 80.0;
@@ -1938,7 +1996,14 @@ pub(in crate::app) fn draw_foundation_block_control(
     // A block-index "Go to" can target a block hidden under one or more
     // collapsed containers. Force every ancestor and the target block itself
     // open until the target header consumes the one-shot jump below.
-    let pending_jump = ui.data(|data| data.get_temp::<String>(jump_target_id()));
+    let parent_jump_id = parent_block_jump_id(view_scope, tag_key);
+    let (pending_jump_id, pending_jump) = ui.data(|data| {
+        if let Some(path) = data.get_temp::<String>(parent_jump_id) {
+            (parent_jump_id, Some(path))
+        } else {
+            (jump_target_id(), data.get_temp::<String>(jump_target_id()))
+        }
+    });
     if pending_jump
         .as_deref()
         .is_some_and(|target| block_jump_opens_path(target, path_salt))
@@ -1951,8 +2016,17 @@ pub(in crate::app) fn draw_foundation_block_control(
 
     add_foundation_header_spacing(ui);
     let row_width = ui.available_width();
+    let narrow = row_width < 900.0;
+    let toolbar_width = (row_width - 16.0).max(1.0);
+    let inline_structural = allow_structural
+        && (!narrow || toolbar_width >= 96.0 + 8.0 * (ICON_BUTTON_SIZE.x + 4.0) + 4.0);
+    let size_label_width = if narrow {
+        block_size_label.map(|label| ui.painter().layout_no_wrap(label.to_owned(),
+            FontId::monospace(TextStyle::Small.resolve(ui.style()).size), subtle_dark()).size().x
+            .min(toolbar_width * 0.35)).unwrap_or(0.0)
+    } else { 0.0 };
     let row_height = 40.0;
-    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, row_height), Sense::hover());
+    let (mut row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, row_height), Sense::hover());
     let header_fill = foundation_block_bar();
     let header_background = ui.painter().add(egui::Shape::Noop);
 
@@ -1974,7 +2048,7 @@ pub(in crate::app) fn draw_foundation_block_control(
     {
         ui.scroll_to_rect(block_jump_scroll_rect(row_rect), Some(egui::Align::Min));
         ui.data_mut(|d| {
-            d.remove::<String>(jump_target_id());
+            d.remove::<String>(pending_jump_id);
             d.insert_temp(jump_highlight_id, now + BLOCK_JUMP_HIGHLIGHT_SECONDS);
         });
         ui.ctx().request_repaint();
@@ -1997,37 +2071,22 @@ pub(in crate::app) fn draw_foundation_block_control(
 
     // Paint controls inside the already-reserved row without changing the
     // parent's cursor; otherwise the 8pt bottom padding is lost.
-    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink(8.0)));
-    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-    header_ui.horizontal_centered(|ui| {
-        ui.add_space(depth as f32 * 5.0);
+    let parent_block = parent_block_path(path_salt);
+    let jump_space = if parent_block.is_some() { ICON_BUTTON_SIZE.x + 4.0 } else { 0.0 };
+    let mut controls_rect = row_rect.shrink(8.0);
+    if !narrow { controls_rect.max.x -= jump_space; }
+    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(controls_rect));
+    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, if narrow { 4.0 } else { 0.0 });
+    header_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(narrow), |ui| {
+        let mut title_row = |ui: &mut Ui| {
+        // The containing block body already supplies the nesting indent.
         let toggle = foundation_header_toggle_cell(ui, state.is_open(), count > 0);
         if toggle.clicked() && count > 0 {
             state.toggle(ui);
         }
-        // Jump-to-parent follows the disclosure control for nested blocks;
-        // hover shows the breadcrumb.
-        if depth > 0 {
-            let jump = icon_button(
-                ui,
-                ButtonIcon::JumpUp,
-                "Jump to parent block",
-                true,
-                foundation_block_text(),
-            )
-            .on_hover_text(format!(
-                "Jump to parent block\n{}",
-                breadcrumb_for_path(path_salt)
-            ));
-            if jump.clicked() {
-                if let Some(parent) = parent_block_path(path_salt) {
-                    ui.data_mut(|d| d.insert_temp(jump_target_id(), parent));
-                }
-            }
-        }
         let block_title = foundation_block_title(name);
         let (name_rect, name_label) =
-            ui.allocate_exact_size(Vec2::new(190.0, 20.0), Sense::click());
+            ui.allocate_exact_size(Vec2::new(if narrow { (ui.available_width() - if show_search_jump { ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x } else { 0.0 } - if size_label_width > 0.0 { size_label_width + ui.spacing().item_spacing.x } else { 0.0 }).max(1.0) } else { 190.0 }, 24.0), Sense::click());
         let block_title_font = bold_font(12.5);
         if jump_highlight_strength > 0.0 {
             let galley = ui.painter().layout_no_wrap(
@@ -2057,7 +2116,7 @@ pub(in crate::app) fn draw_foundation_block_control(
             ui,
             name_rect.left_center(),
             Align2::LEFT_CENTER,
-            &block_title,
+            &truncate_for_cell(&block_title, name_rect.width()),
             block_title_font,
             foundation_block_text(),
             FindTargetKind::Block,
@@ -2066,7 +2125,7 @@ pub(in crate::app) fn draw_foundation_block_control(
         // read-only and available for any element collection (including
         // fixed-size arrays); the size/content-changing paste & replace
         // actions are gated behind `allow_structural`.
-        let name_label = name_label.on_hover_text("Right-click for block options");
+        let name_label = name_label.on_hover_text(format!("{block_title}\nRight-click for block options"));
         context_menu(&name_label, |ui| {
             draw_block_header_menu(ui, count, allow_structural, editable, paste_gate, &mut actions);
         });
@@ -2087,6 +2146,21 @@ pub(in crate::app) fn draw_foundation_block_control(
                 )
             });
         }
+        if narrow && let Some(size_label) = block_size_label {
+            ui.add_sized(Vec2::new(size_label_width, 24.0),
+                egui::Label::new(RichText::new(size_label).color(subtle_dark()).monospace().small()).truncate())
+                .on_hover_text(format!("Block memory usage: elements × element byte size\n{size_label}"));
+        }
+        };
+        if narrow {
+            // Keep disclosure and title together in a non-wrapping
+            // first row. The selector and edit controls share the row below it.
+            ui.allocate_ui_with_layout(Vec2::new((toolbar_width - jump_space).max(1.0), 24.0),
+                egui::Layout::left_to_right(egui::Align::Center), &mut title_row);
+        } else {
+            title_row(ui);
+        }
+        let mut toolbar_row = |ui: &mut Ui| {
         // Keep the previous arrow directly beside the selected
         // reference, with the next arrow following it.
         if foundation_header_stepper_clicked(ui, "<", has_sel && selected_index > 0) {
@@ -2094,7 +2168,12 @@ pub(in crate::app) fn draw_foundation_block_control(
         }
 
         // Instance selector dropdown — built lazily (only when open).
-        let combo_width = foundation_selected_width(row_width);
+        let combo_width = if narrow {
+            let button_count = 3 + if inline_structural { 5 } else { 0 };
+            (toolbar_width - button_count as f32 * (ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x)
+                - ui.spacing().item_spacing.x).max(1.0)
+        }
+            else { foundation_selected_width(row_width) };
         {
             // Include the count so changed blocks retire the popup's old sizing.
             let popup_id = ui.make_persistent_id((
@@ -2132,7 +2211,7 @@ pub(in crate::app) fn draw_foundation_block_control(
             actions.new_selection = Some(selected_index + 1);
         }
 
-        if let Some(size_label) = block_size_label {
+        if !narrow && let Some(size_label) = block_size_label {
             ui.label(
                 RichText::new(size_label)
                     .color(subtle_dark())
@@ -2149,7 +2228,7 @@ pub(in crate::app) fn draw_foundation_block_control(
         // are fixed-size, so the count-changing actions don't apply and the
         // buttons are omitted entirely. The grow actions (Add / Insert /
         // Duplicate) are disabled once the block hits its schema cap.
-        if allow_structural {
+        if inline_structural {
             let hint = capacity_hint.as_deref();
             if foundation_header_button_clicked_hint(ui, "Add", can_edit && !at_capacity, hint) {
                 actions.add = true;
@@ -2178,12 +2257,45 @@ pub(in crate::app) fn draw_foundation_block_control(
             }
         }
         icon_menu_button(ui, ButtonIcon::Other, "Other block options", |ui| {
+            if allow_structural && !inline_structural {
+                draw_block_compact_actions(ui, can_edit, has_sel, at_capacity, capacity_hint.as_deref(), &mut actions);
+                ui.separator();
+            }
             draw_block_header_menu(
                 ui, count, allow_structural, editable, paste_gate, &mut actions,
             );
         });
+        };
+        if narrow {
+            ui.allocate_ui_with_layout(Vec2::new(toolbar_width, 24.0),
+                egui::Layout::left_to_right(egui::Align::Center), &mut toolbar_row);
+        } else {
+            toolbar_row(ui);
+        }
     });
 
+    // Parent navigation stays anchored to the top-right in both layouts.
+    if let Some(parent) = parent_block {
+        let jump_rect = egui::Rect::from_min_size(
+            egui::pos2(row_rect.right() - 8.0 - ICON_BUTTON_SIZE.x, row_rect.top() + 8.0), ICON_BUTTON_SIZE);
+        let mut jump_ui = ui.new_child(egui::UiBuilder::new().id_salt(id.with("parent_jump"))
+            .max_rect(jump_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let jump = icon_button(
+            &mut jump_ui, ButtonIcon::JumpUp, "Jump to parent block", true, foundation_block_text(),
+        ).on_hover_text(format!("Jump to parent block\n{}", breadcrumb_for_path(path_salt)));
+        if jump.clicked() {
+            ui.data_mut(|d| d.insert_temp(parent_jump_id, parent));
+            ui.ctx().request_repaint();
+        }
+    }
+
+    // Stacking adds a toolbar row. Extend the reserved header before
+    // drawing its body so the background, jump targets and scroll extent agree.
+    let bottom = header_ui.min_rect().bottom() + 8.0;
+    if bottom > row_rect.bottom() {
+        ui.add_space(bottom - row_rect.bottom());
+        row_rect.max.y = bottom;
+    }
     if has_sel && selector_active {
         let navigation_delta = ui.input(|input| {
             if input.key_pressed(egui::Key::ArrowUp) {
@@ -2210,12 +2322,7 @@ pub(in crate::app) fn draw_foundation_block_control(
             Frame::NONE
                 .fill(foundation_group_bg())
                 .corner_radius(foundation_body_rounding())
-                .inner_margin(egui::Margin {
-                    left: (14.0 + depth as f32 * 5.0) as i8,
-                    right: 8,
-                    top: 8,
-                    bottom: 8,
-                })
+                .inner_margin(foundation_body_margin())
                 // Render the body inline — no nested ScrollArea. The single outer
                 // ScrollArea in `draw_tag_fields_scroll` owns all scrolling, so a
                 // block element expands to its full height instead of growing an
@@ -2247,7 +2354,32 @@ pub(in crate::app) fn draw_foundation_block_control(
         egui::StrokeKind::Middle,
     );
 
+    finish_foundation_container_spacing(ui, container_rect);
     actions
+}
+
+fn draw_block_compact_actions(
+    ui: &mut Ui, can_edit: bool, has_selection: bool, at_capacity: bool,
+    capacity_hint: Option<&str>, actions: &mut BlockHeaderActions,
+) {
+    for (icon_key, label, enabled, target) in [
+        ("Add", "Add element", can_edit && !at_capacity, &mut actions.add),
+        ("Insert", "Insert element", can_edit && has_selection && !at_capacity, &mut actions.insert),
+        ("Duplicate", "Duplicate element", can_edit && has_selection && !at_capacity, &mut actions.duplicate),
+        ("Delete", "Delete element", can_edit && has_selection, &mut actions.delete),
+        ("Delete all", "Delete all elements", can_edit && has_selection, &mut actions.delete_all),
+    ] {
+        let response = icon_text_button(ui, icon_for_foundation_button(icon_key).unwrap(), label, enabled);
+        if response.clicked() {
+            *target = true;
+            close_menu(ui);
+        }
+        if at_capacity && matches!(icon_key, "Add" | "Insert" | "Duplicate")
+            && let Some(hint) = capacity_hint
+        {
+            response.on_disabled_hover_text(hint);
+        }
+    }
 }
 
 /// Shared by the block title's context menu and its visible Other button.
@@ -2572,8 +2704,8 @@ fn searchable_block_selector_with_none(
 
 pub(in crate::app) fn combo_box_with_scroll<R>(
     ui: &mut Ui,
-    combo: egui::ComboBox,
-    add_contents: impl FnOnce(&mut Ui) -> R,
+    combo: ValueComboBox,
+    add_contents: impl FnOnce(&mut ValueComboUi<'_>) -> R,
 ) -> (egui::InnerResponse<Option<R>>, Option<i32>) {
     let response = ui
         .scope(|ui| {
@@ -2586,7 +2718,7 @@ pub(in crate::app) fn combo_box_with_scroll<R>(
             // instance selector would scroll rather than grow the moment an
             // element was added.
             ui.spacing_mut().combo_height = COMBO_POPUP_MAX_HEIGHT;
-            combo.show_ui(ui, add_contents)
+            combo.height(COMBO_POPUP_MAX_HEIGHT).show_ui(ui, add_contents)
         })
         .inner;
     let popup_open = response.inner.is_some();
@@ -2953,8 +3085,7 @@ pub(in crate::app) fn draw_foundation_bar(
     default_open: bool,
     add_contents: impl FnOnce(&mut Ui),
 ) {
-    ui.scope(|ui| {
-        draw_foundation_collapsing_header(
+    draw_foundation_collapsing_header(
             ui,
             title.clone(),
             ("foundation_bar", title, depth),
@@ -2969,16 +3100,10 @@ pub(in crate::app) fn draw_foundation_bar(
                 Frame::NONE
                     .fill(foundation_group_bg())
                     .corner_radius(foundation_body_rounding())
-                    .inner_margin(egui::Margin {
-                        left: (8.0 + depth as f32 * 6.0) as i8,
-                        right: 6,
-                        top: 5,
-                        bottom: 5,
-                    })
+                    .inner_margin(foundation_body_margin())
                     .show(ui, add_contents);
             },
         );
-    });
 }
 
 /// The dropdown label of every element of `target`: what the block-index
@@ -3059,9 +3184,9 @@ pub(in crate::app) fn draw_foundation_block_index_row(
         "<none>".to_owned()
     };
 
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    let breakpoint = foundation_field_breakpoint(ui, depth, 180.0 + 32.0, "");
+    foundation_field_row_at(ui, meta, depth, breakpoint, |ui| {
+        let value_width = 300.0_f32.min((ui.available_size_before_wrap().x - 32.0).max(1.0));
 
         if editable {
             let mut new_index: Option<i64> = None;
@@ -3083,7 +3208,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                     usize::MAX
                 },
                 target.len,
-                300.0,
+                value_width,
                 &|index| {
                     let block = block.get_or_init(|| {
                         root.and_then(|root| root.field_path(target_block_path))
@@ -3114,7 +3239,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                 });
             }
         } else {
-            foundation_input_cell(ui, &selected_text, 300.0);
+            foundation_input_cell(ui, &selected_text, value_width);
         }
 
         // "Go to" the referenced element: scroll to the target block and select
@@ -3143,6 +3268,271 @@ pub(in crate::app) fn draw_foundation_block_index_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn containers_leave_eight_points_before_fields_and_adjacent_containers() {
+        for blocks in [false, true] {
+            for open in [false, true] {
+                let ctx = egui::Context::default();
+                Baboon::configure_context(&ctx);
+                let mut following_top = 0.0;
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    for index in 0..2 {
+                        if blocks {
+                            draw_foundation_block_control(ui, "Block", "0. entry", 0, 1,
+                                None, true, true, "spacing", "test", &format!("block_{index}"), 0,
+                                true, Some(open), false, PasteGate::Empty, None, |_| "0. entry".to_owned(), |ui| {
+                                    ui.label("Field");
+                                });
+                        } else {
+                            draw_foundation_group(ui, "Group".to_owned(), index, 0, open, Some(open), |ui| {
+                                ui.label("Field");
+                            });
+                        }
+                    }
+                    following_top = ui.allocate_exact_size(Vec2::new(100.0, 24.0), Sense::hover()).0.top();
+                });
+                let outlines: Vec<_> = output.shapes.iter().filter_map(|paint| match &paint.shape {
+                    egui::Shape::Rect(rect) if rect.stroke.width == 1.0
+                        && rect.stroke.color == foundation_block_edge()
+                        && rect.corner_radius.nw == FOUNDATION_CONTAINER_RADIUS as u8
+                        && rect.rect.width() > 300.0 => Some(rect.rect),
+                    _ => None,
+                }).collect();
+                assert_eq!(outlines.len(), 2);
+                assert!((outlines[1].top() - outlines[0].bottom() - 8.0).abs() < 0.1,
+                    "adjacent containers share one 8pt gap: blocks={blocks}, open={open}, {outlines:?}");
+                assert!((following_top - outlines[1].bottom() - 8.0).abs() < 0.1,
+                    "the following field gets an 8pt gap: blocks={blocks}, open={open}");
+            }
+        }
+    }
+
+    #[test]
+    fn nested_blocks_and_fields_use_fixed_local_padding() {
+        fn nested(ui: &mut Ui, depth: usize, flags: TagField<'_>, positions: &mut Vec<(usize, f32, f32)>) {
+            let left = ui.cursor().left();
+            draw_foundation_block_control(ui, &format!("Depth {depth}"), "0. entry", 0, 1,
+                None, true, true, "padding", "test", &format!("block_{depth}"), depth,
+                true, Some(true), false, PasteGate::Empty, None, |_| "0. entry".to_owned(), |ui| {
+                    positions.push((depth, ui.max_rect().left(), ui.max_rect().left() - left));
+                    with_test_edit_context(|edit| {
+                        draw_foundation_editable_text_row(ui, &field_display_meta(&format!("field_depth_{depth}")),
+                            "0", "real", depth, 140.0, &format!("number_{depth}"), edit);
+                        draw_foundation_flags_row(ui, &field_display_meta(&format!("flags_depth_{depth}")),
+                            0, &[], flags, depth, &format!("flags_{depth}"), edit);
+                    });
+                    if depth < 3 { nested(ui, depth + 1, flags, positions); }
+                });
+        }
+        let tag = TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let root = tag.root();
+        let flags = root.fields_all().find(|field| matches!(field.options(), Some(blam_tags::TagOptions::Flags(_)))).unwrap();
+        for width in [450.0, 1200.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut positions = Vec::new();
+            let mut painted = Vec::new();
+            let mut group_inset = 0.0;
+            for _ in 0..2 {
+                positions.clear();
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 5000.0))),
+                    ..Default::default()
+                }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let group_left = ui.cursor().left();
+                        draw_foundation_group(ui, "Overall group".to_owned(), "overall_padding", 0, true, Some(true), |ui| {
+                            group_inset = ui.max_rect().left() - group_left;
+                            nested(ui, 0, flags, &mut positions);
+                        });
+                    });
+                });
+                painted = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                    _ => None,
+                }).collect::<Vec<_>>();
+            }
+            assert_eq!(positions.len(), 4);
+            let inset = positions[0].2;
+            assert!((group_inset - inset).abs() < 1.0, "the overall group and nested block bodies use the same inset");
+            for (depth, body_left, body_inset) in positions {
+                assert!((body_inset - inset).abs() < 1.0, "block body padding is fixed at depth {depth}, {width}px");
+                for label in [format!("field_depth_{depth}"), format!("flags_depth_{depth}")] {
+                    let rect = painted.iter().find(|(text, _)| *text == label).unwrap().1;
+                    assert!((rect.left() - body_left - FOUNDATION_LABEL_INSET).abs() < 1.0,
+                        "{label} uses the same local field padding at {width}px");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parent_jump_does_not_reach_another_workspace_with_the_same_tag() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let frame = |events| {
+            let mut opened = [false; 2];
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                events,
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1240.0, 600.0))),
+                ..Default::default()
+            }, |ui| {
+                for pane in 0..2 {
+                    let area = egui::Rect::from_min_size(egui::pos2(pane as f32 * 620.0, 0.0), Vec2::new(600.0, 600.0));
+                    ui.scope_builder(egui::UiBuilder::new().id_salt(pane).max_rect(area), |ui| {
+                        let scope = format!("workspace_{pane}/tag_pane");
+                        let key = "objects/characters/brute/brute.model";
+                        draw_foundation_block_control(ui, "Variants", "0. entry", 0, 1,
+                            None, true, true, &scope, key, "variants", 0,
+                            false, None, false, PasteGate::Empty, None, |_| "0. entry".to_owned(), |_| {
+                                opened[pane] = true;
+                            });
+                        // The child is drawn independently so opening the target
+                        // parent exposes which pane consumed the actual click.
+                        draw_foundation_block_control(ui, &format!("Child {pane}"), "0. entry", 0, 1,
+                            None, true, true, &scope, key, "variants[0]/regions", 1,
+                            false, None, false, PasteGate::Empty, None, |_| "0. entry".to_owned(), |_| {});
+                    });
+                }
+            });
+            (opened, output)
+        };
+        frame(vec![]);
+        let (_, output) = frame(vec![]);
+        let title = output.shapes.iter().find_map(|paint| match &paint.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Child 1" =>
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
+            _ => None,
+        }).expect("the second workspace's child block is visible");
+        let pos = egui::pos2(1220.0 - 20.0, title.center().y);
+        frame(vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            frame(vec![egui::Event::PointerButton { pos, pressed,
+                button: egui::PointerButton::Primary, modifiers: egui::Modifiers::NONE }]);
+        }
+        let (opened, _) = frame(vec![]);
+        assert_eq!(opened, [false, true], "only the workspace whose Jump to parent button was clicked may react");
+    }
+
+    #[test]
+    fn parent_jump_stays_at_the_top_right_in_both_header_layouts() {
+        for width in [280.0, 600.0, 1200.0] {
+            for depth in [1, 3] {
+                let ctx = egui::Context::default();
+                Baboon::configure_context(&ctx);
+                let frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))),
+                    ..Default::default()
+                }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        draw_foundation_block_control(ui, "Nested test", "0. selected", 0, 4,
+                            None, true, true, "jump", "test", "regions[0]/permutations", depth, false, None, false,
+                            PasteGate::Empty, Some("160 bytes"), |index| format!("{index}. selected"), |_| {});
+                    });
+                });
+                let output = frame(Vec::new());
+                let jump = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if (rect.rect.width() - ICON_BUTTON_SIZE.x).abs() < 0.1
+                        && (rect.rect.height() - ICON_BUTTON_SIZE.y).abs() < 0.1
+                        && (rect.rect.right() - (width - 16.0)).abs() < 1.0 => Some(rect.rect),
+                    _ => None,
+                }).min_by(|a, b| a.top().total_cmp(&b.top())).expect("a right-aligned parent jump button");
+                let title = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().starts_with("Nested") =>
+                        Some(text.galley.rect.translate(text.pos.to_vec2())),
+                    _ => None,
+                }).unwrap();
+                assert!((jump.center().y - title.center().y).abs() < 1.0, "the parent jump stays on the title row at {width}px");
+                for pressed in [true, false] {
+                    frame(vec![egui::Event::PointerMoved(jump.center()), egui::Event::PointerButton {
+                        pos: jump.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE,
+                    }]);
+                }
+                assert_eq!(ctx.data(|data| data.get_temp::<String>(parent_block_jump_id("jump", "test"))).as_deref(), Some("regions"));
+            }
+        }
+    }
+
+    #[test]
+    fn compact_block_actions_preserve_editing_and_capacity_gates() {
+        for (label, editable, selected, capped, expected) in [
+            ("Add element", true, false, false, true),
+            ("Add element", true, false, true, false),
+            ("Add element", false, true, false, false),
+            ("Duplicate element", true, false, false, false),
+            ("Duplicate element", true, true, false, true),
+            ("Delete element", true, true, true, true),
+        ] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut actions = BlockHeaderActions::default();
+            let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.vertical(|ui| draw_block_compact_actions(ui, editable, selected, capped, None, &mut actions));
+                });
+            });
+            let output = frame(Vec::new());
+            let target = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => Some(text.pos + text.galley.rect.center().to_vec2()),
+                _ => None,
+            }).unwrap();
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerMoved(target), egui::Event::PointerButton {
+                    pos: target, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            assert_eq!(actions.add || actions.duplicate || actions.delete, expected, "{label}, editable={editable}, selected={selected}, capped={capped}");
+        }
+    }
+
+    #[test]
+    fn stacked_block_toolbar_fills_its_row_without_wrapping() {
+        for depth in [0, 1, 3] {
+        for width in [280.0, 480.0, 720.0, 860.0] {
+            for structural in [false, true] {
+                let ctx = egui::Context::default();
+                ctx.set_fonts(foundation_fonts());
+                let mut expected_right = 0.0;
+                let mut top = 0.0;
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))),
+                    ..Default::default()
+                }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        top = ui.cursor().top();
+                        expected_right = ui.max_rect().right() - 8.0;
+                        draw_foundation_block_control(ui, "Toolbar test", "0. selected", 0, 4,
+                            None, true, structural, "toolbar", "test", "block", depth, false, None, false,
+                            PasteGate::Empty, Some("160 bytes"), |index| format!("{index}. selected"), |_| {});
+                    });
+                });
+                let buttons = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if (rect.rect.height() - BUTTON_HEIGHT).abs() < 0.1
+                        && rect.rect.width() >= ICON_BUTTON_SIZE.x && rect.rect.center().y > top + 35.0 => Some(rect.rect),
+                    _ => None,
+                }).collect::<Vec<_>>();
+                let selector = buttons.iter().max_by(|a, b| a.width().total_cmp(&b.width())).unwrap();
+                let title_left = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if (rect.rect.height() - BUTTON_HEIGHT).abs() < 0.1
+                        && (rect.rect.width() - ICON_BUTTON_SIZE.x).abs() < 0.1
+                        && rect.rect.center().y < top + 35.0 => Some(rect.rect.left()),
+                    _ => None,
+                }).fold(f32::INFINITY, f32::min);
+                let toolbar_left = buttons.iter().map(|rect| rect.left()).fold(f32::INFINITY, f32::min);
+                assert!((title_left - toolbar_left).abs() < 1.0,
+                    "title and toolbar buttons align at nesting depth {depth}");
+                assert!(buttons.iter().all(|rect| (rect.center().y - selector.center().y).abs() < 1.0),
+                    "the selector and all visible buttons share one row at {width}px");
+                let right = buttons.iter().map(|rect| rect.right()).fold(f32::NEG_INFINITY, f32::max);
+                assert!((right - expected_right).abs() < 1.0, "the toolbar fills its row at {width}px");
+                assert!(selector.width() > (width - 300.0).max(80.0), "the selector uses the remaining width at {width}px");
+            }
+        }
+        }
+    }
 
     /// Block headers and block-index dropdowns show the game's own editor
     /// label (blam-tags `element_label`) with Baboon's `N. ` prefix, not
@@ -4158,7 +4548,7 @@ mod tests {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ui, |ui| {
-                        let output = egui::ScrollArea::vertical().animated(false).show(ui, |ui| {
+                        let output = crate::app::ScrollArea::vertical().animated(false).show(ui, |ui| {
                             ui.allocate_exact_size(
                                 egui::Vec2::new(400.0, 150.0),
                                 egui::Sense::hover(),
@@ -4336,12 +4726,14 @@ mod tests {
 
     #[test]
     fn parent_block_path_and_breadcrumb() {
+        assert_eq!(parent_block_path("definitions/skeleton nodes"), None);
+        assert_eq!(parent_block_path("regions[0]/definitions/skeleton nodes").as_deref(), Some("regions"));
         assert_eq!(
             parent_block_path("regions[0]/permutations").as_deref(),
             Some("regions")
         );
-        assert_eq!(parent_block_path("a/b/c").as_deref(), Some("a/b"));
-        assert_eq!(parent_block_path("a/b[3]").as_deref(), Some("a"));
+        assert_eq!(parent_block_path("a/b/c"), None);
+        assert_eq!(parent_block_path("a/b[3]"), None);
         assert_eq!(parent_block_path("regions"), None);
 
         assert_eq!(
@@ -4505,7 +4897,7 @@ mod tests {
                         egui::CentralPanel::default().show(ui, |ui| {
                             // As the tag pane's: full width, so its floating scroll
                             // bar runs down the right edge.
-                            let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                            let mut area = crate::app::ScrollArea::vertical().auto_shrink([false, false]);
                             // Set only when a step moves it, as a user's scroll does.
                             if index == 0 || steps[index - 1].0 != *offset {
                                 area = area.vertical_scroll_offset(*offset);
@@ -4525,12 +4917,13 @@ mod tests {
                         egui::Shape::Text(text) if clipped.clip_rect.contains(text.pos) => Some((text.galley.text().to_owned(), text.pos.y)),
                         _ => None,
                     });
-                    // The box is the rectangle painted in the text-edit fill;
-                    // the text editor inside it is as tall as all its text.
-                    let box_fill = ctx.global_style().visuals.text_edit_bg_color();
+                    // Every input shares this fill. The multiline box is
+                    // taller than this fixture's single-line fields.
+                    let box_fill = foundation_input();
                     fn filled(shape: &egui::Shape, fill: egui::Color32) -> Option<egui::Rect> {
                         match shape {
-                            egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                            egui::Shape::Rect(rect) if rect.fill == fill
+                                && rect.rect.height() > BUTTON_HEIGHT => Some(rect.rect),
                             egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| filled(shape, fill)),
                             _ => None,
                         }
@@ -4704,7 +5097,7 @@ mod tests {
                         ..Default::default()
                     }, |ui| {
                         egui::CentralPanel::default().show(ui, |ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
+                            crate::app::ScrollArea::vertical().show(ui, |ui| {
                                 draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
                             });
                         });
@@ -4728,11 +5121,10 @@ mod tests {
         assert!(widget.iter().any(|text| text == "Function Type"), "a function field drew no function editor: {widget:?}");
     }
 
-    /// An explanation is drawn as it was written: in a fixed-pitch face,
-    /// upright, a row per line however narrow the pane, with its blank lines.
-    /// The bitmap's "IMPORT DATA" rows of asterisks used to wrap.
+    /// Documentation reflows when its pane changes width, preserving the text's
+    /// explicit line breaks and its upright monospace styling.
     #[test]
-    fn explanations_keep_their_lines_as_written() {
+    fn explanations_wrap_to_the_pane_and_keep_explicit_line_breaks() {
         let docs = crate::app::help::build_def_docs(&locate_definitions_root(), GameId::Halo3, "bitmap");
         let body = docs
             .all_entries()
@@ -4743,29 +5135,36 @@ mod tests {
             .expect("the bitmap's IMPORT DATA explanation");
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::app::foundation_fonts());
-        let mut galley = None;
-        for _ in 0..2 {
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 900.0))),
-                ..Default::default()
-            };
-            let output = crate::app::run_ui_test(&ctx, input, |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    draw_foundation_explanation_row(ui, "IMPORT DATA", Some(&body), 0, "import data", None);
+        let mut row_counts = Vec::new();
+        for width in [400.0, 1000.0, 400.0] {
+            let mut galley = None;
+            for _ in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 900.0))),
+                    ..Default::default()
+                };
+                let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        draw_foundation_explanation_row(ui, "IMPORT DATA", Some(&body), 0, "import data", None);
+                    });
                 });
-            });
-            galley = output.shapes.iter().find_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text) if text.galley.text().contains("Everything below") => Some(text.galley.clone()),
-                _ => None,
-            });
+                galley = output.shapes.iter().find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text().contains("Everything below") => Some(text.galley.clone()),
+                    _ => None,
+                });
+            }
+            let galley = galley.expect("the explanation's text is painted");
+            let format = &galley.job.sections[0].format;
+            assert_eq!(format.font_id.family, egui::FontFamily::Monospace);
+            assert!(!format.italics);
+            let written = body.trim_end();
+            assert!(written.starts_with("\n\n\n"), "the blank lines it was written with are kept");
+            assert_eq!(galley.text(), written, "explicit line breaks and blank lines are retained");
+            assert!(galley.size().x <= width - 48.0, "documentation stays within its padded pane");
+            row_counts.push(galley.rows.len());
         }
-        let galley = galley.expect("the explanation's text is painted");
-        let format = &galley.job.sections[0].format;
-        assert_eq!(format.font_id.family, egui::FontFamily::Monospace);
-        assert!(!format.italics);
-        let written = body.trim_end();
-        assert!(written.starts_with("\n\n\n"), "the blank lines it was written with are kept");
-        assert_eq!(galley.rows.len(), written.split('\n').count(), "a line wrapped in a 400 pixel pane");
+        assert!(row_counts[0] > row_counts[1], "a narrower pane wraps into more rows");
+        assert_eq!(row_counts[0], row_counts[2], "resizing back restores the same layout");
     }
 
     /// Halo 3's `left/right bleed` shows its name as written (with `/`, as
@@ -4811,9 +5210,6 @@ mod tests {
             texts.iter().any(|t| t == "real [0 = no bleed, 1 = swap left/right, 0.5 = mono]"),
             "{texts:?}"
         );
-        // Every explanation's scroll area has an id of its own: egui paints
-        // a warning over any it sees twice.
-        assert!(!texts.iter().any(|t| t.contains("use of ScrollArea ID")), "{texts:?}");
     }
 
     #[test]

@@ -54,7 +54,7 @@ fn sidebar_shortcut_button(ui: &mut Ui, label: &str,
         let fill = if response.is_pointer_button_down_on() {
             ui.visuals().widgets.active.weak_bg_fill
         } else {
-            ui.visuals().widgets.hovered.weak_bg_fill
+            context_menu_hover()
         };
         ui.painter()
             .rect_filled(rect, ui.visuals().widgets.hovered.corner_radius, fill);
@@ -189,6 +189,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
         return;
     };
     let generation = cx.model.kits[kit_index].generation;
+    set_browser_selected_tag(ui, pane.selected_tag.clone());
+    begin_browser_navigation(ui, egui::Id::new(("folder_navigation", kit_id, pane_key)));
     let bitmap_hover_requests = begin_bitmap_hovers(ui, Arc::clone(&view.bitmap_browser.thumbnails));
 
     let is_loose = cx.model.kits[kit_index]
@@ -432,6 +434,8 @@ pub(in crate::app) fn draw_folder_browser_pane(
             });
         });
 
+    finish_browser_navigation(ui);
+    pane.selected_tag = browser_selected_tag(ui);
     queue_bitmap_hover_thumbnails(cx, kit_index, &mut view.bitmap_browser, &bitmap_hover_requests);
     edit_browser_prefs(cx, show_browser_prefixes, folders_before_tags);
     if pane.search_scope != previous_search_scope {
@@ -704,6 +708,8 @@ fn draw_kit_browser_inner(
     // draw one after another, so what is in memory during this tree's draw
     // is this kit's own set.
     set_browser_modified_tags(ui, std::sync::Arc::clone(&view.browser.modified_tags));
+    set_browser_selected_tag(ui, view.browser.selected_tag.clone());
+    begin_browser_navigation(ui, egui::Id::new(("sidebar_navigation", kit_id)));
     set_browser_favorite_folders(
         ui,
         cx.model.kits[kit_index]
@@ -869,10 +875,13 @@ fn draw_kit_browser_inner(
             folder: request.folder,
         });
         let sort = view.browser.sort;
+        let section_key = crate::app::shell::shortcuts::shortcut_kit_key(cx.model, kit_index);
+        let saved_sections = cx.model.prefs.browser_section_states.get(&section_key).copied().unwrap_or_default();
+        let mut sections = saved_sections;
         let action = ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let (favorite_action, favorites_visible) = draw_favorites(
+            .show(ui, |ui| with_browser_section_state(ui, &mut sections, |ui| {
+                let (favorite_action, _) = draw_favorites(
                     ui,
                     &active_favorite_entries,
                     // Favorites follow the visible folder browser's lazy
@@ -892,9 +901,6 @@ fn draw_kit_browser_inner(
                     &search_keywords,
                     game,
                 );
-                if favorites_visible {
-                    ui.add_space(8.0);
-                }
                 let (_, add_shortcut) = show_browser_navigation_section_with_add(
                     ui,
                     "browser_shortcuts",
@@ -912,7 +918,7 @@ fn draw_kit_browser_inner(
                                     "builtin:git_review" if git_review_enabled => {
                                         let app = crate::app::shell::shortcuts::builtin_shortcut(&cx.model.prefs, &shortcut_kit, &key, tool_root.as_deref(), cx.model.tag_test_executable_for(kit_index));
                                         let response = sidebar_list_button(ui, ButtonIcon::Git, &app.name);
-                                        if browser_open_requested(&response, double_click_to_open) { shortcut = Some(KitShortcut::GitReview); }
+                                        if browser_shortcut_open_requested(&response, double_click_to_open) { shortcut = Some(KitShortcut::GitReview); }
                                         response
                                     }
                                     "builtin:tag_test" | "builtin:sapien" => {
@@ -932,7 +938,7 @@ fn draw_kit_browser_inner(
                                         } else { ready };
                                         let response = sidebar_kit_app_button(ui, &app.name, Some(&app.path), uri, bytes, true)
                                             .on_hover_text(app.path.display().to_string());
-                                        if browser_open_requested(&response, double_click_to_open) && ready {
+                                        if browser_shortcut_open_requested(&response, double_click_to_open) && ready {
                                             if overridden {
                                                 cx.send(AppAction::FocusKit(kit_id));
                                                 cx.send(AppAction::LaunchShortcutApp(app));
@@ -946,7 +952,7 @@ fn draw_kit_browser_inner(
                                         let texture = crate::app::shell::shortcuts::app_icon(ui.ctx(), &app.path);
                                         let response = sidebar_app_button(ui, texture.as_ref(), &app.name, "↗", true)
                                             .on_hover_text(app.path.display().to_string());
-                                        if browser_open_requested(&response, double_click_to_open) { custom_shortcut = Some(index); }
+                                        if browser_shortcut_open_requested(&response, double_click_to_open) { custom_shortcut = Some(index); }
                                         response
                                     }
                                 };
@@ -958,6 +964,9 @@ fn draw_kit_browser_inner(
                 if add_shortcut {
                     cx.open_dialog(crate::app::shell::shortcuts::AddShortcutDialog::for_kit(cx.model, kit_index));
                 }
+                let recent_action = draw_recents(ui, &view.browser.recent_entries, selected.as_deref(),
+                    &filter, show_prefixes, double_click_to_open, &favorite_keys,
+                    view.browser.search_scope, &search_keywords, game);
                 browser_favorites_divider(ui, true);
 
                 let tree_action = if !filter.is_empty() {
@@ -1092,9 +1101,12 @@ fn draw_kit_browser_inner(
                         }
                     }
                 };
-                favorite_action.or(tree_action)
-            })
+                favorite_action.or(recent_action).or(tree_action)
+            }))
             .inner;
+        if sections != saved_sections {
+            cx.edit_prefs(move |prefs| { prefs.browser_section_states.insert(section_key, sections); });
+        }
         if !load_requests.is_empty() {
             cx.send(BrowserCommand::LoadFolders {
                 kit: kit_id,
@@ -1137,6 +1149,8 @@ fn draw_kit_browser_inner(
         }
         None => {}
     }
+    finish_browser_navigation(ui);
+    view.browser.selected_tag = browser_selected_tag(ui);
     queue_bitmap_hover_thumbnails(cx, kit_index, &mut view.bitmap_browser, &bitmap_hover_requests);
 }
 
@@ -1190,7 +1204,7 @@ fn browser_toolbar_controls(
             }
         }
         ui.separator();
-        ui.checkbox(folders_before_tags, "Folders before tags");
+        ui.baboon_checkbox(folders_before_tags, "Folders before tags");
     });
     if show_modes {
         icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
@@ -1205,7 +1219,7 @@ fn browser_toolbar_controls(
                 close_menu(ui);
             }
             ui.separator();
-            ui.checkbox(show_prefixes, "Show prefixes");
+            ui.baboon_checkbox(show_prefixes, "Show prefixes");
         });
     }
     icon_menu_button(ui, ButtonIcon::Other, "Other browser options", |ui| {
@@ -1246,8 +1260,8 @@ fn draw_folder_browser_controls(
         icon_menu_button(ui, ButtonIcon::Filter, "Filter asset types", |ui| {
             style_list_menu(ui);
             ui.label("Asset types");
-            ui.checkbox(&mut pane.asset_bitmaps, "Bitmaps");
-            ui.checkbox(&mut pane.asset_models, "Models");
+            ui.baboon_checkbox(&mut pane.asset_bitmaps, "Bitmaps");
+            ui.baboon_checkbox(&mut pane.asset_models, "Models");
         });
         icon_menu_button(ui, ButtonIcon::View, "Thumbnail size", |ui| {
             ui.label("Thumbnail size");
@@ -1626,6 +1640,58 @@ mod tests {
         assert!(added);
         assert!(visible);
         assert!(frame(Vec::new()).1);
+    }
+
+    #[test]
+    fn browser_categories_restore_saved_choices_in_a_fresh_ui() {
+        use crate::app::prefs::BrowserSectionState;
+        fn frame(ctx: &egui::Context, state: &mut BrowserSectionState, events: Vec<egui::Event>)
+            -> ([egui::Rect; 3], [bool; 3])
+        {
+            let mut headers = [egui::Rect::NOTHING; 3];
+            let mut visible = [false; 3];
+            let _ = crate::app::run_ui_test(ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+                with_browser_section_state(ui, state, |ui| {
+                    for (index, (id, title)) in [
+                        ("browser_favorites", "Favorites"),
+                        ("browser_shortcuts", "Shortcuts"),
+                        ("browser_recents", "Recents"),
+                    ].into_iter().enumerate() {
+                        headers[index] = show_browser_navigation_section(ui, id, title,
+                            ButtonIcon::Pin, text_dark(), |ui| {
+                                visible[index] = true;
+                                ui.label("Entry");
+                            }).rect;
+                    }
+                });
+            });
+            (headers, visible)
+        }
+        let context = || {
+            let ctx = egui::Context::default();
+            ctx.global_style_mut(|style| style.animation_time = 0.0);
+            ctx
+        };
+        let ctx = context();
+        let mut saved = BrowserSectionState::default();
+        assert_eq!(frame(&ctx, &mut saved, vec![]).1, [false; 3]);
+        for index in [0, 2] {
+            let pos = frame(&ctx, &mut saved, vec![]).0[index].center();
+            frame(&ctx, &mut saved, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(&ctx, &mut saved, vec![egui::Event::PointerButton {
+                    pos, pressed, button: egui::PointerButton::Primary, modifiers: Default::default(),
+                }]);
+            }
+        }
+        assert_eq!(saved, BrowserSectionState { favorites: true, shortcuts: false, recents: true });
+        let fresh = context();
+        frame(&fresh, &mut saved, vec![]);
+        assert_eq!(frame(&fresh, &mut saved, vec![]).1, [true, false, true]);
+        let mut other_kit = BrowserSectionState::default();
+        frame(&fresh, &mut other_kit, vec![]);
+        assert_eq!(frame(&fresh, &mut other_kit, vec![]).1, [false; 3]);
+        assert_eq!(frame(&fresh, &mut saved, vec![]).1, [true, false, true]);
     }
 
     #[test]

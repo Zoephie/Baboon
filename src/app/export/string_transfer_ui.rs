@@ -1,6 +1,6 @@
 use super::*;
 
-fn described_option<T: PartialEq>(ui: &mut egui::Ui, value: &mut T, option: T, title: &str, description: &str) -> egui::Response {
+fn described_option<T: PartialEq>(ui: &mut crate::app::ui_kit::ValueComboUi<'_>, value: &mut T, option: T, title: &str, description: &str) -> egui::Response {
     let mut text = egui::text::LayoutJob::default();
     text.append(title, 0.0, egui::TextFormat::simple(TextStyle::Body.resolve(ui.style()), text_dark()));
     text.append(&format!("\n{description}"), 0.0, egui::TextFormat::simple(TextStyle::Small.resolve(ui.style()), subtle_dark()));
@@ -92,7 +92,7 @@ impl Dialog for StringTransferWindow {
                 let mut settings_changed = false;
                 egui::Grid::new("string transfer settings").num_columns(2).min_col_width(label_width).spacing(Vec2::new(8.0, 8.0)).show(ui, |ui| {
                     ui.label("Method:");
-                    egui::ComboBox::from_id_salt("strings method").width(field_width)
+                    crate::app::ui_kit::ValueComboBox::from_id_salt("strings method").width(field_width)
                         .selected_text(if self.method == StringMethod::Baboon { "Baboon" } else { "tool.exe" }).show_ui(ui, |ui| {
                             settings_changed |= described_option(ui, &mut self.method, StringMethod::Baboon, "Baboon",
                                 "Uses the open tag. Supports text and CSV; imports can be undone.").changed();
@@ -103,7 +103,7 @@ impl Dialog for StringTransferWindow {
                     let baboon = self.method == StringMethod::Baboon;
                     ui.label("Format:");
                     ui.add_enabled_ui(baboon, |ui| {
-                        egui::ComboBox::from_id_salt("strings format").width(field_width)
+                        crate::app::ui_kit::ValueComboBox::from_id_salt("strings format").width(field_width)
                             .selected_text(if !baboon || self.format == StringFormat::Text { text_format.as_str() } else { ".csv" }).show_ui(ui, |ui| {
                                 settings_changed |= described_option(ui, &mut self.format, StringFormat::Text, &text_format,
                                     "Engine-style text, with a separate file for each language. Exports use UTF-16.").changed();
@@ -117,7 +117,7 @@ impl Dialog for StringTransferWindow {
                     let language_label = if !baboon || csv_import { "All" } else if list.languages.len() == 1 { "Text" }
                         else { self.language.map_or("All", |language| list.languages[language].name.as_str()) };
                     ui.add_enabled_ui(baboon && !csv_import && list.languages.len() > 1, |ui| {
-                        egui::ComboBox::from_id_salt("strings language").width(field_width).selected_text(language_label).show_ui(ui, |ui| {
+                        crate::app::ui_kit::ValueComboBox::from_id_salt("strings language").width(field_width).selected_text(language_label).show_ui(ui, |ui| {
                             settings_changed |= ui.selectable_value(&mut self.language, None, "All").changed();
                             for (index, language) in list.languages.iter().enumerate() {
                                 settings_changed |= ui.selectable_value(&mut self.language, Some(index), &language.name).changed();
@@ -127,7 +127,7 @@ impl Dialog for StringTransferWindow {
                     ui.end_row();
                     ui.label("Destination:");
                     ui.add_enabled_ui(baboon, |ui| {
-                        egui::ComboBox::from_id_salt("strings destination").width(field_width)
+                        crate::app::ui_kit::ValueComboBox::from_id_salt("strings destination").width(field_width)
                             .selected_text(if !baboon || self.destination == StringDestination::Kit { "Data Folder" }
                                 else if self.path.is_some() { "Custom Location" } else { "Select…" }).show_ui(ui, |ui| {
                                 ui.add_enabled_ui(layout.is_some(), |ui| {
@@ -144,7 +144,7 @@ impl Dialog for StringTransferWindow {
                             browse = icon_text_button(ui, ButtonIcon::Browse, "Browse…", true).clicked();
                             let mut path = self.path.as_ref().map_or_else(String::new, |path| path.display().to_string());
                             let response = ui.add_sized(Vec2::new(ui.available_width(), BUTTON_HEIGHT),
-                                egui::TextEdit::singleline(&mut path).vertical_align(egui::Align::Center).hint_text("Select or enter a path…"));
+                                crate::app::ui_kit::singleline_text_edit(&mut path).hint_text("Select or enter a path…"));
                             if response.changed() {
                                 self.path = (!path.is_empty()).then(|| PathBuf::from(path));
                                 changed = true;
@@ -154,7 +154,7 @@ impl Dialog for StringTransferWindow {
                     }
                     if baboon && self.import {
                         ui.label("Import mode:");
-                        egui::ComboBox::from_id_salt("strings import mode").width(field_width)
+                        crate::app::ui_kit::ValueComboBox::from_id_salt("strings import mode").width(field_width)
                             .selected_text(match self.mode { None => "Select…", Some(ImportMode::Amend) => "Amend", Some(ImportMode::Replace) => "Replace" }).show_ui(ui, |ui| {
                                 changed |= ui.selectable_value(&mut self.mode, Some(ImportMode::Amend), "Amend").changed();
                                 changed |= ui.selectable_value(&mut self.mode, Some(ImportMode::Replace), "Replace").changed();
@@ -216,7 +216,7 @@ impl Dialog for StringTransferWindow {
                         match paths {
                             Ok(paths) => {
                                 ui.collapsing("File locations", |ui| {
-                                    egui::ScrollArea::vertical().id_salt("string paths").max_height(100.0).show(ui, |ui| {
+                                    crate::app::ScrollArea::vertical().id_salt("string paths").max_height(100.0).show(ui, |ui| {
                                         for (_, path) in paths { ui.label(path.display().to_string()); }
                                     });
                                 });

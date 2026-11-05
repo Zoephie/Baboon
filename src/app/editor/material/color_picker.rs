@@ -470,7 +470,7 @@ pub(in crate::app) fn draw_color_popup(
                 &window_title,
                 ButtonIcon::ColorPicker,
             );
-            ui.separator();
+            ui.add_space(8.0);
             if editable {
                 draw_color_picker_editor(ui, color, custom_swatches);
             } else {
@@ -480,6 +480,7 @@ pub(in crate::app) fn draw_color_popup(
                 draw_palette_feedback(ui, color, custom_swatches);
             }
             ui.add_space(10.0);
+            popup_footer(ui, |ui| {
             ui.horizontal(|ui| {
                 if editable {
                     draw_palette_file_buttons(ui, color, custom_swatches, palette_last_dir);
@@ -585,6 +586,7 @@ pub(in crate::app) fn draw_color_popup(
                         close = true;
                     }
                 });
+            });
             });
         });
     if editable && !close && color.show_save_palette_dialog {
@@ -1154,7 +1156,6 @@ fn draw_save_palette_format_dialog(
                 ButtonIcon::Save,
                 &mut open,
             );
-            ui.separator();
             ui.add_space(6.0);
             ui.label(RichText::new("Choose a palette format:").color(text_dark()));
             ui.add_space(6.0);

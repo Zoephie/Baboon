@@ -138,7 +138,7 @@ impl Dialog for FindWindow {
                     .show(ui, |ui| {
                         find_row_label(ui, "Within:");
                         if let Some(options) = &mut query.strings {
-                            egui::ComboBox::from_id_salt("find_string_within")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("find_string_within")
                                 .selected_text(if options.selected_rows { "Selected Rows" } else { "Current Tag" })
                                 .width(option_width).truncate().show_ui(ui, |ui| {
                                     changed |= ui.selectable_value(&mut options.selected_rows, false, "Current Tag").changed();
@@ -146,7 +146,7 @@ impl Dialog for FindWindow {
                                 });
                         } else {
                         ui.scope(|ui| {
-                            egui::ComboBox::from_id_salt("find_within")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("find_within")
                                 .selected_text(query.within.label())
                                 .width(option_width)
                                 .show_ui(ui, |ui| {
@@ -190,20 +190,20 @@ impl Dialog for FindWindow {
                                 (false, true) => if hud { "Text" } else { "String Text" },
                                 (false, false) => "Nothing",
                             };
-                            egui::ComboBox::from_id_salt("find_string_look_in")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("find_string_look_in")
                                 .selected_text(label)
                                 .width(option_width).truncate()
                                 .show_ui(ui, |ui| {
                                 changed |= ui
-                                    .add_enabled(
+                                    .checkbox_enabled(
                                         has_ids,
-                                        egui::Checkbox::new(&mut options.ids, if hud { "Names" } else { "String IDs" }),
+                                        &mut options.ids, if hud { "Names" } else { "String IDs" },
                                     )
                                     .on_disabled_hover_text(
                                         "Halo CE string lists have no string IDs",
                                     )
                                     .changed();
-                                changed |= ui.checkbox(&mut options.text, if hud { "Text" } else { "String Text" }).changed();
+                                changed |= ui.baboon_checkbox(&mut options.text, if hud { "Text" } else { "String Text" }).changed();
                             });
                         } else {
                             if replace_mode {
@@ -218,18 +218,18 @@ impl Dialog for FindWindow {
                                 });
                                 response.on_hover_text("Field Values is the only option in Replace mode because only field values can be edited.");
                             } else {
-                            egui::ComboBox::from_id_salt("find_look_in")
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("find_look_in")
                                 .selected_text(query.look_in.label())
                                 .width(option_width)
                                 .show_ui(ui, |ui| {
                                     changed |= ui
-                                        .checkbox(&mut query.look_in.field_names, "Field names")
+                                        .baboon_checkbox(&mut query.look_in.field_names, "Field names")
                                         .changed();
                                     changed |= ui
-                                        .checkbox(&mut query.look_in.field_values, "Field values")
+                                        .baboon_checkbox(&mut query.look_in.field_values, "Field values")
                                         .changed();
                                     changed |=
-                                        ui.checkbox(&mut query.look_in.blocks, "Blocks").changed();
+                                        ui.baboon_checkbox(&mut query.look_in.blocks, "Blocks").changed();
                                 });
                             }
                         }
@@ -256,7 +256,7 @@ impl Dialog for FindWindow {
                                         .cloned()
                                         .unwrap_or_else(|| "Current Language".to_owned()),
                                 };
-                                egui::ComboBox::from_id_salt("find_string_language")
+                                crate::app::ui_kit::ValueComboBox::from_id_salt("find_string_language")
                                     .selected_text(label)
                                     .width(option_width).truncate()
                                     .show_ui(ui, |ui| {
@@ -304,8 +304,8 @@ impl Dialog for FindWindow {
                         // row around their smaller square, inflating visible gaps.
                         ui.spacing_mut().interact_size.y = ui.spacing().icon_width;
                         ui.label(RichText::new("Selection Options").strong().color(subtle_dark()));
-                        changed |= ui.checkbox(&mut query.match_case, "Match Case").changed();
-                        changed |= ui.checkbox(&mut query.whole_word, "Match Whole Word").changed();
+                        changed |= ui.baboon_checkbox(&mut query.match_case, "Match Case").changed();
+                        changed |= ui.baboon_checkbox(&mut query.whole_word, "Match Whole Word").changed();
                         });
                     });
                 });
@@ -448,15 +448,15 @@ pub(in crate::app) fn draw_tabbed_window_header(
             let active = egui::Rect::from_min_max(tab.min, egui::pos2(tab.right(), background.bottom()));
             painter.rect_filled(active, rounding, ui.visuals().window_fill);
         } else if response.hovered() { painter.rect_filled(tab, rounding, ui.visuals().widgets.hovered.weak_bg_fill); }
-        paint_button_icon_at(ui, *icon, egui::Rect::from_center_size(egui::pos2(tab.left() + PADDING + ICON_SIZE * 0.5, tab.center().y), Vec2::splat(ICON_SIZE)), color);
-        painter.galley(egui::pos2(tab.left() + PADDING + ICON_SIZE + GAP, tab.center().y - galley.size().y * 0.5), galley, color);
+        paint_button_icon_at(ui, *icon, egui::Rect::from_center_size(egui::pos2(tab.left() + PADDING + ICON_SIZE * 0.5, background.center().y), Vec2::splat(ICON_SIZE)), color);
+        painter.galley(egui::pos2(tab.left() + PADDING + ICON_SIZE + GAP, background.center().y - galley.size().y * 0.5), galley, color);
         if response.clicked() { *selected = index; }
         left = tab.right();
     }
-    let close_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 10.0, rect.center().y), Vec2::splat(20.0));
+    let close_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 10.0, background.center().y), Vec2::splat(20.0));
     let mut help_clicked = false;
     if let Some((tooltip, id)) = help {
-        let help_rect = egui::Rect::from_center_size(egui::pos2(close_rect.left() - 14.0, rect.center().y), Vec2::splat(20.0));
+        let help_rect = egui::Rect::from_center_size(egui::pos2(close_rect.left() - 14.0, background.center().y), Vec2::splat(20.0));
         let response = ui.interact(help_rect, id, Sense::click()).on_hover_text(tooltip);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tooltip));
         paint_button_icon_at(ui, ButtonIcon::About, help_rect.shrink(2.0),
@@ -520,7 +520,7 @@ fn draw_icon_window_header_impl(
     let icon_rect = egui::Rect::from_min_size(
         egui::pos2(
             rect.center().x - group_width * 0.5,
-            rect.center().y - TITLE_ICON_SIZE * 0.5,
+            background.center().y - TITLE_ICON_SIZE * 0.5,
         ),
         Vec2::splat(TITLE_ICON_SIZE),
     );
@@ -528,7 +528,7 @@ fn draw_icon_window_header_impl(
     ui.painter().galley(
         egui::pos2(
             icon_rect.right() + TITLE_GAP,
-            rect.center().y - galley.size().y * 0.5,
+            background.center().y - galley.size().y * 0.5,
         ),
         galley,
         text_dark(),
@@ -536,7 +536,7 @@ fn draw_icon_window_header_impl(
 
     if let Some(open) = open {
         let close_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 10.0, rect.center().y),
+            egui::pos2(rect.right() - 10.0, background.center().y),
             Vec2::splat(20.0),
         );
         let close = ui
@@ -546,16 +546,10 @@ fn draw_icon_window_header_impl(
                 Sense::click(),
             )
             .on_hover_text(format!("Close {title}"));
-        let color = ui.style().interact(&close).fg_stroke.color;
         let cross = close_rect.shrink(5.0);
-        ui.painter().line_segment(
-            [cross.left_top(), cross.right_bottom()],
-            Stroke::new(1.5_f32, color),
-        );
-        ui.painter().line_segment(
-            [cross.right_top(), cross.left_bottom()],
-            Stroke::new(1.5_f32, color),
-        );
+        let stroke = Stroke::new(1.5_f32, ui.style().interact(&close).fg_stroke.color);
+        ui.painter().line_segment([cross.left_top(), cross.right_bottom()], stroke);
+        ui.painter().line_segment([cross.right_top(), cross.left_bottom()], stroke);
         if close.clicked() {
             *open = false;
         }
@@ -602,6 +596,7 @@ mod tests {
             let ctx = egui::Context::default();
             ctx.set_global_style(foundation_style());
             ctx.set_fonts(foundation_fonts());
+            egui_extras::install_image_loaders(&ctx);
             let mut app = Baboon::for_test();
             app.open_find();
             app.set_find_mode(replace, &ctx);
@@ -611,10 +606,19 @@ mod tests {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0))),
                     ..Default::default()
                 }, |_ui| { app.dialogs.draw(&cx!(app, &ctx), &app_reads!(app)); });
-                boxes = output.shapes.iter().filter_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.rect.size() == Vec2::splat(ctx.global_style().spacing.icon_width) => Some(rect.rect),
+                let labels: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if matches!(text.galley.job.text.as_str(), "Match Case" | "Match Whole Word") =>
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
                     _ => None,
                 }).collect();
+                boxes = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.brush.is_some() && rect.rect.size() == Vec2::splat(16.0) => Some(rect.rect),
+                    egui::Shape::Mesh(mesh) if mesh.calc_bounds().size() == Vec2::splat(16.0) => Some(mesh.calc_bounds()),
+                    _ => None,
+                }).filter(|rect| labels.iter().any(|label|
+                    (rect.center().y - label.center().y).abs() < 1.0
+                    && rect.right() <= label.left() && label.left() - rect.right() < 20.0
+                )).collect();
             }
             boxes.sort_by(|a, b| a.top().total_cmp(&b.top()));
             assert_eq!(boxes.len(), 2);

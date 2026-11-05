@@ -10,8 +10,14 @@ pub(in crate::app) fn browser_open_requested(
     if double_click_to_open {
         response.double_clicked()
     } else {
-        response.clicked()
+        response.clicked() && !response.ctx.input(|input| input.modifiers.ctrl || input.modifiers.command)
     }
+}
+
+/// Shortcut rows launch tools rather than selecting tags, so Ctrl does not
+/// reserve their click for browser selection.
+pub(super) fn browser_shortcut_open_requested(response: &egui::Response, double_click_to_open: bool) -> bool {
+    if double_click_to_open { response.double_clicked() } else { response.clicked() }
 }
 
 pub(in crate::app) const CONTEXT_MENU_WIDTH: f32 = 340.0;
@@ -281,7 +287,7 @@ fn context_menu_primary_button(
             let fill = if pressed {
                 system_visuals.widgets.active.weak_bg_fill
             } else if hovered {
-                context_menu_hover()
+                system_visuals.widgets.hovered.weak_bg_fill
             } else if interactive {
                 system_visuals.widgets.inactive.weak_bg_fill
             } else {
@@ -497,20 +503,7 @@ pub(in crate::app) fn context_menu_separator(ui: &mut Ui) {
 /// Shared geometry and interaction treatment for ordinary list menus. egui's
 /// menu implementation deliberately replaces normal button padding with a
 /// two-point inset, so restore the roomier application row here.
-pub(in crate::app) fn style_list_menu(ui: &mut Ui) {
-    ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
-    ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
-    ui.spacing_mut().interact_size.y = 28.0;
-    ui.visuals_mut().override_text_color = Some(text_dark());
-    ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
-    ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-    ui.visuals_mut().widgets.hovered.bg_fill = context_menu_hover();
-    ui.visuals_mut().widgets.hovered.weak_bg_fill = context_menu_hover();
-    ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::NONE;
-    ui.visuals_mut().widgets.active.bg_fill = context_menu_hover();
-    ui.visuals_mut().widgets.active.weak_bg_fill = context_menu_hover();
-    ui.visuals_mut().widgets.active.bg_stroke = Stroke::NONE;
-}
+pub(in crate::app) use crate::app::ui_kit::style_list_menu;
 
 pub(in crate::app) fn style_tag_context_menu(ui: &mut Ui) {
     // `set_min_width` is not enough here: during egui's menu sizing pass the
@@ -1012,6 +1005,7 @@ fn with_folder_block_skipping(
         .with("browser_folder_block");
     let spacing = ui.spacing().item_spacing.y;
     if !on_path
+        && !browser_navigation_building(ui) && browser_navigation_target(ui).is_none()
         && tree_skips_rows()
         && let Some((cached_key, height)) = ui.data(|data| data.get_temp::<(u64, f32)>(id))
         && cached_key == key
@@ -1120,6 +1114,7 @@ fn draw_tree_node_lazy_block(
         !filter.is_empty(),
         on_path,
         is_current_folder(selected, &node.rel_path),
+        Some(&node.rel_path),
         |ui| {
             if !node.entries_loaded {
                 load_requests.push(node.rel_path.clone());
@@ -1403,6 +1398,7 @@ fn draw_tree_node_block(
             expand_folders || !filter.is_empty(),
             on_path,
             is_current_folder(selected, &node.rel_path),
+            Some(&node.rel_path),
             body,
         )
     };
@@ -2287,6 +2283,7 @@ fn show_folder_tree_header<R>(
     default_open: bool,
     force_open: bool,
     current: bool,
+    folder_path: Option<&Path>,
     add_body: impl FnOnce(&mut Ui) -> R,
 ) -> egui::Response {
     #[cfg(test)]
@@ -2331,10 +2328,22 @@ fn show_folder_tree_header<R>(
         tops.borrow_mut()
             .push((id_source.to_owned(), response.rect.top()))
     });
+    if let Some(path) = folder_path {
+        register_browser_folder(ui, response.id, Some(id), path, id_source, state.is_open());
+        if select_browser_tag(ui, &response, &folder_pane_key(path)) {
+            paint_browser_selection_border(ui, response.rect);
+        }
+    }
     if response.clicked() && !toggle_clicked {
         state.toggle(ui);
     }
-    show_relocated_browser_tree_body(ui, &mut state, &response, guide_x, add_body);
+    let navigation_open = state.is_open();
+    show_relocated_browser_tree_body(ui, &mut state, &response, guide_x, |ui| {
+        if folder_path.is_some() { push_browser_parent(ui, response.id, navigation_open); }
+        let result = add_body(ui);
+        if folder_path.is_some() { pop_browser_parent(ui); }
+        result
+    });
     response
 }
 
@@ -2350,9 +2359,9 @@ fn browser_row_hover_shape(
 ) -> Option<egui::Shape> {
     let visuals = ui.style().interact_selectable(response, false);
     let fill = if current {
-        ui.visuals().selection.bg_fill
+        ui.visuals().selection.bg_fill.gamma_multiply(0.5)
     } else if response.hovered() || response.highlighted() || response.has_focus() {
-        visuals.weak_bg_fill
+        context_menu_hover()
     } else {
         return None;
     };
@@ -2644,13 +2653,15 @@ pub(in crate::app) fn draw_entry_list(
     let top = ui.cursor().top();
     let clip = ui.clip_rect();
     let count = matching.len();
-    let (first, last) = if tree_skips_rows() {
+    let (first, last) = if tree_skips_rows() && !browser_navigation_building(ui) {
         let first = (((clip.top() - top) / stride).floor().max(0.0) as usize).min(count);
         let last = (((clip.bottom() - top) / stride).ceil().max(0.0) as usize).clamp(first, count);
         (first, last)
     } else {
         (0, count)
     };
+    let navigation_target = browser_navigation_target(ui);
+    let reveal_key = navigation_target.as_ref().map(|(key, _)| key.as_str()).or(reveal_key);
     if let Some(reveal_key) = reveal_key
         && let Some(position) = matching
             .iter()
@@ -2716,7 +2727,9 @@ pub(in crate::app) fn draw_entry(
     #[cfg(test)]
     TREE_ROWS_LAID_OUT.with(|count| count.set(count.get() + 1));
     let row_size = Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
-    let (row_rect, response) = ui.allocate_exact_size(row_size, Sense::click_and_drag());
+    let (row_rect, _) = ui.allocate_exact_size(row_size, Sense::hover());
+    let response = ui.interact(row_rect, ui.make_persistent_id(("browser_tag", &entry.key)), Sense::click_and_drag());
+    let browser_selected = select_browser_tag(ui, &response, &entry.key);
     #[cfg(test)]
     TREE_ROW_TOPS.with(|tops| tops.borrow_mut().push((entry.key.clone(), row_rect.top())));
     if response.hovered() {
@@ -2779,19 +2792,28 @@ pub(in crate::app) fn draw_entry(
         } else {
             leaf_label.to_owned()
         };
-        ui.painter().with_clip_rect(folder_name_clip(ui)).text(
-            row_rect.left_center() + Vec2::new(disclosure_offset + icon_size + 5.0, 0.0),
-            Align2::LEFT_CENTER,
+        let label_left = row_rect.left() + disclosure_offset + icon_size + 5.0;
+        let label_clip = folder_name_clip(ui).intersect(row_rect);
+        let color = match browser_modified_tags(ui) {
+            Some(modified) if modified.contains_key(&entry.key) => modified_text(),
+            _ => text_dark(),
+        };
+        let mut job = egui::text::LayoutJob::simple(
             label,
             FontId::proportional(12.5),
-            // Marked when the tag has unsaved edits, or bytes stashed in the
-            // workspace's project from an earlier session.
-            match browser_modified_tags(ui) {
-                Some(modified) if modified.contains_key(&entry.key) => modified_text(),
-                _ => text_dark(),
-            },
+            color,
+            (label_clip.right() - label_left - 4.0).max(0.0),
         );
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        job.wrap.overflow_character = Some('…');
+        let galley = ui.painter().layout_job(job);
+        let label_pos = egui::pos2(label_left, row_rect.center().y - galley.size().y * 0.5);
+        ui.painter().with_clip_rect(label_clip).galley(label_pos, galley, color);
         paint_folder_columns(ui, row_rect, Some(entry), None);
+        if browser_selected {
+            paint_browser_selection_border(ui, row_rect);
+        }
     }
     if response.dragged()
         && let Some(pointer_pos) = ui.ctx().pointer_interact_pos()
@@ -2815,6 +2837,38 @@ pub(in crate::app) fn draw_entry(
         }
     });
     action
+}
+
+pub(in crate::app) fn select_browser_tag(ui: &Ui, response: &egui::Response, key: &str) -> bool {
+    register_browser_navigation(ui, key, response.id);
+    let navigated = browser_navigation_target(ui).is_some_and(|(_, id)| id == response.id);
+    if response.clicked() || response.secondary_clicked() || navigated {
+        if !navigated { browser_navigation_select(ui, response.id); }
+        set_browser_selected_tag(ui, Some(key.to_owned()));
+        response.request_focus();
+        ui.data_mut(|data| data.insert_temp(browser_selection_owner_id(), (response.id, ui.clip_rect())));
+        ui.data_mut(|data| data.insert_temp(browser_selection_owner_id().with("popup"), egui::Popup::default_response_id(response)));
+        ui.ctx().request_repaint();
+        if navigated {
+            response.scroll_to_me(None);
+            browser_navigation_arrived(ui);
+        }
+    }
+    if response.has_focus() {
+        ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, egui::EventFilter {
+            vertical_arrows: true, horizontal_arrows: true, ..Default::default()
+        }));
+    }
+    browser_selected_tag(ui).as_deref() == Some(key) || response.context_menu_opened()
+}
+
+pub(in crate::app) fn paint_browser_selection_border(ui: &Ui, rect: egui::Rect) {
+    ui.painter().rect_stroke(
+        rect,
+        ui.visuals().widgets.hovered.corner_radius,
+        ui.visuals().selection.stroke,
+        egui::StrokeKind::Inside,
+    );
 }
 
 pub(in crate::app) fn draw_tag_context_menu_contents(
@@ -3082,6 +3136,10 @@ pub(in crate::app) fn draw_favorites(
             button_icon_image(ui, ButtonIcon::FolderOpen, text_dark(), BROWSER_TREE_ICON_SIZE)
                 .paint_at(ui, icon_rect);
             let tooltip = tag_path::relative_tag_path(folder);
+            register_browser_folder(ui, response.id, None, folder, &label, false);
+            if select_browser_tag(ui, &response, &folder_pane_key(folder)) {
+                paint_browser_selection_border(ui, response.rect);
+            }
             hover_tooltip_beside_pointer(ui, &response, &tooltip);
             if browser_open_requested(&response, double_click_to_open) && action.is_none() {
                 action = Some(BrowserAction::OpenFolderBrowser {
@@ -3165,6 +3223,29 @@ pub(in crate::app) fn draw_favorites(
 fn show_favorites_section<R>(ui: &mut Ui, add_body: impl FnOnce(&mut Ui) -> R) -> egui::Response {
     show_browser_navigation_section(ui, "browser_favorites", "Favorites",
         ButtonIcon::FavouriteFilled, Color32::from_rgb(242, 196, 48), add_body)
+}
+
+/// Bind the sidebar's collapsing headers to explicit preferences instead of
+/// egui's transient widget memory, retaining normal collapse animations.
+pub(super) fn with_browser_section_state<R>(
+    ui: &mut Ui,
+    state: &mut crate::app::prefs::BrowserSectionState,
+    draw: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let sections = ["browser_favorites", "browser_shortcuts", "browser_recents"];
+    for (section, open) in sections.iter().zip([state.favorites, state.shortcuts, state.recents]) {
+        let mut header = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(), ui.make_persistent_id(section), false);
+        header.set_open(open);
+        header.store(ui.ctx());
+    }
+    let result = draw(ui);
+    let open = sections.map(|section| {
+        egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(), ui.make_persistent_id(section), false).is_open()
+    });
+    [state.favorites, state.shortcuts, state.recents] = open;
+    result
 }
 
 pub(in crate::app) fn show_browser_navigation_section<R>(
@@ -3768,6 +3849,7 @@ mod tests {
                         false,
                         false,
                         false,
+                        None,
                         |_| {},
                     )
                     .rect;
@@ -3908,9 +3990,9 @@ mod tests {
         let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 begin_folder_chevron_collection(ui);
-                show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, false, |ui| {
+                show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, false, None, |ui| {
                     nested_guide_enabled = ui.visuals().indent_has_left_vline;
-                    show_folder_tree_header(ui, "inner", "inner", text_dark(), true, true, false, |_| {});
+                    show_folder_tree_header(ui, "inner", "inner", text_dark(), true, true, false, None, |_| {});
                 });
             });
         });
@@ -4058,6 +4140,82 @@ mod tests {
     }
 
     #[test]
+    fn browser_click_selects_without_opening_and_keeps_the_active_tag_distinct() {
+        for pointer_button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
+        for double_click in [false, true] {
+        for ctrl in [false, true] {
+            let ctx = egui::Context::default();
+            let entry = entry(TagEntryLocation::LooseFile(PathBuf::from("example.model")));
+            let mut selection = None;
+            let mut row = egui::Rect::NOTHING;
+            let mut frame = |events| {
+                let mut action = None;
+                let mut events: Vec<_> = events;
+                events.insert(0, egui::Event::ModifiersChanged(if ctrl { egui::Modifiers::CTRL } else { egui::Modifiers::NONE }));
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        set_browser_selected_tag(ui, selection.clone());
+                        row = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), ui.spacing().interact_size.y));
+                        action = draw_entry(ui, &entry, Some("another-active-tag"), false, double_click, None, None, false, None);
+                        selection = browser_selected_tag(ui);
+                    });
+                });
+                (output, action, row, selection.clone())
+            };
+            let (_, _, row, _) = frame(Vec::new());
+            let pos = row.center();
+            frame(vec![egui::Event::PointerMoved(pos)]);
+            let button = |pressed| egui::Event::PointerButton {
+                pos, button: pointer_button, pressed, modifiers: if ctrl { egui::Modifiers::CTRL } else { egui::Modifiers::NONE },
+            };
+            frame(vec![button(true)]);
+            let (output, action, _, selected) = frame(vec![button(false)]);
+            assert_eq!(selected.as_deref(), Some(entry.key.as_str()));
+            assert_eq!(matches!(action, Some(BrowserAction::Select(_))), !ctrl && !double_click && pointer_button == egui::PointerButton::Primary);
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Rect(rect) if rect.stroke == ctx.global_style().visuals.selection.stroke
+                    && rect.stroke_kind == egui::StrokeKind::Inside)));
+            if double_click && pointer_button == egui::PointerButton::Primary {
+                frame(vec![button(true)]);
+                let (_, action, _, _) = frame(vec![button(false)]);
+                assert!(matches!(action, Some(BrowserAction::Select(_))), "Ctrl must not block double-click opening");
+            }
+            // Selection survives leaving the row and the editor's active tag stays separate.
+            let (_, action, _, selected) = frame(vec![egui::Event::PointerGone]);
+            assert_eq!(selected.as_deref(), Some(entry.key.as_str()));
+            assert!(action.is_none());
+        }
+        }
+        }
+    }
+
+    #[test]
+    fn browser_long_names_elide_inside_the_row_and_active_fill_is_half_opacity() {
+        let ctx = egui::Context::default();
+        let mut entry = entry(TagEntryLocation::LooseFile(PathBuf::from("long.model")));
+        entry.display_path = format!("objects/{}.model", "long_tag_name_".repeat(20));
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(166.0, 200.0))),
+            ..Default::default()
+        }, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.set_max_width(150.0);
+                set_browser_selected_tag(ui, None);
+                draw_entry(ui, &entry, Some(&entry.key), false, true, None, None, false, None);
+            });
+        });
+        let text = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.contains("long_tag_name") => Some(text),
+            _ => None,
+        }).expect("tag name was painted");
+        assert!(text.galley.elided);
+        assert!(text.galley.size().x <= 150.0 - 16.0 - 5.0 - 4.0);
+        assert_eq!(text.galley.rows.len(), 1);
+        let fill = ctx.global_style().visuals.selection.bg_fill.gamma_multiply(0.5);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == fill)));
+    }
+
+    #[test]
     fn loaded_extractables_include_direct_files_and_descendants_only() {
         let loose_entry = |path: &str, group_tag: u32| TagEntry {
             key: path.to_owned(),
@@ -4178,6 +4336,7 @@ mod tests {
                         false,
                         false,
                         false,
+                        None,
                         |_| {
                             drawn = true;
                         },
@@ -5050,7 +5209,7 @@ mod tests {
             let mut load_requests = Vec::new();
             let output = crate::app::run_ui_test(&self.ctx, input, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let mut area = egui::ScrollArea::vertical();
+                    let mut area = crate::app::ScrollArea::vertical();
                     if let Some(offset) = offset {
                         area = area.vertical_scroll_offset(offset);
                     }
@@ -5112,7 +5271,7 @@ mod tests {
             self.last = tops;
             self.content_height = content_height;
             self.offset = offset.unwrap_or(shown_offset);
-            let current_fill = self.ctx.global_style().visuals.selection.bg_fill;
+            let current_fill = self.ctx.global_style().visuals.selection.bg_fill.gamma_multiply(0.5);
             let current_rows = output
                 .shapes
                 .iter()

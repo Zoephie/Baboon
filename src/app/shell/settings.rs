@@ -311,11 +311,21 @@ fn editing_kit_field_label(ui: &mut Ui, label: &str) {
     ui.label(RichText::new(label).strong().color(text_dark()));
 }
 
-fn editing_kit_text_input(value: &mut String, width: f32) -> egui::TextEdit<'_> {
+fn editing_kit_text_input(value: &mut String, width: f32) -> SinglelineTextEdit<'_> {
     crate::app::ui_kit::singleline_text_edit(value)
         .desired_width(width)
         .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
         .vertical_align(egui::Align::Center)
+}
+
+fn editing_kit_input_state(draft: &CustomEditingKitDraft, field: CustomEditingKitInput) -> InputState {
+    if draft.error.is_some() && draft.error_input.as_ref() == Some(&field) {
+        InputState::Invalid
+    } else if field == CustomEditingKitInput::Icon && draft.icon_warning.is_some() {
+        InputState::Warning
+    } else {
+        InputState::Normal
+    }
 }
 
 fn draw_editing_kit_form(
@@ -324,6 +334,7 @@ fn draw_editing_kit_form(
     texture: Option<&egui::TextureHandle>,
 ) -> EditingKitFormActions {
     let mut actions = EditingKitFormActions::default();
+    egui::Frame::NONE.inner_margin(ui.spacing().window_margin).show(ui, |ui| {
     let title = if draft.name.trim().is_empty() {
         "Editing Kit"
     } else {
@@ -340,17 +351,20 @@ fn draw_editing_kit_form(
     ui.columns(2, |columns| {
         editing_kit_field_label(&mut columns[0], "Name");
         let width = columns[0].available_width();
+        let state = editing_kit_input_state(draft, CustomEditingKitInput::Name);
         if columns[0]
             .add(
                 editing_kit_text_input(&mut draft.name, width)
+                    .validation_state(state)
                     .hint_text(placeholder_text("Editing kit name")),
             )
             .changed()
         {
+            if draft.error_input == Some(CustomEditingKitInput::Name) { draft.error = None; }
             ui_repaint_for_kit_draft(&columns[0]);
         }
         editing_kit_field_label(&mut columns[1], "Engine");
-        egui::ComboBox::from_id_salt("editing_kit_form_engine")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("editing_kit_form_engine")
             .selected_text(game_display_name(&draft.game))
             .width(columns[1].available_width())
             .show_ui(&mut columns[1], |ui| {
@@ -363,6 +377,7 @@ fn draw_editing_kit_form(
                         )
                         .changed()
                     {
+                        draft.error = None;
                         refill_kit_folders(draft);
                         ui_repaint_for_kit_draft(ui);
                     }
@@ -371,6 +386,7 @@ fn draw_editing_kit_form(
     });
     ui.add_space(8.0);
     editing_kit_field_label(ui, "Editing Kit Root Folder");
+    let root_state = editing_kit_input_state(draft, CustomEditingKitInput::Root);
     ui.horizontal(|ui| {
         let width = (ui.available_width()
             - editing_kit_action_width(ui, "Browse")
@@ -381,6 +397,7 @@ fn draw_editing_kit_form(
         if ui
             .add(
                 editing_kit_text_input(&mut draft.root_input, width)
+                    .validation_state(root_state)
                     .hint_text(placeholder_text("Kit root, tags folder, or game install")),
             )
             .changed()
@@ -420,6 +437,7 @@ fn draw_editing_kit_form(
     }
     ui.add_space(8.0);
     editing_kit_field_label(ui, "Custom Icon (.png)");
+    let icon_state = editing_kit_input_state(draft, CustomEditingKitInput::Icon);
     ui.horizontal(|ui| {
         let mut display = draft_icon_path(ui.ctx(), &draft.icon)
             .map(|path| path.display().to_string())
@@ -432,6 +450,7 @@ fn draw_editing_kit_form(
             .max(40.0);
         ui.add(
             editing_kit_text_input(&mut display, width)
+                .validation_state(icon_state)
                 .interactive(false)
                 .hint_text(placeholder_text("Default engine artwork")),
         );
@@ -457,7 +476,10 @@ fn draw_editing_kit_form(
                     });
                     ui_repaint_for_kit_draft(ui);
                 }
-                Err(error) => draft.error = Some(error),
+                Err(error) => {
+                    draft.error = Some(error);
+                    draft.error_input = Some(CustomEditingKitInput::Icon);
+                }
             }
         }
         if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
@@ -475,7 +497,7 @@ fn draw_editing_kit_form(
     if !draft.is_campaign_evolved() {
         ui.add_space(8.0);
         editing_kit_field_label(ui, "Options");
-        ui.checkbox(&mut draft.read_only, "Read-Only");
+        ui.baboon_checkbox(&mut draft.read_only, "Read-Only");
         ui.indent("editing_kit_read_only_help", |ui| {
             ui.label(
                 RichText::new("Make this editing kit read-only within Baboon.")
@@ -490,7 +512,7 @@ fn draw_editing_kit_form(
             );
         });
         ui.add_space(8.0);
-        ui.checkbox(&mut draft.git_tracked, "Tracked in Git");
+        ui.baboon_checkbox(&mut draft.git_tracked, "Tracked in Git");
         ui.indent("editing_kit_git_help", |ui| {
             ui.label(
                 RichText::new(
@@ -511,8 +533,9 @@ fn draw_editing_kit_form(
     if let Some(error) = &draft.error {
         ui.label(RichText::new(error).color(material_delete_text()));
     }
+    });
     ui.add_space(8.0);
-    ui.separator();
+    popup_footer(ui, |ui| {
     ui.allocate_ui_with_layout(
         Vec2::new(ui.available_width(), BUTTON_HEIGHT),
         egui::Layout::right_to_left(egui::Align::Center),
@@ -524,6 +547,7 @@ fn draw_editing_kit_form(
             actions.save = ui.button("Save").clicked();
         },
     );
+    });
     actions
 }
 
@@ -581,6 +605,9 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
     let root = PathBuf::from(draft.root_input.trim());
     ui.add_space(8.0);
     editing_kit_field_label(ui, folder.label());
+    let field = match folder { KitFolder::Tags => CustomEditingKitInput::Tags, KitFolder::Data => CustomEditingKitInput::Data };
+    let state = editing_kit_input_state(draft, field.clone());
+    let mut changed = false;
     ui.horizontal(|ui| {
         let width = (ui.available_width()
             - editing_kit_action_width(ui, "Browse")
@@ -591,9 +618,10 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
         let hint = format!("{} (the root's own)", folder.name());
         let (input, auto) = folder.input(draft);
         if ui
-            .add(editing_kit_text_input(input, width).hint_text(placeholder_text(&hint)))
+            .add(editing_kit_text_input(input, width).validation_state(state).hint_text(placeholder_text(&hint)))
             .changed()
         {
+            changed = true;
             *auto = input.trim().is_empty();
             ui_repaint_for_kit_draft(ui);
         }
@@ -603,6 +631,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
                 dialog = dialog.set_directory(&root);
             }
             if let Some(path) = dialog.pick_folder() {
+                changed = true;
                 *input = path
                     .strip_prefix(&root)
                     .map(Path::to_path_buf)
@@ -614,6 +643,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
             }
         }
         if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
+            changed = true;
             input.clear();
             *auto = true;
             ui_repaint_for_kit_draft(ui);
@@ -637,6 +667,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
             for name in candidates.iter() {
                 let selected = input.trim().eq_ignore_ascii_case(name);
                 if ui.selectable_label(selected, name).clicked() {
+                    changed = true;
                     *input = name.clone();
                     *auto = false;
                     ui_repaint_for_kit_draft(ui);
@@ -644,6 +675,7 @@ fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder:
             }
         });
     }
+    if changed && draft.error_input == Some(field) { draft.error = None; }
 }
 
 fn settings_window_body(
@@ -656,7 +688,7 @@ fn settings_window_body(
     // after drawing adds that height at the current cursor, doubling the body.
     ui.set_min_height(ui.available_height());
     crate::app::search::draw_icon_window_header(ui, "Settings", ButtonIcon::Settings, open);
-    ui.separator();
+    ui.add_space(8.0);
     ScrollArea::horizontal()
         .id_salt("settings_tabs_scroll")
         .max_height(BUTTON_ICON_SIZE + 20.0)
@@ -745,7 +777,7 @@ fn settings_hint(ui: &mut Ui, help: &str) {
 }
 
 fn settings_dropdown_option<T: PartialEq>(
-    ui: &mut Ui,
+    ui: &mut crate::app::ui_kit::ValueComboUi<'_>,
     selected: &mut T,
     value: T,
     title: &str,
@@ -948,9 +980,11 @@ impl Baboon {
     }
 
     fn commit_custom_editing_kit_draft(&mut self, draft: &mut CustomEditingKitDraft) -> bool {
+        draft.error_input = None;
         let name = draft.name.trim().to_owned();
         if name.is_empty() {
             draft.error = Some("Enter an editing kit name".to_owned());
+            draft.error_input = Some(CustomEditingKitInput::Name);
             return false;
         }
         let Some(game) = game_for_saved_id(&draft.game) else {
@@ -975,6 +1009,12 @@ impl Baboon {
             Ok(layout) => layout,
             Err(error) => {
                 draft.error = Some(error);
+                draft.error_input = Some(if choosable && root_input.is_dir()
+                    && (tags_input.is_some() || data_input.is_some()) {
+                    if validate_kit_layout(&root_input, game.as_str(), tags_input.as_deref(), None).is_err() {
+                        CustomEditingKitInput::Tags
+                    } else { CustomEditingKitInput::Data }
+                } else { CustomEditingKitInput::Root });
                 return false;
             }
         };
@@ -984,6 +1024,7 @@ impl Baboon {
             &layout.tags,
         ) {
             draft.error = Some("Another editing kit already uses this tags folder".to_owned());
+            draft.error_input = Some(if choosable { CustomEditingKitInput::Tags } else { CustomEditingKitInput::Root });
             return false;
         }
         let tags_folder = choosable
@@ -1023,6 +1064,7 @@ impl Baboon {
                     Ok(relative) => Some(relative),
                     Err(error) => {
                         draft.error = Some(error);
+                        draft.error_input = Some(CustomEditingKitInput::Icon);
                         return false;
                     }
                 }
@@ -1389,7 +1431,7 @@ fn draw_settings_general_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
         "Choose what happens when opening Baboon after exiting with open windows.",
         170.0,
         |ui| {
-            egui::ComboBox::from_id_salt("session_restore")
+            crate::app::ui_kit::ValueComboBox::from_id_salt("session_restore")
                 .width(170.0)
                 .selected_text(restore_label(s.prefs.session_restore))
                 .show_ui(ui, |ui| {
@@ -1578,7 +1620,7 @@ fn settings_row_contents_channel(
             },
         );
         let previous = prefs.update_channel;
-        egui::ComboBox::from_id_salt("settings_update_channel")
+        crate::app::ui_kit::ValueComboBox::from_id_salt("settings_update_channel")
             .width(170.0)
             .selected_text(prefs.update_channel.label())
             .show_ui(ui, |ui| {
@@ -1606,12 +1648,12 @@ pub(in crate::app) fn draw_update_channel_picker(ui: &mut Ui, prefs: &mut GuiPre
     let mut changed = false;
     for option in UpdateChannel::ALL {
         changed |= ui
-            .radio_value(&mut prefs.update_channel, option, option.label())
+            .baboon_radio_value(&mut prefs.update_channel, option, option.label())
             .on_hover_text(option.help())
             .changed();
     }
     ui.add_space(4.0);
-    ui.checkbox(
+    ui.baboon_checkbox(
         &mut prefs.check_updates_on_startup,
         "Check for updates when Baboon starts",
     );
@@ -1645,7 +1687,7 @@ pub(in crate::app) fn draw_nested_default_picker(ui: &mut Ui, nested_default: &m
     ui.label(RichText::new("Groups, structs and blocks start").color(text_dark()));
     ui.horizontal(|ui| {
         for option in NestedDefault::ALL {
-            ui.radio_value(nested_default, option, option.label())
+            ui.baboon_radio_value(nested_default, option, option.label())
                 .on_hover_text(option.help());
         }
     });
@@ -1683,7 +1725,7 @@ fn draw_settings_expansion_behavior(ui: &mut Ui, s: &mut SettingsDraw) {
         "Applies to tags opened from now on. Groups you open or close yourself keep the state you chose.",
         150.0,
         |ui| {
-            egui::ComboBox::from_id_salt("settings_nested_default")
+            crate::app::ui_kit::ValueComboBox::from_id_salt("settings_nested_default")
                 .width(150.0)
                 .selected_text(s.prefs.nested_default.label())
                 .show_ui(ui, |ui| {
@@ -1846,12 +1888,8 @@ impl Dialog for CustomEditingKitDraft {
             .scroll([false, true])
             .show(ctx, |ui| {
                 crate::app::search::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
-                ui.separator();
-                egui::Frame::NONE
-                    .inner_margin(ui.spacing().window_margin)
-                    .show(ui, |ui| {
-                        actions = draw_editing_kit_form(ui, self, texture.as_ref());
-                    });
+                ui.add_space(8.0);
+                actions = draw_editing_kit_form(ui, self, texture.as_ref());
             });
         let EditingKitFormActions {
             save,
@@ -1921,7 +1959,7 @@ pub(in crate::app) fn draw_theme_picker(ui: &mut Ui, prefs: &mut GuiPrefs) {
         egui::ThemePreference::Dark => "Dark",
         egui::ThemePreference::Light => "Light",
     };
-    egui::ComboBox::from_id_salt("settings_theme")
+    crate::app::ui_kit::ValueComboBox::from_id_salt("settings_theme")
         .width(170.0)
         .selected_text(label(theme))
         .show_ui(ui, |ui| {
@@ -1956,13 +1994,19 @@ fn draw_settings_interface_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     );
     draw_settings_browser_section(ui, s);
     settings_section(ui, "Tag Editor");
+    settings_toggle(
+        ui,
+        "Scroll wheel cycles dropdowns",
+        "Scrolling over a closed dropdown changes its selected value. Turn this off to scroll the page instead.",
+        &mut s.prefs.scroll_to_cycle_dropdowns,
+    );
     settings_row(
         ui,
         "Display Angles as",
         "Angle fields hold radians on disk. Guerilla and the other Halo tools show them in degrees, and so does Baboon. Choose Radians to read and type the stored radians instead. Field search, TSV copy/paste and the tag diff follow the same setting.",
         150.0,
         |ui| {
-            egui::ComboBox::from_id_salt("settings_angles")
+            crate::app::ui_kit::ValueComboBox::from_id_salt("settings_angles")
                 .width(150.0)
                 .selected_text(if s.prefs.angles_in_degrees {
                     "Degrees"
@@ -2138,6 +2182,36 @@ fn ui_scale_from_percent(percent: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kit_settings_mark_the_invalid_input_only_after_validation() {
+        let mut app = Baboon::for_test();
+        let mut draft = CustomEditingKitDraft::new();
+        assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Name), InputState::Normal);
+        assert!(!app.commit_custom_editing_kit_draft(&mut draft));
+        assert_eq!(draft.error_input, Some(CustomEditingKitInput::Name));
+        assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Name), InputState::Invalid);
+        draft.name = "Test kit".to_owned();
+        draft.root_input = "C:/missing-test-kit-4ad686d7".to_owned();
+        assert!(!app.commit_custom_editing_kit_draft(&mut draft));
+        assert_eq!(draft.error_input, Some(CustomEditingKitInput::Root));
+        assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Name), InputState::Normal);
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 1000.0))),
+            ..Default::default()
+        }, |ui| { draw_editing_kit_form(ui, &mut draft, None); });
+        let borders: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) if rect.stroke == invalid_value_stroke() => Some(rect),
+            _ => None,
+        }).collect();
+        assert_eq!(borders.len(), 1, "the error highlights its field, not the entire form");
+        assert_eq!(borders[0].corner_radius, egui::CornerRadius::same(2));
+        draft.error = None;
+        draft.icon_warning = Some("Image dimensions differ from the recommendation".to_owned());
+        assert_eq!(editing_kit_input_state(&draft, CustomEditingKitInput::Icon), InputState::Warning);
+    }
+
     use super::*;
     use crate::app::shell::frame::EditingKitMenuEntry;
     use crate::app::shell::frame::visible_editing_kit_menu_entries;
@@ -2230,7 +2304,7 @@ mod tests {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let right = ui.max_rect().right();
                         settings_row(ui, "Block Default Expansion Behavior", "Applies to tags opened from now on. A group you open or close yourself keeps the state you chose.", 150.0, |ui| {
-                            egui::ComboBox::from_id_salt("test_expansion").width(150.0).selected_text("Expanded").show_ui(ui, |_| {});
+                            crate::app::ui_kit::ValueComboBox::from_id_salt("test_expansion").width(150.0).selected_text("Expanded").show_ui(ui, |_| {});
                         });
                         let mut speed = 1.0;
                         draw_speed_row(ui, "Scroll Speed", "Scroll help", &mut speed, 0.5..=2.0, 1.0);
@@ -2337,7 +2411,7 @@ mod tests {
                         24.0
                     );
                 }
-                let engine = egui::ComboBox::from_id_salt("height_test_engine")
+                let engine = crate::app::ui_kit::ValueComboBox::from_id_salt("height_test_engine")
                     .selected_text("Halo 2")
                     .show_ui(ui, |_| {});
                 assert_eq!(engine.response.rect.height(), 24.0);

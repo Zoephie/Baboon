@@ -120,7 +120,7 @@ impl Dialog for ToolCommandsUiState {
                         ui.label(RichText::new("Commands").color(text_dark()).strong());
                         ui.separator();
                         let list_height = ui.available_height().max(120.0);
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("tool_command_list")
                             .max_height(list_height)
                             .show(ui, |ui| {
@@ -149,7 +149,7 @@ impl Dialog for ToolCommandsUiState {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.set_min_width(300.0);
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("tool_command_detail")
                             .max_height(available_height)
                             .show(ui, |ui| {
@@ -389,7 +389,7 @@ fn draw_tool_command_arg(
             ToolCommandArgKind::Enum => {
                 let (_, wheel_delta) = combo_box_with_scroll(
                     ui,
-                    egui::ComboBox::from_id_salt(("tool_arg_enum", &command.name, &arg.name))
+                    crate::app::ui_kit::ValueComboBox::from_id_salt(("tool_arg_enum", &command.name, &arg.name))
                         .selected_text(if value.is_empty() {
                             arg.values.first().map(String::as_str).unwrap_or("")
                         } else {

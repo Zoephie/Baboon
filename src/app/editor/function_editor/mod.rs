@@ -115,7 +115,7 @@ pub(in crate::app) fn draw_function_popup(
             let (header_rect, _) = ui.allocate_exact_size(
                 Vec2::new(ui.available_width(), 28.0), Sense::hover(),
             );
-            ui.separator();
+            ui.add_space(8.0);
             if !editable {
                 ui.label(
                     RichText::new("read-only (function has no writable path on this tag)")
@@ -133,7 +133,7 @@ pub(in crate::app) fn draw_function_popup(
             );
             popup.history.observe(&popup.view, ctx.input(|input| input.pointer.primary_down()));
             ui.add_space(4.0);
-            ui.separator();
+            popup_footer(ui, |ui| {
             ui.horizontal(|ui| {
                 if icon_text_button(ui, ButtonIcon::Undo, "Undo", popup.can_step_history(false)).clicked() {
                     popup.step_history(false);
@@ -150,6 +150,7 @@ pub(in crate::app) fn draw_function_popup(
                         close = true;
                     }
                 });
+            });
             });
             // The editor can expand the content width. Paint the header only
             // after that width is known, using the frame's inner corner radius.
@@ -232,15 +233,24 @@ mod tests {
             .expect("header is painted at the top of the window");
         assert!((window.rect.right() - header.rect.right()).abs() <= 2.0);
         assert_eq!(header.corner_radius.nw, window.corner_radius.nw.saturating_sub(window.stroke.width.ceil() as u8));
-        let content_bottom = rectangles.iter().filter(|rect|
+        let footer = rectangles.iter().find(|rect| rect.fill == foundation_block_bar()
+            && rect.corner_radius.nw == 0 && rect.corner_radius.sw > 0
+            && rect.rect.width() > 500.0).expect("filled footer with rounded bottom corners");
+        let content_bottom = rectangles.iter().filter(|rect| rect.rect.bottom() <= footer.rect.top()).filter(|rect|
             ((rect.rect.width() - 465.0).abs() < 1.0 && rect.rect.height() < 50.0)
             || ((rect.rect.width() - 150.0).abs() < 1.0 && rect.rect.height() < 160.0 && rect.rect.height() > 60.0)
             || ((rect.rect.width() - 623.0).abs() < 1.0 && rect.rect.height() > 30.0 && rect.rect.height() < 200.0)
         ).map(|rect| rect.rect.bottom()).max_by(f32::total_cmp).unwrap();
-        let footer_separator = shapes.iter().filter_map(|shape| match shape {
-            egui::Shape::LineSegment { points, .. } if points[1].x - points[0].x > 500.0 => Some(points[0].y),
-            _ => None,
-        }).max_by(f32::total_cmp).unwrap();
-        assert!((0.0..=12.0).contains(&(footer_separator - content_bottom)), "footer {footer_separator} should follow content {content_bottom}; frames {:?}", rectangles.iter().map(|rect| rect.rect).collect::<Vec<_>>());
+        assert!((0.0..=12.0).contains(&(footer.rect.top() - content_bottom)),
+            "footer {:?} should follow content bottom {content_bottom}; frames {:?}",
+            footer.rect, rectangles.iter().map(|rect| rect.rect).collect::<Vec<_>>());
+        assert!((footer.rect.left() - window.rect.left()).abs() <= 2.0);
+        assert!((footer.rect.right() - window.rect.right()).abs() <= 2.0);
+        assert!(output.shapes.iter().any(|paint| match &paint.shape {
+            egui::Shape::Rect(rect) if rect.rect == footer.rect =>
+                paint.clip_rect.contains(window.rect.left_bottom() - Vec2::new(-1.0, 1.0))
+                    && paint.clip_rect.contains(window.rect.right_bottom() - Vec2::splat(1.0)),
+            _ => false,
+        }), "footer fill reaches both bottom corners without the content clip cutting it off");
     }
 }

@@ -32,6 +32,7 @@ Glyph tables are engine-specific: Halo 2, Halo 3, ODST and Reach have named glyp
 - With checkboxes hidden, click an **Index** or row background to select a row. Clicking a text field selects its row and begins editing.
 - **Ctrl-click** toggles rows; **Shift-click** selects a range. Modified clicks in fields change selection without entering text editing.
 - **Ctrl+A** selects all visible rows when the table has focus. Inside a field, it selects text instead.
+- **Home / End** scroll to the top or bottom of the active table, like the header/footer buttons. **Page Up / Page Down** scroll about one viewport. While editing a text field, these keys retain their normal text-navigation behavior.
 - **View → Show Selection Checkboxes** makes row selection checkbox-driven. Editing or right-clicking another row preserves the checked selection. Check a row before dragging it.
 - **View → Wrap Text** wraps both String ID and Text, expanding row heights without changing stored text. Both View preferences are remembered.
 - Use **Add String** at the bottom for a new entry. Header and right-click actions insert, duplicate, or delete the selection. **Insert Above/Below** adds the same number of blank rows around each consecutive selected group.

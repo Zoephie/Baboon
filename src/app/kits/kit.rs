@@ -94,6 +94,8 @@ pub(in crate::app) struct Kit {
     /// Matching on the requested path is what lets a repeat open of the same
     /// folder focus this kit instead of loading a duplicate.
     pub(in crate::app) requested_path: Option<PathBuf>,
+    /// Known display name while the source is loading in the background.
+    pub(in crate::app) loading_label: Option<String>,
     /// First-class custom profile associated with this workspace, if any.
     pub(in crate::app) profile: Option<EditingKitProfileIdentity>,
 
@@ -141,6 +143,7 @@ impl Kit {
             active_favorite_folders: Vec::new(),
             scanning_entries: false,
             requested_path: None,
+            loading_label: None,
             profile: None,
             pending_container_folders: std::collections::BTreeSet::new(),
             chimp: ChimpState::default(),
@@ -205,6 +208,7 @@ impl Kit {
             return;
         }
         self.requested_path = None;
+        self.loading_label = None;
         self.profile = None;
         self.restore.pending_restore_tags.clear();
         self.restore.pending_restore_folders.clear();
@@ -256,8 +260,15 @@ impl Baboon {
     /// tab. A split needs no help — both panes are already visible, and
     /// `make_active` leaves a pane that is not in a tab group alone.
     pub(in crate::app) fn focus_kit(&mut self, index: usize) {
+        self.shell.home_open = false;
         self.model.active = index;
         let kit = self.model.kits[index].id;
+        if let Some(group) = self.kit_tree.tiles.iter().find_map(|(id, tile)| {
+            matches!(tile, egui_tiles::Tile::Pane(open) if *open == kit)
+                .then(|| self.kit_tree.tiles.parent_of(*id)).flatten()
+        }) {
+            self.shell.home_groups.remove(&group);
+        }
         self.kit_tree
             .make_active(|_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit));
     }
@@ -298,7 +309,9 @@ impl Baboon {
     /// so "open another game" is add-then-load rather than a separate path.
     pub(in crate::app) fn add_kit(&mut self) -> KitId {
         let id = self.push_empty_kit();
-        self.model.active = self.model.kits.len() - 1;
+        // Insert while the previous kit still identifies the target split.
+        self.sync_kit_tree();
+        self.focus_kit(self.model.kits.len() - 1);
         id
     }
 
@@ -317,6 +330,9 @@ impl Baboon {
         let Some(index) = self.model.kit_index(id) else {
             return;
         };
+        let stay_on_home = self.shell.home_open;
+        let home_groups = self.shell.home_groups.clone();
+        self.remember_closed_tag_keys(index, self.views[id].tabs_from_tree());
         let closing_campaign_evolved = self.model.kits[index]
             .source
             .as_ref()
@@ -332,6 +348,8 @@ impl Baboon {
         // The tab bar would otherwise fall back to its first tab while the
         // actions went to the kit that slid into the closed one's place.
         self.focus_kit(active_after_removal(self.model.active, index, self.model.kits.len()));
+        self.shell.home_open = stay_on_home;
+        self.shell.home_groups = home_groups;
     }
 
     /// Route an open request for `path` to a kit.
@@ -358,6 +376,9 @@ impl Baboon {
             self.add_kit();
         }
         self.model.kits[self.model.active].requested_path = Some(path);
+        // A reserved workspace now owns the loading page, even when the
+        // request reused the empty workspace behind Home.
+        self.focus_kit(self.model.active);
         false
     }
 
@@ -475,12 +496,15 @@ pub(in crate::app) fn document_edits_are_saveable(kit: &Kit, key: &str, document
 /// Label for a kit in the kit strip: the game's display name where one was
 /// detected, otherwise the source label, otherwise an empty workspace.
 pub(in crate::app) fn kit_strip_label(kit: &Kit) -> String {
-    let Some(source) = kit.source.as_ref() else {
-        return "New workspace".to_owned();
-    };
     if let Some(profile) = &kit.profile {
         return profile.name.clone();
     }
+    let Some(source) = kit.source.as_ref() else {
+        return kit.loading_label.clone()
+            .or_else(|| kit.requested_path.as_ref().and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "New workspace".to_owned());
+    };
     match source.game {
         Some(game) => game.display_name().to_owned(),
         None => source.label.clone(),
@@ -524,6 +548,8 @@ impl Kit {
 pub(in crate::app) struct IndexJobs {
     /// Checking the cached loose-folder index for file changes.
     pub(in crate::app) refreshing: bool,
+    /// A manual refresh must relist directories even if no tag files changed.
+    pub(in crate::app) refresh_browser: bool,
     /// When the next periodic refresh is due, in egui time.
     pub(in crate::app) next_refresh_at: f64,
     /// A reference-index build is running.
@@ -749,6 +775,23 @@ mod tests {
         // Closing the only kit leaves one fresh empty workspace behind it.
         assert_eq!(active_after_removal(0, 0, 1), 0);
         assert_eq!(active_after_removal(5, 0, 1), 0);
+    }
+
+    #[test]
+    fn loading_workspace_titles_use_the_name_before_a_source_arrives() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        assert_eq!(kit_strip_label(&kit), "New workspace");
+        kit.requested_path = Some(PathBuf::from("C:/kits/H3EK"));
+        assert_eq!(kit_strip_label(&kit), "H3EK");
+        kit.loading_label = Some("Halo 3 Editing Kit".to_owned());
+        assert_eq!(kit_strip_label(&kit), "Halo 3 Editing Kit");
+        kit.profile = Some(EditingKitProfileIdentity {
+            id: "custom-h3".to_owned(), name: "H3 Rebalance".to_owned(),
+        });
+        assert_eq!(kit_strip_label(&kit), "H3 Rebalance");
+        kit.release_source_load();
+        assert_eq!(kit_strip_label(&kit), "New workspace");
+        assert!(kit.loading_label.is_none());
     }
 
     #[test]

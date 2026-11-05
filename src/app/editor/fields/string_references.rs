@@ -352,8 +352,13 @@ pub(super) fn draw_row(
     // Read the draft before the row borrows its other sinks.
     let draft = edit.buffers.draft_mut(&buffer_key, value);
     let validation = list.validate(&draft.text);
-    draw_foundation_labelled_cell_row(ui, meta, "", depth, |ui, available_width| {
-        let width = foundation_value_width(&draft.text, available_width).clamp(150.0, 300.0);
+    let open_width = if list.groups.len() > 1 { 80.0 } else { ICON_BUTTON_SIZE.x + ui.spacing().item_spacing.x };
+    let trailing_width = open_width + if validation == StringReferenceValidation::Unavailable {
+        foundation_caption_space(ui, "Could not validate")
+    } else { 0.0 };
+    let controls_width = foundation_picker_controls_width(ui, caption, suffix, trailing_width);
+    draw_foundation_cell_row_with_min_width(ui, meta, "", depth, controls_width, |ui, available_width| {
+        let width = foundation_picker_value_width(ui, &draft.text, available_width, caption, suffix, trailing_width);
         let response = foundation_string_id_value_cell(
             ui,
             &mut draft.text,
@@ -393,7 +398,7 @@ pub(super) fn draw_row(
                 let width = popup_width(ui, &list, &filter, grouped);
                 string_picker::search(ui, &mut filter, filter_id, just_opened, width, "Search String IDs or Text");
                 if can_group {
-                    ui.checkbox(&mut grouped, "Group by Prefix");
+                    ui.baboon_checkbox(&mut grouped, "Group by Prefix");
                 }
                 ui.separator();
                 if let Some(reason) = &list.unavailable {

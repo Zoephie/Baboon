@@ -14,6 +14,7 @@ use crate::app::shell::frame::{
 /// draw: undo availability, the poke record, a running extraction, the
 /// update link, the editing kits with their banners, and the toolbar icons.
 pub(in crate::app) struct MenuState {
+    home: bool,
     can_undo: bool,
     can_redo: bool,
     last_poke: bool,
@@ -102,6 +103,7 @@ impl Baboon {
             })
             .collect();
         MenuState {
+            home: self.shell.home_open,
             can_undo: self.can_undo_current(),
             can_redo: self.can_redo_current(),
             last_poke: self.poke.last_poke.is_some(),
@@ -122,8 +124,8 @@ impl Baboon {
 /// The top menu bar: the File, Edit, Tools, View, Help and Editing Kits
 /// menus, then the tool launcher buttons.
 pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuState, view: &mut KitView) {
-    egui::Panel::top("menu")
-        .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
+    let bar = egui::Panel::top("menu")
+        .frame(Frame::NONE.fill(row_type()).inner_margin(egui::Margin {
             left: 6,
             right: 6,
             top: 2,
@@ -134,11 +136,9 @@ pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuStat
                 aligned_menu_button(ui, "File", |ui| {
                     draw_file_menu(cx, ui, menu);
                 });
-                aligned_menu_button(ui, "Edit", |ui| {
-                    draw_edit_menu(cx, ui, menu);
-                });
-                aligned_menu_button(ui, "Tools", |ui| {
-                    draw_tools_menu(cx, ui);
+                ui.add_enabled_ui(!menu.home, |ui| {
+                    aligned_menu_button(ui, "Edit", |ui| { draw_edit_menu(cx, ui, menu); });
+                    aligned_menu_button(ui, "Tools", |ui| { draw_tools_menu(cx, ui); });
                 });
                 aligned_menu_button(ui, "View", |ui| {
                     draw_view_menu(cx, ui, view);
@@ -149,9 +149,11 @@ pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuStat
                 aligned_menu_button(ui, "Editing Kits", |ui| {
                     draw_editing_kits_menu(cx, ui, menu);
                 });
-                draw_tool_launcher_buttons(cx, ui);
+                ui.add_enabled_ui(!menu.home, |ui| draw_tool_launcher_buttons(cx, ui));
             });
         });
+    ui.painter().hline(bar.response.rect.x_range(), bar.response.rect.bottom() - 0.5,
+        Stroke::new(1.0, grid_line()));
 }
 
 #[cfg(test)]
@@ -196,7 +198,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     style_list_menu(ui);
     if shortcut_menu_button(
         ui, "New Tag...", Some(ButtonIcon::NewTag), egui::Modifiers::COMMAND, egui::Key::N,
-        !cx.model.editing_kit_is_read_only(cx.model.active),
+        !menu.home && !cx.model.editing_kit_is_read_only(cx.model.active),
     )
         .clicked()
     {
@@ -209,7 +211,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     // another game. Splitting them in the menu would make
     // the user answer a question about Baboon's internals
     // to do the same thing.
-    let can_import = cx.model.current_source_is_container() || cx.model.can_import_tags();
+    let can_import = !menu.home && (cx.model.current_source_is_container() || cx.model.can_import_tags());
     if ui
         .add_enabled(can_import, egui::Button::new("Import Tags..."))
         .on_hover_text(if cx.model.current_source_is_container() {
@@ -251,7 +253,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     // these write a copy the user owns and can move, back up
     // or hand to someone. Before them, the only way to get a
     // `.baboon` out of Baboon was to export a mod.
-    let can_save_project = cx.model.current_source_is_campaign_project_capable(cx.model.active);
+    let can_save_project = !menu.home && cx.model.current_source_is_campaign_project_capable(cx.model.active);
     let project_target = cx.model.kits[cx.model.active]
         .project.active
         .as_ref()
@@ -279,7 +281,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
         cx.send(AppAction::Defer(DeferredFileAction::SaveProjectAs));
     }
     ui.separator();
-    let has_loaded_folder = cx.model.loaded_tags_root().is_some();
+    let has_loaded_folder = !menu.home && cx.model.loaded_tags_root().is_some();
     if ui
         .add_enabled(has_loaded_folder, egui::Button::new("Open Tags Folder"))
         .clicked()
@@ -317,7 +319,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
         Some(ButtonIcon::Save),
         egui::Modifiers::COMMAND,
         egui::Key::S,
-        !cx.model.editing_kit_is_read_only(cx.model.active),
+        !menu.home && !cx.model.editing_kit_is_read_only(cx.model.active),
     )
     .clicked()
     {
@@ -326,7 +328,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     }
     if ui
         .add_enabled(
-            cx.model.kits[cx.model.active].selected_key.is_some()
+            !menu.home && cx.model.kits[cx.model.active].selected_key.is_some()
                 && !cx.model.editing_kit_is_read_only(cx.model.active),
             egui::Button::new("Save Current Tag As..."),
         )
@@ -335,7 +337,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
         close_menu(ui);
         cx.send(AppAction::SaveCurrentTagAs);
     }
-    if cx.model.current_source_is_container() {
+    if !menu.home && cx.model.current_source_is_container() {
         if shortcut_menu_button(
             ui, "Poke Current Tag...", None, egui::Modifiers::COMMAND, egui::Key::P,
             cx.model.can_poke_current_tag(),
@@ -415,7 +417,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     ui.separator();
     if shortcut_menu_button(
         ui, "Close Current Tag", None, egui::Modifiers::COMMAND, egui::Key::W,
-        cx.model.kits[cx.model.active].selected_key.is_some(),
+        !menu.home && cx.model.kits[cx.model.active].selected_key.is_some(),
     )
         .clicked()
     {
@@ -429,7 +431,7 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     }
     if ui
         .add_enabled(
-            !cx.model.kits[cx.model.active].open_tabs.is_empty(),
+            !menu.home && !cx.model.kits[cx.model.active].open_tabs.is_empty(),
             egui::Button::new("Close All Tags"),
         )
         .clicked()
@@ -679,7 +681,7 @@ fn draw_tools_menu(cx: &Ctx, ui: &mut Ui) {
             can_refresh_browser
                 && !cx.model.kits[cx.model.active].scanning_entries
                 && !cx.model.kits[cx.model.active].index_jobs.refreshing,
-            egui::Button::new("Refresh Tag Browser"),
+            egui::Button::new("Refresh Tag Browser").shortcut_text("F5"),
         )
         .clicked()
     {
@@ -692,71 +694,26 @@ fn draw_tools_menu(cx: &Ctx, ui: &mut Ui) {
 /// the terminal.
 fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView) {
     style_list_menu(ui);
-    // The browser view belongs to a workspace, so this
-    // menu shows and sets the focused kit's — matching the
-    // Folders/Groups buttons in that kit's own toolbar.
-    if ui
-        .selectable_label(view.browser.mode == BrowserMode::Folders, "Folders")
-        .clicked()
-    {
-        view.browser.mode = BrowserMode::Folders;
-        close_menu(ui);
-    }
-    if ui
-        .selectable_label(view.browser.mode == BrowserMode::Groups, "Tag Groups")
-        .clicked()
-    {
-        view.browser.mode = BrowserMode::Groups;
-        close_menu(ui);
-    }
-    ui.separator();
-    let selected_sort = right_opening_menu_button(
-        ui,
-        format!("Sort by: {}", view.browser.sort.label()),
-        220.0,
-        |ui| {
-            style_list_menu(ui);
-            for option in BrowserSort::ALL {
-                if ui
-                    .selectable_label(view.browser.sort == option, option.label())
-                    .clicked()
-                {
-                    return Some(option);
-                }
-            }
-            None
-        },
-    )
-    .inner
-    .flatten();
-    if let Some(option) = selected_sort {
-        view.browser.sort = option;
-        close_menu(ui);
-    }
-    ui.separator();
     // Toggles on copies of the preferences, sent as a change once drawn.
     let prefs = &cx.model.prefs;
     let mut show_browser_prefixes = prefs.show_browser_prefixes;
     let mut show_block_sizes = prefs.show_block_sizes;
     let mut angles_in_degrees = prefs.angles_in_degrees;
-    let mut scroll_to_cycle_dropdowns = prefs.scroll_to_cycle_dropdowns;
     let mut expert_mode = prefs.expert_mode;
-    ui.checkbox(&mut show_browser_prefixes, "Show [tag]/[folder]");
-    ui.checkbox(&mut show_block_sizes, "Show block sizes");
-    ui.checkbox(&mut angles_in_degrees, "Angles in degrees")
+    ui.baboon_checkbox(&mut show_browser_prefixes, "Show [tag]/[folder]");
+    ui.baboon_checkbox(&mut show_block_sizes, "Show block sizes");
+    ui.baboon_checkbox(&mut angles_in_degrees, "Angles in degrees")
         .on_hover_text(
             "Angle fields hold radians on disk. Guerilla and the other Halo \
              tools show them in degrees, and so does Baboon — turn this off to \
              read and type the stored radians instead.",
         );
-    ui.checkbox(&mut scroll_to_cycle_dropdowns, "Scroll wheel cycles dropdowns");
-    ui.checkbox(&mut expert_mode, "Expert mode");
-    if (show_browser_prefixes, show_block_sizes, angles_in_degrees, scroll_to_cycle_dropdowns, expert_mode)
+    ui.baboon_checkbox(&mut expert_mode, "Expert mode");
+    if (show_browser_prefixes, show_block_sizes, angles_in_degrees, expert_mode)
         != (
             prefs.show_browser_prefixes,
             prefs.show_block_sizes,
             prefs.angles_in_degrees,
-            prefs.scroll_to_cycle_dropdowns,
             prefs.expert_mode,
         )
     {
@@ -764,7 +721,6 @@ fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView) {
             prefs.show_browser_prefixes = show_browser_prefixes;
             prefs.show_block_sizes = show_block_sizes;
             prefs.angles_in_degrees = angles_in_degrees;
-            prefs.scroll_to_cycle_dropdowns = scroll_to_cycle_dropdowns;
             prefs.expert_mode = expert_mode;
         });
     }

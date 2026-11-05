@@ -229,7 +229,7 @@ impl Dialog for RenameTagState {
                             ))
                             .color(text_dark()),
                         );
-                        egui::ScrollArea::vertical()
+                        crate::app::ScrollArea::vertical()
                             .id_salt("rename_referrers")
                             .max_height(220.0)
                             .show(ui, |ui| {

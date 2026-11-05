@@ -52,10 +52,11 @@ pub(super) fn caption(editor: &str, original: &str) -> String {
 
 pub(super) fn image(ui: &Ui, editor: &str) -> Option<egui::Image<'static>> {
     let icon = match editor {
+        "material" => ButtonIcon::MaterialsLookup,
         "object_function" | "object_function_no_own" | "object_function_panel" => {
             ButtonIcon::Function
         }
-        "object_marker" | "marker_names" => ButtonIcon::Markers,
+        "object_marker" | "marker_names" => ButtonIcon::MarkersLookup,
         "default_model_variant" | "child_model_variant" => ButtonIcon::Model,
         _ => return None,
     };
@@ -90,8 +91,8 @@ pub(super) fn search(
 }
 
 /// Follow visible content up to the screen-dependent scrolling limit.
-pub(super) fn scroll(ui: &Ui, id: egui::Id) -> egui::ScrollArea {
-    egui::ScrollArea::vertical()
+pub(super) fn scroll(ui: &Ui, id: egui::Id) -> crate::app::ScrollArea {
+    crate::app::ScrollArea::vertical()
         .id_salt(id)
         .min_scrolled_height(BUTTON_HEIGHT)
         .max_height((ui.ctx().content_rect().height() * 0.6).clamp(120.0, 360.0))

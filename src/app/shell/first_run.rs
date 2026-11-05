@@ -161,7 +161,7 @@ fn draw_first_run_storage(ui: &mut Ui, s: &mut FirstRunDraw) {
         .is_some();
     let state = &mut *s.wizard;
     ui.add_enabled_ui(!locked, |ui| {
-        ui.radio_value(
+        ui.baboon_radio_value(
             &mut state.selected_storage,
             Some(crate::core::storage::StorageMode::Installed),
             "Installed mode (recommended)",
@@ -170,7 +170,7 @@ fn draw_first_run_storage(ui: &mut Ui, s: &mut FirstRunDraw) {
             ui.label("Store preferences, sessions, indexes, keywords, and logs in AppData.");
         });
         ui.add_space(6.0);
-        ui.radio_value(
+        ui.baboon_radio_value(
             &mut state.selected_storage,
             Some(crate::core::storage::StorageMode::Portable),
             "Portable mode",
@@ -230,11 +230,11 @@ fn draw_first_run_interface(ui: &mut Ui, s: &mut FirstRunDraw) {
     });
     ui.add_space(12.0);
     ui.label(RichText::new("Tag browser").strong());
-    ui.checkbox(
+    ui.baboon_checkbox(
         &mut s.prefs.double_click_to_open_tags,
         "Double-click to open tags",
     );
-    ui.checkbox(
+    ui.baboon_checkbox(
         &mut s.prefs.folders_before_tags,
         "List subfolders before tags",
     );
@@ -256,7 +256,7 @@ fn draw_first_run_editing_kits(ui: &mut Ui, s: &mut FirstRunDraw) {
     ui.heading("Editing kits");
     ui.label("Detected paths fill only empty entries. Every editing-kit path is optional.");
     ui.add_space(8.0);
-    egui::ScrollArea::vertical()
+    crate::app::ScrollArea::vertical()
         .max_height(360.0)
         .show(ui, |ui| {
             for shortcut in EDITING_KIT_SHORTCUTS {

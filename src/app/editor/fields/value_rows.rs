@@ -3,6 +3,130 @@
 
 use super::*;
 
+pub(super) const FOUNDATION_LABEL_INSET: f32 = 11.0;
+
+pub(super) fn stacked_field_row(ui: &Ui) -> bool {
+    ui.available_width() < 760.0
+}
+
+/// Keep the label beside its controls when there is room; in narrow panes
+/// give the controls their own wrapping row instead of a minimum-width canvas.
+pub(super) fn foundation_field_row<R>(
+    ui: &mut Ui, meta: &FieldDisplayMeta, depth: usize,
+    controls: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    foundation_field_row_at(ui, meta, depth, 760.0, controls)
+}
+
+pub(super) fn foundation_field_row_at<R>(
+    ui: &mut Ui, meta: &FieldDisplayMeta, depth: usize, breakpoint: f32,
+    controls: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    foundation_field_row_inner(ui, meta, depth, breakpoint, 0.0, controls)
+}
+
+fn foundation_field_row_inner<R>(
+    ui: &mut Ui, meta: &FieldDisplayMeta, _depth: usize, breakpoint: f32, leading_label_space: f32,
+    controls: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    // Container bodies already position nested fields; row padding is local.
+    // Controls retain one identity even when the label moves to another row.
+    let controls_id = ui.next_auto_id().with("foundation_field_controls");
+    let controls = |ui: &mut Ui| ui.scope_builder(egui::UiBuilder::new().id(controls_id), controls).inner;
+    if ui.available_width() < breakpoint {
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                foundation_stacked_label_cell(ui, &meta.label, meta.help.as_deref());
+            });
+            // Keep the stacked label close to its own input even when the
+            // outer field rows use a larger vertical gap.
+            ui.add_space(1.0 - ui.spacing().item_spacing.y);
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(FOUNDATION_LABEL_INSET);
+                controls(ui)
+            }).inner
+        })
+    } else {
+        ui.horizontal(|ui| {
+            foundation_label_cell_with_trailing_space(ui, &meta.label, meta.help.as_deref(), leading_label_space);
+            controls(ui)
+        })
+    }
+}
+
+pub(super) fn foundation_caption_space(ui: &Ui, caption: &str) -> f32 {
+    if caption.is_empty() { return 0.0; }
+    ui.painter().layout_no_wrap(caption.to_owned(), TextStyle::Small.resolve(ui.style()), subtle_dark())
+        .size().x + ui.spacing().item_spacing.x
+}
+
+pub(super) fn foundation_field_breakpoint(ui: &Ui, _depth: usize, controls_width: f32, suffix: &str) -> f32 {
+    FOUNDATION_LABEL_WIDTH + controls_width
+        + foundation_caption_space(ui, suffix) + 28.0
+}
+
+pub(super) fn foundation_picker_controls_width(ui: &Ui, caption: &str, suffix: &str, extra: f32) -> f32 {
+    150.0 + ui.painter().layout_no_wrap(caption.to_owned(), TextStyle::Button.resolve(ui.style()), text_dark()).size().x
+        + 16.0 + 24.0 + 2.0 * ui.spacing().button_padding.x + 2.0 * ui.spacing().item_spacing.x
+        + foundation_caption_space(ui, suffix) + extra
+}
+
+pub(super) fn foundation_picker_value_width(
+    ui: &Ui, value: &str, available: f32,
+    picker_caption: &str, suffix: &str, extra_controls: f32,
+) -> f32 {
+    let preferred = foundation_value_width(ui, value, available).min(300.0);
+    let reserve = foundation_picker_controls_width(ui, picker_caption, suffix, extra_controls) - 150.0;
+    preferred.min((ui.available_size_before_wrap().x - reserve).max(1.0))
+}
+
+const COMPONENT_LABEL_GAP: f32 = 4.0;
+const COMPONENT_GROUP_GAP: f32 = 12.0;
+
+fn component_label_width(ui: &Ui, label: &str) -> f32 {
+    if label.is_empty() { return 0.0; }
+    ui.painter().layout_no_wrap(label.to_owned(), TextStyle::Small.resolve(ui.style()), subtle_dark()).size().x
+}
+
+fn foundation_component_row<R>(
+    ui: &mut Ui, meta: &FieldDisplayMeta, depth: usize, parts: &[(String, String)],
+    controls: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let prefix = parts.first().map_or(0.0, |(label, _)| component_label_width(ui, label) + COMPONENT_LABEL_GAP);
+    foundation_field_row_inner(ui, meta, depth, 760.0, prefix, controls)
+}
+
+fn foundation_component_width(ui: &Ui, parts: &[(String, String)], preferred: f32, reserve: f32) -> f32 {
+    let labels = parts.iter().skip(1).filter(|(label, _)| !label.is_empty()).map(|(label, _)|
+        component_label_width(ui, label) + COMPONENT_LABEL_GAP).sum::<f32>();
+    let gaps = parts.len().saturating_sub(1) as f32 * COMPONENT_GROUP_GAP.max(ui.spacing().item_spacing.x);
+    ((ui.available_size_before_wrap().x - labels - gaps - reserve).max(1.0) / parts.len().max(1) as f32).min(preferred)
+}
+
+/// Keep a component label with its box. The first label hangs in the gutter,
+/// leaving its box on the same column as an ordinary single-value field.
+fn foundation_component_cell<R>(
+    ui: &mut Ui, index: usize, label: &str, width: f32, draw: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    if index > 0 { ui.add_space((COMPONENT_GROUP_GAP - ui.spacing().item_spacing.x).max(0.0)); }
+    let label_width = component_label_width(ui, label);
+    let prefix = if index > 0 && !label.is_empty() { label_width + COMPONENT_LABEL_GAP } else { 0.0 };
+    let row = ui.allocate_ui_with_layout(Vec2::new(width + prefix, 24.0),
+        egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = COMPONENT_LABEL_GAP;
+            if index > 0 && !label.is_empty() { ui.label(RichText::new(label).color(subtle_dark()).small()); }
+            draw(ui)
+        });
+    if index == 0 && !label.is_empty() {
+        let rect = egui::Rect::from_min_max(ui.clip_rect().min,
+            egui::pos2(row.response.rect.left() - 1.0, ui.clip_rect().bottom()));
+        ui.painter().with_clip_rect(rect).text(
+            row.response.rect.left_center() - egui::vec2(COMPONENT_LABEL_GAP, 0.0),
+            Align2::RIGHT_CENTER, label, TextStyle::Small.resolve(ui.style()), subtle_dark());
+    }
+    row.inner
+}
+
 pub(in crate::app) fn draw_foundation_value_row(
     ui: &mut Ui,
     field: TagField<'_>,
@@ -103,6 +227,7 @@ pub(in crate::app) fn draw_foundation_value_row(
             field_suffix(meta, type_name).as_str(),
             depth,
             path,
+            matches!(value, TagFieldData::Point2d(_)),
             edit,
         );
         return;
@@ -145,16 +270,38 @@ pub(in crate::app) fn draw_foundation_value_row(
         return;
     }
     if let Some(value) = raw_string_id {
+        let function_lookup = is_h2_hud_function_tag(edit.game, edit.group_tag)
+            && matches!(field.name(), "input name" | "range name");
+        let function_menu = function_lookup.then(|| {
+            let menu_id = egui::Id::new(("native function catalog", edit.definitions_root, edit.game));
+            ui.data_mut(|data| {
+                data.get_temp_mut_or_insert_with::<Option<std::sync::Arc<blam_tags::string_editor::Menu>>>(menu_id, || {
+                    string_editors::string_editors(edit.definitions_root, edit.game)
+                        .and_then(|editors| editors.built_in_function_menu()).map(std::sync::Arc::new)
+                }).clone()
+            })
+        }).flatten();
         let enabled = edit.can_edit(meta);
         let buffer_key = format!("{}|{}", edit.tag_key, path);
         let id = edit.widget_id(("text", &buffer_key));
+        let function_menu_id = edit.widget_id(("function choices", &buffer_key));
         let draft = edit.buffers.draft_mut(&buffer_key, value);
-        draw_foundation_labelled_cell_row(ui, meta, &field_suffix(meta, type_name), depth, |ui, available_width| {
-            let width = foundation_value_width(&draft.text, available_width);
+        let menu_width = if function_lookup { 48.0 + ui.spacing().item_spacing.x } else { 0.0 };
+        draw_foundation_cell_row_with_min_width(ui, meta, &field_suffix(meta, type_name), depth, 150.0 + menu_width, |ui, available_width| {
+            let width = foundation_value_width(ui, &draft.text, available_width - menu_width);
             let response = foundation_string_id_value_cell(ui, &mut draft.text, width, id, enabled, false);
             draft.note_response(&response);
             if enabled && draft.should_commit(ui, &response) { edit.pending.extend(field_edit_ops(path, &draft.text).pending); }
             draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, path));
+            // Culling offscreen rows changes automatic UI IDs. Anchor the
+            // popup to this field so focusing its search cannot replace it.
+            let picked = function_lookup && ui.scope_builder(egui::UiBuilder::new().id(function_menu_id), |ui| {
+                function_name_suggestions(ui, &buffer_key, &mut draft.text, enabled, function_menu.as_deref())
+            }).inner;
+            if picked {
+                edit.pending.extend(field_edit_ops(path, &draft.text).pending);
+                draft.mark_committed();
+            }
         });
         return;
     }
@@ -165,6 +312,7 @@ pub(in crate::app) fn draw_foundation_value_row(
             &formatted,
             field_suffix(meta, type_name).as_str(),
             depth,
+            if matches!(value, TagFieldData::String(_) | TagFieldData::LongString(_)) { 300.0 } else { 140.0 },
             path,
             edit,
         );
@@ -188,6 +336,7 @@ pub(in crate::app) fn draw_foundation_value_row(
         &formatted,
         field_suffix(meta, type_name).as_str(),
         depth,
+        if matches!(value, TagFieldData::String(_) | TagFieldData::LongString(_)) { 300.0 } else { 140.0 },
     );
 }
 
@@ -246,20 +395,12 @@ pub(in crate::app) fn draw_foundation_color_row(
     );
     let editable = edit.can_edit(meta);
 
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        draw_foundation_component_cells(ui, &parts, 76.0, path, editable, edit);
+    foundation_component_row(ui, meta, depth, &parts, |ui| {
+        const SWATCH_WIDTH: f32 = 48.0;
+        let width = foundation_component_width(ui, &parts, 76.0, SWATCH_WIDTH + ui.spacing().item_spacing.x);
+        draw_foundation_component_cells(ui, &parts, width, path, editable, false, edit);
 
-        let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
-        ui.painter().rect_filled(rect, 2.0, swatch);
-        ui.painter()
-            .rect_stroke(
-                rect,
-                2.0,
-                Stroke::new(1.0_f32, foundation_input_edge()),
-                egui::StrokeKind::Middle,
-            );
+        let response = color_preview_button(ui, Vec2::new(SWATCH_WIDTH, BUTTON_HEIGHT), swatch);
         let response = response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(if editable {
@@ -285,14 +426,10 @@ pub(in crate::app) fn draw_foundation_multi_value_row(
     suffix: &str,
     depth: usize,
 ) {
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        for (label, value) in parts {
-            if !label.is_empty() {
-                ui.label(RichText::new(label).color(subtle_dark()).small());
-            }
-            foundation_input_cell(ui, value, 92.0);
+    foundation_component_row(ui, meta, depth, parts, |ui| {
+        let width = foundation_component_width(ui, parts, 92.0, foundation_caption_space(ui, suffix));
+        for (index, (label, value)) in parts.iter().enumerate() {
+            foundation_component_cell(ui, index, label, width, |ui| foundation_input_cell(ui, value, width));
         }
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
@@ -341,7 +478,6 @@ pub(in crate::app) fn draw_foundation_bounds_row(
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let lower_key = format!("{buffer_key}|lower");
     let upper_key = format!("{buffer_key}|upper");
@@ -350,13 +486,15 @@ pub(in crate::app) fn draw_foundation_bounds_row(
     let mut lower = edit.buffers.take(&lower_key, lower_value);
     let mut upper = edit.buffers.take(&upper_key, upper_value);
 
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    let controls_width = 184.0 + foundation_caption_space(ui, "to") + 2.0 * ui.spacing().item_spacing.x;
+    let breakpoint = foundation_field_breakpoint(ui, depth, controls_width, suffix);
+    foundation_field_row_at(ui, meta, depth, breakpoint, |ui| {
         let editable = edit.can_edit(meta);
-        let lower_response = foundation_value_cell(ui, &mut lower.text, 92.0, lower_id, editable);
+        let width = ((ui.available_size_before_wrap().x - foundation_caption_space(ui, suffix)
+            - foundation_caption_space(ui, "to") - 2.0 * ui.spacing().item_spacing.x) * 0.5).clamp(1.0, 92.0);
+        let lower_response = foundation_value_cell(ui, &mut lower.text, width, lower_id, editable);
         ui.label(RichText::new("to").color(subtle_dark()).small());
-        let upper_response = foundation_value_cell(ui, &mut upper.text, 92.0, upper_id, editable);
+        let upper_response = foundation_value_cell(ui, &mut upper.text, width, upper_id, editable);
         if editable {
             lower.note_response(&lower_response);
             upper.note_response(&upper_response);
@@ -396,18 +534,33 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
     suffix: &str,
     depth: usize,
     path: &str,
+    integer_coordinates: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let indent = depth as f32 * 12.0;
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_component_row(ui, meta, depth, parts, |ui| {
         let editable = edit.can_edit(meta);
-        draw_foundation_component_cells(ui, parts, 92.0, path, editable, edit);
+        let width = foundation_component_width(ui, parts, 92.0, foundation_caption_space(ui, suffix));
+        draw_foundation_component_cells(ui, parts, width, path, editable, integer_coordinates, edit);
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
     });
+}
+
+fn integer_coordinate_warning(text: &str) -> Option<String> {
+    if text.trim().parse::<i16>().is_ok() { return None; }
+    Some(match crate::core::document::value::parse_integer_point_coordinate(text) {
+        Ok(rounded) => format!("Will round to {rounded} on Enter or when leaving the field."),
+        Err(reason) => reason,
+    })
+}
+
+fn component_input_ops(path: &str, texts: &[&str], integer_coordinates: bool) -> Result<DeferredOps, String> {
+    if !integer_coordinates { return Ok(field_edit_ops(path, &components_input(texts))); }
+    let coordinates = texts.iter().map(|text|
+        crate::core::document::value::parse_integer_point_coordinate(text).map(|value| value.to_string())
+    ).collect::<Result<Vec<_>, _>>()?;
+    Ok(field_edit_ops(path, &coordinates.join(", ")))
 }
 
 /// One labelled cell per component, inside the caller's row layout. When
@@ -420,6 +573,7 @@ fn draw_foundation_component_cells(
     width: f32,
     path: &str,
     editable: bool,
+    integer_coordinates: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
     let buffer_key = format!("{}|{}", edit.tag_key, path);
@@ -430,16 +584,26 @@ fn draw_foundation_component_cells(
     let mut drafts = Vec::with_capacity(parts.len());
     for (label, value) in parts {
         let key = format!("{buffer_key}|component|{label}");
-        let draft = edit.buffers.take(&key, value);
+        let mut draft = edit.buffers.take(&key, value);
+        // Saving flushes drafts before this row draws. Clear a rounded draft
+        // even when it rounded back to the value the tag already contained.
+        if integer_coordinates && !draft.changed
+            && crate::core::document::value::parse_integer_point_coordinate(&draft.text)
+                .is_ok_and(|rounded| rounded.to_string() == value.trim()) {
+            draft.set_clean(value);
+        }
         drafts.push((key, draft));
     }
 
     let mut responses = Vec::with_capacity(parts.len());
-    for (index, ((label, _), (_, draft))) in parts.iter().zip(drafts.iter_mut()).enumerate() {
-        if !label.is_empty() {
-            ui.label(RichText::new(label.as_str()).color(subtle_dark()).small());
+    for (index, ((label, value), (_, draft))) in parts.iter().zip(drafts.iter_mut()).enumerate() {
+        if integer_coordinates && ui.memory(|memory| memory.has_focus(ids[index]) || memory.had_focus_last_frame(ids[index]))
+            && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            draft.set_clean(value);
         }
-        let response = foundation_value_cell(ui, &mut draft.text, width, ids[index], editable);
+        let warning = integer_coordinates.then(|| integer_coordinate_warning(&draft.text)).flatten();
+        let response = foundation_component_cell(ui, index, label, width,
+            |ui| foundation_value_cell_with_warning(ui, &mut draft.text, width, ids[index], editable, warning.as_deref()));
         if editable {
             draft.note_response(&response);
         }
@@ -454,7 +618,19 @@ fn draw_foundation_component_cells(
         }
         if committed {
             let texts = drafts.iter().map(|(_, draft)| draft.text.as_str()).collect::<Vec<_>>();
-            edit.push_ops(field_edit_ops(path, &components_input(&texts)));
+            match component_input_ops(path, &texts, integer_coordinates) {
+                Ok(ops) => {
+                    edit.push_ops(ops);
+                    if integer_coordinates {
+                        for (_, draft) in &mut drafts {
+                            if let Ok(value) = crate::core::document::value::parse_integer_point_coordinate(&draft.text) {
+                                draft.text = value.to_string();
+                            }
+                        }
+                    }
+                }
+                Err(reason) => { if let Some(status) = edit.status.as_deref_mut() { *status = reason; } }
+            }
             for (_, draft) in &mut drafts {
                 draft.mark_committed();
             }
@@ -464,7 +640,7 @@ fn draw_foundation_component_cells(
             let commit = DraftCommit::new(
                 edit.tag_key,
                 drafts.iter().map(|(key, _)| key.clone()).collect(),
-                move |texts| Ok(field_edit_ops(&path, &components_input(texts))),
+                move |texts| component_input_ops(&path, texts, integer_coordinates),
             );
             for (_, draft) in &mut drafts {
                 draft.keep_commit(|| commit.clone());
@@ -485,7 +661,7 @@ pub(in crate::app) fn draw_foundation_text_row(
     depth: usize,
 ) {
     let meta = field_display_meta(name);
-    draw_foundation_meta_text_row(ui, &meta, value, suffix, depth);
+    draw_foundation_meta_text_row(ui, &meta, value, suffix, depth, 300.0);
 }
 
 pub(in crate::app) fn draw_foundation_meta_text_row(
@@ -494,9 +670,10 @@ pub(in crate::app) fn draw_foundation_meta_text_row(
     value: &str,
     suffix: &str,
     depth: usize,
+    minimum_width: f32,
 ) {
-    draw_foundation_labelled_cell_row(ui, meta, suffix, depth, |ui, available_width| {
-        foundation_input_cell(ui, value, foundation_value_width(value, available_width));
+    draw_foundation_cell_row_with_min_width(ui, meta, suffix, depth, minimum_width, |ui, available_width| {
+        foundation_input_cell(ui, value, foundation_value_width(ui, value, available_width));
     });
 }
 
@@ -506,14 +683,15 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
     value: &str,
     suffix: &str,
     depth: usize,
+    minimum_width: f32,
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("text", &buffer_key));
     let draft = edit.buffers.draft_mut(&buffer_key, value);
-    draw_foundation_labelled_cell_row(ui, meta, suffix, depth, |ui, available_width| {
-        let width = foundation_value_width(&draft.text, available_width);
+    draw_foundation_cell_row_with_min_width(ui, meta, suffix, depth, minimum_width, |ui, available_width| {
+        let width = foundation_value_width(ui, &draft.text, available_width);
         let response = foundation_value_cell(ui, &mut draft.text, width, id, true);
         draft.note_response(&response);
         if draft.should_commit(ui, &response) {
@@ -586,10 +764,7 @@ fn draw_foundation_data_row(
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let indent = depth as f32 * 12.0;
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    foundation_field_row(ui, meta, depth, |ui| {
         ui.label(RichText::new(data_size_text(bytes.len())).color(text_dark()));
     });
     let Some(definition) = data_definitions(edit.definitions_root, edit.game)
@@ -617,7 +792,7 @@ fn draw_foundation_data_row(
         field_edit_ops(path, &hex)
     };
     ui.horizontal_top(|ui| {
-        ui.add_space(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x);
+        ui.add_space(if stacked_field_row(ui) { FOUNDATION_LABEL_INSET } else { FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x });
         // Foundation's box is at least 600 wide and grows to 200 tall; Halo 2
         // Guerilla's is a fixed 540 by 128 in an 11-pixel fixed-pitch font.
         // Neither wraps. This one starts as wide as there is room for and as
@@ -649,7 +824,7 @@ fn draw_foundation_data_row(
                 let text_color = if stored_bytes(&draft.text).is_err() {
                     invalid_value_text()
                 } else if editable { text_dark() } else { subtle_dark() };
-                let scroll = egui::ScrollArea::both()
+                let scroll = crate::app::ScrollArea::both()
                     .id_salt(id.with("scroll"))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -685,25 +860,19 @@ fn draw_foundation_data_row(
                             draft.mark_committed();
                         }
                     });
-                let visuals = ui.visuals();
                 let invalid = stored_bytes(&draft.text).is_err();
-                let stroke = if invalid {
-                    invalid_value_stroke()
-                } else if ui.memory(|memory| memory.has_focus(id)) {
-                    visuals.selection.stroke
-                } else {
-                    visuals.widgets.inactive.bg_stroke
-                };
+                let appearance = input_appearance(ui,
+                    if invalid { InputState::Invalid } else { InputState::Normal },
+                    !editable, ui.memory(|memory| memory.has_focus(id)));
                 ui.painter().set(
                     background,
                     egui::Shape::Vec(vec![
                         egui::Shape::rect_filled(
                             frame_rect,
-                            0.0,
-                            if invalid { invalid_value_fill() }
-                            else if editable { visuals.text_edit_bg_color() } else { foundation_input_read_only() },
+                            appearance.corners,
+                            appearance.fill,
                         ),
-                        egui::Shape::rect_stroke(frame_rect, 0.0, stroke, egui::StrokeKind::Inside),
+                        egui::Shape::rect_stroke(frame_rect, appearance.corners, appearance.stroke, egui::StrokeKind::Inside),
                     ]),
                 );
                 // While its text can still scroll, the box keeps the wheel:
@@ -734,7 +903,7 @@ fn draw_foundation_data_row(
     });
     if let Err(too_long) = stored_bytes(&draft.text) {
         ui.horizontal(|ui| {
-            ui.add_space(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x);
+            ui.add_space(if stacked_field_row(ui) { FOUNDATION_LABEL_INSET } else { FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x });
             ui.label(RichText::new(too_long.to_string()).color(invalid_value_text()).small());
         });
     }
@@ -883,14 +1052,29 @@ pub(super) fn draw_foundation_labelled_cell_row(
     depth: usize,
     cell: impl FnOnce(&mut Ui, f32),
 ) {
-    let indent = depth as f32 * 12.0;
-    let suffix_reserve = if suffix.is_empty() { 0.0 } else { 96.0 };
-    let available_value_width =
-        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - suffix_reserve - 28.0)
-            .clamp(180.0, 920.0);
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+    draw_foundation_cell_row_at(ui, meta, suffix, depth, 760.0, cell);
+}
+
+pub(super) fn draw_foundation_cell_row_with_min_width(
+    ui: &mut Ui, meta: &FieldDisplayMeta, suffix: &str, depth: usize, minimum_width: f32,
+    cell: impl FnOnce(&mut Ui, f32),
+) {
+    let breakpoint = foundation_field_breakpoint(ui, depth, minimum_width, suffix);
+    draw_foundation_cell_row_at(ui, meta, suffix, depth, breakpoint, cell);
+}
+
+fn draw_foundation_cell_row_at(
+    ui: &mut Ui, meta: &FieldDisplayMeta, suffix: &str, depth: usize, breakpoint: f32,
+    cell: impl FnOnce(&mut Ui, f32),
+) {
+    let stacked = ui.available_width() < breakpoint;
+    let suffix_reserve = foundation_caption_space(ui, suffix);
+    let available_value_width = if stacked {
+        (ui.available_width() - FOUNDATION_LABEL_INSET - 8.0 - suffix_reserve).max(1.0)
+    } else {
+        (ui.available_width() - FOUNDATION_LABEL_WIDTH - suffix_reserve - 28.0).clamp(1.0, 920.0)
+    };
+    foundation_field_row_at(ui, meta, depth, breakpoint, |ui| {
         cell(ui, available_value_width);
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
@@ -941,6 +1125,232 @@ pub(in crate::app) fn block_flags_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn field_control_identity_survives_a_breakpoint_change() {
+        let ctx = egui::Context::default();
+        let mut ids = Vec::new();
+        for width in [1000.0, 500.0, 1000.0] {
+            crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width, 200.0))),
+                ..Default::default()
+            }, |ui| {
+                foundation_field_row(ui, &field_display_meta("enum"), 0, |ui| {
+                    ids.push(ui.make_persistent_id("enum_dropdown"));
+                });
+            });
+        }
+        assert_eq!(ids[0], ids[1]);
+        assert_eq!(ids[1], ids[2]);
+    }
+
+    #[test]
+    fn string_id_boxes_only_grow_when_the_text_needs_more_space() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let normal = foundation_picker_value_width(ui, "shield_glow_source", 600.0, "Object Functions", "string id", 0.0);
+                for value in ["current_shield_damage".to_owned(), "é".repeat(18)] {
+                    let measured = ui.painter().layout_no_wrap(value.clone(), TextStyle::Monospace.resolve(ui.style()), text_dark()).size().x;
+                    assert!(measured + 10.0 <= normal, "the example text already fits in a normal box");
+                    let width = foundation_picker_value_width(ui, &value, 600.0, "Object Functions", "string id", 0.0);
+                    assert!((width - normal).abs() < 0.1, "{value:?} should not widen a box it already fits in");
+                }
+                let long = "a_very_long_object_function_name_that_needs_more_space";
+                let width = foundation_picker_value_width(ui, long, 600.0, "Object Functions", "string id", 0.0);
+                assert!(width > normal, "long values can still widen their input");
+                let narrow = foundation_picker_value_width(ui, long, 120.0, "Object Functions", "string id", 0.0);
+                assert!(narrow <= 120.0, "growing values respect the available width");
+            });
+        });
+    }
+
+    #[test]
+    fn component_boxes_share_the_scalar_column_and_have_clear_group_spacing() {
+        for width in [280.0, 450.0, 1200.0] {
+            for labels in [
+                &["r", "g", "b"][..], &["a", "r", "g", "b"][..],
+                &["x", "y", "z"][..], &["yaw", "pitch", "roll"][..],
+            ] {
+                for editable in [true, false] {
+                    let ctx = egui::Context::default();
+                    Baboon::configure_context(&ctx);
+                    let parts = labels.iter().map(|label| ((*label).to_owned(), "0".to_owned())).collect::<Vec<_>>();
+                    let mut scalar = egui::Rect::NOTHING;
+                    let mut boxes = Vec::new();
+                    let mut overflow = 0.0;
+                    let mut painted = Vec::new();
+                    for _ in 0..2 {
+                        let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))),
+                            ..Default::default()
+                        }, |ui| {
+                            egui::CentralPanel::default().show(ui, |ui| {
+                                let right = ui.max_rect().right();
+                                super::with_test_edit_context(|edit| {
+                                    draw_foundation_editable_text_row(ui, &field_display_meta("single value"), "0", "", 1, 452.0, "single", edit);
+                                    scalar = ctx.read_response(edit.widget_id(("text", format!("{}|single", edit.tag_key)))).unwrap().rect;
+                                    edit.editable = editable;
+                                    draw_foundation_component_edit_row(ui, &field_display_meta("components"), &parts, "vector", 1, "components", false, edit);
+                                    boxes = labels.iter().map(|label| ctx.read_response(edit.widget_id(
+                                        ("component", format!("{}|components", edit.tag_key), *label))).unwrap().rect).collect();
+                                });
+                                overflow = ui.min_rect().right() - right;
+                            });
+                        });
+                        painted = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                            _ => None,
+                        }).collect::<Vec<_>>();
+                    }
+                    assert!((boxes[0].left() - scalar.left()).abs() < 1.0, "first component aligns at {width}px: {labels:?}");
+                    assert!(overflow < 1.0, "components fit the pane at {width}px");
+                    let first_label = painted.iter().find(|(text, _)| text == labels[0]).unwrap().1;
+                    assert!(first_label.right() <= boxes[0].left() - 2.0, "the first label hangs to the left of its box");
+                    for index in 1..labels.len() {
+                        let label = painted.iter().find(|(text, _)| text == labels[index]).unwrap().1;
+                        assert!(label.left() - boxes[index - 1].right() >= COMPONENT_GROUP_GAP - 0.5,
+                            "component groups have a wider gap at {width}px");
+                        assert!((boxes[index].left() - label.right() - COMPONENT_LABEL_GAP).abs() < 1.0,
+                            "each label stays close to its own input");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compact_values_stay_horizontal_after_references_stack() {
+        let damage = blam_tags::TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let model = blam_tags::TagFile::new(locate_definitions_root().join("halo3_mcc/model.json")).unwrap();
+        let damage_root = damage.root();
+        let model_root = model.root();
+        let number = damage_root.fields_all().find(|field| field.clean_name() == "damage lower bound").unwrap();
+        let identifier = model_root.fields_all().find(|field| matches!(field.value(), Some(TagFieldData::StringId(_)))).unwrap();
+        let reference = model_root.fields_all().find(|field| matches!(field.value(), Some(TagFieldData::TagReference(_)))).unwrap();
+        for width in [450.0, 660.0, 1100.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut rects = Vec::new();
+            let mut painted = Vec::new();
+            let mut overflow = 0.0;
+            for _ in 0..2 {
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 800.0))),
+                    ..Default::default()
+                }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let right = ui.max_rect().right();
+                        rects.clear();
+                        super::with_test_edit_context(|edit| {
+                            for (label, field, type_name, path, widget) in [
+                                ("compact number", number, "real", "number", "text"),
+                                ("compact identifier", identifier, "string id", "identifier", "text"),
+                                ("wide reference", reference, "tag reference", "reference", "tag_ref"),
+                            ] {
+                                draw_foundation_value_row(ui, field, &field_display_meta(label), type_name,
+                                    &field.value().unwrap(), &TagNameIndex::default(), 0, path, edit, None, 520.0);
+                                rects.push(ctx.read_response(edit.widget_id((widget, format!("{}|{path}", edit.tag_key)))).unwrap().rect);
+                            }
+                        });
+                        overflow = ui.min_rect().right() - right;
+                    });
+                });
+                painted = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                    _ => None,
+                }).collect::<Vec<_>>();
+            }
+            assert!(overflow < 1.0, "fields fit the {width}px pane");
+            for (index, label) in ["compact number", "compact identifier", "wide reference"].iter().enumerate() {
+                let label_rect = painted.iter().find(|(text, _)| text == label).unwrap().1;
+                let stacked = width < 500.0 || (index == 2 && width < 760.0);
+                if stacked {
+                    assert!(label_rect.bottom() <= rects[index].top(), "{label} stacks at {width}px");
+                } else {
+                    assert!((label_rect.center().y - rects[index].center().y).abs() < 3.0,
+                        "{label} stays horizontal at {width}px");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn narrow_fields_stack_labels_and_keep_block_controls_within_the_pane() {
+        let tag = blam_tags::TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let root = tag.root();
+        let flags = root.fields_all().find(|field|
+            matches!(field.options(), Some(blam_tags::TagOptions::Flags(options)) if options.len() >= 2)).unwrap();
+        for width in [280.0, 480.0, 720.0, 1200.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut text_rect = egui::Rect::NOTHING;
+            let mut label_rect = egui::Rect::NOTHING;
+            let mut reference_rect = egui::Rect::NOTHING;
+            let mut caption_rect = egui::Rect::NOTHING;
+            let mut reference_caption = egui::Rect::NOTHING;
+            let mut block_title_rect = egui::Rect::NOTHING;
+            let mut header_top = 0.0;
+            let mut overflow = 0.0_f32;
+            let mut header_height = 0.0;
+            let mut text_stacked = false;
+            for _ in 0..3 {
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 1400.0))),
+                    ..Default::default()
+                }, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let right = ui.max_rect().right();
+                        super::with_test_edit_context(|edit| {
+                            let meta = field_display_meta("responsive field");
+                            text_stacked = ui.available_width() < foundation_field_breakpoint(ui, 1, 300.0, "world units");
+                            let id = edit.widget_id(("text", format!("{}|text", edit.tag_key)));
+                            draw_foundation_editable_text_row(ui, &meta, &"long value ".repeat(10), "world units", 1, 300.0, "text", edit);
+                            text_rect = ctx.read_response(id).unwrap().rect;
+                            draw_foundation_tag_reference_row(ui, &field_display_meta("reference"), "NONE", None, None, 1, "reference", edit, 520.0);
+                            reference_rect = ctx.read_response(edit.widget_id(("tag_ref", format!("{}|reference", edit.tag_key)))).unwrap().rect;
+                            draw_foundation_enum_row(ui, &field_display_meta("option"), &["one", "two"], Some(0), 1, "option", edit);
+                            draw_foundation_flags_row(ui, &field_display_meta("flags"), 0, &[], flags, 1, "flags", edit);
+                        });
+                        let top = ui.cursor().top();
+                        header_top = top;
+                        draw_foundation_block_control(ui, "A block with a longer title", "0. example", 0, 4,
+                            None, true, true, "responsive", "test", "block", 1, true, None, false,
+                            PasteGate::Empty, Some("160 bytes"), |index| format!("{index}. example"), |_| {});
+                        header_height = ui.cursor().top() - top;
+                        overflow = ui.min_rect().right() - right;
+                    });
+                });
+                label_rect = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "responsive field" =>
+                        Some(text.galley.rect.translate(text.pos.to_vec2())),
+                    _ => None,
+                }).unwrap();
+                let text_rect = |needle: &str| output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().starts_with(needle) =>
+                        Some(text.galley.rect.translate(text.pos.to_vec2())),
+                    _ => None,
+                }).unwrap();
+                caption_rect = text_rect("world units");
+                reference_caption = text_rect("tag reference");
+                block_title_rect = text_rect("A Block");
+            }
+            assert!(overflow < 1.0, "{width}px pane overflowed by {overflow}px");
+            if text_stacked {
+                assert!(label_rect.bottom() <= text_rect.top(), "the label moves above its input at {width}px");
+                assert!((label_rect.left() - text_rect.left()).abs() < 1.0, "stacked labels align with their fields at {width}px");
+            } else {
+                assert!((label_rect.center().y - text_rect.center().y).abs() < 3.0);
+            }
+            assert!((caption_rect.center().y - text_rect.center().y).abs() < 3.0, "type captions stay beside their controls at {width}px");
+            assert!((reference_caption.center().y - reference_rect.center().y).abs() < 3.0, "reference type captions stay beside their buttons at {width}px");
+            if width < 900.0 {
+                assert!(block_title_rect.top() < header_top + 24.0, "block titles stay on the first row at {width}px");
+                assert!(header_height > 60.0, "the block toolbar stacks at {width}px");
+            }
+        }
+    }
 
     /// A block-flags field lists its target block's elements as checkboxes,
     /// named as the editor names them, and a click sets the element's bit.
@@ -1601,8 +2011,124 @@ mod tests {
     #[derive(Clone, Copy)]
     enum Marked {
         Editable,
+        EditableInExpertMode,
         ReadOnly,
         ReadOnlyInExpertMode,
+    }
+
+    #[test]
+    fn fractional_hud_offsets_warn_then_round_when_committed() {
+        for (text, expected) in [("200.5", 201), ("-200.5", -201), ("200.4", 200), ("0.4", 0)] {
+            for route in ["enter", "blur", "save"] {
+                let mut tag = TagFile::new_classic(
+                    crate::app::test_definition_path("halo2_mcc/new_hud_definition.json"),
+                    blam_tags::classic::ClassicEngine::Halo2V4,
+                ).unwrap();
+                crate::core::document::apply::apply_one_block_op(&mut tag, &BlockOp {
+                    path: "bitmap widgets".into(), kind: BlockOpKind::Add,
+                }).unwrap();
+                let path = "bitmap widgets[0]/fullscreen offset";
+                let ctx = egui::Context::default();
+                with_test_edit_context(|edit| {
+                    let buffer_key = format!("{}|{path}", edit.tag_key);
+                    let key = format!("{buffer_key}|component|x");
+                    let draft = edit.buffers.draft_mut(&key, "0");
+                    draft.text = text.to_owned();
+                    draft.changed = true;
+                    let frame = |tag: &TagFile, events, edit: &mut FieldEditContext<'_>| {
+                        crate::app::run_ui_test(&ctx, egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(900.0, 250.0))),
+                            events, ..Default::default()
+                        }, |ui| {
+                            egui::CentralPanel::default().show(ui, |ui| {
+                                let field = tag.root().field_path(path).unwrap();
+                                draw_foundation_value_row(ui, field, &field_display_meta(field.name()),
+                                    field.type_name(), &field.value().unwrap(), &TagNameIndex::default(),
+                                    0, path, edit, None, 300.0);
+                            });
+                        })
+                    };
+                    let output = frame(&tag, vec![], edit);
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Rect(rect) if rect.fill == unapplied_value_fill())),
+                        "fractional integer coordinates need an amber field");
+                    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Text(text) if text.galley.text().contains("round"))),
+                        "rounding hints belong in the tooltip, not under the row");
+                    ctx.memory_mut(|memory| memory.request_focus(edit.widget_id(("component", &buffer_key, "x"))));
+                    frame(&tag, vec![], edit);
+                    match route {
+                        "enter" => { frame(&tag, vec![egui::Event::Key {
+                            key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }], edit); }
+                        "blur" => {
+                            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("another field")));
+                            frame(&tag, vec![], edit);
+                        }
+                        _ => {
+                            let mut commits = edit.buffers.take_uncommitted(DraftFlush::All);
+                            assert_eq!(commits.len(), 1);
+                            edit.push_ops(commits.remove(0).1.unwrap());
+                        }
+                    }
+                    assert_eq!(edit.pending.len(), 1, "{route}: {text}");
+                    let pending = edit.pending.remove(0);
+                    crate::core::document::apply::apply_field_edit(&mut tag, path, &pending.input).unwrap();
+                    assert!(matches!(tag.root().field_path(path).unwrap().value(),
+                        Some(TagFieldData::Point2d(point)) if point.x == expected && point.y == 0));
+                    let output = frame(&tag, vec![], edit);
+                    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Rect(rect) if rect.fill == unapplied_value_fill())));
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn halo2_hud_screen_offsets_edit_in_normal_and_expert_modes() {
+        for block in ["bitmap widgets", "text widgets"] {
+            for name in ["fullscreen offset", "halfscreen offset", "quarterscreen offset"] {
+                for marked in [Marked::Editable, Marked::EditableInExpertMode] {
+                    let mut tag = TagFile::new_classic(
+                        crate::app::test_definition_path("halo2_mcc/new_hud_definition.json"),
+                        blam_tags::classic::ClassicEngine::Halo2V4,
+                    ).unwrap();
+                    crate::core::document::apply::apply_one_block_op(&mut tag, &BlockOp {
+                        path: block.to_owned(), kind: BlockOpKind::Add,
+                    }).unwrap();
+                    let path = format!("{block}[0]/{name}");
+                    tag.root_mut().field_path_mut(&path).unwrap().set(
+                        TagFieldData::Point2d(blam_tags::math::Point2d { x: 0, y: 17 }),
+                    ).unwrap();
+                    let pending = type_into_first_value_cell(&tag, &path, "-123", marked);
+                    assert_eq!(pending.len(), 1, "{path} must accept an offset edit");
+                    crate::core::document::apply::apply_field_edit(
+                        &mut tag, &path, &pending[0].input,
+                    ).unwrap();
+                    assert!(matches!(tag.root().field_path(&path).unwrap().value(),
+                        Some(TagFieldData::Point2d(point)) if point.x == -123 && point.y == 17),
+                        "editing x must preserve y: {path}");
+                    let field = tag.root().field_path(&path).unwrap();
+                    for invalid in ["32768, 0", "0, -32769", "NaN, 0", "inf, 0", "1", "1, 2, 3", "1,,2", ",2"] {
+                        assert!(crate::core::document::value::parse_gui_field_value(&field, invalid).is_err(), "{invalid}");
+                    }
+                    crate::core::document::apply::apply_field_edit(
+                        &mut tag, &path, "-32768, 32767",
+                    ).unwrap();
+                    let bytes = tag.write_to_bytes().unwrap();
+                    let reopened = blam_tags::classic::read_classic_tag_file(
+                        &bytes,
+                        blam_tags::layout::TagLayout::from_json(
+                            crate::app::test_definition_path("halo2_mcc/new_hud_definition.json"),
+                        ).unwrap(),
+                    ).unwrap();
+                    assert!(matches!(reopened.root().field_path(&path).unwrap().value(),
+                        Some(TagFieldData::Point2d(point)) if point.x == i16::MIN && point.y == i16::MAX),
+                        "integer offsets must survive saving: {path}");
+                }
+            }
+        }
     }
 
     /// A field the definitions mark read-only is shown but not editable,
@@ -1629,7 +2155,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut pending = Vec::new();
         with_test_edit_context(|edit| {
-            edit.expert_mode = matches!(marked, Marked::ReadOnlyInExpertMode);
+            edit.expert_mode = matches!(marked, Marked::ReadOnlyInExpertMode | Marked::EditableInExpertMode);
             let frame = |events: Vec<egui::Event>, edit: &mut FieldEditContext<'_>| {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 200.0))),
@@ -1641,7 +2167,7 @@ mod tests {
                         let field = tag.root().field_path(path).expect("color field");
                         let value = field.value().expect("color value");
                         let mut meta = field_display_meta(field.name());
-                        meta.read_only = !matches!(marked, Marked::Editable);
+                        meta.read_only = matches!(marked, Marked::ReadOnly | Marked::ReadOnlyInExpertMode);
                         draw_foundation_value_row(
                             ui, field, &meta, field.type_name(), &value,
                             &TagNameIndex::default(), 0, path, edit, None, 300.0,

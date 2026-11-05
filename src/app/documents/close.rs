@@ -97,6 +97,12 @@ impl Baboon {
     }
 
     pub(in crate::app) fn close_tab(&mut self, key: &str) {
+        self.remember_closed_tag_keys(self.model.active, vec![key.to_owned()]);
+        self.close_tab_without_history(key);
+    }
+
+    /// Retire a replaced tab during Save As without recording a user close.
+    pub(in crate::app) fn close_tab_without_history(&mut self, key: &str) {
         // `close_tag_pane` re-derives the open set and moves the selection off
         // a removed tag, so there is nothing to fix up afterwards.
         self.kit_and_view(self.model.active).close_tag_pane(key);
@@ -277,6 +283,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn close_all_tabs(&mut self) {
+        self.remember_closed_tag_keys(self.model.active, self.views[self.model.kits[self.model.active].id].tabs_from_tree());
         let id = self.model.kits[self.model.active].id;
         self.views[self.model.kits[self.model.active].id].tag_tree = egui_tiles::Tree::empty(tag_tree_id(id));
         self.model.kits[self.model.active].open_tabs.clear();
@@ -287,6 +294,8 @@ impl Baboon {
     }
 
     pub(in crate::app) fn close_all_tabs_but(&mut self, key: &str) {
+        let closing = self.views[self.model.kits[self.model.active].id].tabs_from_tree().into_iter().filter(|open| open != key).collect();
+        self.remember_closed_tag_keys(self.model.active, closing);
         for open in self.views[self.model.kits[self.model.active].id].tabs_from_tree() {
             if open != key {
                 self.kit_and_view(self.model.active).close_tag_pane(&open);
@@ -601,7 +610,7 @@ pub(in crate::app) fn render_save_changes_prompt(
             ScrollArea::both().max_height(150.0).show(ui, |ui| {
                 for dirty in &mut prompt.dirty_tags {
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut dirty.checked, "");
+                        ui.baboon_checkbox(&mut dirty.checked, "");
                         ui.label(RichText::new(&dirty.path).color(text_dark()));
                     });
                 }
@@ -885,6 +894,7 @@ mod tests {
         assert!(app.dialogs.get::<SaveChangesPrompt>().is_none());
         assert!(!tab_open(&app, &key));
         assert!(!app.model.kits[0].parsed_tags.contains_key(&key), "the document is dropped");
+        assert_eq!(app.model.prefs.editing_kit_recents[0].tags, vec![tag_path::to_relative(MODEL)]);
     }
 
     #[test]
@@ -944,6 +954,7 @@ mod tests {
                 .is_none_or(|prompt| prompt.dirty_tags.is_empty())
         );
         assert_eq!(app.model.status, "Saved 1 file(s)");
+        assert_eq!(app.model.prefs.editing_kit_recents[0].tags, vec![tag_path::to_relative(MODEL)]);
         assert!(!tab_open(&app, &key), "the close went ahead");
         assert!(tab_open(&app, &other));
         // The reference the tag already held is written back untouched.
@@ -964,6 +975,7 @@ mod tests {
         driver.click(&mut app, "Don't Save");
 
         assert_eq!(fs::read(kit.path(MODEL)).unwrap(), before, "nothing written");
+        assert_eq!(app.model.prefs.editing_kit_recents[0].tags, vec![tag_path::to_relative(MODEL)]);
         assert!(app.dialogs.get::<SaveChangesPrompt>().is_none());
         assert!(!tab_open(&app, &key));
         assert!(!app.model.kits[0].parsed_tags.contains_key(&key));
@@ -987,6 +999,7 @@ mod tests {
         assert!(is_dirty(&app, &key));
         assert_eq!(distance_in_document(&app, &key), 12.5);
         assert_eq!(distance_on_disk(&kit, MODEL), 0.0);
+        assert!(app.model.prefs.editing_kit_recents.is_empty(), "cancel is not a completed close");
     }
 
     /// An unchecked tag is not written. The Save itself "succeeds" ("No files
