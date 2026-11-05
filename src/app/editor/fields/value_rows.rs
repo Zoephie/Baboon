@@ -227,6 +227,7 @@ pub(in crate::app) fn draw_foundation_value_row(
             field_suffix(meta, type_name).as_str(),
             depth,
             path,
+            matches!(value, TagFieldData::Point2d(_)),
             edit,
         );
         return;
@@ -269,16 +270,38 @@ pub(in crate::app) fn draw_foundation_value_row(
         return;
     }
     if let Some(value) = raw_string_id {
+        let function_lookup = is_h2_hud_function_tag(edit.game, edit.group_tag)
+            && matches!(field.name(), "input name" | "range name");
+        let function_menu = function_lookup.then(|| {
+            let menu_id = egui::Id::new(("native function catalog", edit.definitions_root, edit.game));
+            ui.data_mut(|data| {
+                data.get_temp_mut_or_insert_with::<Option<std::sync::Arc<blam_tags::string_editor::Menu>>>(menu_id, || {
+                    string_editors::string_editors(edit.definitions_root, edit.game)
+                        .and_then(|editors| editors.built_in_function_menu()).map(std::sync::Arc::new)
+                }).clone()
+            })
+        }).flatten();
         let enabled = edit.can_edit(meta);
         let buffer_key = format!("{}|{}", edit.tag_key, path);
         let id = edit.widget_id(("text", &buffer_key));
+        let function_menu_id = edit.widget_id(("function choices", &buffer_key));
         let draft = edit.buffers.draft_mut(&buffer_key, value);
-        draw_foundation_cell_row_with_min_width(ui, meta, &field_suffix(meta, type_name), depth, 150.0, |ui, available_width| {
-            let width = foundation_value_width(ui, &draft.text, available_width);
+        let menu_width = if function_lookup { 48.0 + ui.spacing().item_spacing.x } else { 0.0 };
+        draw_foundation_cell_row_with_min_width(ui, meta, &field_suffix(meta, type_name), depth, 150.0 + menu_width, |ui, available_width| {
+            let width = foundation_value_width(ui, &draft.text, available_width - menu_width);
             let response = foundation_string_id_value_cell(ui, &mut draft.text, width, id, enabled, false);
             draft.note_response(&response);
             if enabled && draft.should_commit(ui, &response) { edit.pending.extend(field_edit_ops(path, &draft.text).pending); }
             draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, path));
+            // Culling offscreen rows changes automatic UI IDs. Anchor the
+            // popup to this field so focusing its search cannot replace it.
+            let picked = function_lookup && ui.scope_builder(egui::UiBuilder::new().id(function_menu_id), |ui| {
+                function_name_suggestions(ui, &buffer_key, &mut draft.text, enabled, function_menu.as_deref())
+            }).inner;
+            if picked {
+                edit.pending.extend(field_edit_ops(path, &draft.text).pending);
+                draft.mark_committed();
+            }
         });
         return;
     }
@@ -375,7 +398,7 @@ pub(in crate::app) fn draw_foundation_color_row(
     foundation_component_row(ui, meta, depth, &parts, |ui| {
         const SWATCH_WIDTH: f32 = 48.0;
         let width = foundation_component_width(ui, &parts, 76.0, SWATCH_WIDTH + ui.spacing().item_spacing.x);
-        draw_foundation_component_cells(ui, &parts, width, path, editable, edit);
+        draw_foundation_component_cells(ui, &parts, width, path, editable, false, edit);
 
         let response = color_preview_button(ui, Vec2::new(SWATCH_WIDTH, BUTTON_HEIGHT), swatch);
         let response = response
@@ -511,16 +534,33 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
     suffix: &str,
     depth: usize,
     path: &str,
+    integer_coordinates: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
     foundation_component_row(ui, meta, depth, parts, |ui| {
         let editable = edit.can_edit(meta);
         let width = foundation_component_width(ui, parts, 92.0, foundation_caption_space(ui, suffix));
-        draw_foundation_component_cells(ui, parts, width, path, editable, edit);
+        draw_foundation_component_cells(ui, parts, width, path, editable, integer_coordinates, edit);
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
     });
+}
+
+fn integer_coordinate_warning(text: &str) -> Option<String> {
+    if text.trim().parse::<i16>().is_ok() { return None; }
+    Some(match crate::core::document::value::parse_integer_point_coordinate(text) {
+        Ok(rounded) => format!("Will round to {rounded} on Enter or when leaving the field."),
+        Err(reason) => reason,
+    })
+}
+
+fn component_input_ops(path: &str, texts: &[&str], integer_coordinates: bool) -> Result<DeferredOps, String> {
+    if !integer_coordinates { return Ok(field_edit_ops(path, &components_input(texts))); }
+    let coordinates = texts.iter().map(|text|
+        crate::core::document::value::parse_integer_point_coordinate(text).map(|value| value.to_string())
+    ).collect::<Result<Vec<_>, _>>()?;
+    Ok(field_edit_ops(path, &coordinates.join(", ")))
 }
 
 /// One labelled cell per component, inside the caller's row layout. When
@@ -533,6 +573,7 @@ fn draw_foundation_component_cells(
     width: f32,
     path: &str,
     editable: bool,
+    integer_coordinates: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
     let buffer_key = format!("{}|{}", edit.tag_key, path);
@@ -543,14 +584,26 @@ fn draw_foundation_component_cells(
     let mut drafts = Vec::with_capacity(parts.len());
     for (label, value) in parts {
         let key = format!("{buffer_key}|component|{label}");
-        let draft = edit.buffers.take(&key, value);
+        let mut draft = edit.buffers.take(&key, value);
+        // Saving flushes drafts before this row draws. Clear a rounded draft
+        // even when it rounded back to the value the tag already contained.
+        if integer_coordinates && !draft.changed
+            && crate::core::document::value::parse_integer_point_coordinate(&draft.text)
+                .is_ok_and(|rounded| rounded.to_string() == value.trim()) {
+            draft.set_clean(value);
+        }
         drafts.push((key, draft));
     }
 
     let mut responses = Vec::with_capacity(parts.len());
-    for (index, ((label, _), (_, draft))) in parts.iter().zip(drafts.iter_mut()).enumerate() {
+    for (index, ((label, value), (_, draft))) in parts.iter().zip(drafts.iter_mut()).enumerate() {
+        if integer_coordinates && ui.memory(|memory| memory.has_focus(ids[index]) || memory.had_focus_last_frame(ids[index]))
+            && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            draft.set_clean(value);
+        }
+        let warning = integer_coordinates.then(|| integer_coordinate_warning(&draft.text)).flatten();
         let response = foundation_component_cell(ui, index, label, width,
-            |ui| foundation_value_cell(ui, &mut draft.text, width, ids[index], editable));
+            |ui| foundation_value_cell_with_warning(ui, &mut draft.text, width, ids[index], editable, warning.as_deref()));
         if editable {
             draft.note_response(&response);
         }
@@ -565,7 +618,19 @@ fn draw_foundation_component_cells(
         }
         if committed {
             let texts = drafts.iter().map(|(_, draft)| draft.text.as_str()).collect::<Vec<_>>();
-            edit.push_ops(field_edit_ops(path, &components_input(&texts)));
+            match component_input_ops(path, &texts, integer_coordinates) {
+                Ok(ops) => {
+                    edit.push_ops(ops);
+                    if integer_coordinates {
+                        for (_, draft) in &mut drafts {
+                            if let Ok(value) = crate::core::document::value::parse_integer_point_coordinate(&draft.text) {
+                                draft.text = value.to_string();
+                            }
+                        }
+                    }
+                }
+                Err(reason) => { if let Some(status) = edit.status.as_deref_mut() { *status = reason; } }
+            }
             for (_, draft) in &mut drafts {
                 draft.mark_committed();
             }
@@ -575,7 +640,7 @@ fn draw_foundation_component_cells(
             let commit = DraftCommit::new(
                 edit.tag_key,
                 drafts.iter().map(|(key, _)| key.clone()).collect(),
-                move |texts| Ok(field_edit_ops(&path, &components_input(texts))),
+                move |texts| component_input_ops(&path, texts, integer_coordinates),
             );
             for (_, draft) in &mut drafts {
                 draft.keep_commit(|| commit.clone());
@@ -1127,7 +1192,7 @@ mod tests {
                                     draw_foundation_editable_text_row(ui, &field_display_meta("single value"), "0", "", 1, 452.0, "single", edit);
                                     scalar = ctx.read_response(edit.widget_id(("text", format!("{}|single", edit.tag_key)))).unwrap().rect;
                                     edit.editable = editable;
-                                    draw_foundation_component_edit_row(ui, &field_display_meta("components"), &parts, "vector", 1, "components", edit);
+                                    draw_foundation_component_edit_row(ui, &field_display_meta("components"), &parts, "vector", 1, "components", false, edit);
                                     boxes = labels.iter().map(|label| ctx.read_response(edit.widget_id(
                                         ("component", format!("{}|components", edit.tag_key), *label))).unwrap().rect).collect();
                                 });
@@ -1946,8 +2011,124 @@ mod tests {
     #[derive(Clone, Copy)]
     enum Marked {
         Editable,
+        EditableInExpertMode,
         ReadOnly,
         ReadOnlyInExpertMode,
+    }
+
+    #[test]
+    fn fractional_hud_offsets_warn_then_round_when_committed() {
+        for (text, expected) in [("200.5", 201), ("-200.5", -201), ("200.4", 200), ("0.4", 0)] {
+            for route in ["enter", "blur", "save"] {
+                let mut tag = TagFile::new_classic(
+                    crate::app::test_definition_path("halo2_mcc/new_hud_definition.json"),
+                    blam_tags::classic::ClassicEngine::Halo2V4,
+                ).unwrap();
+                crate::core::document::apply::apply_one_block_op(&mut tag, &BlockOp {
+                    path: "bitmap widgets".into(), kind: BlockOpKind::Add,
+                }).unwrap();
+                let path = "bitmap widgets[0]/fullscreen offset";
+                let ctx = egui::Context::default();
+                with_test_edit_context(|edit| {
+                    let buffer_key = format!("{}|{path}", edit.tag_key);
+                    let key = format!("{buffer_key}|component|x");
+                    let draft = edit.buffers.draft_mut(&key, "0");
+                    draft.text = text.to_owned();
+                    draft.changed = true;
+                    let frame = |tag: &TagFile, events, edit: &mut FieldEditContext<'_>| {
+                        crate::app::run_ui_test(&ctx, egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(900.0, 250.0))),
+                            events, ..Default::default()
+                        }, |ui| {
+                            egui::CentralPanel::default().show(ui, |ui| {
+                                let field = tag.root().field_path(path).unwrap();
+                                draw_foundation_value_row(ui, field, &field_display_meta(field.name()),
+                                    field.type_name(), &field.value().unwrap(), &TagNameIndex::default(),
+                                    0, path, edit, None, 300.0);
+                            });
+                        })
+                    };
+                    let output = frame(&tag, vec![], edit);
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Rect(rect) if rect.fill == unapplied_value_fill())),
+                        "fractional integer coordinates need an amber field");
+                    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Text(text) if text.galley.text().contains("round"))),
+                        "rounding hints belong in the tooltip, not under the row");
+                    ctx.memory_mut(|memory| memory.request_focus(edit.widget_id(("component", &buffer_key, "x"))));
+                    frame(&tag, vec![], edit);
+                    match route {
+                        "enter" => { frame(&tag, vec![egui::Event::Key {
+                            key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }], edit); }
+                        "blur" => {
+                            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("another field")));
+                            frame(&tag, vec![], edit);
+                        }
+                        _ => {
+                            let mut commits = edit.buffers.take_uncommitted(DraftFlush::All);
+                            assert_eq!(commits.len(), 1);
+                            edit.push_ops(commits.remove(0).1.unwrap());
+                        }
+                    }
+                    assert_eq!(edit.pending.len(), 1, "{route}: {text}");
+                    let pending = edit.pending.remove(0);
+                    crate::core::document::apply::apply_field_edit(&mut tag, path, &pending.input).unwrap();
+                    assert!(matches!(tag.root().field_path(path).unwrap().value(),
+                        Some(TagFieldData::Point2d(point)) if point.x == expected && point.y == 0));
+                    let output = frame(&tag, vec![], edit);
+                    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Rect(rect) if rect.fill == unapplied_value_fill())));
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn halo2_hud_screen_offsets_edit_in_normal_and_expert_modes() {
+        for block in ["bitmap widgets", "text widgets"] {
+            for name in ["fullscreen offset", "halfscreen offset", "quarterscreen offset"] {
+                for marked in [Marked::Editable, Marked::EditableInExpertMode] {
+                    let mut tag = TagFile::new_classic(
+                        crate::app::test_definition_path("halo2_mcc/new_hud_definition.json"),
+                        blam_tags::classic::ClassicEngine::Halo2V4,
+                    ).unwrap();
+                    crate::core::document::apply::apply_one_block_op(&mut tag, &BlockOp {
+                        path: block.to_owned(), kind: BlockOpKind::Add,
+                    }).unwrap();
+                    let path = format!("{block}[0]/{name}");
+                    tag.root_mut().field_path_mut(&path).unwrap().set(
+                        TagFieldData::Point2d(blam_tags::math::Point2d { x: 0, y: 17 }),
+                    ).unwrap();
+                    let pending = type_into_first_value_cell(&tag, &path, "-123", marked);
+                    assert_eq!(pending.len(), 1, "{path} must accept an offset edit");
+                    crate::core::document::apply::apply_field_edit(
+                        &mut tag, &path, &pending[0].input,
+                    ).unwrap();
+                    assert!(matches!(tag.root().field_path(&path).unwrap().value(),
+                        Some(TagFieldData::Point2d(point)) if point.x == -123 && point.y == 17),
+                        "editing x must preserve y: {path}");
+                    let field = tag.root().field_path(&path).unwrap();
+                    for invalid in ["32768, 0", "0, -32769", "NaN, 0", "inf, 0", "1", "1, 2, 3", "1,,2", ",2"] {
+                        assert!(crate::core::document::value::parse_gui_field_value(&field, invalid).is_err(), "{invalid}");
+                    }
+                    crate::core::document::apply::apply_field_edit(
+                        &mut tag, &path, "-32768, 32767",
+                    ).unwrap();
+                    let bytes = tag.write_to_bytes().unwrap();
+                    let reopened = blam_tags::classic::read_classic_tag_file(
+                        &bytes,
+                        blam_tags::layout::TagLayout::from_json(
+                            crate::app::test_definition_path("halo2_mcc/new_hud_definition.json"),
+                        ).unwrap(),
+                    ).unwrap();
+                    assert!(matches!(reopened.root().field_path(&path).unwrap().value(),
+                        Some(TagFieldData::Point2d(point)) if point.x == i16::MIN && point.y == i16::MAX),
+                        "integer offsets must survive saving: {path}");
+                }
+            }
+        }
     }
 
     /// A field the definitions mark read-only is shown but not editable,
@@ -1974,7 +2155,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut pending = Vec::new();
         with_test_edit_context(|edit| {
-            edit.expert_mode = matches!(marked, Marked::ReadOnlyInExpertMode);
+            edit.expert_mode = matches!(marked, Marked::ReadOnlyInExpertMode | Marked::EditableInExpertMode);
             let frame = |events: Vec<egui::Event>, edit: &mut FieldEditContext<'_>| {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 200.0))),
@@ -1986,7 +2167,7 @@ mod tests {
                         let field = tag.root().field_path(path).expect("color field");
                         let value = field.value().expect("color value");
                         let mut meta = field_display_meta(field.name());
-                        meta.read_only = !matches!(marked, Marked::Editable);
+                        meta.read_only = matches!(marked, Marked::ReadOnly | Marked::ReadOnlyInExpertMode);
                         draw_foundation_value_row(
                             ui, field, &meta, field.type_name(), &value,
                             &TagNameIndex::default(), 0, path, edit, None, 300.0,

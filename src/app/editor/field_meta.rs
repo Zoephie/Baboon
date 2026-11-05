@@ -3,6 +3,11 @@
 
 use super::*;
 
+/// Presentation preserves literal bracket annotations as well as `/`.
+pub(in crate::app) fn display_field_name(name: &str) -> String {
+    blam_tags::parse_field_name(name).display().into_owned()
+}
+
 pub(in crate::app) fn field_display_meta(name: &str) -> FieldDisplayMeta {
     // The engine owns the canonical field-name markup grammar (Foundation's
     // `TagFieldNameInfo`). We map its decomposition onto Baboon's display meta.
@@ -57,6 +62,30 @@ pub(in crate::app) fn enum_option_label(options: &[&str], selected: i64) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn halo2_hud_state_flags_have_distinct_visible_labels() {
+        let path = locate_definitions_root().join("halo2_mcc/new_hud_definition.json");
+        let definition: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(path).unwrap(),
+        ).unwrap();
+        let fields = definition["structs"]["hud_widget_state_definition_struct_2"]["fields"]
+            .as_array().unwrap();
+        let mut labels = std::collections::HashSet::new();
+        for field in fields.iter().filter(|field| field["type"] == "word_flags") {
+            let name = field["name"].as_str().unwrap();
+            let meta = field_display_meta(name);
+            assert_eq!(meta.label, name, "literal YES/NO prefix must remain visible");
+            assert!(!meta.label.is_empty(), "missing HUD state flag label: {name}");
+            assert!(labels.insert(meta.label.clone()), "duplicate HUD state flag label: {name}");
+            assert!(meta.range.is_none(), "HUD flag name interpreted as a numeric range: {name}");
+            assert!(!meta.advanced && !meta.read_only, "HUD state flags need ordinary editing: {name}");
+            let options = definition["enums_flags"][field["definition"].as_str().unwrap()]["options"]
+                .as_array().expect("HUD state flags have named options");
+            assert!(!options.is_empty());
+        }
+        assert_eq!(labels.len(), 8);
+    }
 
     // Editor unit and fixture tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

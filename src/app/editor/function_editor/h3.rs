@@ -56,7 +56,19 @@ fn function_name_input(
         })
         .inner;
     text_edit_cursor_to_start_on_tab_focus(ui, &response);
-    let mut changed = response.changed();
+    response.changed() | function_name_suggestions(ui, id, value, editable, inputs)
+}
+
+/// The same searchable function catalog beside native string-id fields and
+/// the dedicated editor. Picking a suggestion commits the exact function ID.
+pub(in crate::app) fn function_name_suggestions(
+    ui: &mut Ui,
+    id: &str,
+    value: &mut String,
+    editable: bool,
+    inputs: Option<&blam_tags::string_editor::Menu>,
+) -> bool {
+    const MENU_WIDTH: f32 = 48.0;
     use crate::app::editor::string_picker;
     use blam_tags::string_editor::MenuItem;
     let menu_id = ui.make_persistent_id((id, "function choices"));
@@ -104,9 +116,9 @@ fn function_name_input(
     });
     if let Some(picked) = picked {
         *value = picked;
-        changed = true;
+        return true;
     }
-    changed
+    false
 }
 
 fn master_label(master: EngineMasterType) -> &'static str {
@@ -333,30 +345,34 @@ fn draw_function_type_row(
                     *selected_point = 0;
                     changed = true;
                 }
-                icon_menu_button(ui, ButtonIcon::Find, "Zoom and grid", |ui| {
-                    ui.add(
-                        egui::Slider::new(&mut graph_view.zoom_percent, 50.0..=100.0)
-                            .text("Zoom")
-                            .suffix("%")
-                            .step_by(1.0),
-                    );
-                    ui.separator();
-                    ui.label(RichText::new("Grid").color(text_dark().gamma_multiply(0.5)));
-                    for (grid, label) in [
-                        (FunctionGrid::Off, "Off"),
-                        (FunctionGrid::Ten, "10×10"),
-                        (FunctionGrid::Twenty, "20×20"),
-                    ] {
-                        ui.scope(|ui| {
-                            ui.spacing_mut().button_padding = Vec2::new(BUTTON_TEXT_PADDING_X, 2.0);
-                            if ui
-                                .add(egui::Button::selectable(graph_view.grid == grid, label))
-                                .clicked()
-                            {
-                                graph_view.grid = grid;
-                            }
-                        });
-                    }
+                // Basic/constant functions render their output controls without
+                // a graph, so its view settings do not apply to this type.
+                ui.add_enabled_ui(editor.master_type() != EngineMasterType::Basic, |ui| {
+                    icon_menu_button(ui, ButtonIcon::Find, "Zoom and grid", |ui| {
+                        ui.add(
+                            egui::Slider::new(&mut graph_view.zoom_percent, 50.0..=100.0)
+                                .text("Zoom")
+                                .suffix("%")
+                                .step_by(1.0),
+                        );
+                        ui.separator();
+                        ui.label(RichText::new("Grid").color(text_dark().gamma_multiply(0.5)));
+                        for (grid, label) in [
+                            (FunctionGrid::Off, "Off"),
+                            (FunctionGrid::Ten, "10×10"),
+                            (FunctionGrid::Twenty, "20×20"),
+                        ] {
+                            ui.scope(|ui| {
+                                ui.spacing_mut().button_padding = Vec2::new(BUTTON_TEXT_PADDING_X, 2.0);
+                                if ui
+                                    .add(egui::Button::selectable(graph_view.grid == grid, label))
+                                    .clicked()
+                                {
+                                    graph_view.grid = grid;
+                                }
+                            });
+                        }
+                    });
                 });
                 if has_options {
                     icon_menu_button(ui, ButtonIcon::Other, "Curve options", |ui| {
@@ -1439,6 +1455,9 @@ mod tests {
                 }
             }
             assert!(menu.accepts("a_custom_function_not_in_the_catalog"));
+            for name in ["hud_input1", "hud_input2", "hud_input3", "hud_input4"] {
+                assert_eq!(menu.picks().contains(&name), game == GameId::Halo2, "{game:?}: {name}");
+            }
         }
         for game in [GameId::HaloCe, GameId::CampaignEvolved] {
             let editors = crate::app::editor::fields::string_editors::string_editors(Some(&defs), Some(game)).unwrap();

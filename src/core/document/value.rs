@@ -219,6 +219,19 @@ pub(crate) fn parse_gui_field_value(
                 k,
             }))
         }
+        TagFieldType::Point2d => {
+            let parts = if trimmed.contains(',') {
+                trimmed.split(',').map(str::trim).collect::<Vec<_>>()
+            } else {
+                trimmed.split_whitespace().collect::<Vec<_>>()
+            };
+            let [x, y]: [&str; 2] = parts.try_into()
+                .map_err(|_| "expected 2 integer coordinates for point 2d".to_owned())?;
+            Ok(TagFieldData::Point2d(blam_tags::math::Point2d {
+                x: parse_integer_point_coordinate(x)?,
+                y: parse_integer_point_coordinate(y)?,
+            }))
+        }
         TagFieldType::RealPoint2d => {
             let [x, y] = parse_float_channels::<2>(trimmed, "real point 2d")?;
             Ok(TagFieldData::RealPoint2d(blam_tags::math::RealPoint2d {
@@ -372,6 +385,17 @@ pub(crate) fn parse_gui_field_value(
             field.type_name()
         )),
     }
+}
+
+/// Integer HUD coordinates accept decimal input and round when applied.
+pub(crate) fn parse_integer_point_coordinate(input: &str) -> Result<i16, String> {
+    let message = "Enter a number that rounds to a whole number from -32768 to 32767.";
+    let number = input.trim().parse::<f64>().map_err(|_| message.to_owned())?;
+    let rounded = number.round();
+    if !rounded.is_finite() || rounded < i16::MIN as f64 || rounded > i16::MAX as f64 {
+        return Err(message.to_owned());
+    }
+    Ok(rounded as i16)
 }
 
 /// Decode a contiguous lowercase/uppercase hex string (no separators)

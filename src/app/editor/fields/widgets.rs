@@ -280,6 +280,23 @@ pub(in crate::app) fn foundation_value_cell(
     foundation_value_cell_with_error(ui, text, width, id, editable, false)
 }
 
+/// A value box using the shared amber state for an unapplied numeric draft.
+pub(in crate::app) fn foundation_value_cell_with_warning(
+    ui: &mut Ui, text: &mut String, width: f32, id: egui::Id,
+    editable: bool, warning: Option<&str>,
+) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+    let fill = warning.map(|_| unapplied_value_fill());
+    let response = if editable {
+        foundation_value_text_filled(ui, rect, text, Some(id), text_dark(), VALUE_PADDING, fill, None)
+    } else {
+        foundation_value_text_filled(ui, rect, &mut text.as_str(), Some(id), text_dark(), VALUE_PADDING, fill, None)
+    };
+    if let Some(warning) = warning {
+        response.on_hover_text(RichText::new(warning).color(unapplied_value_text()))
+    } else { response }
+}
+
 /// A value box using the shared error fill, text and border when invalid.
 pub(in crate::app) fn foundation_value_cell_with_error(
     ui: &mut Ui,
@@ -609,6 +626,10 @@ pub(in crate::app) fn foundation_editable_component_parts(
     value: &TagFieldData,
 ) -> Option<Vec<(String, String)>> {
     match value {
+        TagFieldData::Point2d(p) => Some(vec![
+            ("x".to_owned(), p.x.to_string()),
+            ("y".to_owned(), p.y.to_string()),
+        ]),
         TagFieldData::RealPoint2d(p) => Some(vec![
             ("x".to_owned(), fmt_real(p.x)),
             ("y".to_owned(), fmt_real(p.y)),
