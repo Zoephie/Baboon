@@ -13,7 +13,7 @@ use super::ce::lights::{CeFlareView, CeSprite, posed_on};
 use super::h3_effects::{
     H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
 };
-use super::h2_functions::H2FunctionValues;
+use super::h2::functions::H2FunctionValues;
 use blam_tags::tag_function::transition_function_evaluate;
 
 use super::h2_passes::{H2Image, tag_function_at};

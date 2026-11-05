@@ -12,7 +12,7 @@ use super::attachment::MarkerFrame;
 use super::h3_effects::adopt_event_function;
 use super::ce::attachments::elements;
 use super::ce::lights::CeFlareView;
-use super::h2_functions::H2FunctionValues;
+use super::h2::functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;
 use super::h3_effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_runs_by};

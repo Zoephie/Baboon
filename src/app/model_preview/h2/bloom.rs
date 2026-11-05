@@ -114,14 +114,14 @@ impl Surface {
     }
 }
 
-pub(super) struct H2Bloom {
+pub(in crate::app::model_preview) struct H2Bloom {
     program: glow::NativeProgram,
     vertex_array: glow::NativeVertexArray,
     surfaces: Option<([Surface; 2], [i32; 2])>,
 }
 
 impl H2Bloom {
-    pub(super) unsafe fn new(gl: &glow::Context, version: &str) -> Option<Self> {
+    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, version: &str) -> Option<Self> {
         unsafe {
             let program = gl.create_program().ok()?;
             let mut shaders = Vec::new();
@@ -154,7 +154,7 @@ impl H2Bloom {
 
     /// Add the glow of `scene`, whose alpha holds the mask, to the framebuffer
     /// bound for it. Leaves that framebuffer bound.
-    pub(super) unsafe fn apply(
+    pub(in crate::app::model_preview) unsafe fn apply(
         &mut self,
         gl: &glow::Context,
         scene_framebuffer: glow::NativeFramebuffer,

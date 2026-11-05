@@ -7,7 +7,7 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::attachment::{MarkerFrame, cross, perpendicular, unit};
 use super::ce::attachments::{elements, object_block};
-use super::h2_functions::H2FunctionValues;
+use super::h2::functions::H2FunctionValues;
 use super::*;
 use crate::core::source::TagSource;
 

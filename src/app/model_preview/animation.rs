@@ -353,7 +353,7 @@ fn h2_held_layers(
     index: usize,
     data: &ModelPreviewData,
     state: &ModelPreviewState,
-) -> Vec<super::h2_weapons::H2PoseLayer> {
+) -> Vec<super::h2::weapons::H2PoseLayer> {
     let (Some(weapons), Some(clip)) = (data.h2_weapons.as_ref(), clips.get(index)) else {
         return Vec::new();
     };
@@ -1962,9 +1962,9 @@ fn lay_over(
     animation: &Animation<'_>,
     skeleton: &Skeleton,
     left_arm: &[bool],
-    layer: &super::h2_weapons::H2PoseLayer,
+    layer: &super::h2::weapons::H2PoseLayer,
 ) {
-    use super::h2_weapons::H2Arm;
+    use super::h2::weapons::H2Arm;
     let Some(group) = animation.find(&layer.clip) else {
         return;
     };
@@ -2004,7 +2004,7 @@ fn decode_held_animation(
     source: &TagSource,
     entry: &TagEntry,
     animation_index: usize,
-    layers: &[super::h2_weapons::H2PoseLayer],
+    layers: &[super::h2::weapons::H2PoseLayer],
 ) -> Result<DecodedAnimationPose, String> {
     let model = crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
     if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1 {
@@ -2101,7 +2101,7 @@ fn decode_held_animation(
         super::reach_blend_screens::lay_blend_screens(jmad, animation, &skeleton, animation_index, &mut pose);
     }
     if !layers.is_empty() {
-        let left_arm = super::h2_weapons::left_arm_nodes(jmad);
+        let left_arm = super::h2::weapons::left_arm_nodes(jmad);
         for layer in layers {
             lay_over(&mut pose, animation, &skeleton, &left_arm, layer);
         }

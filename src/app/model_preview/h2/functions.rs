@@ -13,8 +13,8 @@ use eframe::egui::{self, Ui};
 
 use crate::app::ui_kit::ThemedCheckbox;
 
-use super::ce::attachments::{elements, object_block};
-use super::h2_passes::{object_input, tag_function_at};
+use super::super::ce::attachments::{elements, object_block};
+use super::super::h2_passes::{object_input, tag_function_at};
 
 /// What the panel has set, by object geometry and input name.
 pub(crate) type H2FunctionInputs = HashMap<(u64, String), f32>;
@@ -675,7 +675,7 @@ fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut H2Functi
 }
 
 /// Sliders for what an object imports, and what its functions come to.
-pub(super) fn draw_h2_function_controls(
+pub(in crate::app::model_preview) fn draw_h2_function_controls(
     ui: &mut Ui,
     functions: &H2ObjectFunctions,
     key: u64,
@@ -690,7 +690,7 @@ pub(super) fn draw_h2_function_controls(
         }
     }
     let (events, names): (Vec<&str>, Vec<&str>) =
-        names.into_iter().partition(|name| super::h3_effects::is_event_function(name));
+        names.into_iter().partition(|name| super::super::h3_effects::is_event_function(name));
     draw_event_effects(ui, &events, key, set);
     if names.is_empty() {
         return;
@@ -767,7 +767,7 @@ mod tests {
 
     #[test]
     fn an_events_function_goes_by_its_field_and_a_region_name_does_not() {
-        use super::super::h3_effects::is_event_function;
+        use super::super::super::h3_effects::is_event_function;
         assert!(is_event_function("firing effect: firing"));
         assert!(is_event_function("transition effect (generic): human_explosion_large"));
         assert!(!is_event_function("headlights"));

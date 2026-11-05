@@ -88,7 +88,7 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
                 .map_or(0, |sequence| sequence.read_int_any("first bitmap index").unwrap_or(0).max(0) as usize);
             Arc::new(decode_h2_image(source, &map, SamplerKind::Texture2D, index)?)
         }
-        None => super::super::h2_light_volumes::read_glow(source)?,
+        None => super::super::h2::light_volumes::read_glow(source)?,
     };
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let mut brightness = [real("perpendicular brightness scale"), real("parallel brightness scale")];

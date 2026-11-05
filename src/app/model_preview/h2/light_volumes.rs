@@ -5,16 +5,16 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::{elements, object_block};
-use super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::h2_functions::H2FunctionValues;
-use super::h2_lights::H2EffectPart;
-use super::h3_effects::{adopt_event_function, for_each_attached_part, part_markers};
-use super::h2_passes::{H2Image, tag_function_at};
-use super::h3_effects::marker_name;
-use super::materials::decode_h2_image;
-use super::*;
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::functions::H2FunctionValues;
+use super::lights::H2EffectPart;
+use super::super::h3_effects::{adopt_event_function, for_each_attached_part, part_markers};
+use super::super::h2_passes::{H2Image, tag_function_at};
+use super::super::h3_effects::marker_name;
+use super::super::materials::decode_h2_image;
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -149,14 +149,14 @@ fn read_volume(source: &TagSource, volume: TagStruct<'_>, glow: Option<&Arc<H2Im
 }
 
 /// `globals`' `rasterizer data`, whose `glow` stands in for a volume's bitmap.
-pub(super) fn read_glow(source: &TagSource) -> Option<Arc<H2Image>> {
+pub(in crate::app::model_preview) fn read_glow(source: &TagSource) -> Option<Arc<H2Image>> {
     let globals = load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
     let data = elements(globals.root(), "rasterizer data");
     let path = data.first()?.read_tag_ref_path("glow").filter(|path| !path.is_empty())?;
     decode_h2_image(source, &path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
-pub(super) fn read_h2_bitmap(source: &TagSource, path: &str) -> Option<Arc<H2Image>> {
+pub(in crate::app::model_preview) fn read_h2_bitmap(source: &TagSource, path: &str) -> Option<Arc<H2Image>> {
     decode_h2_image(source, path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
@@ -167,7 +167,7 @@ pub(super) fn read_h2_bitmap(source: &TagSource, path: &str) -> Option<Arc<H2Ima
 /// `light_volume` parts, which `sub_515280` submits at every marker of their
 /// location while their event runs: scale 1, white faded over the event, as
 /// bright as the part's A and B scales.
-pub(super) fn read_h2_light_volumes(
+pub(in crate::app::model_preview) fn read_h2_light_volumes(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -189,7 +189,7 @@ pub(super) fn read_h2_light_volumes(
                 continue;
             };
             let named = light.root().read_tag_ref_path("light volume").filter(|path| !path.is_empty());
-            match named.filter(|_| super::h2_lights::light_can_shine(light.root())) {
+            match named.filter(|_| super::lights::light_can_shine(light.root())) {
                 Some(named) => (named, false),
                 None => continue,
             }
@@ -471,7 +471,7 @@ impl H2LightVolume {
     ) -> Option<([f32; 3], f32)> {
         let Some(part) = &self.effect else {
             let tint = self.change_color.and_then(|index| change_colors.get(index)).copied().unwrap_or([1.0; 3]);
-            return Some((tint, super::h2_lights::attachment_value(&self.scale_by, values)));
+            return Some((tint, super::lights::attachment_value(&self.scale_by, values)));
         };
         let lit = part.light(&self.scale_by, values, time, onset)?;
         let kept = self.volumes.first().is_some_and(|volume| volume.not_scaled_by_duration);

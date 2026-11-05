@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use blam_tags::{RenderMesh, RenderModel, TagFile, TagStruct};
 
-use super::renderer::preview_mesh_order;
+use super::super::renderer::preview_mesh_order;
 
 /// `info->m_sh_order` is asserted to be 3 in the game.
 const SH_ORDER: i128 = 3;

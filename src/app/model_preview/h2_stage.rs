@@ -7,7 +7,7 @@
 //! by `color1.a`, so `color1` is left at 1.
 
 use super::ce::lights::CE_POINT_LIGHT_ROWS;
-use super::h2_prt::H2_PRT_REGISTERS;
+use super::h2::prt::H2_PRT_REGISTERS;
 use super::renderer::model_vertex_prelude;
 
 /// Passes keep values up to register 9 of the vertex shader's bank.

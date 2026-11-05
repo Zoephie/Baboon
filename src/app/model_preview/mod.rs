@@ -25,14 +25,8 @@ pub(in crate::app) mod derived;
 mod errors;
 mod attachment;
 mod ce;
-mod h2_bloom;
-pub(in crate::app) mod h2_functions;
-mod h2_contrails;
-mod h2_light_volumes;
-mod h2_liquid;
-mod h2_lights;
+pub(in crate::app) mod h2;
 pub(in crate::app) mod h2_passes;
-pub(in crate::app) mod h2_prt;
 pub(in crate::app) mod h2_stage;
 mod h3_effects;
 pub(crate) mod h3_cloth;
@@ -48,7 +42,6 @@ pub(crate) mod h3_shaders;
 pub(crate) mod h4_shaders;
 mod h4_lighting;
 mod h4_submit;
-mod h2_weapons;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod reach_antennas;
@@ -130,7 +123,7 @@ pub(crate) struct RenderModelPreview {
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
     /// Halo 2 precomputed radiance transfer, on the few models that have it.
-    pub h2_prt: Option<h2_prt::H2Prt>,
+    pub h2_prt: Option<h2::prt::H2Prt>,
     /// Halo 2: the function whose value above nothing turns on the model's
     /// hologram shader.
     pub h2_hologram_control: Option<String>,
@@ -139,13 +132,13 @@ pub(crate) struct RenderModelPreview {
     /// Halo CE: the lens flares of the object and what it holds.
     pub ce_lights: Vec<ce::lights::CeLight>,
     /// Halo 2 lens flares, on the markers of the object and what it holds.
-    pub h2_flares: Vec<h2_lights::H2FlareAt>,
+    pub h2_flares: Vec<h2::lights::H2FlareAt>,
     /// Halo 2 sphere lights on the object and what it holds.
-    pub h2_point_lights: Vec<h2_lights::H2PointLight>,
-    pub h2_gel_lights: Vec<h2_lights::H2GelLight>,
-    pub h2_light_volumes: Vec<h2_light_volumes::H2LightVolume>,
-    pub h2_contrails: Vec<h2_contrails::H2ContrailAt>,
-    pub h2_liquids: Vec<h2_liquid::H2LiquidAt>,
+    pub h2_point_lights: Vec<h2::lights::H2PointLight>,
+    pub h2_gel_lights: Vec<h2::lights::H2GelLight>,
+    pub h2_light_volumes: Vec<h2::light_volumes::H2LightVolume>,
+    pub h2_contrails: Vec<h2::contrails::H2ContrailAt>,
+    pub h2_liquids: Vec<h2::liquid::H2LiquidAt>,
     pub h3_prt: Option<h3_prt::H3Prt>,
     /// The model's own `shield impact parameter override`.
     pub h3_shield: Option<Arc<h3_shaders::H3ShieldSettings>>,
@@ -210,7 +203,7 @@ pub(crate) struct RenderModelPreview {
     pub h4_change_color_count: u8,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
-    pub h2_antennas: Vec<h2_lights::H2Antenna>,
+    pub h2_antennas: Vec<h2::lights::H2Antenna>,
     /// Halo CE: the antennas among the object's widgets.
     pub ce_antennas: Vec<ce::lights::CeAntenna>,
     /// Halo CE effects the object's attachments hang on it, then those it
@@ -1299,7 +1292,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
     if let Some(functions) = &data.h2_object_functions {
         let time = ui.input(|input| input.time) as f32;
         let values = renderer::h2_function_values(data, &state.h2_function_inputs, time);
-        h2_functions::draw_h2_function_controls(
+        h2::functions::draw_h2_function_controls(
             ui,
             functions,
             data.geometry_id,

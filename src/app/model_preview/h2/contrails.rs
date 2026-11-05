@@ -6,16 +6,16 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::{elements, object_block};
-use super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::h2_functions::H2FunctionValues;
-use super::h2_lights::attachment_value;
-use super::h2_passes::H2Image;
-use super::h3_effects::marker_name;
-use super::h3_shaders::H3Blend;
-use super::materials::decode_h2_image;
-use super::*;
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::functions::H2FunctionValues;
+use super::lights::attachment_value;
+use super::super::h2_passes::H2Image;
+use super::super::h3_effects::marker_name;
+use super::super::h3_shaders::H3Blend;
+use super::super::materials::decode_h2_image;
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -143,7 +143,7 @@ fn blend_named(name: &str) -> H3Blend {
 }
 
 /// `object_attachment`s of group `cont`, at every marker of their name.
-pub(super) fn read_h2_contrails(
+pub(in crate::app::model_preview) fn read_h2_contrails(
     source: &TagSource,
     object: &TagFile,
     owner: u8,

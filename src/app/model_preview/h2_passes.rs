@@ -15,9 +15,9 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 use blam_tags::tag_function::FunctionType;
 
-use super::h2_functions::H2FunctionValues;
+use super::h2::functions::H2FunctionValues;
 
-use super::h2_prt::H2PrtLight;
+use super::h2::prt::H2PrtLight;
 use super::ce::passes::{CeModelAnimation, CeNumeric};
 use super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::materials::TextureImage;

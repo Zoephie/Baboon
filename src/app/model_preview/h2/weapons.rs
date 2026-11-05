@@ -8,14 +8,14 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachment::{MarkerFrame, WeaponOption, merge_attached};
-use super::ce::attachments::{attached_marker_frame, elements, loose_weapon_paths, weapon_ik};
-use super::attachment::{attach_point, attach_vector};
-use super::loading::build_render_preview;
-use super::ce::attachments::CeWeaponIk;
-use super::h2_passes::{h2_change_colors_for, read_h2_change_colors};
-use super::h3_cloth::ClothGame;
-use super::*;
+use super::super::attachment::{MarkerFrame, WeaponOption, merge_attached};
+use super::super::ce::attachments::{attached_marker_frame, elements, loose_weapon_paths, weapon_ik};
+use super::super::attachment::{attach_point, attach_vector};
+use super::super::loading::build_render_preview;
+use super::super::ce::attachments::CeWeaponIk;
+use super::super::h2_passes::{h2_change_colors_for, read_h2_change_colors};
+use super::super::h3_cloth::ClothGame;
+use super::super::*;
 use crate::core::source::TagSource;
 
 /// The mode a unit nobody controls is in.
@@ -326,7 +326,7 @@ impl H2UnitWeapons {
 }
 
 /// The struct holding a field, wherever in the tag it sits.
-pub(super) fn holder_of<'a>(from: TagStruct<'a>, field: &str) -> Option<TagStruct<'a>> {
+pub(in crate::app::model_preview) fn holder_of<'a>(from: TagStruct<'a>, field: &str) -> Option<TagStruct<'a>> {
     if from.field(field).is_some() {
         return Some(from);
     }
@@ -421,7 +421,7 @@ fn graph_overlays(graph: &TagFile) -> BTreeSet<String> {
 }
 
 /// Which of a graph's nodes the `left arm member` channel reaches.
-pub(super) fn left_arm_nodes(graph: &TagFile) -> Vec<bool> {
+pub(in crate::app::model_preview) fn left_arm_nodes(graph: &TagFile) -> Vec<bool> {
     let Some(holder) = holder_of(graph.root(), "skeleton nodes") else {
         return Vec::new();
     };
@@ -490,7 +490,7 @@ fn unit_graph(source: &TagSource, unit: &TagFile) -> Option<TagFile> {
 }
 
 /// What a unit can hold, from a loose folder's weapons.
-pub(super) fn unit_weapons(
+pub(in crate::app::model_preview) fn unit_weapons(
     source: &TagSource,
     unit: &TagFile,
     known: Option<&[H2Equippable]>,
@@ -563,7 +563,7 @@ fn h4_weapon_specific_marker(source: &TagSource, unit: &TagFile, weapon: &TagFil
 
 /// `sub_88D990`, attaching a readied weapon: the unit's hand, to the unit's
 /// preferred gun marker if the weapon has one, or else its handle node.
-pub(super) fn attach_h2_weapon(
+pub(in crate::app::model_preview) fn attach_h2_weapon(
     source: &TagSource,
     unit: &TagFile,
     path: &str,
@@ -595,9 +595,9 @@ pub(super) fn attach_h2_weapon(
         let place = |frame: &MarkerFrame| {
             (frame.axes.map(|axis| attach_vector(&parent, &child, axis)), attach_point(&parent, &child, frame.position))
         };
-        let holder = super::reach_ik::ReachIkHolder::Weapon(owner);
+        let holder = super::super::reach_ik::ReachIkHolder::Weapon(owner);
         let node = Some(parent.node.max(0) as usize);
-        preview.reach_ik_markers.extend(super::reach_ik::reach_ik_markers(&attached, holder, place, node));
+        preview.reach_ik_markers.extend(super::super::reach_ik::reach_ik_markers(&attached, holder, place, node));
     }
     if let Some(weapons) = ik {
         let class = string_id_in(&weapon, "weapon class");
@@ -654,23 +654,23 @@ fn fold_attached(
         read_extension_weapons(source, object, owner, &attached.markers, &frame, preview, Some(name));
     } else {
         let (flares, lights, gels) =
-            super::h2_lights::read_h2_flares(source, object, owner, &attached.markers, frame);
+            super::lights::read_h2_flares(source, object, owner, &attached.markers, frame);
         preview.h2_flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
         preview.h2_point_lights.extend(lights.into_iter().map(|light| light.on_attached(name)));
         preview.h2_gel_lights.extend(gels.into_iter().map(|light| light.on_attached(name)));
         let markers = &attached.markers;
         // Particle systems carry the held object's event effects (`firing
         // effect` and the rest), which its owner's panel plays by name.
-        let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+        let particles = super::super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
         let particles: Vec<_> = particles.into_iter().map(|system| Arc::new(system.on_attached(name))).collect();
         preview.h3_particles.extend(particles);
-        let volumes = super::h2_light_volumes::read_h2_light_volumes(source, object, owner, markers, frame);
+        let volumes = super::light_volumes::read_h2_light_volumes(source, object, owner, markers, frame);
         preview.h2_light_volumes.extend(volumes.into_iter().map(|volume| volume.on_attached(name)));
-        let contrails = super::h2_contrails::read_h2_contrails(source, object, owner, markers, frame);
+        let contrails = super::contrails::read_h2_contrails(source, object, owner, markers, frame);
         preview.h2_contrails.extend(contrails.into_iter().map(|contrail| contrail.on_attached(name)));
-        let liquids = super::h2_liquid::read_h2_liquids(source, object, owner, markers, frame);
+        let liquids = super::liquid::read_h2_liquids(source, object, owner, markers, frame);
         preview.h2_liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
-        super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
+        super::super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
         read_extension_weapons(source, object, owner, markers, &frame, preview, Some(name));
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
@@ -684,7 +684,7 @@ fn fold_attached(
         }
     }
     merge_attached(preview, attached, parent, child, owner, name);
-    let functions = super::h2_functions::read_h2_object_functions(object, Some(model))?;
+    let functions = super::functions::read_h2_object_functions(object, Some(model))?;
     // `object_set_initial_change_colors`: each object its own, from its own tag.
     let change_colors = h2_change_colors_for(&read_h2_change_colors(object), variant);
     Some(H2AttachedObject { owner, functions, change_colors })
@@ -713,24 +713,24 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     name: Option<&str>,
     preview: &mut RenderModelPreview,
 ) {
-    let lights = super::h3_lights::read_h3_lights(source, object, owner, markers, frame);
-    let flares = super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
-    let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    let lights = super::super::h3_lights::read_h3_lights(source, object, owner, markers, frame);
+    let flares = super::super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
+    let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
-    let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    let particles = super::super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
     let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
-    let carried = super::h3_particles::carried_strips(&particles);
+    let carried = super::super::h3_particles::carried_strips(&particles);
     preview.h3_particles.extend(particles);
     preview.h3_strips.extend(carried);
-    let strips = super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
+    let strips = super::super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
     preview.h3_strips.extend(named!(strips, name).map(Arc::new));
-    super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
-    let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
+    super::super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
+    let screens = super::super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
-    super::h3_screen_effects::add_screen_shader_materials(preview);
+    super::super::h3_screen_effects::add_screen_shader_materials(preview);
     let lights: Vec<_> = named!(lights, name).collect();
     preview.h3_flares.extend(named!(flares, name));
-    preview.h3_flares.extend(super::h3_lights::light_flares(&lights));
+    preview.h3_flares.extend(super::super::h3_lights::light_flares(&lights));
     preview.h3_lights.extend(lights);
 }
 
@@ -741,7 +741,7 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
 /// and cloth. `center` is the middle of its bounding sphere, in its own
 /// space.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -751,31 +751,31 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
     center: [f32; 3],
     preview: &mut RenderModelPreview,
 ) {
-    let flares = super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
+    let flares = super::super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
     preview.h3_flares.extend(named!(flares, name));
-    let (lights, cheap) = super::reach_lights::read_reach_lights(source, object, owner, markers, frame);
+    let (lights, cheap) = super::super::reach_lights::read_reach_lights(source, object, owner, markers, frame);
     preview.reach_lights.extend(named!(lights, name));
     preview.reach_cheap_lights.extend(named!(cheap, name));
-    let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
-    let cheap = super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
+    let cheap = super::super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
     preview.reach_cheap_emitters.extend(named!(cheap, name));
-    let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    let particles = super::super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
     let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
-    let carried = super::h3_particles::carried_strips(&particles);
+    let carried = super::super::h3_particles::carried_strips(&particles);
     preview.h3_particles.extend(particles);
     preview.h3_strips.extend(carried);
-    let strips = super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
+    let strips = super::super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
     preview.h3_strips.extend(named!(strips, name).map(Arc::new));
-    let screens = super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
+    let screens = super::super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
-    super::h3_screen_effects::add_screen_shader_materials(preview);
-    preview.h2_antennas.extend(super::h2_lights::read_reach_antennas(source, object, markers, frame, name));
-    super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
+    super::super::h3_screen_effects::add_screen_shader_materials(preview);
+    preview.h2_antennas.extend(super::lights::read_reach_antennas(source, object, markers, frame, name));
+    super::super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
     let lit = !(preview.reach_lights.is_empty() && preview.reach_cheap_lights.is_empty());
     if lit && preview.reach_light_passes.is_empty() {
-        let mut sources = super::h3_shaders::H3Sources::new(source);
+        let mut sources = super::super::h3_shaders::H3Sources::new(source);
         let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
         preview.reach_light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
     }
@@ -788,7 +788,7 @@ pub(super) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (
 /// `tracers.md`), its cheap particles, and antennas and cloth, whose
 /// definitions are Reach's (`objects.md` §3.10).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -800,25 +800,25 @@ pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (Mar
 ) {
     // A weapon opened on its own has no parent to hold it.
     let lone_weapon = name.is_none() && object.group().tag == u32::from_be_bytes(*b"weap");
-    let (lights, cheap) = super::h4_lights::read_h4_lights(source, object, owner, markers, frame, lone_weapon);
+    let (lights, cheap) = super::super::h4_lights::read_h4_lights(source, object, owner, markers, frame, lone_weapon);
     preview.h4_lights.extend(named!(lights, name));
     preview.h4_cheap_lights.extend(named!(cheap, name));
-    super::h4_lights::read_h4_light_passes(source, preview);
-    let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    super::super::h4_lights::read_h4_light_passes(source, preview);
+    let particles = super::super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
     preview.h3_particles.extend(named!(particles, name).map(Arc::new));
-    let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+    let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
-    let tracers = super::h4_tracers::read_h4_tracers(source, object, owner, markers, frame);
+    let tracers = super::super::h4_tracers::read_h4_tracers(source, object, owner, markers, frame);
     preview.h4_tracers.extend(named!(tracers, name));
-    let cheap = super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
+    let cheap = super::super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
     preview.reach_cheap_emitters.extend(named!(cheap, name));
-    let flares = super::h4_flares::read_h4_flares(source, object, owner, markers, frame);
+    let flares = super::super::h4_flares::read_h4_flares(source, object, owner, markers, frame);
     preview.h4_flares.extend(named!(flares, name));
     if !preview.h4_flares.is_empty() && preview.h4_flare_pass.is_none() {
-        preview.h4_flare_pass = super::h4_flares::h4_flare_pass(source).ok().map(Arc::new);
+        preview.h4_flare_pass = super::super::h4_flares::h4_flare_pass(source).ok().map(Arc::new);
     }
-    preview.h2_antennas.extend(super::h2_lights::read_reach_antennas(source, object, markers, frame, name));
-    super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
+    preview.h2_antennas.extend(super::lights::read_reach_antennas(source, object, markers, frame, name));
+    super::super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
 }
 
 /// A unit's own `weapons` that are an `extension of parent` (vehicle and
@@ -826,7 +826,7 @@ pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (Mar
 /// H3 `sub_180343CCC`, ODST `sub_140ABC7F0`) hands theirs to the unit, so
 /// their effects play at the unit's markers. On a child object they take its
 /// name, as its own effects do.
-pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -835,7 +835,7 @@ pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (Marker
     preview: &mut RenderModelPreview,
     within: Option<&str>,
 ) {
-    let Some(holder) = super::ce::attachments::object_block(object, "weapons") else {
+    let Some(holder) = super::super::ce::attachments::object_block(object, "weapons") else {
         return;
     };
     for entry in elements(holder, "weapons") {
@@ -845,7 +845,7 @@ pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (Marker
         let Ok(weapon) = load_referenced_tag_from_source(source, &path, "weapon", b"weap") else {
             continue;
         };
-        let flags = super::ce::attachments::object_block(&weapon, "bounding radius")
+        let flags = super::super::ce::attachments::object_block(&weapon, "bounding radius")
             .and_then(|object| object.read_flag_names("flags"))
             .unwrap_or_default();
         if !flags.iter().any(|(_, flag)| flag.starts_with("extension of parent")) {
@@ -855,15 +855,15 @@ pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (Marker
             read_h3_attached_features(source, &weapon, owner, markers, frame, within, preview);
             continue;
         }
-        let particles = super::h3_particles::read_h3_particles(source, &weapon, owner, markers, frame);
+        let particles = super::super::h3_particles::read_h3_particles(source, &weapon, owner, markers, frame);
         preview.h3_particles.extend(named!(particles, within).map(Arc::new));
-        let (flares, lights, gels) = super::h2_lights::read_h2_flares(source, &weapon, owner, markers, frame);
+        let (flares, lights, gels) = super::lights::read_h2_flares(source, &weapon, owner, markers, frame);
         preview.h2_flares.extend(named!(flares, within));
         preview.h2_point_lights.extend(named!(lights, within));
         preview.h2_gel_lights.extend(named!(gels, within));
-        let volumes = super::h2_light_volumes::read_h2_light_volumes(source, &weapon, owner, markers, frame);
+        let volumes = super::light_volumes::read_h2_light_volumes(source, &weapon, owner, markers, frame);
         preview.h2_light_volumes.extend(named!(volumes, within));
-        let contrails = super::h2_contrails::read_h2_contrails(source, &weapon, owner, markers, frame);
+        let contrails = super::contrails::read_h2_contrails(source, &weapon, owner, markers, frame);
         preview.h2_contrails.extend(named!(contrails, within));
     }
 }
@@ -915,7 +915,7 @@ fn child_model(source: &TagSource, entry: &VariantObject) -> Option<(TagFile, Ta
 /// The variant of `model` an object is made as: `wanted`, or with none the
 /// object's default, falling back to `default` and then the first.
 fn object_variant(object: &TagFile, model: &TagFile, wanted: &str) -> Option<ModelVariantPreview> {
-    let variants = super::variants::read_model_variants(model);
+    let variants = super::super::variants::read_model_variants(model);
     let wanted = match wanted {
         "" => object_default_variant(object).unwrap_or_default(),
         name => name.to_owned(),
@@ -927,7 +927,7 @@ fn object_variant(object: &TagFile, model: &TagFile, wanted: &str) -> Option<Mod
 
 /// What a `.model`'s variants attach, such as the warthog's turret: every one
 /// goes in once, drawn only under the variants that name it.
-pub(super) fn attach_variant_objects(
+pub(in crate::app::model_preview) fn attach_variant_objects(
     source: &TagSource,
     model: &TagFile,
     variants: &mut [ModelVariantPreview],
@@ -994,7 +994,7 @@ pub(super) fn attach_variant_objects(
 pub(crate) struct H2AttachedObject {
     /// What its materials carry as `object`.
     pub(crate) owner: u8,
-    pub(crate) functions: super::h2_functions::H2ObjectFunctions,
+    pub(crate) functions: super::functions::H2ObjectFunctions,
     pub(crate) change_colors: [[f32; 3]; 4],
 }
 

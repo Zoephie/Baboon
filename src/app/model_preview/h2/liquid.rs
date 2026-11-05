@@ -7,15 +7,15 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::{elements, object_block};
-use super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::h2_functions::H2FunctionValues;
-use super::h2_light_volumes::{read_glow, read_h2_bitmap};
-use super::h2_lights::attachment_value;
-use super::h2_passes::{H2Image, tag_function_at};
-use super::h3_effects::marker_name;
-use super::*;
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::functions::H2FunctionValues;
+use super::light_volumes::{read_glow, read_h2_bitmap};
+use super::lights::attachment_value;
+use super::super::h2_passes::{H2Image, tag_function_at};
+use super::super::h3_effects::marker_name;
+use super::super::*;
 use crate::core::source::TagSource;
 
 const OCTAVES: usize = 9;
@@ -135,7 +135,7 @@ fn driver_of(source: &TagSource, object: &TagFile, liquid: &str) -> Option<Strin
 }
 
 /// `liquid_new` for an object's `widgets`.
-pub(super) fn read_h2_liquids(
+pub(in crate::app::model_preview) fn read_h2_liquids(
     source: &TagSource,
     object: &TagFile,
     owner: u8,

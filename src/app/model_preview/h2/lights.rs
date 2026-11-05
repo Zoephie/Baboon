@@ -1,27 +1,27 @@
 //! Halo 2's lens flares on objects: `render_submit`'s attachments, then
 //! `rasterizer_lens_flares.cpp`. The shape is Halo CE's, in
-//! [`super::ce_lights`], but the sums are not: brightness, color and rotation
+//! [`super::super::ce_lights`], but the sums are not: brightness, color and rotation
 //! animate, occlusion comes in two sizes, and the pixel shader adds a highlight.
 
 use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::{elements, object_block};
-use super::ce::lights::{
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::lights::{
     ANTENNA_TRIM, AntennaSprite, CeAntennaQuad, CeFlareView, CeSprite, REACH_ANTENNA_TRIM, antenna_sprite, posed_on,
 };
-use super::ce::passes::argb;
-use super::h2_functions::H2FunctionValues;
-use super::h3_effects::{H3EffectTimes, adopt_event_function, for_each_attached_part, part_markers};
+use super::super::ce::passes::argb;
+use super::functions::H2FunctionValues;
+use super::super::h3_effects::{H3EffectTimes, adopt_event_function, for_each_attached_part, part_markers};
 use blam_tags::tag_function::h2::transition_evaluate;
-use super::h2_passes::{
+use super::super::h2_passes::{
     H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
 };
-use super::materials::{H3Bitmap, decode_h2_image, read_h3_bitmap};
-use super::reach_antennas::{ReachAntennaSpring, posed_marker};
-use super::*;
+use super::super::materials::{H3Bitmap, decode_h2_image, read_h3_bitmap};
+use super::super::reach_antennas::{ReachAntennaSpring, posed_marker};
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -196,7 +196,7 @@ pub(crate) struct H2PartLight {
 const SHORTEST_FADING_EVENT: f32 = 0.033_433_337;
 
 impl H2EffectPart {
-    pub(super) fn new(part: &super::h3_effects::H3EffectPart<'_>) -> Self {
+    pub(in crate::app::model_preview) fn new(part: &super::super::h3_effects::H3EffectPart<'_>) -> Self {
         Self {
             times: Arc::clone(&part.times),
             event: part.event,
@@ -538,7 +538,7 @@ fn read_h2_antenna(
 }
 
 /// The antennas among `object`'s widgets.
-pub(super) fn read_h2_antennas(
+pub(in crate::app::model_preview) fn read_h2_antennas(
     source: &TagSource,
     object: &TagFile,
     markers: &[RenderModelPreviewMarker],
@@ -624,7 +624,7 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
         .and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok())
-        .map(|tag| super::ce::particles::CePointPhysics::read(&tag));
+        .map(|tag| super::super::ce::particles::CePointPhysics::read(&tag));
     let reach = ReachAntennaSpring {
         strength: root.read_real("spring strength coefficient").unwrap_or(0.0),
         length: total_length,
@@ -649,7 +649,7 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
 
 /// Reach's antennas among `object`'s widgets (`widgets_new`, the 360's
 /// 0x82BCBFC0), named after the attached object they hang on, if any.
-pub(super) fn read_reach_antennas<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+pub(in crate::app::model_preview) fn read_reach_antennas<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     source: &TagSource,
     object: &TagFile,
     markers: &[RenderModelPreviewMarker],
@@ -794,7 +794,7 @@ fn light_value(
 
 /// What an attachment's `scale by` reads: full with none named, and the
 /// idle object's input for a name nothing gave a value.
-pub(super) fn attachment_value(name: &str, values: Option<&H2FunctionValues>) -> f32 {
+pub(in crate::app::model_preview) fn attachment_value(name: &str, values: Option<&H2FunctionValues>) -> f32 {
     if name.is_empty() {
         return 1.0;
     }
@@ -865,7 +865,7 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
 
 /// Whether a `light` can ever be on in a third person view: nothing else sets
 /// the bit `sub_8ED2A0` turns a light on through.
-pub(super) fn light_can_shine(root: TagStruct<'_>) -> bool {
+pub(in crate::app::model_preview) fn light_can_shine(root: TagStruct<'_>) -> bool {
     let flags = root.read_int_any("flags").unwrap_or(0);
     flags & (NO_ILLUMINATION | LIGHT_ONLY_FIRST_PERSON) == 0
         && root.read_int_any("default lightmap setting") != Some(LIGHTMAPS_ONLY)
@@ -1041,7 +1041,7 @@ fn place_h2_light(
 /// and their `lens_flare` parts, which `sub_515280` submits at every marker
 /// of their location: scale 1, tinted by the effect's color (its object's
 /// change color, or white).
-pub(super) fn read_h2_flares(
+pub(in crate::app::model_preview) fn read_h2_flares(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -1924,7 +1924,7 @@ mod tests {
             reach: Some(ReachAntennaSpring { strength: 0.1, length: 0.4, physics: None }),
             only_under: None,
             h3_bitmap: None,
-            image: Arc::new(H2Image::Flat(super::super::materials::TextureImage {
+            image: Arc::new(H2Image::Flat(super::super::super::materials::TextureImage {
                 rgba: Vec::new(),
                 width: 0,
                 height: 0,
@@ -2006,7 +2006,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, crate::core::game::GameId::HaloReach);
+        let source = super::super::super::h3_particles::loose_kit(&root, crate::core::game::GameId::HaloReach);
         let path = "objects\\vehicles\\human\\warthog\\bitmaps\\antenna";
         let bitmap = load_referenced_tag_from_source(&source, path, "bitmap", b"bitm").unwrap();
         let reach = antenna_sprite(&bitmap, 0, REACH_ANTENNA_TRIM).unwrap();

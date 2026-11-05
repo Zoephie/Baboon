@@ -4,7 +4,7 @@
 use super::*;
 use crate::core::source::MountedContainer;
 use super::h2_passes::{H2Layer, h2_prt_lights};
-use super::h2_prt::read_h2_prt;
+use super::h2::prt::read_h2_prt;
 use super::h3_cloth::ClothGame;
 use blam_tags::iostore::IoStoreArchive;
 use blam_tags::iostore::container_header::EIoContainerHeaderVersion;
@@ -37,7 +37,7 @@ pub(super) struct PreviewLoadSettings {
     /// Halo 2 units: what the left hand holds, by path.
     pub(super) secondary_weapon: Option<String>,
     /// Halo 2 units: their weapons, when an earlier load found them.
-    pub(super) h2_equippable: Option<Vec<super::h2_weapons::H2Equippable>>,
+    pub(super) h2_equippable: Option<Vec<super::h2::weapons::H2Equippable>>,
 }
 
 impl PreviewLoadSettings {
@@ -436,7 +436,7 @@ fn load_tag_preview(
         let mut notes = std::mem::take(&mut data.notes);
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
+            let functions = || super::h2::functions::read_h2_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its lights and effects", preview, |preview| {
@@ -447,7 +447,7 @@ fn load_tag_preview(
         // on their own readers; what the object's shaders read does not.
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::HaloReach), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
+            let functions = || super::h2::functions::read_h2_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its flares and lights", preview, |preview| {
@@ -458,7 +458,7 @@ fn load_tag_preview(
         // attachments, lights and effects wait on their own readers.
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo4), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
+            let functions = || super::h2::functions::read_h2_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             preview.h4_bounding_sphere = read_h4_bounding_sphere(model_tag);
@@ -473,12 +473,12 @@ fn load_tag_preview(
             let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
             let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
             feature_into(&mut notes, "its antennas and cloth", preview, |preview| {
-                super::h2_weapons::read_h4_attached_features(source, model_tag, 0, &markers, &frame, None, center, preview);
+                super::h2::weapons::read_h4_attached_features(source, model_tag, 0, &markers, &frame, None, center, preview);
             });
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::h2_functions::read_h2_object_functions(model_tag, Some(model));
+            let functions = || super::h2::functions::read_h2_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its lights and effects", preview, |preview| {
@@ -500,7 +500,7 @@ fn load_tag_preview(
             let known = settings.h2_equippable.as_deref();
             let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
             let weapons = feature(&mut notes, "the unit's weapons", || {
-                is_biped.then(|| super::h2_weapons::unit_weapons(source, model_tag, known))
+                is_biped.then(|| super::h2::weapons::unit_weapons(source, model_tag, known))
             });
             if let Some(weapons) = weapons {
                 let preview = std::sync::Arc::make_mut(&mut data.preview);
@@ -513,7 +513,7 @@ fn load_tag_preview(
                     // `unit_apply_ik` leaves two weapons in their own hands.
                     let ik = (secondary.is_none() && legacy_weapon_ik).then_some(&weapons);
                     let attach = |preview: &mut RenderModelPreview| {
-                        super::h2_weapons::attach_h2_weapon(source, model_tag, path, left, owner, ik, preview)
+                        super::h2::weapons::attach_h2_weapon(source, model_tag, path, left, owner, ik, preview)
                     };
                     let attached = feature_into(&mut notes, "a held weapon", preview, attach);
                     if attached.is_none() {
@@ -528,7 +528,7 @@ fn load_tag_preview(
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             let variants = &mut data.variants;
             let attach = |preview: &mut RenderModelPreview| {
-                super::h2_weapons::attach_variant_objects(source, model, variants, preview)
+                super::h2::weapons::attach_variant_objects(source, model, variants, preview)
             };
             data.h2_attached.extend(feature_into(&mut notes, "the variants' children", preview, attach));
         }
@@ -737,7 +737,7 @@ fn load_tag_preview(
         let preview = std::sync::Arc::make_mut(&mut data.preview);
         let variants = &mut data.variants;
         let attach = |preview: &mut RenderModelPreview| {
-            super::h2_weapons::attach_variant_objects(source, model_tag, variants, preview)
+            super::h2::weapons::attach_variant_objects(source, model_tag, variants, preview)
         };
         data.h2_attached.extend(feature_into(&mut data.notes, "the variants' children", preview, attach));
     }
@@ -844,7 +844,7 @@ fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, model: &T
     let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
     // `object_get_bounding_sphere`'s middle, as the leaves take it.
     let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
-    super::h2_weapons::read_reach_attached_features(source, model_tag, 0, &markers, &frame, None, center, preview);
+    super::h2::weapons::read_reach_attached_features(source, model_tag, 0, &markers, &frame, None, center, preview);
 }
 
 /// A Halo 3 or ODST object's own shield, lights, flares, light volumes,
@@ -880,10 +880,10 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
     if preview.h3_screen_effects.iter().any(|effect| effect.adds_noise()) {
         preview.reach_screen_noise = super::h3_screen_effects::read_reach_screen_noise(source);
     }
-    preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &preview.markers);
+    preview.h2_antennas = super::h2::lights::read_h2_antennas(source, model_tag, &preview.markers);
     let markers = preview.markers.clone();
     super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
-    super::h2_weapons::read_extension_weapons(source, model_tag, 0, &markers, &frame, preview, None);
+    super::h2::weapons::read_extension_weapons(source, model_tag, 0, &markers, &frame, preview, None);
     let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
     let leaves = super::h3_leaves::read_h3_leaves(source, model_tag, &markers, middle);
     // Framed by a null model alone, the eye sits among the leaves and
@@ -898,7 +898,7 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
 /// contrails, liquids, cloth and extension weapons.
 fn read_h2_object_features(source: &TagSource, model_tag: &TagFile, preview: &mut RenderModelPreview) {
     let markers = std::mem::take(&mut preview.markers);
-    let found = super::h2_lights::read_h2_flares(source, model_tag, 0, &markers, |marker| {
+    let found = super::h2::lights::read_h2_flares(source, model_tag, 0, &markers, |marker| {
         let place = super::attachment::MarkerFrame {
             axes: marker.axes,
             position: marker.position,
@@ -907,7 +907,7 @@ fn read_h2_object_features(source: &TagSource, model_tag: &TagFile, preview: &mu
         (place, marker.node_index.max(0) as usize)
     });
     (preview.h2_flares, preview.h2_point_lights, preview.h2_gel_lights) = found;
-    preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &markers);
+    preview.h2_antennas = super::h2::lights::read_h2_antennas(source, model_tag, &markers);
     let systems = super::h3_particles::read_h3_particles(source, model_tag, 0, &markers, |marker| {
         let place = super::attachment::MarkerFrame {
             axes: marker.axes,
@@ -917,7 +917,7 @@ fn read_h2_object_features(source: &TagSource, model_tag: &TagFile, preview: &mu
         (place, marker.node_index.max(0) as usize)
     });
     preview.h3_particles = systems.into_iter().map(Arc::new).collect();
-    preview.h2_light_volumes = super::h2_light_volumes::read_h2_light_volumes(source, model_tag, 0, &markers, |marker| {
+    preview.h2_light_volumes = super::h2::light_volumes::read_h2_light_volumes(source, model_tag, 0, &markers, |marker| {
         let place = super::attachment::MarkerFrame {
             axes: marker.axes,
             position: marker.position,
@@ -925,7 +925,7 @@ fn read_h2_object_features(source: &TagSource, model_tag: &TagFile, preview: &mu
         };
         (place, marker.node_index.max(0) as usize)
     });
-    preview.h2_contrails = super::h2_contrails::read_h2_contrails(source, model_tag, 0, &markers, |marker| {
+    preview.h2_contrails = super::h2::contrails::read_h2_contrails(source, model_tag, 0, &markers, |marker| {
         let place = super::attachment::MarkerFrame {
             axes: marker.axes,
             position: marker.position,
@@ -942,9 +942,9 @@ fn read_h2_object_features(source: &TagSource, model_tag: &TagFile, preview: &mu
         (place, marker.node_index.max(0) as usize)
     };
     let frame = &frame;
-    preview.h2_liquids = super::h2_liquid::read_h2_liquids(source, model_tag, 0, &markers, frame);
+    preview.h2_liquids = super::h2::liquid::read_h2_liquids(source, model_tag, 0, &markers, frame);
     super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
-    super::h2_weapons::read_extension_weapons(source, model_tag, 0, &markers, frame, preview, None);
+    super::h2::weapons::read_extension_weapons(source, model_tag, 0, &markers, frame, preview, None);
     preview.markers = markers;
 }
 

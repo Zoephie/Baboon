@@ -262,7 +262,7 @@ pub(in crate::app) struct ModelPreviewState {
     /// The shots the panel has fired from Halo CE weapons' triggers.
     pub(in crate::app) ce_shots: super::ce::firing::CeShots,
     /// What the panel has set of a Halo 2 object's functions.
-    pub(in crate::app) h2_function_inputs: super::h2_functions::H2FunctionInputs,
+    pub(in crate::app) h2_function_inputs: super::h2::functions::H2FunctionInputs,
     /// A texture-resolve job is running for the loaded model.
     pub(in crate::app) textures_pending: bool,
     /// `.model` overlays only: draw the render model itself. Off leaves just
@@ -539,11 +539,11 @@ pub(in crate::app) struct ModelPreviewData {
     /// Halo CE bipeds: what the unit can hold.
     pub(in crate::app) ce_weapons: Option<super::ce::attachments::CeBipedWeapons>,
     /// Halo 2: the functions of an opened object.
-    pub(in crate::app) h2_object_functions: Option<super::h2_functions::H2ObjectFunctions>,
+    pub(in crate::app) h2_object_functions: Option<super::h2::functions::H2ObjectFunctions>,
     /// Halo 2 units: what they can hold.
-    pub(in crate::app) h2_weapons: Option<super::h2_weapons::H2UnitWeapons>,
+    pub(in crate::app) h2_weapons: Option<super::h2::weapons::H2UnitWeapons>,
     /// Halo 2 units: what they hold.
-    pub(in crate::app) h2_attached: Vec<super::h2_weapons::H2AttachedObject>,
+    pub(in crate::app) h2_attached: Vec<super::h2::weapons::H2AttachedObject>,
     /// Scenario tags only: the `structure bsps` block's references (one per
     /// element, `None` where the reference is empty), driving the per-BSP
     /// checkbox list. Empty for every other tag group.

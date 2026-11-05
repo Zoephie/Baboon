@@ -11,7 +11,7 @@ use super::attachment::MarkerFrame;
 use super::h3_effects::adopt_event_function;
 use super::ce::attachments::elements;
 use super::ce::lights::{CeFlareView, posed_on};
-use super::h2_functions::H2FunctionValues;
+use super::h2::functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, read_part_placement};
 use super::h3_particles::{

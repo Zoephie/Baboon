@@ -12,7 +12,7 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use super::ce::attachments::elements;
-use super::h2_functions::H2FunctionValues;
+use super::h2::functions::H2FunctionValues;
 use super::h3_shaders::{H3Pass, H3Texture};
 use super::reach_shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 use crate::app::export::geometry::load_referenced_tag_from_source;
