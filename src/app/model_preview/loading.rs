@@ -461,6 +461,7 @@ fn load_tag_preview(
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             preview.h4_bounding_sphere = read_h4_bounding_sphere(model_tag);
             preview.h4_change_color_count = read_h4_change_color_count(model_tag);
+            preview.h4_camo = super::h4_camo::H4Camo::read(source).map(std::sync::Arc::new);
             // The unit's markers its IK sets and chains place.
             let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
             preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);

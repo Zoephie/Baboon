@@ -67,6 +67,7 @@ mod reach_cheap_particles;
 mod reach_lights;
 mod h4_lights;
 mod h4_flares;
+mod h4_camo;
 mod reach_blend_screens;
 mod reach_camo;
 mod reach_shadow;
@@ -169,6 +170,8 @@ pub(crate) struct RenderModelPreview {
     /// Halo 4's attached `lens_flare`s, and explicit 46's pass that draws them.
     pub h4_flares: Vec<h4_flares::H4FlareAt>,
     pub h4_flare_pass: Option<Arc<h3_shaders::H3Pass>>,
+    /// `globals`' active camo, for a Halo 4 object.
+    pub h4_camo: Option<Arc<h4_camo::H4Camo>>,
     /// Reach's shield impact, as its damage sections choose it.
     pub reach_shield: Option<Arc<reach_shield::ReachShield>>,
     /// `globals`' active camo curves, for a Reach object.

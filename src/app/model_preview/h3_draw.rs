@@ -1116,6 +1116,8 @@ impl ModelGlRenderer {
                     // No level casts shadows into Halo 4's mask: white.
                     "ps_view_shadow_mask" => self.placeholder,
                     "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
+                    // Halo 4's camo: what the object hides.
+                    "sceneTexture_texture" => self.h4_camo_scene.or(targets.map(|targets| targets.behind)),
                     "depth_buffer" => self.h3_depth_copy,
                     "shadow_mask_texture" => self.reach_shadow_mask,
                     other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
@@ -1260,11 +1262,25 @@ impl ModelGlRenderer {
                 })
                 .collect();
             // Halo 4's holograms draw apart from the scene (`RenderHolograms`).
-            let (holograms, batches): (Vec<_>, Vec<_>) =
+            let (mut holograms, mut batches): (Vec<_>, Vec<_>) =
                 batches.into_iter().partition(|(_, material)| super::h4_holograms::draws_as_hologram(material));
             // A model's materials are all of one game.
             let reach = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Reach);
             let halo4 = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Halo4);
+            // Halo 4's full camo (`render_object_mesh_parts`): a camo object's
+            // parts draw only into the shadow and as camo, so nothing of it
+            // lands in the light; below full transparency its lit base does.
+            let h4_camo = frame
+                .preview
+                .h4_camo
+                .as_ref()
+                .filter(|_| halo4 && frame.active_camo)
+                .map(|camo| camo.draw(1.0, frame.time));
+            let camo_batches: Vec<_> = match h4_camo {
+                Some(draw) if !draw.has_base => batches.drain(..).chain(holograms.drain(..)).collect(),
+                Some(_) => batches.clone(),
+                None => Vec::new(),
+            };
             // Reach shadows into a mask ahead of the lights, which is not
             // built, so its self shadow does not run. Halo 4's shadow is not
             // built yet.
@@ -1504,7 +1520,7 @@ impl ModelGlRenderer {
                 let values = [("k_vs_active_camo_factor", draw.factor), ("p_lighting_constant_9", draw.factor)];
                 self.reach_pass_values = Some(values.into_iter().collect());
             }
-            if frame.active_camo && (!reach || reach_camo.is_some()) {
+            if frame.active_camo && !halo4 && (!reach || reach_camo.is_some()) {
                 // Camo shows what is behind it, which the game blooms the same
                 // with or without the object. A preview's backdrop has no bloom
                 // of its own, so what camo hides is left dark for it.
@@ -1576,6 +1592,9 @@ impl ModelGlRenderer {
                 });
                 if halo4 {
                     self.h4_composite(gl, frame, accumulation, bloom, depth, screen);
+                    if let Some(draw) = h4_camo {
+                        self.draw_h4_camo(gl, frame, slot, &camo_batches, draw, size);
+                    }
                 } else {
                     let noise = frame.preview.reach_screen_noise.as_ref();
                     self.reach_composite(gl, accumulation, bloom, depth, screen, noise);
@@ -1836,6 +1855,87 @@ impl ModelGlRenderer {
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.enable(glow::DEPTH_TEST);
         }
+    }
+
+    /// `c_render_active_camo::render_object_callback` for a Halo 4 object,
+    /// over the finished picture: each part's `active_camo` entry point reads
+    /// a copy of the picture so far (`resolve_framebuffer_for_active_camo`),
+    /// `alpha_blend`. The game reads and writes its light ahead of the tone
+    /// curve; the preview's backdrop is the picture, and at full camo nothing
+    /// of the object is in it, so reading and writing the picture's bytes is
+    /// the same. Fully transparent, nothing of the object is under it,
+    /// and the nearest part alone shows, as its depth decides. Otherwise its
+    /// lit base wrote depth, which the camo meets nudged toward the eye by
+    /// `camo depth bias function`'s constant.
+    unsafe fn draw_h4_camo(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        batches: &[(RenderModelPreviewBatch, Arc<H3Material>)],
+        draw: super::super::h4_camo::H4CamoDraw,
+        size: [i32; 2],
+    ) {
+        /// `camo depth bias function`: the kit's constant, in a 24-bit
+        /// buffer's units.
+        const DEPTH_BIAS: f32 = -2e-5 * 16_777_216.0;
+        let [width, height] = size.map(|side| side as f32);
+        self.reach_pass_values = Some(
+            [
+                ("ps_activeCamoFactor", draw.factor),
+                ("ps_distortionTextureTransform", draw.transform),
+                ("distortionTextureEnabled", [f32::from(u8::from(draw.textured)); 4]),
+                ("ps_textureSize", [width, height, 1.0 / width, 1.0 / height]),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        unsafe {
+            if self.h4_camo_scene.is_none() {
+                self.h4_camo_scene = gl.create_texture().ok();
+            }
+            gl.bind_texture(glow::TEXTURE_2D, self.h4_camo_scene);
+            gl.copy_tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8, 0, 0, size[0], size[1], 0);
+            for (name, value) in [
+                (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
+                (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
+                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+            ] {
+                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
+            }
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            h3_set_cull(gl, frame);
+            gl.enable(glow::DEPTH_TEST);
+            gl.depth_func(glow::LEQUAL);
+            let camo = |this: &mut Self| {
+                for (batch, material) in batches {
+                    if let Some(pass) = material.camo.as_ref() {
+                        this.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                    }
+                }
+            };
+            if draw.has_base {
+                gl.enable(glow::POLYGON_OFFSET_FILL);
+                gl.polygon_offset(0.0, DEPTH_BIAS);
+            } else {
+                gl.depth_mask(true);
+                gl.clear(glow::DEPTH_BUFFER_BIT);
+                gl.disable(glow::BLEND);
+                gl.color_mask(false, false, false, false);
+                camo(self);
+                gl.color_mask(true, true, true, true);
+            }
+            gl.depth_mask(false);
+            gl.enable(glow::BLEND);
+            gl.blend_equation(glow::FUNC_ADD);
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            camo(self);
+            gl.disable(glow::POLYGON_OFFSET_FILL);
+            gl.depth_mask(true);
+        }
+        self.reach_pass_values = None;
     }
 
     /// Reach's `final_composite`: see [`REACH_COMPOSITE_FRAGMENT`].

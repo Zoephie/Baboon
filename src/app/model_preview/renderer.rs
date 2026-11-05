@@ -4112,6 +4112,8 @@ struct ModelGlRenderer {
     h4_holograms: Option<h4_holograms::H4Holograms>,
     /// The corners Halo 4's flare reflections draw from.
     h4_flare_geometry: Option<(glow::NativeVertexArray, glow::NativeBuffer)>,
+    /// The picture as Halo 4's camo reads it, bytes as they are.
+    h4_camo_scene: Option<glow::NativeTexture>,
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
     h4_draw: Option<h4_submit::H4Draw>,
@@ -4277,6 +4279,7 @@ impl ModelGlRenderer {
                 h4_bloom: None,
                 h4_holograms: None,
                 h4_flare_geometry: None,
+                h4_camo_scene: None,
                 h4_draw: None,
                 reach_shadow: None,
                 reach_shadow_program: None,

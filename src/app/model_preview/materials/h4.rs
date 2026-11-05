@@ -269,7 +269,7 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                 after_lighting: decal && material.flags & 0x2 != 0,
                 sort_layer: i32::from(baked.sort_layer),
                 prt: [None, None, None],
-                camo: None,
+                camo: shader.pass("active_camo"),
                 shadow_generate: None,
                 dynamic_light: None,
                 blend,
@@ -319,6 +319,21 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
                     }),
                     frames,
                 });
+            }
+            // `c_render_active_camo` binds `globals`' distortion texture at s13.
+            let camo_texture = caches
+                .h4_camo_texture
+                .get_or_insert_with(|| super::super::h4_camo::H4Camo::read(source).and_then(|camo| camo.texture))
+                .clone();
+            let camo_uniform = h3.camo.as_ref().and_then(|pass| {
+                pass.textures.iter().find(|(name, _)| name == "distortionTexture_texture").map(|(name, _)| name.clone())
+            });
+            if let (Some(path), Some(uniform)) = (camo_texture, camo_uniform)
+                && let Some((image, texels, mips)) = h3_image(source, &path, 0, SamplerKind::Texture2D, caches)
+            {
+                // Address 0 (wrap), filter 2 (bilinear).
+                let sampler = H3Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Bilinear };
+                h3.textures.push(H3Texture { uniform, image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
             }
             // Still this material's alone, so the submit takes them in place.
             if let Some(submit) = h3.h4.as_mut().and_then(Arc::get_mut) {
