@@ -1940,6 +1940,11 @@ impl H3ParticleAxis {
 #[derive(Debug)]
 struct H3Emitter {
     update: H3ParticleUpdate,
+    /// On the card, Reach's and Halo 4's self-acceleration is a straight lerp
+    /// between its ends (Reach's `map_to_vector3d_range` has its slerp
+    /// commented out; Halo 4's `ParticleMapToVector3dLerp`); Halo 3's and
+    /// ODST's turn from one to the other.
+    card_lerps: bool,
     /// `becomes gpu when at rest`: a particle that stops moves on to the card.
     card_at_rest: bool,
     /// What a pulse's count may fall short of a whole particle by and still
@@ -2171,6 +2176,7 @@ fn read_emitter(
     let raw_scale = emitter.read_point3d("axis scale");
     Some(H3Emitter {
         update,
+        card_lerps: reach,
         card_at_rest,
         spawn_slack: 0.0,
         axis: H3ParticleAxis::named(&emitter.read_enum_name("particle axis (for models)").unwrap_or_default()),
@@ -2342,6 +2348,7 @@ fn read_h2_emitter(
     Some(H3Emitter {
         h4: None,
         update: H3ParticleUpdate::Cpu,
+        card_lerps: false,
         card_at_rest: false,
         spawn_slack: 0.0001,
         controllers,
@@ -3227,7 +3234,8 @@ impl H3Emitter {
             let push = turbulence_push(&turbulence.image, xform, [particle.emission_time, particle.seeds[4]], strength * dt);
             particle.position = std::array::from_fn(|axis| particle.position[axis] + push[axis]);
         }
-        let acceleration = self.acceleration.around(&state);
+        let acceleration =
+            if self.card_lerps { self.acceleration.vector(&state) } else { self.acceleration.around(&state) };
         particle.velocity = std::array::from_fn(|axis| velocity[axis] + acceleration[axis] * dt);
         particle.velocity[2] -= gravity * dt;
         let air = (air_friction * dt).clamp(0.0, 1.0);
@@ -4558,6 +4566,7 @@ mod tests {
         H3Emitter {
             h4: None,
             update: H3ParticleUpdate::Gpu,
+            card_lerps: false,
             card_at_rest: false,
             spawn_slack: 0.0,
             controllers: Vec::new(),
@@ -4684,6 +4693,24 @@ mod tests {
         let mut particles = vec![Particle { velocity: [1.0, 0.0, 0.0], ..test_particle() }];
         calm.step(H3ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
         assert_eq!(particles[0].position, [0.5, 0.0, 0.0], "none without the movement");
+    }
+
+    /// Halo 4's `muzzle_smoke` pushes from (-0.1, 0.1, 0) to the opposite
+    /// way. On Reach's and Halo 4's card that is a lerp, through nothing, so
+    /// a particle keeps a sound velocity; Halo 3's turn has no way round and
+    /// is not asked to find one here.
+    #[test]
+    fn reach_and_halo_4_lerp_opposite_accelerations_on_the_card() {
+        let ends = [[-0.1, 0.1, 0.0], [0.1, -0.1, 0.0]];
+        let acceleration = H3ParticleProperty { ends, ..H3ParticleProperty::fixed(0.25).unwrap() };
+        assert!(acceleration.around(&H3ParticleState::default()).iter().any(|axis| axis.is_nan()), "the turn fails");
+        let emitter = H3Emitter { card_lerps: true, acceleration, ..test_emitter(H3EmissionShape::Sprayer) };
+        let mut particles = vec![Particle { velocity: [1.0, 0.0, 0.0], ..test_particle() }];
+        let mut ended = Vec::new();
+        emitter.step(H3ParticleState::default(), &mut particles, 1.0, [0.0; 3], &mut ended, None, false);
+        let [x, y, z] = particles[0].velocity;
+        let near = (x - 0.95).abs() < 1e-6 && (y - 0.05).abs() < 1e-6 && z == 0.0;
+        assert!(near, "a quarter of the way from one end to the other: {:?}", particles[0].velocity);
     }
 
     /// Reach's additive blends take `v_alt_exposure.y`, the rest
