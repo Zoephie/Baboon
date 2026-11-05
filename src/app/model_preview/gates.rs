@@ -71,6 +71,17 @@ const LOAD_SET: &[(&str, GameId, &[(&str, &str, &[u8; 4])])] = &[
         ],
     ),
     (
+        "BLAM_TEST_ODSTEK",
+        GameId::Halo3Odst,
+        &[
+            ("objects\\characters\\odst\\odst", "biped", b"bipd"),
+            ("objects\\characters\\odst_recon\\odst_recon", "biped", b"bipd"),
+            ("objects\\weapons\\rifle\\smg_silenced\\smg_silenced", "weapon", b"weap"),
+            ("objects\\vehicles\\phantom\\phantom", "vehicle", b"vehi"),
+            ("objects\\vehicles\\brute_chopper\\brute_chopper", "vehicle", b"vehi"),
+        ],
+    ),
+    (
         "BLAM_TEST_HREK",
         GameId::HaloReach,
         &[
@@ -382,7 +393,8 @@ fn gate_load() {
 }
 
 /// What G-px shoots of each game: a biped, a vehicle, and something that
-/// moves at rest (the phantom does for Halo 3), each in every [`LOOKS`].
+/// moves at rest (the phantom does for Halo 3 and ODST), each in every
+/// [`LOOKS`].
 #[cfg(target_os = "macos")]
 const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
     (
@@ -411,6 +423,15 @@ const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
         GameId::Halo3,
         &[
             ("objects\\characters\\masterchief\\masterchief", "biped"),
+            ("objects\\vehicles\\phantom\\phantom", "vehicle"),
+        ],
+    ),
+    (
+        "BLAM_TEST_ODSTEK",
+        GameId::Halo3Odst,
+        &[
+            ("objects\\characters\\odst\\odst", "biped"),
+            ("objects\\vehicles\\brute_chopper\\brute_chopper", "vehicle"),
             ("objects\\vehicles\\phantom\\phantom", "vehicle"),
         ],
     ),
