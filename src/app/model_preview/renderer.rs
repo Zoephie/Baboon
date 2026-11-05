@@ -2099,7 +2099,7 @@ struct ModelGpuSlot {
     h3_onsets: h3_effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
     h3_vision_clock: Option<(f32, f32)>,
-    h3_cloth: h3_cloth::H3ClothField,
+    h3_cloth: cloth::H3ClothField,
     reach_antennas: reach_antennas::ReachAntennaField,
     h3_leaves: h3_leaves::H3LeafField,
     leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
@@ -2199,7 +2199,7 @@ impl ModelGpuSlot {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         first: usize,
-        moved: impl IntoIterator<Item = h3_cloth::MovedClothVertex>,
+        moved: impl IntoIterator<Item = cloth::MovedClothVertex>,
     ) {
         let moved: Vec<_> = moved.into_iter().collect();
         let Some(loaded) = frame.preview.vertices.get(first..first + moved.len()) else {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use super::ce::attachments::{elements, object_block};
-use super::h3_cloth::{H3Wind, away_from_pole, turned_about};
+use super::cloth::{H3Wind, away_from_pole, turned_about};
 use super::h3_effects::marker_name;
 use super::particles::{H3ParticleVertex, H3SpriteShader};
 use super::h3_shaders::H3Blend;

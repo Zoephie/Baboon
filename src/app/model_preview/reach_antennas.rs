@@ -6,7 +6,7 @@
 use super::ce::lights::posed_on;
 use super::ce::particles::CePointPhysics;
 use super::h2::lights::H2Antenna;
-use super::h3_cloth::REACH_TICK_RATE;
+use super::cloth::REACH_TICK_RATE;
 
 /// The step `antennas_update` hands every antenna, whatever the tick's length:
 /// the 360's constant `flt_85251DE4`; MCC's `min(tick, 0.0333)` (0x140E52D1B)

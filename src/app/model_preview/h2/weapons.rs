@@ -14,7 +14,7 @@ use super::super::attachment::{attach_point, attach_vector};
 use super::super::loading::build_render_preview;
 use super::super::ce::attachments::CeWeaponIk;
 use super::super::dx9::passes::{h2_change_colors_for, read_h2_change_colors};
-use super::super::h3_cloth::ClothGame;
+use super::super::cloth::ClothGame;
 use super::super::*;
 use crate::core::source::TagSource;
 
@@ -670,7 +670,7 @@ fn fold_attached(
         preview.h2_contrails.extend(contrails.into_iter().map(|contrail| contrail.on_attached(name)));
         let liquids = super::liquid::read_h2_liquids(source, object, owner, markers, frame);
         preview.h2_liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
-        super::super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
+        super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
         read_extension_weapons(source, object, owner, markers, &frame, preview, Some(name));
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
@@ -724,7 +724,7 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     preview.h3_strips.extend(carried);
     let strips = super::super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
     preview.h3_strips.extend(named!(strips, name).map(Arc::new));
-    super::super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
+    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     let screens = super::super::h3_screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
     super::super::h3_screen_effects::add_screen_shader_materials(preview);
@@ -771,7 +771,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     preview.h3_screen_effects.extend(screens);
     super::super::h3_screen_effects::add_screen_shader_materials(preview);
     preview.h2_antennas.extend(super::lights::read_reach_antennas(source, object, markers, frame, name));
-    super::super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
+    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
     let lit = !(preview.reach_lights.is_empty() && preview.reach_cheap_lights.is_empty());
     if lit && preview.reach_light_passes.is_empty() {
@@ -818,7 +818,7 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderMode
         preview.h4_flare_pass = super::super::h4_flares::h4_flare_pass(source).ok().map(Arc::new);
     }
     preview.h2_antennas.extend(super::lights::read_reach_antennas(source, object, markers, frame, name));
-    super::super::h3_cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
+    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
 }
 
 /// A unit's own `weapons` that are an `extension of parent` (vehicle and

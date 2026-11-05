@@ -28,7 +28,7 @@ mod ce;
 pub(in crate::app) mod dx9;
 pub(in crate::app) mod h2;
 mod h3_effects;
-pub(crate) mod h3_cloth;
+pub(crate) mod cloth;
 pub(crate) mod h3_leaves;
 pub(crate) mod h3_light_volumes;
 pub(crate) mod particles;
@@ -180,7 +180,7 @@ pub(crate) struct RenderModelPreview {
     pub h4_tracers: Vec<h4_tracers::H4TracerAt>,
     pub h3_particles: Vec<Arc<particles::H3ParticleSystem>>,
     pub h3_strips: Vec<Arc<h3_strips::H3StripAt>>,
-    pub h3_cloth: Vec<h3_cloth::H3ClothAt>,
+    pub h3_cloth: Vec<cloth::H3ClothAt>,
     pub h3_leaves: Vec<Arc<h3_leaves::H3LeavesAt>>,
     pub h3_screen_effects: Vec<h3_screen_effects::H3ScreenEffectAt>,
     /// ODST's VISR, for an object with an effect that turns it on.

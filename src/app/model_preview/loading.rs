@@ -5,7 +5,7 @@ use super::*;
 use crate::core::source::MountedContainer;
 use super::dx9::passes::{H2Layer, h2_prt_lights};
 use super::h2::prt::read_h2_prt;
-use super::h3_cloth::ClothGame;
+use super::cloth::ClothGame;
 use blam_tags::iostore::IoStoreArchive;
 use blam_tags::iostore::container_header::EIoContainerHeaderVersion;
 use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
@@ -882,7 +882,7 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
     }
     preview.h2_antennas = super::h2::lights::read_h2_antennas(source, model_tag, &preview.markers);
     let markers = preview.markers.clone();
-    super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
+    super::cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     super::h2::weapons::read_extension_weapons(source, model_tag, 0, &markers, &frame, preview, None);
     let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
     let leaves = super::h3_leaves::read_h3_leaves(source, model_tag, &markers, middle);
@@ -943,7 +943,7 @@ fn read_h2_object_features(source: &TagSource, model_tag: &TagFile, preview: &mu
     };
     let frame = &frame;
     preview.h2_liquids = super::h2::liquid::read_h2_liquids(source, model_tag, 0, &markers, frame);
-    super::h3_cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
+    super::cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
     super::h2::weapons::read_extension_weapons(source, model_tag, 0, &markers, frame, preview, None);
     preview.markers = markers;
 }
@@ -4465,7 +4465,7 @@ pub(super) mod kit_object_tests {
         let data = kit_preview(&root, GameId::HaloReach, path, "weapon", b"weap");
         let cloths = &data.preview.h3_cloth;
         assert_eq!(cloths.len(), 1);
-        assert_eq!(cloths[0].game(), super::super::h3_cloth::ClothGame::Reach);
+        assert_eq!(cloths[0].game(), super::super::cloth::ClothGame::Reach);
         assert_eq!(cloths[0].pinned_vertices(), [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
         // The model's variant names a `flag` region its render model lacks;
         // the sheet, listed apart from it, still shows.
@@ -4488,7 +4488,7 @@ pub(super) mod kit_object_tests {
         let data = kit_preview(&root, GameId::Halo3, path, "weapon", b"weap");
         let cloths = &data.preview.h3_cloth;
         assert_eq!(cloths.len(), 1);
-        assert_eq!(cloths[0].game(), super::super::h3_cloth::ClothGame::Halo3);
+        assert_eq!(cloths[0].game(), super::super::cloth::ClothGame::Halo3);
         assert!(cloths[0].pinned_vertices().len() <= 6);
         let path = "objects\\vehicles\\warthog\\warthog";
         let data = kit_preview(&root, GameId::Halo3, path, "vehicle", b"vehi");
