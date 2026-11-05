@@ -459,6 +459,17 @@ pub(in crate::app) fn draw_field(
             );
             return;
         }
+        // Guerilla lays out these HUD wrappers inline. Their unnamed and
+        // placeholder struct names are not user-facing section headings;
+        // the definition's explanation fields supply the useful sections.
+        if is_h2_hud_function_tag(edit.game, edit.group_tag)
+            && (meta.label.trim().is_empty()
+                || matches!(nested.definition().name(),
+                    "hud_widget_effect_function_struct_2" | "scalar_function_struct_2"))
+        {
+            draw_struct_fields_inline(ui, nested, names, depth, expert_mode, &field_path, edit);
+            return;
+        }
         // A struct is a single fixed sub-structure (not a paginated collection
         // like a block/array), so show it expanded by default — matching
         // Foundation/Guerilla. The user can still collapse it, and that choice
