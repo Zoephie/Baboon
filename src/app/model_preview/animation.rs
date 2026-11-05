@@ -250,6 +250,42 @@ pub(super) fn muted_nodes(nodes: &[RenderModelPreviewNode], names: &[String]) ->
     muted
 }
 
+/// The selected variant's [`muted_nodes`]; none with no variant selected.
+fn variant_muted_nodes(data: &ModelPreviewData, state: &ModelPreviewState) -> Vec<bool> {
+    let nodes = &data.preview.nodes;
+    state
+        .selected_variant
+        .and_then(|index| data.variants.get(index))
+        .map_or_else(|| vec![false; nodes.len()], |variant| muted_nodes(nodes, &variant.muted_nodes))
+}
+
+/// Each node's world rotation, translation and scale, from the local
+/// transform `local` gives it: parents first, as the nodes come.
+fn world_pose(
+    nodes: &[RenderModelPreviewNode],
+    mut local: impl FnMut(usize, &RenderModelPreviewNode) -> (RealQuaternion, RealVector3d, f32),
+) -> Vec<(RealQuaternion, RealVector3d, f32)> {
+    let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
+    for (index, node) in nodes.iter().enumerate() {
+        let local = local(index, node);
+        let transform = if node.parent >= 0 {
+            let (parent_rotation, parent_translation, parent_scale) = world
+                .get(node.parent as usize)
+                .copied()
+                .unwrap_or((RealQuaternion::IDENTITY, RealVector3d::ZERO, 1.0));
+            (
+                (parent_rotation * local.0).normalized(),
+                parent_translation + (parent_rotation * (local.1 * parent_scale)),
+                parent_scale * local.2,
+            )
+        } else {
+            local
+        };
+        world.push(transform);
+    }
+    world
+}
+
 /// A muted node's local transform (`object_handle_muted_nodes`, X360
 /// 0x84A476D0): the render model node's default rotation and translation,
 /// scale 1.
@@ -279,36 +315,16 @@ pub(super) fn animation_skinning_rows(
     let (frame_a, frame_b, blend) = sampled_frames(playback, pose.frames.len());
     let (frame_a, frame_b) = (&pose.frames[frame_a], &pose.frames[frame_b]);
 
-    let muted = state
-        .selected_variant
-        .and_then(|index| data.variants.get(index))
-        .map_or_else(|| vec![false; nodes.len()], |variant| muted_nodes(nodes, &variant.muted_nodes));
-    let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
-    let mut matrices: Vec<Matrix4> = Vec::with_capacity(nodes.len());
-    let mut inverse_binds: Vec<Matrix4> = Vec::with_capacity(nodes.len());
-    for (index, node) in nodes.iter().enumerate() {
-        let local = if muted[index] {
+    let muted = variant_muted_nodes(data, state);
+    let world = world_pose(nodes, |index, node| {
+        if muted[index] {
             bind_transform(node)
         } else {
             blend_transforms(frame_a.get(index), frame_b.get(index), blend, node)
-        };
-        let (rotation, translation, scale) = if node.parent >= 0 {
-            let (parent_rotation, parent_translation, parent_scale) = world
-                .get(node.parent as usize)
-                .copied()
-                .unwrap_or((RealQuaternion::IDENTITY, RealVector3d::ZERO, 1.0));
-            (
-                (parent_rotation * local.0).normalized(),
-                parent_translation + (parent_rotation * (local.1 * parent_scale)),
-                parent_scale * local.2,
-            )
-        } else {
-            local
-        };
-        world.push((rotation, translation, scale));
-        matrices.push(world_matrix((rotation, translation, scale)));
-        inverse_binds.push(inverse_bind_matrix(node));
-    }
+        }
+    });
+    let mut matrices: Vec<Matrix4> = world.iter().copied().map(world_matrix).collect();
+    let inverse_binds: Vec<Matrix4> = nodes.iter().map(inverse_bind_matrix).collect();
     apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
     // `biped_postprocess_node_matrices` (X360 0x84B1A738): the IK set, then
     // the chains.
@@ -470,36 +486,21 @@ pub(super) fn armature_node_positions(
             Some((&pose.frames[a], &pose.frames[b], blend))
         });
 
-    let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
-    for (index, node) in nodes.iter().enumerate() {
-        let local = if let Some((a, b, blend)) = sampled_frames {
-            blend_transforms(a.get(index), b.get(index), blend, node)
-        } else {
-            (
-                quat(node.bind_rotation),
-                RealVector3d {
-                    i: node.bind_translation[0],
-                    j: node.bind_translation[1],
-                    k: node.bind_translation[2],
-                },
-                1.0,
-            )
-        };
-        let transform = if node.parent >= 0 {
-            let (parent_rotation, parent_translation, parent_scale) = world
-                .get(node.parent as usize)
-                .copied()
-                .unwrap_or((RealQuaternion::IDENTITY, RealVector3d::ZERO, 1.0));
-            (
-                (parent_rotation * local.0).normalized(),
-                parent_translation + (parent_rotation * (local.1 * parent_scale)),
-                parent_scale * local.2,
-            )
-        } else {
-            local
-        };
-        world.push(transform);
-    }
+    // A muted node holds its bind pose, as the skinned mesh does.
+    let muted = variant_muted_nodes(data, state);
+    let world = world_pose(nodes, |index, node| match sampled_frames {
+        Some(_) if muted[index] => bind_transform(node),
+        Some((a, b, blend)) => blend_transforms(a.get(index), b.get(index), blend, node),
+        None => (
+            quat(node.bind_rotation),
+            RealVector3d {
+                i: node.bind_translation[0],
+                j: node.bind_translation[1],
+                k: node.bind_translation[2],
+            },
+            1.0,
+        ),
+    });
     let mut matrices: Vec<Matrix4> = world.iter().copied().map(world_matrix).collect();
     if sampled_frames.is_some() {
         let inverse_binds: Vec<_> = nodes.iter().map(inverse_bind_matrix).collect();
@@ -751,6 +752,43 @@ mod tests {
         assert_eq!(animated.len(), 2);
         assert!((animated[0][0] - bind_positions[0][0] - 0.5).abs() < 1e-4);
         assert!((animated[1][0] - bind_positions[1][0] - 0.5).abs() < 1e-4);
+    }
+
+    /// A muted node's joint holds its bind pose under its moving parent, as
+    /// the skinned mesh does, so the armature stays on the mesh.
+    #[test]
+    fn armature_holds_a_muted_node_where_the_skin_does() {
+        let nodes = test_nodes();
+        let bind = armature_node_positions(&preview_with_nodes(nodes.clone()), &ModelPreviewState::default());
+        let mut frame = bind_pose_frame(&nodes);
+        frame[0].translation[0] += 0.5;
+        frame[1].translation[2] += 0.75;
+        let mut data = preview_with_nodes(nodes);
+        data.variants = vec![ModelVariantPreview {
+            name: "muted".to_owned(),
+            regions: Default::default(),
+            hidden_regions: Default::default(),
+            muted_nodes: vec!["spine".to_owned()],
+        }];
+        let mut state = ModelPreviewState::default();
+        state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(0, vec![frame])));
+        let unmuted = armature_node_positions(&data, &state);
+        state.selected_variant = Some(0);
+        let muted = armature_node_positions(&data, &state);
+
+        assert!((unmuted[1][2] - bind[1][2]).abs() > 0.1, "unmuted, the spine plays its own move");
+        assert!((muted[1][0] - bind[1][0] - 0.5).abs() < 1e-4, "it follows its parent");
+        assert!((muted[1][2] - bind[1][2]).abs() < 1e-4, "and holds its own bind pose");
+        // The skin's translation is world × inverse bind, so the joint is the
+        // skin applied to the bind position.
+        let rows = animation_skinning_rows(&data, &state).expect("skinning rows");
+        let skinned: [f32; 3] = std::array::from_fn(|axis| {
+            let row = rows[3 + axis];
+            row[0] * bind[1][0] + row[1] * bind[1][1] + row[2] * bind[1][2] + row[3]
+        });
+        for axis in 0..3 {
+            assert!((skinned[axis] - muted[1][axis]).abs() < 1e-4, "{skinned:?} {:?}", muted[1]);
+        }
     }
 
     /// Halfway between two frames, the pose is a blend of them; with
