@@ -273,7 +273,31 @@ struct H3ScreenDefinition {
     /// Its tag was last saved before `object falloff` existed.
     predates_object_falloff: bool,
     /// ODST's `shader effect`, with its `render layer` and `sort order`.
-    shader: Option<(String, i32, i32)>,
+    shader: Option<(String, ScreenLayer, i32)>,
+}
+
+/// `render layer`: where `render_screen_shaders` draws a `shader_screen`.
+/// Pre-UI and post-UI draw last, either side of the UI; Reach's
+/// pre-transparents draws in `c_player_view::render`, after the static
+/// lighting and before the lights, the transparents and the postprocess (the
+/// 360's 0x8302A358 called with layer 2). Its accumulate sorts by `sort order`
+/// alone; each draw takes its own layer's, so sorting by layer first keeps
+/// each layer's order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum ScreenLayer {
+    PreUi,
+    PostUi,
+    PreTransparents,
+}
+
+impl ScreenLayer {
+    fn read(root: TagStruct<'_>) -> Self {
+        match root.read_enum_option("render layer").as_deref() {
+            Some("post-UI") => Self::PostUi,
+            Some("pre-transparents") => Self::PreTransparents,
+            _ => Self::PreUi,
+        }
+    }
 }
 
 /// A `shader_screen` to draw this frame, at this much of its effect.
@@ -281,8 +305,18 @@ struct H3ScreenDefinition {
 pub(crate) struct H3ScreenShader {
     pub(crate) path: String,
     pub(crate) alpha: f32,
-    layer: i32,
+    layer: ScreenLayer,
     order: i32,
+}
+
+impl H3ScreenShader {
+    /// Drawn at the end of the frame. Nothing the preview loads uses Reach's
+    /// pre-transparents layer (only night vision and the sniper's zoom, from
+    /// a unit's or weapon's `screen effects`), so it has no pass of its own
+    /// and is left out rather than drawn over everything.
+    pub(crate) fn at_frame_end(&self) -> bool {
+        self.layer != ScreenLayer::PreTransparents
+    }
 }
 
 /// `s_screen_effect_shader_sample_result::accumulate_settings`: ahead of the
@@ -353,11 +387,11 @@ fn shows_to_no_unit(flagged: impl Fn(&str) -> bool) -> bool {
     !(flagged("unattached") || flagged("first person") || flagged("third person")) || flagged("unattached")
 }
 
-fn read_screen_shader(source: &TagSource, element: TagStruct<'_>) -> Option<(String, i32, i32)> {
+fn read_screen_shader(source: &TagSource, element: TagStruct<'_>) -> Option<(String, ScreenLayer, i32)> {
     let path = element.read_tag_ref_path("shader effect").filter(|path| !path.is_empty())?;
     let tag = load_referenced_tag_from_source(source, &path, "shader_screen", b"rmss").ok()?;
     let root = tag.root();
-    let layer = i32::from(root.read_enum_name("render layer").as_deref() != Some("pre-UI"));
+    let layer = ScreenLayer::read(root);
     let order = root.read_int_any("sort order").unwrap_or(0) as i32;
     Some((path, layer, order))
 }
@@ -670,13 +704,13 @@ mod tests {
     fn screen_shaders_sort_by_layer_then_order_and_stop_at_the_limit() {
         let shader = |name: &str, layer, order| H3ScreenShader { path: name.to_owned(), alpha: 1.0, layer, order };
         let mut shaders = Vec::new();
-        insert_shader(&mut shaders, shader("post", 1, 0));
-        insert_shader(&mut shaders, shader("b", 0, 5));
-        insert_shader(&mut shaders, shader("a", 0, 2));
-        insert_shader(&mut shaders, shader("c", 0, 5));
+        insert_shader(&mut shaders, shader("post", ScreenLayer::PostUi, 0));
+        insert_shader(&mut shaders, shader("b", ScreenLayer::PreUi, 5));
+        insert_shader(&mut shaders, shader("a", ScreenLayer::PreUi, 2));
+        insert_shader(&mut shaders, shader("c", ScreenLayer::PreUi, 5));
         let names: Vec<_> = shaders.iter().map(|shader| shader.path.as_str()).collect();
         assert_eq!(names, ["a", "c", "b", "post"], "the later of equals goes first");
-        (0..9).for_each(|at| insert_shader(&mut shaders, shader("more", 2, at)));
+        (0..9).for_each(|at| insert_shader(&mut shaders, shader("more", ScreenLayer::PostUi, at)));
         assert_eq!(shaders.len(), MOST_SCREEN_SHADERS);
     }
 
@@ -756,6 +790,26 @@ mod tests {
         assert_eq!(settings.stops(), 2.0 - 1.5);
         assert_eq!(settings.noise(), [0.4, 0.4]);
         assert_eq!(settings.exposure(), 4.0, "Halo 3's composite reads the boost alone");
+    }
+
+    /// With `BLAM_TEST_HREK`: a `render layer` reads by its option's name,
+    /// and only a pre-transparents shader stays out of the frame's end.
+    #[test]
+    fn kit_reach_screen_shaders_read_their_layer() {
+        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
+            eprintln!("skipping: BLAM_TEST_HREK is not set");
+            return;
+        };
+        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        for (path, layer) in [
+            ("fx\\screen_fx\\camera_fx\\dead_static_overlay", ScreenLayer::PostUi),
+            ("objects\\characters\\spartans\\fx\\night_vision\\night_vision", ScreenLayer::PreTransparents),
+        ] {
+            let tag = load_referenced_tag_from_source(&source, path, "shader_screen", b"rmss").expect(path);
+            assert_eq!(ScreenLayer::read(tag.root()), layer, "{path}");
+            let shader = H3ScreenShader { path: path.to_owned(), alpha: 1.0, layer, order: 0 };
+            assert_eq!(shader.at_frame_end(), layer != ScreenLayer::PreTransparents, "{path}");
+        }
     }
 
     /// With `BLAM_TEST_HREK`: the Spartans' body damage effect is not seen

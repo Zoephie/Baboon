@@ -2126,7 +2126,11 @@ impl ModelGlRenderer {
         let blur = screen.blur();
         let vision = frame.preview.h3_vision.clone().filter(|_| screen.vision() > 0.0);
         let suck = frame.preview.h3_motion_blur.zip(screen.suck());
-        if shaders.is_empty() && blur.is_none() && vision.is_none() && suck.is_none() {
+        if !shaders.iter().any(h3_screen_effects::H3ScreenShader::at_frame_end)
+            && blur.is_none()
+            && vision.is_none()
+            && suck.is_none()
+        {
             return;
         }
         let Some(targets) = self.h3_targets.as_ref() else {
@@ -2172,7 +2176,7 @@ impl ModelGlRenderer {
                 screen_copy(gl, true);
                 self.h3_draw_suck(gl, frame, &blur, moved, behind, depth_copy);
             }
-            for shader in shaders {
+            for shader in shaders.iter().filter(|shader| shader.at_frame_end()) {
                 let screen = u32::from_be_bytes(*b"rmss");
                 let found = frame
                     .preview
