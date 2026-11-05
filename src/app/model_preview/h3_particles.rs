@@ -440,7 +440,9 @@ pub(super) fn slerped([from, to]: [[f32; 3]; 2], t: f32) -> [f32; 3] {
 
 /// `c_particle_system_definition::postprocess`' LOD: in, out, feather in and
 /// feather out. Only what ignores the camera mode gets the near pair, and that
-/// from how fast it emits.
+/// from how fast it emits. Out and its feather default to 20 and 5 in both
+/// MCC tools (Halo 3 0x1407E4A30, ODST 0x140828DE0); the tag's "defaults to
+/// 30.0 / 10.0" is Halo 2's text, carried over.
 fn baked_lod(raw: [f32; 4], any_camera: bool, rates: impl Iterator<Item = f32>) -> [f32; 4] {
     let empty = |value: f32| value.abs() < 0.0001;
     let [mut near, mut far, mut feather_in, mut feather_out] = raw;
