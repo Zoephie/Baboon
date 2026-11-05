@@ -314,6 +314,15 @@ pub(crate) fn translate_with(
     Ok(Translated { source, uniforms: emitter.uniforms, textures: emitter.textures, attributes })
 }
 
+/// A system value semantic with its index 0 written out (`SV_Position0`, as
+/// Halo 4's particle interpolators spell it), as it is without.
+fn system_semantic(upper: &str) -> String {
+    match upper.strip_suffix('0') {
+        Some(base) if base.starts_with("SV_") && !base.ends_with(|c: char| c.is_ascii_digit()) && base != "SV_TARGET" => base.to_owned(),
+        _ => upper.to_owned(),
+    }
+}
+
 /// Semantics upper-cased: the kit spells them both ways.
 fn varying_name(semantic: &str) -> String {
     format!("v_{}", semantic.to_ascii_uppercase())
@@ -1806,7 +1815,7 @@ impl Emitter<'_> {
         let Some(semantic) = semantic else {
             return Ok(());
         };
-        let upper = semantic.to_ascii_uppercase();
+        let upper = system_semantic(&semantic.to_ascii_uppercase());
         let source = match (self.stage, upper.as_str()) {
             (Stage::Pixel, "SV_POSITION" | "VPOS") => "gl_FragCoord".to_owned(),
             (Stage::Pixel, "SV_ISFRONTFACE" | "VFACE") => "gl_FrontFacing".to_owned(),
@@ -1862,9 +1871,9 @@ impl Emitter<'_> {
         let Some(semantic) = semantic else {
             return Ok(());
         };
-        let upper = semantic.to_ascii_uppercase();
+        let upper = system_semantic(&semantic.to_ascii_uppercase());
         match (self.stage, upper.as_str()) {
-            (Stage::Vertex, "SV_POSITION" | "POSITION") => {
+            (Stage::Vertex, "SV_POSITION" | "POSITION" | "POSITION0") => {
                 after.push_str(&format!("    gl_Position = {source};\n"));
             }
             (_, "SV_CLIPDISTANCE") => {}
@@ -1981,6 +1990,20 @@ mod tests {
         assert!(translate_with(&program, "main_ps", Stage::Pixel, &extra).is_err());
         let unbound = translate(&program, "main_ps", Stage::Pixel).unwrap().source;
         assert!(!unbound.contains("hlsl_p1 = true;"), "no arguments leaves them unset: {unbound}");
+    }
+
+    /// `SV_Position0` is `SV_Position`, out of a vertex stage and into a
+    /// pixel one; `SV_Target0` stays a target, and an ordinary `TEXCOORD0`
+    /// a varying.
+    #[test]
+    fn an_indexed_position_semantic_is_the_position() {
+        assert_eq!(system_semantic("SV_POSITION0"), "SV_POSITION");
+        assert_eq!(system_semantic("SV_TARGET0"), "SV_TARGET0");
+        assert_eq!(system_semantic("TEXCOORD0"), "TEXCOORD0");
+        let source = "struct o { float4 p : SV_Position0; float4 t : TEXCOORD0; };\nvoid main_vs(uint id : SV_VertexID, out o r) { r.p = float4(id, 0, 0, 1); r.t = 0; }\n";
+        let text = glsl(source, "main_vs", Stage::Vertex).source;
+        assert!(text.contains("gl_Position = hlsl_p1.p;"), "{text}");
+        assert!(text.contains("v_TEXCOORD0 = hlsl_p1.t;"), "{text}");
     }
 
     #[test]
