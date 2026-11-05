@@ -77,6 +77,8 @@ mod reach_camo;
 mod reach_shadow;
 mod reach_shield;
 mod renderer;
+#[cfg(test)]
+mod gates;
 mod variants;
 
 use animation::*;
