@@ -70,6 +70,7 @@ mod h4_flares;
 mod h4_camo;
 mod h4_shield;
 mod h4_shadow;
+mod h4_particles;
 mod reach_blend_screens;
 mod reach_camo;
 mod reach_shadow;

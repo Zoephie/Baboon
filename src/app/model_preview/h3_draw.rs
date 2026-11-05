@@ -2438,7 +2438,7 @@ pub(super) unsafe fn h3_set_blend(gl: &glow::Context, blend: H3Blend) {
 
 /// `d3d11_sampler_state_cache::get`: the border is transparent black, and
 /// anisotropic filters are trilinear with a limit.
-unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: H3Sampler) {
+pub(super) unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: H3Sampler) {
     const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
     let address = |mode| match mode {
         BitmapAddressMode::Clamp => glow::CLAMP_TO_EDGE,

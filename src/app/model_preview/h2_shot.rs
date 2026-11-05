@@ -128,11 +128,13 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     data.textures = Some(Arc::new(textures));
     eprintln!("NOTE {} cheap particle emitters", data.preview.reach_cheap_emitters.len());
     eprintln!(
-        "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares",
+        "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares, {} particle systems ({} on materials)",
         data.preview.h4_lights.len(),
         data.preview.h4_cheap_lights.len(),
         data.preview.h4_light_passes.len(),
-        data.preview.h4_flares.len()
+        data.preview.h4_flares.len(),
+        data.preview.h3_particles.len(),
+        data.preview.h3_particles.iter().filter(|system| system.look.h4.is_some()).count()
     );
     // `H2_SHOT_DROP=a,b` leaves out whole features, to see one on its own.
     if let Ok(dropped) = std::env::var("H2_SHOT_DROP") {

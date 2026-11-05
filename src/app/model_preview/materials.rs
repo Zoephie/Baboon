@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 mod h4;
-pub(super) use h4::h4_screen_vertex;
+pub(super) use h4::{H4EffectMaterial, h4_screen_vertex, resolve_h4_effect_material};
 
 /// The texture roles the preview understands.
 ///

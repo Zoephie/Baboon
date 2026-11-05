@@ -1495,6 +1495,8 @@ mod h4_light_pass;
 mod h4_flare_pass;
 #[path = "h4_shadow_pass.rs"]
 mod h4_shadow_pass;
+#[path = "h4_particle_pass.rs"]
+mod h4_particle_pass;
 
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
@@ -2088,6 +2090,8 @@ struct ModelGpuSlot {
     leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
+    /// Halo 4's particle programs, bitmaps and state buffer.
+    h4_particles: h4_particle_pass::H4ParticleGl,
 }
 
 impl ModelGpuSlot {
@@ -2165,6 +2169,7 @@ impl ModelGpuSlot {
                 leaf_textures: Vec::new(),
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
+                h4_particles: Default::default(),
             })
         }
     }
@@ -2280,6 +2285,7 @@ impl ModelGpuSlot {
             return;
         }
         unsafe {
+            self.h4_particles.clear(gl);
             let drained = self
                 .particle_textures
                 .drain(..)
@@ -5077,6 +5083,30 @@ impl ModelGlRenderer {
                     Sprites::System(index) => {
                         let system = &frame.preview.h3_particles[index];
                         if !frame.h3_systems_shown.get(index).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        // Halo 4's: through their material, from packed state.
+                        if let Some(render) = system.look.h4.as_ref() {
+                            let values = frame.h2_values_of_object(system.object);
+                            let onset = uploaded.h3_onsets.of(system.object, system.scale_name(), values, frame.time);
+                            let draws = uploaded.h3_particles.h4_draws(index, system, values, bones, &view, frame.time, onset);
+                            if !draws.is_empty() {
+                                let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+                                h4_particle_pass::draw_h4_particles(
+                                    gl,
+                                    &mut uploaded.h4_particles,
+                                    frame,
+                                    render,
+                                    &draws,
+                                    self.h3_depth_copy,
+                                    size,
+                                    self.placeholder,
+                                    system.object,
+                                );
+                                gl.use_program(Some(flares.program));
+                                gl.bind_vertex_array(Some(flares.vertex_array));
+                                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                            }
                             continue;
                         }
                         let Some(particles) = particle_gl.as_ref() else {

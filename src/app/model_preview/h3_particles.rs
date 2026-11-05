@@ -827,6 +827,8 @@ pub(crate) struct H3ParticleLook {
     rate: H3ParticleProperty,
     palette: H3ParticleProperty,
     pub(crate) shader: Arc<H3SpriteShader>,
+    /// Halo 4's: drawn through its material from packed state, not as quads.
+    pub(crate) h4: Option<Arc<super::h4_particles::H4ParticleRender>>,
     /// Halo 3's colours are light, and Halo 2's are what shows.
     exposed: bool,
     /// Reach's: its own game time, lighting, exposure and shapes.
@@ -1260,7 +1262,14 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         Some(model) => Some(read_particle_mesh(source, &model)?),
         None => None,
     };
-    let shader = root.descend("actual shader?")?;
+    // Halo 4 draws through the particle's own `actual material`; its
+    // `actual shader` is the deprecated render method's remains.
+    let halo4 = source.game() == Some(GameId::Halo4);
+    let h4 = match halo4 {
+        true => Some(Arc::new(super::h4_particles::read_h4_particle_render(source, root, model.is_some()).ok()?)),
+        false => None,
+    };
+    let shader = root.descend("actual shader?");
     let flags = root.read_flag_names("appearance flags").unwrap_or_default();
     let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     let animation = root.read_flag_names("animation flags").unwrap_or_default();
@@ -1269,9 +1278,13 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     let offset = root.read_point2d("center offset");
     let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
     let one_shot = animated("frame animation one shot");
-    let (frames, corner) = read_frames(source, shader, first, [offset.x, offset.y], start, one_shot);
+    let (frames, corner) = match shader.filter(|_| !halo4) {
+        Some(shader) => read_frames(source, shader, first, [offset.x, offset.y], start, one_shot),
+        None => (vec![[0.0, 0.0, 1.0, 1.0]], [0.0, 0.0, 1.0, 1.0]),
+    };
     let billboard = H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default());
-    let reach = source.game() == Some(GameId::HaloReach);
+    // Halo 4's simulation is Reach's, with terms of its own.
+    let reach = matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4));
     let main_flags = root.read_flag_names("main flags").unwrap_or_default();
     let cheap = reach && main_flags.iter().any(|(_, name)| name.starts_with("uses cheap shader"));
     const PROPERTIES: [&str; 7] =
@@ -1287,7 +1300,10 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     };
     properties.iter_mut().for_each(|property| property.allocate(&mut seeds));
     let [aspect, color, intensity, alpha, frame, rate, palette] = properties;
-    let mut sprite_shader = read_sprite_shader(source, shader)?;
+    let mut sprite_shader = match shader.filter(|_| !halo4) {
+        Some(shader) => read_sprite_shader(source, shader)?,
+        None => H3SpriteShader::plain(H3Blend::Additive),
+    };
     // `default_vs`: Reach's constant self-illumination is at `V_ILLUM_EXPOSURE`.
     sprite_shader.add_at_illum = reach;
     if cheap {
@@ -1348,6 +1364,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         rate,
         palette,
         shader: Arc::new(sprite_shader),
+        h4,
         exposed: true,
         reach,
         cheap,
@@ -1498,6 +1515,7 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
         rate: H3ParticleProperty::fixed(0.0)?,
         palette: H3ParticleProperty::fixed(0.0)?,
         shader: Arc::new(shader),
+        h4: None,
         exposed: false,
         reach: false,
         cheap: false,
@@ -3550,6 +3568,10 @@ impl H3ParticleSystem {
     ) {
         let system = self;
         let look = &*system.look;
+        // Halo 4's draw through their material, from packed state.
+        if look.h4.is_some() {
+            return;
+        }
         let light = particle_exposure(look.shader.blend, look.exposed, look.reach, stops);
         let initial = match (look.tint_from_lightmap, look.reach) {
             (false, _) => [1.0; 3],
@@ -4636,5 +4658,133 @@ mod tests {
         assert_eq!(plane.update, H3ParticleUpdate::Gpu);
         let turbulence = plane.turbulence.as_ref().expect("its turbulence");
         assert!(turbulence.image.width > 0 && turbulence.image.whole());
+    }
+}
+
+/// One Halo 4 emitter's draw: its particles packed as the card holds them,
+/// and the matrix from their space to the world.
+#[derive(Debug, Clone)]
+pub(crate) struct H4EmitterDraw {
+    /// `vs_emitter_to_world_matrix`: forward, left, up and position.
+    pub(crate) to_world: [[f32; 3]; 4],
+    pub(crate) states: Vec<[u32; 20]>,
+    /// `near fade range` and its cutoff.
+    pub(crate) near: [f32; 2],
+    /// `psBlackOrWhitePointEnabled`: set unless the black point is ever 0
+    /// and the white point 1 (`c_particle_emitter_definition` postprocess).
+    pub(crate) black_or_white: bool,
+}
+
+impl H3ParticleField {
+    /// Halo 4: each emitter of `system`'s particles as `pack_particle_state`
+    /// writes them, for its material to draw.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn h4_draws(
+        &self,
+        index: usize,
+        system: &H3ParticleSystem,
+        values: Option<&H2FunctionValues>,
+        bones: Option<&[[f32; 4]]>,
+        view: &CeFlareView,
+        time: f32,
+        onset: f32,
+    ) -> Vec<H4EmitterDraw> {
+        let mut draws = Vec::new();
+        if system.hidden || system.look.h4.is_none() {
+            return draws;
+        }
+        if system.child {
+            for run in self.instances.get(index).into_iter().flatten() {
+                system.h4_draws_at(&run.running, (run.origin, run.axes, run.start), values, view, time, &mut draws);
+            }
+            return draws;
+        }
+        let Some(running) = self.running.get(index) else {
+            return draws;
+        };
+        let (origin, axes) = location(system, bones);
+        system.h4_draws_at(running, (origin, axes, onset), values, view, time, &mut draws);
+        draws
+    }
+}
+
+impl H3ParticleSystem {
+    /// `particle_update.fx`'s outputs for each live particle of a location,
+    /// packed.
+    fn h4_draws_at(
+        &self,
+        running: &[RunningEmitter],
+        (origin, axes, onset): ([f32; 3], [[f32; 3]; 3], f32),
+        values: Option<&H2FunctionValues>,
+        view: &CeFlareView,
+        time: f32,
+        draws: &mut Vec<H4EmitterDraw>,
+    ) {
+        use super::h4_particles::{H4ParticleState, pack_particle_state};
+        let system = self;
+        let look = &*system.look;
+        for (emitter, running) in system.emitters.iter().zip(running) {
+            let base = H3ParticleState {
+                system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
+                game_time: particle_game_time(look.reach, time),
+                effect_a: system_state(system, values, time, time - onset).map_or(0.0, |state| state.effect_a),
+                effect_b: system_state(system, values, time, time - onset).map_or(1.0, |state| state.effect_b),
+                location_seed: system.location_seed,
+                lod: {
+                    let away = minus(origin, view.eye);
+                    lod_amount(system.lod, dot(away, away).sqrt())
+                },
+                ..Default::default()
+            };
+            const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+            let (offset, turned) = if system.world { ([0.0; 3], IDENTITY) } else { emitter_frame(emitter, origin, axes, &base) };
+            // `random u/v mirror` reads bit 0 of `256·random`.
+            let mirror = |flip: bool| if flip { 1.5 / 256.0 } else { 0.5 / 256.0 };
+            let mut states = Vec::with_capacity(running.particles.len());
+            for particle in &running.particles {
+                let state = particle.state(base);
+                let tint = emitter.tint.color(&state);
+                let color = look.color.color(&state);
+                let alpha = (emitter.alpha.scalar(&state) * look.alpha.scalar(&state)).clamp(0.0, 1.0);
+                let rgb: [f32; 3] = std::array::from_fn(|axis| (tint[axis] * color[axis]).clamp(0.0, 1.0));
+                let packed = H4ParticleState {
+                    position: particle.position,
+                    size: emitter.size.scalar(&state) * emitter.scale.scalar(&state),
+                    velocity: particle.velocity,
+                    aspect: look.aspect.scalar(&state),
+                    random: [mirror(particle.flip[0]), mirror(particle.flip[1]), particle.seeds[0], particle.seeds[1]],
+                    random2: [particle.seeds[2], particle.seeds[3], particle.seeds[4], particle.seeds[5]],
+                    physical_rotation: if emitter.rotation_given { 0.0 } else { particle.rotation.rem_euclid(1.0) },
+                    manual_rotation: emitter.rotation.scalar(&state).rem_euclid(1.0),
+                    animated_frame: particle.frame.rem_euclid(1.0),
+                    manual_frame: look.frame.scalar(&state).rem_euclid(1.0),
+                    birth_time: particle.emission_time,
+                    inverse_lifespan: particle.inverse_lifespan,
+                    age: particle.age,
+                    intensity: look.intensity.scalar(&state),
+                    rotation_rate: particle.rotation_rate,
+                    frame_rate: particle.frame_rate,
+                    simulation: [0.0; 2],
+                    // A black point of 1 would pick a sixth corner set, past
+                    // the five; GLSL reads nothing sound there.
+                    black_point: emitter.black_point.scalar(&state).clamp(0.0, 0.998),
+                    white_point: 1.0,
+                    palette: look.palette.scalar(&state).clamp(0.0, 1.0),
+                    axis: particle.axis,
+                    color: [rgb[0], rgb[1], rgb[2], alpha],
+                    initial_color: [1.0, 1.0, 1.0, 0.0],
+                };
+                states.push(pack_particle_state(&packed));
+            }
+            if states.is_empty() {
+                continue;
+            }
+            draws.push(H4EmitterDraw {
+                to_world: [turned[0], turned[1], turned[2], offset],
+                states,
+                near: [system.near_range.recip(), system.near_cutoff],
+                black_or_white: emitter.black_point.function.as_constant().is_none_or(|value| value != 0.0),
+            });
+        }
     }
 }

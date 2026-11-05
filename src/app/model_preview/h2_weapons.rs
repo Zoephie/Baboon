@@ -803,6 +803,8 @@ pub(super) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (Mar
     preview.h4_lights.extend(named!(lights, name));
     preview.h4_cheap_lights.extend(named!(cheap, name));
     super::h4_lights::read_h4_light_passes(source, preview);
+    let particles = super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    preview.h3_particles.extend(named!(particles, name).map(Arc::new));
     let flares = super::h4_flares::read_h4_flares(source, object, owner, markers, frame);
     preview.h4_flares.extend(named!(flares, name));
     if !preview.h4_flares.is_empty() && preview.h4_flare_pass.is_none() {

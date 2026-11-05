@@ -87,6 +87,32 @@ pub(crate) fn read_h4_shield(source: &TagSource, model: &TagFile) -> Option<Arc<
     }))
 }
 
+/// `ComputeDepthFade`'s decode of the game's reversed depth through
+/// `psDepthConstants`, made to read the preview's window depth back as world
+/// distance from the eye through [`DEPTH_DECODE`] and [`WORLD_SCALE`].
+pub(crate) fn rewire_depth_fade(pass: &mut H3Pass) -> Result<(), String> {
+    const DECODE: &str =
+        "float l_sceneDepth = (1.0 / ((psDepthConstants.x + psDepthConstants.y) - (psDepthConstants.y * l_depthValue.x)));";
+    if !pass.pixel.contains(DECODE) {
+        return Err("the depth fade's decode is not where it was".to_owned());
+    }
+    pass.pixel = pass.pixel.replace(
+        DECODE,
+        &format!(
+            "float l_window_ndc = l_depthValue.x * 2.0 - 1.0;
+float l_sceneDepth = ((l_window_ndc - {DEPTH_DECODE}.y) / ({DEPTH_DECODE}.x - l_window_ndc * {DEPTH_DECODE}.z) + {DEPTH_DECODE}.w) / {WORLD_SCALE};"
+        ),
+    );
+    pass.pixel = pass.pixel.replacen(
+        "uniform vec4 psDepthConstants;",
+        &format!("uniform vec4 psDepthConstants;\nuniform vec4 {DEPTH_DECODE};\nuniform float {WORLD_SCALE};"),
+        1,
+    );
+    pass.uniforms.push((DEPTH_DECODE.to_owned(), Type::Vector(Scalar::Float, 4)));
+    pass.uniforms.push((WORLD_SCALE.to_owned(), Type::Scalar(Scalar::Float)));
+    Ok(())
+}
+
 /// Explicit 61's `technique` on the preview's skinned vertices, made to read
 /// the preview's depth: `ComputeDepthFade`'s `psDepthConstants` decode is
 /// the game's reversed depth, here the preview's window depth to world units.
@@ -110,27 +136,8 @@ pub(crate) fn h4_shield_pass(source: &TagSource, technique: usize) -> Result<H3P
         super::h4_shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
     let pixel =
         super::h4_shaders::translate_technique(&program, technique, "_default", Stage::Pixel)?;
-    const DECODE: &str = "float l_sceneDepth = (1.0 / ((psDepthConstants.x + psDepthConstants.y) - (psDepthConstants.y * l_depthValue.x)));";
-    if !pixel.source.contains(DECODE) {
-        return Err("the depth fade's decode is not where it was".to_owned());
-    }
     let mut pass = super::h3_shaders::pass_of(vertex, pixel);
-    pass.pixel = pass.pixel.replace(
-        DECODE,
-        &format!(
-            "float l_window_ndc = l_depthValue.x * 2.0 - 1.0;
-float l_sceneDepth = ((l_window_ndc - {DEPTH_DECODE}.y) / ({DEPTH_DECODE}.x - l_window_ndc * {DEPTH_DECODE}.z) + {DEPTH_DECODE}.w) / {WORLD_SCALE};"
-        ),
-    );
-    pass.pixel = pass.pixel.replacen(
-        "uniform vec4 psDepthConstants;",
-        &format!("uniform vec4 psDepthConstants;\nuniform vec4 {DEPTH_DECODE};\nuniform float {WORLD_SCALE};"),
-        1,
-    );
-    pass.uniforms
-        .push((DEPTH_DECODE.to_owned(), Type::Vector(Scalar::Float, 4)));
-    pass.uniforms
-        .push((WORLD_SCALE.to_owned(), Type::Scalar(Scalar::Float)));
+    rewire_depth_fade(&mut pass)?;
     Ok(pass)
 }
 
