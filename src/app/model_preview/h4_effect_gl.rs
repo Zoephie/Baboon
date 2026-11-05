@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use super::h3_shaders::{H3Pass, H3Value};
+use super::h3_shaders::{H3Pass, H3Value, H3Values};
 use super::materials::H4EffectMaterial;
 use super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
@@ -268,7 +268,7 @@ impl H4EffectGl {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         material: &H4EffectMaterial,
-        functions: &HashMap<String, H3Value>,
+        functions: &H3Values,
         name: &str,
         ty: &Type,
         size: [i32; 2],
@@ -313,7 +313,7 @@ pub(super) fn material_functions(
     frame: &ModelGpuFrame,
     material: &H4EffectMaterial,
     object: u8,
-) -> HashMap<String, H3Value> {
+) -> H3Values {
     let drawn = super::h4_submit::DrawnObject {
         values: frame.h2_values_of_object(object),
         time: frame.time,
@@ -333,7 +333,7 @@ pub(super) fn material_functions(
 fn shared_value(
     frame: &ModelGpuFrame,
     material: &H4EffectMaterial,
-    functions: &HashMap<String, H3Value>,
+    functions: &H3Values,
     name: &str,
     size: [i32; 2],
 ) -> Option<H3Value> {

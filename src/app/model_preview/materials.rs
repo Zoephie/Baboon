@@ -809,7 +809,7 @@ fn prepare_h3_material(
         shadow_generate,
         dynamic_light,
         blend,
-        values: HashMap::new(),
+        values: Default::default(),
         textures: Vec::new(),
         change_colors: Vec::new(),
         animations: Vec::new(),
@@ -1001,7 +1001,7 @@ pub(super) fn read_h3_shield_settings(source: &TagSource, path: &str) -> Option<
         let (color, intensity) = (root.read_rgb(color), real(intensity));
         H3Value::Floats([color.red * intensity, color.green * intensity, color.blue * intensity, 0.0])
     };
-    let mut values = HashMap::new();
+    let mut values = super::h3_shaders::H3Values::new();
     let mut set = |name: &str, value: H3Value| {
         values.insert(name.to_owned(), value);
     };

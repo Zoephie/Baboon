@@ -412,7 +412,7 @@ mod tests {
 pub(crate) struct H4EffectMaterial {
     pub(crate) pass: Arc<H3Pass>,
     pub(crate) submit: H4Submit,
-    pub(crate) values: HashMap<String, H3Value>,
+    pub(crate) values: crate::app::model_preview::h3_shaders::H3Values,
     /// Each sampler's bitmap; a texture array's carries every image in
     /// `frames`, its layers in order.
     pub(crate) textures: Vec<H3Texture>,
@@ -422,8 +422,8 @@ pub(crate) struct H4EffectMaterial {
     /// sprites and tight bounds from (`postprocess_frame_animation`).
     pub(crate) first_bitmap: Option<String>,
     /// The material's own parameters over the shader's defaults, by name.
-    reals: HashMap<String, f32>,
-    bools: HashMap<String, bool>,
+    reals: std::collections::BTreeMap<String, f32>,
+    bools: std::collections::BTreeMap<String, bool>,
 }
 
 impl H4EffectMaterial {
@@ -462,8 +462,8 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
         bake(material, &shader.shader, &|path: &str| (lookup.borrow_mut())(path))
     };
     // A parameter's value: the material's, else the shader's default.
-    let mut reals = HashMap::new();
-    let mut bools = HashMap::new();
+    let mut reals = std::collections::BTreeMap::new();
+    let mut bools = std::collections::BTreeMap::new();
     for parameter in shader.shader.parameters.iter().chain(&material.parameters) {
         let name = parameter.name.to_ascii_lowercase();
         reals.insert(name.clone(), parameter.real);

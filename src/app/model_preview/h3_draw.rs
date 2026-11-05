@@ -2657,7 +2657,7 @@ mod tests {
             shadow_generate: None,
             dynamic_light: None,
             blend: H3Blend::Additive,
-            values: HashMap::new(),
+            values: Default::default(),
             textures: Vec::new(),
             change_colors: Vec::new(),
             animations: Vec::new(),

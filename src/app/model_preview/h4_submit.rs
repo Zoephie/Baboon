@@ -2,7 +2,6 @@
 //! functions re-run on the object's function values (blam-tags
 //! `material::update_constants`), and a hologram's light rig.
 
-use std::collections::HashMap;
 
 use blam_tags::material::{
     BakedMaterial, FunctionContext, PIXEL_REGISTERS, TEXTURE_TRANSFORM_REGISTERS, VERTEX_REGISTERS, postprocess_flags,
@@ -11,7 +10,7 @@ use blam_tags::material::{
 
 use std::sync::Arc;
 
-use super::h3_shaders::{H3Pass, H3Texture, H3Value};
+use super::h3_shaders::{H3Pass, H3Texture, H3Value, H3Values};
 
 /// `e_material_extern`s 35 to 41: a hologram's key, fill and rim light
 /// directions (odd) and the scalars beside them (even).
@@ -97,7 +96,7 @@ pub(crate) struct H4Submit {
 pub(crate) struct H4ScreenMaterial {
     pub(crate) pass: Arc<H3Pass>,
     pub(crate) submit: H4Submit,
-    pub(crate) values: HashMap<String, H3Value>,
+    pub(crate) values: H3Values,
     pub(crate) textures: Vec<H3Texture>,
 }
 
@@ -206,9 +205,9 @@ impl H4Submit {
     }
 
     /// The bake's constants under the names the translated source reads.
-    pub(crate) fn baked_values(&self) -> HashMap<String, H3Value> {
+    pub(crate) fn baked_values(&self) -> H3Values {
         let baked = &self.baked;
-        let mut values = HashMap::new();
+        let mut values = H3Values::new();
         insert_registers(&mut values, "user_parameter", PIXEL_REGISTERS.0, &baked.real_vectors);
         insert_registers(&mut values, "user_vertex_parameter", VERTEX_REGISTERS.0, &baked.real_vertex_vectors);
         values.insert("ps_material_shader_transforms".to_owned(), H3Value::FloatArray(transforms(baked)));
@@ -231,7 +230,7 @@ impl H4Submit {
     /// (MCC 0x1408CA980), each only when the bake queued functions of its
     /// kind, and a hologram's rig. `node` is the hologram's node matrix (see
     /// [`hologram_rows`]).
-    pub(crate) fn draw_values(&self, draw: H4Draw, object: &DrawnObject<'_>, node: [[f32; 4]; 3]) -> HashMap<String, H3Value> {
+    pub(crate) fn draw_values(&self, draw: H4Draw, object: &DrawnObject<'_>, node: [[f32; 4]; 3]) -> H3Values {
         /// `single_pass_single_probe`, the fringe's entry.
         const ENTRY_SINGLE_PASS_SINGLE_PROBE: usize = 23;
         let baked = &self.baked;
@@ -242,7 +241,7 @@ impl H4Submit {
             H4Draw::HologramOpaque => (self.lit_phases, 0),
             H4Draw::HologramBlend => (self.lit_phases, 22),
         };
-        let mut values = HashMap::new();
+        let mut values = H3Values::new();
         values.insert("ps_material_blend_constant".to_owned(), H3Value::Floats(blend_constant(state)));
         let queued = |flag: u16| baked.flags & flag != 0;
         if queued(postprocess_flags::VERTEX_CONSTANT_FUNCTIONS) {
@@ -290,7 +289,7 @@ fn transforms(baked: &BakedMaterial) -> Vec<[f32; 4]> {
     transforms
 }
 
-fn insert_registers(values: &mut HashMap<String, H3Value>, prefix: &str, start: u8, registers: &[[f32; 4]]) {
+fn insert_registers(values: &mut H3Values, prefix: &str, start: u8, registers: &[[f32; 4]]) {
     for (index, vector) in registers.iter().enumerate() {
         values.insert(format!("{prefix}_{}", usize::from(start) + index), H3Value::Floats(*vector));
     }

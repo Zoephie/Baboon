@@ -246,15 +246,16 @@ pub(crate) struct RenderModelPreviewRegion {
 pub(crate) struct RenderModelInstances {
     /// Placement names, which instance groups match against.
     pub names: Vec<String>,
-    /// Which placement each of its batches draws.
-    pub batches: HashMap<usize, usize>,
+    /// Which placement each of its batches draws. Ordered maps here and
+    /// below only so the loader's snapshot reads the same every run.
+    pub batches: std::collections::BTreeMap<usize, usize>,
     pub vertex_count: usize,
     /// Each permutation's `instance mask`, by region and name.
-    pub masks: HashMap<(String, String), u128>,
+    pub masks: std::collections::BTreeMap<(String, String), u128>,
     /// The placements each variant's instance group chooses.
     pub variants: Vec<u128>,
     /// Regions with no mesh of their own in any permutation.
-    pub empty_regions: std::collections::HashSet<String>,
+    pub empty_regions: std::collections::BTreeSet<String>,
 }
 
 /// One vertex as the GL program consumes it. `#[repr(C)]` because the whole

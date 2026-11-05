@@ -852,7 +852,7 @@ pub(crate) struct H3Material {
     pub(crate) shadow_generate: Option<Arc<H3Pass>>,
     pub(crate) dynamic_light: Option<Arc<H3Pass>>,
     pub(crate) blend: H3Blend,
-    pub(crate) values: HashMap<String, H3Value>,
+    pub(crate) values: H3Values,
     pub(crate) textures: Vec<H3Texture>,
     /// Uniforms holding the object's change colors, and which channel.
     pub(crate) change_colors: Vec<(String, usize)>,
@@ -861,6 +861,10 @@ pub(crate) struct H3Material {
     /// Halo 4's per-draw functions and hologram rig.
     pub(crate) h4: Option<Arc<super::h4_submit::H4Submit>>,
 }
+
+/// Uniform values by name. Ordered only so the loader's snapshot prints them
+/// the same every run; everything here looks them up.
+pub(crate) type H3Values = std::collections::BTreeMap<String, H3Value>;
 
 /// `shield_impact.hlsl` and the settings it runs on.
 #[derive(Debug)]
@@ -875,7 +879,7 @@ pub(crate) struct H3Shield {
 #[derive(Debug)]
 pub(crate) struct H3ShieldSettings {
     pub(crate) procedural: bool,
-    pub(crate) values: HashMap<String, H3Value>,
+    pub(crate) values: H3Values,
     pub(crate) textures: Vec<H3Texture>,
 }
 
