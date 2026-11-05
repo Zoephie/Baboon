@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-use super::ce::attachments::{elements, object_block};
-use super::cloth::{H3Wind, away_from_pole, turned_about};
-use super::h3_effects::marker_name;
-use super::particles::{H3ParticleVertex, H3SpriteShader};
-use super::h3_shaders::H3Blend;
-use super::materials::read_h3_bitmap;
-use super::renderer::H3_EXPOSURE;
-use super::*;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::cloth::{H3Wind, away_from_pole, turned_about};
+use super::super::h3_effects::marker_name;
+use super::super::particles::{H3ParticleVertex, H3SpriteShader};
+use super::super::h3_shaders::H3Blend;
+use super::super::materials::read_h3_bitmap;
+use super::super::renderer::H3_EXPOSURE;
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -134,7 +134,7 @@ fn unpacked(words: [i16; 4]) -> [[f32; 3]; 3] {
 }
 
 /// `normals_interpolate`.
-pub(super) fn normals_between(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+pub(in crate::app::model_preview) fn normals_between(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let angle = dot(a, b).clamp(-1.0, 1.0).acos();
     let (from, axis, by) = if t <= 0.5 { (a, cross(a, b), angle * t) } else { (b, cross(b, a), angle * (1.0 - t)) };
     let axis = unit(axis);
@@ -220,7 +220,7 @@ impl H3LeavesAt {
 
 /// What an object's `leaf_system`s come to: at their marker, or the middle of
 /// the object as `object_get_bounding_sphere` has it.
-pub(super) fn read_h3_leaves(
+pub(in crate::app::model_preview) fn read_h3_leaves(
     source: &TagSource,
     object: &TagFile,
     markers: &[RenderModelPreviewMarker],

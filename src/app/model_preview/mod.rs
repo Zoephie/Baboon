@@ -29,13 +29,11 @@ pub(in crate::app) mod dx9;
 pub(in crate::app) mod h2;
 mod h3_effects;
 pub(crate) mod cloth;
-pub(crate) mod h3_leaves;
+pub(crate) mod h3;
 pub(crate) mod h3_light_volumes;
 pub(crate) mod particles;
 pub(crate) mod h3_screen_effects;
-pub(crate) mod h3_vision;
 pub(crate) mod h3_strips;
-pub(crate) mod h3_lights;
 pub(in crate::app) mod h3_prt;
 pub(crate) mod h3_shaders;
 pub(crate) mod h4_shaders;
@@ -141,7 +139,7 @@ pub(crate) struct RenderModelPreview {
     pub h3_prt: Option<h3_prt::H3Prt>,
     /// The model's own `shield impact parameter override`.
     pub h3_shield: Option<Arc<h3_shaders::H3ShieldSettings>>,
-    pub h3_lights: Vec<h3_lights::H3Light>,
+    pub h3_lights: Vec<h3::lights::H3Light>,
     /// Reach's attached `light`s and `cheap_light`s.
     pub reach_lights: Vec<reach_lights::ReachLight>,
     pub reach_cheap_lights: Vec<reach_lights::ReachCheapLight>,
@@ -174,19 +172,19 @@ pub(crate) struct RenderModelPreview {
     /// The markers a Reach unit's IK chains can reach for: its own and its
     /// held weapons', in bind space on the nodes they ride.
     pub reach_ik_markers: Vec<reach_ik::ReachIkMarker>,
-    pub h3_flares: Vec<h3_lights::H3FlareAt>,
+    pub h3_flares: Vec<h3::lights::H3FlareAt>,
     pub h3_light_volumes: Vec<h3_light_volumes::H3LightVolumeAt>,
     /// Halo 4's point-to-point tracers.
     pub h4_tracers: Vec<h4_tracers::H4TracerAt>,
     pub h3_particles: Vec<Arc<particles::H3ParticleSystem>>,
     pub h3_strips: Vec<Arc<h3_strips::H3StripAt>>,
     pub h3_cloth: Vec<cloth::H3ClothAt>,
-    pub h3_leaves: Vec<Arc<h3_leaves::H3LeavesAt>>,
+    pub h3_leaves: Vec<Arc<h3::leaves::H3LeavesAt>>,
     pub h3_screen_effects: Vec<h3_screen_effects::H3ScreenEffectAt>,
     /// ODST's VISR, for an object with an effect that turns it on.
-    pub h3_vision: Option<Arc<h3_vision::H3Vision>>,
+    pub h3_vision: Option<Arc<h3::vision::H3Vision>>,
     /// ODST's motion blur, for an object with an effect that moves the view.
-    pub h3_motion_blur: Option<h3_vision::H3MotionBlur>,
+    pub h3_motion_blur: Option<h3::vision::H3MotionBlur>,
     /// Reach's final composite noise map, for an object with an area screen
     /// effect that adds bright or dark noise.
     pub reach_screen_noise: Option<materials::H3Bitmap>,

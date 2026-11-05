@@ -4,9 +4,9 @@
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::dx9::passes::tag_function_at;
-use super::materials::{H3Bitmap, read_h3_bitmap};
-use super::*;
+use super::super::dx9::passes::tag_function_at;
+use super::super::materials::{H3Bitmap, read_h3_bitmap};
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -94,7 +94,7 @@ fn color_of(tag: TagStruct<'_>, name: &str) -> Option<[f32; 3]> {
 }
 
 /// `rasterizer_globals`' `vision_mode`, for an object of `model_tag`.
-pub(super) fn read_h3_vision(source: &TagSource, object: &TagFile) -> Option<H3Vision> {
+pub(in crate::app::model_preview) fn read_h3_vision(source: &TagSource, object: &TagFile) -> Option<H3Vision> {
     let globals =
         load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let path = globals.root().read_tag_ref_path("Vision Mode Settings").filter(|path| !path.is_empty())?;
@@ -136,7 +136,7 @@ impl H3MotionBlur {
     }
 }
 
-pub(super) fn read_h3_motion_blur(source: &TagSource) -> Option<H3MotionBlur> {
+pub(in crate::app::model_preview) fn read_h3_motion_blur(source: &TagSource) -> Option<H3MotionBlur> {
     let globals =
         load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let root = globals.root();

@@ -857,9 +857,9 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
         .read_tag_ref_path("shield impact parameter override")
         .filter(|path| !path.is_empty())
         .and_then(|path| super::materials::read_h3_shield_settings(source, &path));
-    preview.h3_lights = super::h3_lights::read_h3_lights(source, model_tag, 0, &preview.markers, frame);
-    preview.h3_flares = super::h3_lights::read_h3_flares(source, model_tag, 0, &preview.markers, frame);
-    preview.h3_flares.extend(super::h3_lights::light_flares(&preview.h3_lights));
+    preview.h3_lights = super::h3::lights::read_h3_lights(source, model_tag, 0, &preview.markers, frame);
+    preview.h3_flares = super::h3::lights::read_h3_flares(source, model_tag, 0, &preview.markers, frame);
+    preview.h3_flares.extend(super::h3::lights::light_flares(&preview.h3_lights));
     preview.h3_light_volumes =
         super::h3_light_volumes::read_h3_light_volumes(source, model_tag, 0, &preview.markers, frame);
     let systems = super::particles::read_h3_particles(source, model_tag, 0, &preview.markers, frame);
@@ -872,10 +872,10 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
         super::h3_screen_effects::read_h3_screen_effects(source, model_tag, 0, &preview.markers, frame);
     super::h3_screen_effects::add_screen_shader_materials(preview);
     if preview.h3_screen_effects.iter().any(|effect| effect.turns_on_vision()) {
-        preview.h3_vision = super::h3_vision::read_h3_vision(source, model_tag).map(Arc::new);
+        preview.h3_vision = super::h3::vision::read_h3_vision(source, model_tag).map(Arc::new);
     }
     if preview.h3_screen_effects.iter().any(|effect| effect.sucks()) {
-        preview.h3_motion_blur = super::h3_vision::read_h3_motion_blur(source);
+        preview.h3_motion_blur = super::h3::vision::read_h3_motion_blur(source);
     }
     if preview.h3_screen_effects.iter().any(|effect| effect.adds_noise()) {
         preview.reach_screen_noise = super::h3_screen_effects::read_reach_screen_noise(source);
@@ -885,7 +885,7 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
     super::cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     super::h2::weapons::read_extension_weapons(source, model_tag, 0, &markers, &frame, preview, None);
     let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
-    let leaves = super::h3_leaves::read_h3_leaves(source, model_tag, &markers, middle);
+    let leaves = super::h3::leaves::read_h3_leaves(source, model_tag, &markers, middle);
     // Framed by a null model alone, the eye sits among the leaves and
     // one passing the lens fills the view.
     for corner in leaves.iter().flat_map(|system| system.emission_corners()) {

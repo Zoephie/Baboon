@@ -2233,13 +2233,13 @@ impl ModelGlRenderer {
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
-        blur: &h3_vision::H3MotionBlur,
+        blur: &h3::vision::H3MotionBlur,
         moved: [f32; 3],
         picture: glow::NativeTexture,
         depth: glow::NativeTexture,
     ) {
         let matrix = view_projection(&frame.camera);
-        let Some(to_world) = h3_vision::inverted(&matrix) else {
+        let Some(to_world) = h3::vision::inverted(&matrix) else {
             return;
         };
         unsafe {
@@ -2275,7 +2275,7 @@ impl ModelGlRenderer {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
-        vision: &h3_vision::H3Vision,
+        vision: &h3::vision::H3Vision,
         amount: f32,
         depth: glow::NativeTexture,
     ) {
@@ -2288,7 +2288,7 @@ impl ModelGlRenderer {
         *clock = Some((time, on_for));
         let constants = vision.constants(amount, on_for);
         let matrix = view_projection(&frame.camera);
-        let Some(to_world) = h3_vision::inverted(&matrix) else {
+        let Some(to_world) = h3::vision::inverted(&matrix) else {
             return;
         };
         unsafe {
@@ -2317,7 +2317,7 @@ impl ModelGlRenderer {
             gl.uniform_matrix_4_f32_slice(spot("screen_to_world").as_ref(), false, &to_world);
             gl.uniform_3_f32_slice(spot("eye").as_ref(), &view.eye);
             gl.uniform_3_f32_slice(spot("forward").as_ref(), &view.forward);
-            gl.uniform_2_f32(spot("planes").as_ref(), h3_vision::GAME_NEAR, h3_vision::GAME_FAR);
+            gl.uniform_2_f32(spot("planes").as_ref(), h3::vision::GAME_NEAR, h3::vision::GAME_FAR);
             gl.uniform_1_f32(spot("falloff").as_ref(), constants.falloff);
             gl.uniform_3_f32_slice(spot("ping").as_ref(), &constants.ping);
             gl.uniform_4_f32_slice(spot("default_color").as_ref(), &constants.color);

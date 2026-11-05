@@ -2101,7 +2101,7 @@ struct ModelGpuSlot {
     h3_vision_clock: Option<(f32, f32)>,
     h3_cloth: cloth::H3ClothField,
     reach_antennas: reach_antennas::ReachAntennaField,
-    h3_leaves: h3_leaves::H3LeafField,
+    h3_leaves: h3::leaves::H3LeafField,
     leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
@@ -4118,7 +4118,7 @@ struct ModelGlRenderer {
     h2_frame_copy: Option<H2Target>,
     h3_targets: Option<h3_draw::H3Targets>,
     /// The light drawing now, and its gel.
-    h3_light: Option<(h3_lights::H3LitLight, Option<glow::NativeTexture>)>,
+    h3_light: Option<(h3::lights::H3LitLight, Option<glow::NativeTexture>)>,
     /// Linked passes by their address, or the pass that failed to link: each
     /// holds its pass, so no other pass can come to have its address.
     h3_programs: HashMap<usize, Result<h3_draw::H3Program, Arc<h3_shaders::H3Pass>>>,

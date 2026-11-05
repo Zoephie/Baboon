@@ -6,20 +6,20 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::{MarkerFrame, unit};
-use super::h3_effects::adopt_event_function;
-use super::ce::attachments::{elements, object_block};
-use super::ce::lights::{CeFlareView, CeSprite, posed_on};
-use super::h3_effects::{
+use super::super::attachment::{MarkerFrame, unit};
+use super::super::h3_effects::adopt_event_function;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::lights::{CeFlareView, CeSprite, posed_on};
+use super::super::h3_effects::{
     H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
 };
-use super::h2::functions::H2FunctionValues;
+use super::super::h2::functions::H2FunctionValues;
 use blam_tags::tag_function::transition_function_evaluate;
 
-use super::dx9::passes::{H2Image, tag_function_at};
-use super::renderer::H3_EXPOSURE as EXPOSURE;
-use super::materials::{H3Bitmap, read_h3_bitmap};
-use super::*;
+use super::super::dx9::passes::{H2Image, tag_function_at};
+use super::super::renderer::H3_EXPOSURE as EXPOSURE;
+use super::super::materials::{H3Bitmap, read_h3_bitmap};
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -312,7 +312,7 @@ struct H3LightTag {
 
 /// An object's attached `light`s, at the first marker of each name, and those
 /// its attached effects make, `light_new_unattached` at each of a location's.
-pub(super) fn read_h3_lights(
+pub(in crate::app::model_preview) fn read_h3_lights(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -649,7 +649,7 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
 }
 
 /// An object's attached `lens_flare`s, at every marker of each name.
-pub(super) fn read_h3_flares(
+pub(in crate::app::model_preview) fn read_h3_flares(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -717,7 +717,7 @@ pub(super) fn read_h3_flares(
 /// `light_submit_lens_flares`: each light with a `Lens Flare` draws it where
 /// the light is, by the light's color and scale. Take `lights` once they are
 /// final, renamed for what they hang on.
-pub(super) fn light_flares(lights: &[H3Light]) -> Vec<H3FlareAt> {
+pub(in crate::app::model_preview) fn light_flares(lights: &[H3Light]) -> Vec<H3FlareAt> {
     let flare_of = |light: &H3Light| {
         Some(H3FlareAt {
             object: light.object,

@@ -713,8 +713,8 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     name: Option<&str>,
     preview: &mut RenderModelPreview,
 ) {
-    let lights = super::super::h3_lights::read_h3_lights(source, object, owner, markers, frame);
-    let flares = super::super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
+    let lights = super::super::h3::lights::read_h3_lights(source, object, owner, markers, frame);
+    let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
     let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
@@ -730,7 +730,7 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     super::super::h3_screen_effects::add_screen_shader_materials(preview);
     let lights: Vec<_> = named!(lights, name).collect();
     preview.h3_flares.extend(named!(flares, name));
-    preview.h3_flares.extend(super::super::h3_lights::light_flares(&lights));
+    preview.h3_flares.extend(super::super::h3::lights::light_flares(&lights));
     preview.h3_lights.extend(lights);
 }
 
@@ -751,7 +751,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     center: [f32; 3],
     preview: &mut RenderModelPreview,
 ) {
-    let flares = super::super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
+    let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
     preview.h3_flares.extend(named!(flares, name));
     let (lights, cheap) = super::super::reach_lights::read_reach_lights(source, object, owner, markers, frame);
     preview.reach_lights.extend(named!(lights, name));
