@@ -17,6 +17,17 @@ use crate::core::game::GameId;
 /// as many of the preview's features as one load can.
 const LOAD_SET: &[(&str, GameId, &[(&str, &str, &[u8; 4])])] = &[
     (
+        "BLAM_TEST_HCEEK",
+        GameId::HaloCe,
+        &[
+            ("characters\\cyborg\\cyborg", "biped", b"bipd"),
+            ("vehicles\\warthog\\warthog", "vehicle", b"vehi"),
+            ("vehicles\\banshee\\banshee", "vehicle", b"vehi"),
+            ("weapons\\plasma rifle\\plasma rifle", "weapon", b"weap"),
+            ("weapons\\assault rifle\\assault rifle", "weapon", b"weap"),
+        ],
+    ),
+    (
         "BLAM_TEST_H2EK",
         GameId::Halo2,
         &[
@@ -374,6 +385,15 @@ fn gate_load() {
 /// moves at rest (the phantom does for Halo 3), each in every [`LOOKS`].
 #[cfg(target_os = "macos")]
 const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
+    (
+        "BLAM_TEST_HCEEK",
+        GameId::HaloCe,
+        &[
+            ("characters\\cyborg\\cyborg", "biped"),
+            ("vehicles\\warthog\\warthog", "vehicle"),
+            ("weapons\\plasma rifle\\plasma rifle", "weapon"),
+        ],
+    ),
     (
         "BLAM_TEST_H2EK",
         GameId::Halo2,
