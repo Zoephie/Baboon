@@ -15,7 +15,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, BLEND_MODES,
 use blam_tags::TagStruct;
 use blam_tags::tag_function::FunctionType;
 
-use super::ce_attachments::elements;
+use super::ce::attachments::elements;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::H2Image;
 use super::*;

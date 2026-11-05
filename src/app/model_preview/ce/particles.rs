@@ -15,34 +15,34 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::attachment::perpendicular;
-use super::ce_attachments::{elements, has_flag, object_block};
-use super::ce_lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
-use super::ce_particle_systems::{
+use super::super::attachment::perpendicular;
+use super::attachments::{elements, has_flag, object_block};
+use super::lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
+use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,
     unattached_quads, update_unattached,
 };
-use super::ce_passes::{CeMapAnimation, argb, read_effect_map_animation};
-use super::h2_passes::{H2Image, ce_color_interpolate};
-use super::materials::decode_h2_image;
-use super::*;
+use super::passes::{CeMapAnimation, argb, read_effect_map_animation};
+use super::super::h2_passes::{H2Image, ce_color_interpolate};
+use super::super::materials::decode_h2_image;
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
 /// A game tick, which is what `effects_update` steps by.
-pub(super) const STEP: f32 = 1.0 / 30.0;
+pub(in crate::app::model_preview) const STEP: f32 = 1.0 / 30.0;
 const PRE_ROLL: f32 = 4.0;
 /// How far short of a tick the frames' time can fall by rounding alone.
 const TICK_ROUNDING: f32 = 1e-5;
 
 /// The frames' time not yet run as ticks, as `game_time_update` keeps it.
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct CeTicks(f32);
+pub(in crate::app::model_preview) struct CeTicks(f32);
 
 impl CeTicks {
     /// How many ticks a frame `dt` long runs: `game_time_get_elapsed`, which
     /// `game_frame` runs `particles_update` and `widgets_update` by.
-    pub(super) fn run(&mut self, dt: f32) -> u32 {
+    pub(in crate::app::model_preview) fn run(&mut self, dt: f32) -> u32 {
         self.0 += dt;
         let mut ticks = 0;
         // A frame of two half ticks owes a whole one, whatever the rounding.
@@ -108,7 +108,7 @@ pub(crate) struct CePointPhysics {
 }
 
 impl CePointPhysics {
-    pub(super) fn read(tag: &TagFile) -> Self {
+    pub(in crate::app::model_preview) fn read(tag: &TagFile) -> Self {
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let flags = root.read_int_any("flags").unwrap_or(0);
@@ -117,7 +117,7 @@ impl CePointPhysics {
 
     /// What the postprocess makes of a tag's `density`, `flags`, `air
     /// friction`, `surface friction` and `elasticity`.
-    pub(super) fn new(density: f32, flags: i128, air_friction: f32, surface_friction: f32, elasticity: f32) -> Self {
+    pub(in crate::app::model_preview) fn new(density: f32, flags: i128, air_friction: f32, surface_friction: f32, elasticity: f32) -> Self {
         Self {
             mass_over_radius_cubed: density * MASS_OF_DENSITY,
             air_buoyancy: if flags & 0x20 != 0 { 0.0 } else { 1.0 - 2.0 * density / (density + 0.0011) },
@@ -134,7 +134,7 @@ impl CePointPhysics {
 
     /// `point_physics_definition_interpolate`: the runtime values from one to
     /// the other by `t`; the flags stay the first's.
-    pub(super) fn lerp(&self, other: &Self, t: f32) -> Self {
+    pub(in crate::app::model_preview) fn lerp(&self, other: &Self, t: f32) -> Self {
         let mix = |a: f32, b: f32| a * (1.0 - t) + b * t;
         Self {
             mass_over_radius_cubed: mix(self.mass_over_radius_cubed, other.mass_over_radius_cubed),
@@ -147,13 +147,13 @@ impl CePointPhysics {
     }
 
     /// The air friction tool leaves, scaled by 10000.
-    pub(super) fn air_friction(&self) -> f32 {
+    pub(in crate::app::model_preview) fn air_friction(&self) -> f32 {
         self.air_friction
     }
 
     /// `point_physics_update` with a force on the point, which first moves its
     /// velocity by the force over the mass of it and the air it displaces.
-    pub(super) fn step_with_force(
+    pub(in crate::app::model_preview) fn step_with_force(
         &self,
         place: &mut [f32; 3],
         velocity: &mut [f32; 3],
@@ -176,7 +176,7 @@ impl CePointPhysics {
 
     /// `point_physics_update` in still air over a flat floor at `ground`: true
     /// where it touched it, the only structure a preview has.
-    pub(super) fn step(&self, place: &mut [f32; 3], velocity: &mut [f32; 3], radius: f32, ground: f32, dt: f32) -> bool {
+    pub(in crate::app::model_preview) fn step(&self, place: &mut [f32; 3], velocity: &mut [f32; 3], radius: f32, ground: f32, dt: f32) -> bool {
         let bulk = (AIR_MASS_OVER_RADIUS_CUBED + self.mass_over_radius_cubed) * radius * radius * radius;
         let drag = self.air_friction * radius * radius;
         velocity[2] += GRAVITY * self.air_buoyancy * dt;
@@ -250,7 +250,7 @@ pub(crate) struct CeSecondaryDraw {
 }
 
 /// An effect shader's `bitmap` and how it is laid, by the field's name.
-pub(super) fn read_secondary_map(source: &TagSource, holder: TagStruct<'_>, bitmap_field: &str) -> Option<Arc<CeSecondaryMap>> {
+pub(in crate::app::model_preview) fn read_secondary_map(source: &TagSource, holder: TagStruct<'_>, bitmap_field: &str) -> Option<Arc<CeSecondaryMap>> {
     let path = holder.read_tag_ref_path(bitmap_field).filter(|path| !path.is_empty())?;
     let image = decode_h2_image(source, &path, SamplerKind::Texture2D, 0)?;
     Some(Arc::new(CeSecondaryMap {
@@ -289,7 +289,7 @@ pub(crate) struct CeSpriteSheet {
     pub(crate) images: Vec<Option<Arc<H2Image>>>,
 }
 
-pub(super) fn read_sprite_sheet(source: &TagSource, bitmap_path: &str) -> Option<CeSpriteSheet> {
+pub(in crate::app::model_preview) fn read_sprite_sheet(source: &TagSource, bitmap_path: &str) -> Option<CeSpriteSheet> {
     let bitmap = load_referenced_tag_from_source(source, bitmap_path, "bitmap", b"bitm").ok()?;
     let sizes: Vec<[f32; 2]> = elements(bitmap.root(), "bitmaps")
         .iter()
@@ -411,7 +411,7 @@ fn nth_field_path(holder: TagStruct<'_>, name: &str, n: usize) -> Option<String>
 /// Effects read so far, by path; none while one is being read, so an effect
 /// whose particles lead back to it stops there.
 #[derive(Default)]
-pub(super) struct CeEffectCache(std::collections::HashMap<String, Option<Arc<CeEffectDef>>>);
+pub(in crate::app::model_preview) struct CeEffectCache(std::collections::HashMap<String, Option<Arc<CeEffectDef>>>);
 
 impl CeEffectCache {
     fn effect(&mut self, source: &TagSource, path: &str) -> Option<Arc<CeEffectDef>> {
@@ -804,7 +804,7 @@ pub(crate) struct CeEventEffect {
     pub(crate) path: String,
 }
 
-impl super::ce_functions::ReadsOutputs for CeEffectAt {
+impl super::functions::ReadsOutputs for CeEffectAt {
     fn object(&self) -> u8 {
         self.object
     }
@@ -822,7 +822,7 @@ fn function_slot(value: Option<i128>) -> Option<usize> {
 }
 
 /// The effects among `object`'s attachments.
-pub(super) fn read_ce_effects(
+pub(in crate::app::model_preview) fn read_ce_effects(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -887,14 +887,14 @@ fn locate(def: &CeEffectDef, markers: &[RenderModelPreviewMarker]) -> Vec<Vec<Ce
 /// its `attachments`), each by the name the panel plays it by. The game
 /// makes them with `effect_new_from_object` on the object's markers: not
 /// looping, white, and deleted once their events have run.
-pub(super) fn read_ce_event_effects(
+pub(in crate::app::model_preview) fn read_ce_event_effects(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
 ) -> Vec<CeEffectAt> {
     let mut named = Vec::new();
-    super::h3_effects::collect_event_effects(object.root(), &mut named);
+    super::super::h3_effects::collect_event_effects(object.root(), &mut named);
     let mut cache = CeEffectCache::default();
     let mut seen = std::collections::HashSet::new();
     let mut effects = Vec::new();
@@ -912,7 +912,7 @@ pub(super) fn read_ce_event_effects(
             object: owner,
             def,
             spawn: None,
-            event: Some(CeEventEffect { name: super::h3_effects::event_function_name(&field, &path), path: path.clone() }),
+            event: Some(CeEventEffect { name: super::super::h3_effects::event_function_name(&field, &path), path: path.clone() }),
             primary: None,
             secondary: None,
             change_color: None,
@@ -956,7 +956,7 @@ fn integral(function: i32, fraction: f32) -> f32 {
 
 /// `seed_random` and the draws made from it.
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct Random(u32);
+pub(in crate::app::model_preview) struct Random(u32);
 
 impl Random {
     fn next(&mut self) -> f32 {
@@ -969,7 +969,7 @@ impl Random {
     }
 
     /// `seed_random`: the high half of the next seed.
-    pub(super) fn bits(&mut self) -> u32 {
+    pub(in crate::app::model_preview) fn bits(&mut self) -> u32 {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         self.0 >> 16
     }

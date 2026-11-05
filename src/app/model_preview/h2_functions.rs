@@ -13,7 +13,7 @@ use eframe::egui::{self, Ui};
 
 use crate::app::ui_kit::ThemedCheckbox;
 
-use super::ce_attachments::{elements, object_block};
+use super::ce::attachments::{elements, object_block};
 use super::h2_passes::{object_input, tag_function_at};
 
 /// What the panel has set, by object geometry and input name.

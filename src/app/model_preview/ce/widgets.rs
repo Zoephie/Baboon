@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::ce_attachments::{elements, has_flag, object_block};
-use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::ce_passes::argb;
-use super::h2_passes::{H2Image, ce_color_interpolate};
-use super::materials::decode_h2_image;
-use super::*;
+use super::attachments::{elements, has_flag, object_block};
+use super::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::passes::argb;
+use super::super::h2_passes::{H2Image, ce_color_interpolate};
+use super::super::materials::decode_h2_image;
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -77,7 +77,7 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
         return None;
     }
     let name = root.read_string("attachment marker").unwrap_or_default();
-    let (node, position, forward) = super::ce_lights::marker_or_origin(markers, &name, owner)?;
+    let (node, position, forward) = super::lights::marker_or_origin(markers, &name, owner)?;
     // `rasterizer_widget_set_texture`: no map is the globals' `glow`.
     let image = match root.read_tag_ref_path("map").filter(|path| !path.is_empty()) {
         Some(map) => {
@@ -88,7 +88,7 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
                 .map_or(0, |sequence| sequence.read_int_any("first bitmap index").unwrap_or(0).max(0) as usize);
             Arc::new(decode_h2_image(source, &map, SamplerKind::Texture2D, index)?)
         }
-        None => super::h2_light_volumes::read_glow(source)?,
+        None => super::super::h2_light_volumes::read_glow(source)?,
     };
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let mut brightness = [real("perpendicular brightness scale"), real("parallel brightness scale")];
@@ -112,7 +112,7 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
 }
 
 /// The light volumes among `object`'s widgets.
-pub(super) fn read_ce_light_volumes(
+pub(in crate::app::model_preview) fn read_ce_light_volumes(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -134,7 +134,7 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-impl super::ce_functions::ReadsOutputs for CeLightVolume {
+impl super::functions::ReadsOutputs for CeLightVolume {
     fn object(&self) -> u8 {
         self.object
     }
@@ -143,7 +143,7 @@ impl super::ce_functions::ReadsOutputs for CeLightVolume {
     }
 }
 
-impl super::ce_functions::ReadsOutputs for CeLightning {
+impl super::functions::ReadsOutputs for CeLightning {
     fn object(&self) -> u8 {
         self.object
     }
@@ -153,7 +153,7 @@ impl super::ce_functions::ReadsOutputs for CeLightning {
     }
 }
 
-impl super::ce_functions::ReadsOutputs for CeGlow {
+impl super::functions::ReadsOutputs for CeGlow {
     fn object(&self) -> u8 {
         self.object
     }
@@ -354,7 +354,7 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
 }
 
 /// The lightning among `object`'s widgets.
-pub(super) fn read_ce_lightning(
+pub(in crate::app::model_preview) fn read_ce_lightning(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -678,7 +678,7 @@ fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPr
 }
 
 /// The glows among `object`'s widgets.
-pub(super) fn read_ce_glows(source: &TagSource, object: &TagFile, owner: u8, markers: &[RenderModelPreviewMarker]) -> Vec<CeGlow> {
+pub(in crate::app::model_preview) fn read_ce_glows(source: &TagSource, object: &TagFile, owner: u8, markers: &[RenderModelPreviewMarker]) -> Vec<CeGlow> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();
     };

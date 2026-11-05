@@ -6,8 +6,8 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::ce_attachments::{elements, object_block};
-use super::ce_lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::ce::attachments::{elements, object_block};
+use super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::h2_functions::H2FunctionValues;
 use super::h2_lights::H2EffectPart;
 use super::h3_effects::{adopt_event_function, for_each_attached_part, part_markers};

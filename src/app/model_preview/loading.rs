@@ -33,7 +33,7 @@ pub(super) struct PreviewLoadSettings {
     /// Halo CE: the weapon a biped holds, by path.
     pub(super) weapon: Option<String>,
     /// Halo CE: the biped's weapons, when an earlier load found them.
-    pub(super) ce_equippable: Option<Vec<super::ce_attachments::CeEquippable>>,
+    pub(super) ce_equippable: Option<Vec<super::ce::attachments::CeEquippable>>,
     /// Halo 2 units: what the left hand holds, by path.
     pub(super) secondary_weapon: Option<String>,
     /// Halo 2 units: their weapons, when an earlier load found them.
@@ -366,7 +366,7 @@ fn load_tag_preview(
             return Err("Referenced gbxmodel has no previewable draw batches.".to_owned());
         }
         if let Some((shader_group, shader_path)) =
-            super::ce_functions::read_ce_modifier_shader(model_tag)
+            super::ce::functions::read_ce_modifier_shader(model_tag)
         {
             preview.materials.push(RenderModelPreviewMaterial {
                 shader_path,
@@ -377,7 +377,7 @@ fn load_tag_preview(
             });
         }
         // `render_model_parts`: an object's own index wins over each shader's.
-        let forced = super::ce_functions::read_ce_forced_permutation(model_tag);
+        let forced = super::ce::functions::read_ce_forced_permutation(model_tag);
         if forced != 0 {
             preview.materials.iter_mut().for_each(|material| material.permutation = forced);
         }
@@ -387,17 +387,17 @@ fn load_tag_preview(
         let chosen = settings.weapon.as_deref();
         let weapons = feature(&mut notes, "the biped's weapons", || {
             let known = settings.ce_equippable.as_deref();
-            is_biped.then(|| super::ce_attachments::biped_weapons(source, model_tag, chosen, known))
+            is_biped.then(|| super::ce::attachments::biped_weapons(source, model_tag, chosen, known))
         });
         let held = match &weapons {
             Some(weapons) => chosen
                 .filter(|path| weapons.equippable.iter().any(|weapon| weapon.path == *path))
                 .map(str::to_owned),
-            None => super::ce_attachments::first_weapon(model_tag),
+            None => super::ce::attachments::first_weapon(model_tag),
         };
         let attached = held.and_then(|path| {
             let attach = |preview: &mut RenderModelPreview| {
-                super::ce_attachments::attach_ce_weapon(source, model_tag, &path, preview)
+                super::ce::attachments::attach_ce_weapon(source, model_tag, &path, preview)
             };
             let attached = feature_into(&mut notes, "the held weapon", &mut preview, attach);
             if attached.is_none() {
@@ -411,7 +411,7 @@ fn load_tag_preview(
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
         data.ce_object_functions =
-            feature(&mut notes, "its functions", || super::ce_functions::read_ce_object_functions(model_tag));
+            feature(&mut notes, "its functions", || super::ce::functions::read_ce_object_functions(model_tag));
         data.ce_attached.extend(attached);
         data.ce_weapons = weapons;
         data.notes = notes;
@@ -751,10 +751,10 @@ fn load_tag_preview(
 fn read_ce_object_features(
     source: &TagSource,
     model_tag: &TagFile,
-    attached: Option<&super::ce_attachments::CeAttachedObject>,
+    attached: Option<&super::ce::attachments::CeAttachedObject>,
     preview: &mut RenderModelPreview,
 ) {
-    let own = super::ce_lights::read_ce_lights(source, model_tag, 0, &preview.markers, |marker| {
+    let own = super::ce::lights::read_ce_lights(source, model_tag, 0, &preview.markers, |marker| {
         let frame = super::attachment::MarkerFrame {
             axes: marker.axes,
             position: marker.position,
@@ -766,40 +766,40 @@ fn read_ce_object_features(
     // that `attach_ce_weapon` added, as every other feature lists them.
     let held_lights = std::mem::replace(&mut preview.ce_lights, own);
     preview.ce_lights.extend(held_lights);
-    preview.ce_antennas = super::ce_lights::read_ce_antennas(source, model_tag, 0, &preview.markers);
-    preview.ce_effects = super::ce_particles::read_ce_effects(source, model_tag, 0, &preview.markers);
-    preview.ce_contrails = super::ce_contrails::read_ce_contrails(source, model_tag, 0, &preview.markers);
-    preview.ce_light_volumes = super::ce_widgets::read_ce_light_volumes(source, model_tag, 0, &preview.markers);
-    preview.ce_lightning = super::ce_widgets::read_ce_lightning(source, model_tag, 0, &preview.markers);
-    preview.ce_glows = super::ce_widgets::read_ce_glows(source, model_tag, 0, &preview.markers);
-    preview.ce_particle_systems = super::ce_particle_systems::read_ce_particle_systems(source, model_tag, 0, &preview.markers);
+    preview.ce_antennas = super::ce::lights::read_ce_antennas(source, model_tag, 0, &preview.markers);
+    preview.ce_effects = super::ce::particles::read_ce_effects(source, model_tag, 0, &preview.markers);
+    preview.ce_contrails = super::ce::contrails::read_ce_contrails(source, model_tag, 0, &preview.markers);
+    preview.ce_light_volumes = super::ce::widgets::read_ce_light_volumes(source, model_tag, 0, &preview.markers);
+    preview.ce_lightning = super::ce::widgets::read_ce_lightning(source, model_tag, 0, &preview.markers);
+    preview.ce_glows = super::ce::widgets::read_ce_glows(source, model_tag, 0, &preview.markers);
+    preview.ce_particle_systems = super::ce::particle_systems::read_ce_particle_systems(source, model_tag, 0, &preview.markers);
     // What hangs on the held weapon, as object 1, on its markers in the hand.
     let held_tag = attached
         .and_then(|held| load_referenced_tag_from_source(source, &held.path, "weapon", b"weap").ok().map(|tag| (tag, held)));
     if let Some((weapon, held)) = &held_tag {
         let markers = &held.markers;
-        preview.ce_antennas.extend(super::ce_lights::read_ce_antennas(source, weapon, 1, markers));
-        preview.ce_effects.extend(super::ce_particles::read_ce_effects(source, weapon, 1, markers));
-        preview.ce_contrails.extend(super::ce_contrails::read_ce_contrails(source, weapon, 1, markers));
-        preview.ce_light_volumes.extend(super::ce_widgets::read_ce_light_volumes(source, weapon, 1, markers));
-        preview.ce_lightning.extend(super::ce_widgets::read_ce_lightning(source, weapon, 1, markers));
-        preview.ce_glows.extend(super::ce_widgets::read_ce_glows(source, weapon, 1, markers));
-        preview.ce_particle_systems.extend(super::ce_particle_systems::read_ce_particle_systems(source, weapon, 1, markers));
+        preview.ce_antennas.extend(super::ce::lights::read_ce_antennas(source, weapon, 1, markers));
+        preview.ce_effects.extend(super::ce::particles::read_ce_effects(source, weapon, 1, markers));
+        preview.ce_contrails.extend(super::ce::contrails::read_ce_contrails(source, weapon, 1, markers));
+        preview.ce_light_volumes.extend(super::ce::widgets::read_ce_light_volumes(source, weapon, 1, markers));
+        preview.ce_lightning.extend(super::ce::widgets::read_ce_lightning(source, weapon, 1, markers));
+        preview.ce_glows.extend(super::ce::widgets::read_ce_glows(source, weapon, 1, markers));
+        preview.ce_particle_systems.extend(super::ce::particle_systems::read_ce_particle_systems(source, weapon, 1, markers));
     }
     // What each names for its events, which the panel plays: the weapon's on
     // the weapon, as `weapon_effect_new` makes them.
-    let events = super::ce_particles::read_ce_event_effects(source, model_tag, 0, &preview.markers);
+    let events = super::ce::particles::read_ce_event_effects(source, model_tag, 0, &preview.markers);
     preview.ce_effects.extend(events);
     if let Some((weapon, held)) = &held_tag {
-        preview.ce_effects.extend(super::ce_particles::read_ce_event_effects(source, weapon, 1, &held.markers));
+        preview.ce_effects.extend(super::ce::particles::read_ce_event_effects(source, weapon, 1, &held.markers));
     }
-    let own = super::ce_firing::read_ce_weapon_firing(model_tag, 0, &preview.ce_effects);
-    let held = held_tag.as_ref().and_then(|(weapon, _)| super::ce_firing::read_ce_weapon_firing(weapon, 1, &preview.ce_effects));
+    let own = super::ce::firing::read_ce_weapon_firing(model_tag, 0, &preview.ce_effects);
+    let held = held_tag.as_ref().and_then(|(weapon, _)| super::ce::firing::read_ce_weapon_firing(weapon, 1, &preview.ce_effects));
     preview.ce_firing = own.into_iter().chain(held).collect();
     let markers = preview.markers.clone();
-    preview.ce_flags = super::ce_flags::read_ce_flags(source, model_tag, 0, &markers, preview);
+    preview.ce_flags = super::ce::flags::read_ce_flags(source, model_tag, 0, &markers, preview);
     if let Some((weapon, held)) = &held_tag {
-        let flags = super::ce_flags::read_ce_flags(source, weapon, 1, &held.markers, preview);
+        let flags = super::ce::flags::read_ce_flags(source, weapon, 1, &held.markers, preview);
         preview.ce_flags.extend(flags);
     }
 }
@@ -813,7 +813,7 @@ fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::Ma
 /// A Halo 4 object's `bounding offset` and `bounding radius`
 /// (`object_compute_bounding_sphere_recursive`, X360 0x84A489C0, reads both).
 fn read_h4_bounding_sphere(object: &TagFile) -> Option<([f32; 3], f32)> {
-    let holder = super::ce_attachments::object_block(object, "bounding radius")?;
+    let holder = super::ce::attachments::object_block(object, "bounding radius")?;
     let radius = holder.read_real("bounding radius")?;
     let offset = match holder.field("bounding offset").and_then(|field| field.value()) {
         Some(blam_tags::TagFieldData::RealPoint3d(point)) => [point.x, point.y, point.z],
@@ -827,8 +827,8 @@ fn read_h4_bounding_sphere(object: &TagFile) -> Option<([f32; 3], f32)> {
 /// four the object has (`object_get_change_color` answers for each index
 /// below the block's count).
 fn read_h4_change_color_count(object: &TagFile) -> u8 {
-    let holder = super::ce_attachments::object_block(object, "change colors");
-    let count = holder.map_or(0, |holder| super::ce_attachments::elements(holder, "change colors").len());
+    let holder = super::ce::attachments::object_block(object, "change colors");
+    let count = holder.map_or(0, |holder| super::ce::attachments::elements(holder, "change colors").len());
     count.min(4) as u8
 }
 
@@ -4411,7 +4411,7 @@ pub(super) mod kit_object_tests {
         // The marker leans a little off up, so gravity bends the tip a hair.
         assert!((0..3).all(|axis| (tip[axis] - rest[axis]).abs() < 1e-3), "{tip:?} against {rest:?}, {forward:?}");
         assert!(tip[0] < rest[0], "toward where it leans: {tip:?} against {rest:?}, {forward:?}");
-        let view = super::super::ce_lights::CeFlareView {
+        let view = super::super::ce::lights::CeFlareView {
             eye: [0.0, -3.0, 1.0],
             forward: [0.0, 1.0, 0.0],
             right: [1.0, 0.0, 0.0],
@@ -4526,8 +4526,8 @@ pub(super) mod kit_object_tests {
         let data = kit_preview(&root, GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap");
         let flags = &data.preview.ce_flags;
         assert!(!flags.is_empty(), "the flag weapon's flag");
-        let at_open = super::super::ce_flags::CeFlagField::default().advance(flags, None, 0.0, 0.0);
-        let a_minute_in = super::super::ce_flags::CeFlagField::default().advance(flags, None, 0.0, 60.0);
+        let at_open = super::super::ce::flags::CeFlagField::default().advance(flags, None, 0.0, 0.0);
+        let a_minute_in = super::super::ce::flags::CeFlagField::default().advance(flags, None, 0.0, 60.0);
         assert_eq!(at_open, a_minute_in);
     }
 
@@ -4542,7 +4542,7 @@ pub(super) mod kit_object_tests {
         };
         let data = kit_preview(&root, GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap");
         let flags = &data.preview.ce_flags;
-        let mut field = super::super::ce_flags::CeFlagField::default();
+        let mut field = super::super::ce::flags::CeFlagField::default();
         let mut last = field.advance(flags, None, 0.0, 10.0);
         let mut moved = Vec::new();
         for frame in 1..=12 {
@@ -4704,7 +4704,7 @@ pub(super) mod kit_object_tests {
     /// and has one, lives to be drawn.
     #[test]
     fn a_played_firing_effect_runs_once_on_the_held_weapon() {
-        use super::super::ce_particles::{CeEventPlays, CeObjectInputs, CeParticleField};
+        use super::super::ce::particles::{CeEventPlays, CeObjectInputs, CeParticleField};
         let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
             eprintln!("skipping: BLAM_TEST_HCEEK is not set");
             return;
@@ -4772,7 +4772,7 @@ pub(super) mod kit_object_tests {
     /// recovery time. Unfired, it is dark.
     #[test]
     fn firing_the_held_rifle_lights_its_muzzle_flash() {
-        use super::super::ce_firing::{CeWeaponShots, fired_input};
+        use super::super::ce::firing::{CeWeaponShots, fired_input};
         let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
             eprintln!("skipping: BLAM_TEST_HCEEK is not set");
             return;
@@ -4784,8 +4784,8 @@ pub(super) mod kit_object_tests {
         let weapon = preview.ce_firing.iter().find(|weapon| weapon.object == 1).expect("the held rifle fires");
         let functions = data.ce_attached[0].functions.as_ref().expect("the rifle's functions");
         let flash = functions.output_named("muzzle flash").expect("the rifle's muzzle flash function");
-        let mut shots = super::super::ce_firing::CeShots::new();
-        let at = |shots: &super::super::ce_firing::CeShots, time: f32| {
+        let mut shots = super::super::ce::firing::CeShots::new();
+        let at = |shots: &super::super::ce::firing::CeShots, time: f32| {
             let fired = fired_input(&preview.ce_firing, shots, data.geometry_id, 1, time);
             let inputs = functions.with_fired(functions.inputs_for(&Default::default(), (data.geometry_id, 1)), fired);
             functions.outputs(&inputs, time)[flash]
@@ -4805,7 +4805,7 @@ pub(super) mod kit_object_tests {
     /// so it runs through once and is let go.
     #[test]
     fn a_played_event_effect_does_not_loop() {
-        use super::super::ce_particles::{CeEventPlays, CeObjectInputs, CeParticleField};
+        use super::super::ce::particles::{CeEventPlays, CeObjectInputs, CeParticleField};
         let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
             eprintln!("skipping: BLAM_TEST_HCEEK is not set");
             return;
@@ -4837,7 +4837,7 @@ pub(super) mod kit_object_tests {
     /// taken by effects' systems, the steam jets make only what is left.
     #[test]
     fn particle_systems_make_only_what_the_shared_array_has_room_for() {
-        use super::super::ce_particle_systems::{CeParticleSystemField, MOST_SYSTEM_PARTICLES};
+        use super::super::ce::particle_systems::{CeParticleSystemField, MOST_SYSTEM_PARTICLES};
         let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
             eprintln!("skipping: BLAM_TEST_HCEEK is not set");
             return;

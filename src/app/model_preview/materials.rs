@@ -9,11 +9,11 @@ use blam_tags::render_method::{
     RenderMethodDefinition, RenderMethodOption, RenderMethodParameter, RenderMethodParameterType, ResolvedRenderMethod,
     ResolvedValue,
 };
-use super::ce_passes::{
+use super::ce::passes::{
     CeCamoSettings, CeModelCommon, CeNumeric, ce_camo_pass, ce_model_passes, ce_transparent_passes,
     read_ce_camo_settings,
 };
-use super::ce_attachments::elements;
+use super::ce::attachments::elements;
 use super::h3_shaders::{
     H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
     H3Dialect, H3Sampler, H3Texels, H3Texture, H3Value,

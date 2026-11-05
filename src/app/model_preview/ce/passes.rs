@@ -10,12 +10,12 @@ use std::sync::{Arc, LazyLock};
 
 use blam_tags::{TagBlock, TagFieldData, TagStruct};
 
-use super::h2_passes::{
+use super::super::h2_passes::{
     H2Blend, H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2Depth, H2DrawPass, H2DrawTexture,
     H2Image, H2_GLSL_VERSION,
 };
-use super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
-use super::load_referenced_tag_from_source;
+use super::super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
+use super::super::load_referenced_tag_from_source;
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
@@ -134,7 +134,7 @@ static PERIODIC_TABLES: LazyLock<Vec<Vec<u8>>> = LazyLock::new(|| {
 });
 
 /// `periodic_function_evaluate`.
-pub(super) fn periodic_evaluate(function: usize, time: f32) -> f32 {
+pub(in crate::app::model_preview) fn periodic_evaluate(function: usize, time: f32) -> f32 {
     if function == PERIODIC_ONE {
         return 1.0;
     }
@@ -193,7 +193,7 @@ impl TextureWave {
 
 /// A map's transform as `shader_texture_animation_evaluate` works it out.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct CeMapAnimation {
+pub(in crate::app::model_preview) struct CeMapAnimation {
     /// The first of its two texture rows.
     row: usize,
     /// The object output u, v and rotation read, if any.
@@ -291,18 +291,18 @@ pub(crate) struct CeModelAnimation {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CeNumeric {
     /// The first map, whose images are the digits.
-    pub(super) map: String,
+    pub(in crate::app::model_preview) map: String,
     /// How many digits it holds, the base of the count.
-    pub(super) count: usize,
+    pub(in crate::app::model_preview) count: usize,
     /// `numeric counter limit`.
-    pub(super) limit: i32,
+    pub(in crate::app::model_preview) limit: i32,
     /// The digit of this pass.
-    pub(super) digit: usize,
+    pub(in crate::app::model_preview) digit: usize,
     /// The material's permutation: which place of the number it shows.
-    pub(super) place: usize,
+    pub(in crate::app::model_preview) place: usize,
     /// `numeric countdown timer`: it reads a clock only scripts set, not the
     /// object. A preview has no script, so that stays at its zero.
-    pub(super) timer: bool,
+    pub(in crate::app::model_preview) timer: bool,
 }
 
 impl CeNumeric {
@@ -495,7 +495,7 @@ impl CeModelAnimation {
 }
 
 /// `model_common.h` translated, or `None` where the kit has no shaders.
-pub(super) type CeModelCommon = Arc<TranslatedFxShader>;
+pub(in crate::app::model_preview) type CeModelCommon = Arc<TranslatedFxShader>;
 
 /// The kit's `shaders/fx` folder, beside `tags`.
 fn read_common(source: &TagSource) -> Option<CeModelCommon> {
@@ -513,7 +513,7 @@ fn read_common(source: &TagSource) -> Option<CeModelCommon> {
 /// What a map defaults to, as `rasterizer_set_texture_for_effect`'s usage has
 /// it: the shape of `global_rasterizer_data`'s default bitmaps.
 fn flat(value: u8) -> Arc<H2Image> {
-    Arc::new(H2Image::Flat(super::materials::TextureImage {
+    Arc::new(H2Image::Flat(super::super::materials::TextureImage {
         rgba: vec![value, value, value, value],
         width: 1,
         height: 1,
@@ -660,7 +660,7 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<H2DrawPass> {
 }
 
 /// A shader's option by name, with a list's position standing for its value.
-pub(super) fn option_index(root: TagStruct<'_>, field: &str, options: &[&str]) -> i32 {
+pub(in crate::app::model_preview) fn option_index(root: TagStruct<'_>, field: &str, options: &[&str]) -> i32 {
     let name = root.read_enum_name(field);
     options.iter().position(|option| name.as_deref() == Some(*option)).unwrap_or(0) as i32
 }
@@ -669,7 +669,7 @@ const DETAIL_FUNCTIONS: [&str; 3] = ["double/biased multiply", "multiply", "doub
 const COLOR_SOURCES: [&str; 5] = ["none", "A", "B", "C", "D"];
 /// An object function's outputs, as animation and fade fields name them.
 const FUNCTION_SOURCES: [&str; 5] = ["none", "A out", "B out", "C out", "D out"];
-pub(super) const PERIODIC_FUNCTIONS: [&str; 12] = [
+pub(in crate::app::model_preview) const PERIODIC_FUNCTIONS: [&str; 12] = [
     "one",
     "zero",
     "cosine",
@@ -700,7 +700,7 @@ fn nonzero(value: Option<f32>, default: f32) -> f32 {
 
 /// An effect shader's second map's animation, as the game reads it: no
 /// postprocess fills in its zeros, and it is scaled by one.
-pub(super) fn read_effect_map_animation(root: TagStruct<'_>) -> CeMapAnimation {
+pub(in crate::app::model_preview) fn read_effect_map_animation(root: TagStruct<'_>) -> CeMapAnimation {
     let center = root.read_point2d("rotation-animation center");
     CeMapAnimation {
         row: 0,
@@ -719,7 +719,7 @@ pub(super) fn read_effect_map_animation(root: TagStruct<'_>) -> CeMapAnimation {
 
 impl CeMapAnimation {
     /// The two rows of the transform at a time, for an object's outputs.
-    pub(super) fn rows(&self, time: f32, outputs: &[f32; 4]) -> [[f32; 4]; 2] {
+    pub(in crate::app::model_preview) fn rows(&self, time: f32, outputs: &[f32; 4]) -> [[f32; 4]; 2] {
         let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
         let at = Self { row: 0, ..self.clone() };
         at.apply(&mut rows, time, outputs);
@@ -832,7 +832,7 @@ fn chicago_alpha_table(function: i32) -> [f32; 10] {
 }
 
 /// `srcblend_table`, `destblend_table` and `blendop_table`.
-pub(super) fn framebuffer_blend(function: i32) -> H2Blend {
+pub(in crate::app::model_preview) fn framebuffer_blend(function: i32) -> H2Blend {
     use H2BlendFactor::{DstColor, One, OneMinusSrcAlpha, SrcAlpha, SrcColor, Zero};
     let (equation, source, destination) = match function {
         1 => (H2BlendEquation::Add, DstColor, Zero),
@@ -938,7 +938,7 @@ fn enum_values(stage: TagStruct<'_>, after: &str) -> Vec<i32> {
 
 /// A `real_argb_color` field as red, green, blue and alpha; the tag stores
 /// alpha first.
-pub(super) fn argb(root: TagStruct<'_>, name: &str) -> [f32; 4] {
+pub(in crate::app::model_preview) fn argb(root: TagStruct<'_>, name: &str) -> [f32; 4] {
     match root.field(name).and_then(|field| field.value()) {
         Some(TagFieldData::RealArgbColor(color)) => [color.red, color.green, color.blue, color.alpha],
         _ => [0.0; 4],
@@ -1238,7 +1238,7 @@ fn every_flag(root: TagStruct<'_>) -> Vec<String> {
 
 /// A transparent shader's passes: its extra layers, then itself. Empty for
 /// any other group, or where the kit has no shaders.
-pub(super) fn ce_transparent_passes(
+pub(in crate::app::model_preview) fn ce_transparent_passes(
     source: &TagSource,
     root: TagStruct<'_>,
     group: &[u8; 4],
@@ -1362,7 +1362,7 @@ fn normalization(slot: u32) -> H2DrawTexture {
 
 /// A flat normal, as the default vector bitmap has it.
 fn flat_normal() -> Arc<H2Image> {
-    Arc::new(H2Image::Flat(super::materials::TextureImage {
+    Arc::new(H2Image::Flat(super::super::materials::TextureImage {
         rgba: vec![128, 128, 255, 255],
         width: 1,
         height: 1,
@@ -1626,7 +1626,7 @@ fn water_passes(
 
 /// What `globals` gives every object's active camouflage.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct CeCamoSettings {
+pub(in crate::app::model_preview) struct CeCamoSettings {
     fragment: String,
     effect_register: u32,
     screen_register: u32,
@@ -1637,7 +1637,7 @@ pub(super) struct CeCamoSettings {
 }
 
 /// `globals\globals`'s rasterizer data, and the kit's shader for it.
-pub(super) fn read_ce_camo_settings(source: &TagSource) -> Option<CeCamoSettings> {
+pub(in crate::app::model_preview) fn read_ce_camo_settings(source: &TagSource) -> Option<CeCamoSettings> {
     let directory = shader_directory(source)?;
     let globals = load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
     let root = globals.root();
@@ -1666,7 +1666,7 @@ pub(super) fn read_ce_camo_settings(source: &TagSource) -> Option<CeCamoSettings
 
 /// `rasterizer_active_camouflage_draw` at full intensity. A cheap copy of the
 /// frame behind stands in for its own primary target, as Halo 2's camo does.
-pub(super) fn ce_camo_pass(
+pub(in crate::app::model_preview) fn ce_camo_pass(
     settings: &CeCamoSettings,
     two_sided: bool,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
@@ -1776,7 +1776,7 @@ const LAYER_GROUPS: [(&str, &[u8; 4]); 3] = [
 
 /// The passes of a `shader_model` or `shader_environment`, empty for any other
 /// group and where the kit has no shaders, which keeps the slots drawing.
-pub(super) fn ce_model_passes(
+pub(in crate::app::model_preview) fn ce_model_passes(
     source: &TagSource,
     root: TagStruct<'_>,
     group: &[u8; 4],
@@ -1803,7 +1803,7 @@ pub(super) fn ce_model_passes(
         [color.red, color.green, color.blue]
     };
     let pass = if group == b"soso" {
-        let detail_mask = option_index(root, "detail mask", &super::materials::CE_DETAIL_MASKS);
+        let detail_mask = option_index(root, "detail mask", &super::super::materials::CE_DETAIL_MASKS);
         let decal = has("alpha-blended decal");
         let scale = factor(root.read_real("detail map scale"));
         let base_scale = [

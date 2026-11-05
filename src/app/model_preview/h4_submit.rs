@@ -467,7 +467,7 @@ mod tests {
         let texture = baked.textures.iter().find(|texture| texture.frame_index_function.is_some()).expect("a framed texture");
         let function = texture.frame_index_function.unwrap();
         let bitmap = read(&format!("{}.bitmap", texture.bitmap.replace('\\', "/")));
-        let count = super::super::ce_attachments::elements(bitmap.root(), "bitmaps*").len();
+        let count = super::super::ce::attachments::elements(bitmap.root(), "bitmaps*").len();
         assert!(count > 1, "{count}");
         let mut submit = H4Submit::new(baked, 1, 8, None);
         submit.add_frames("selfillum_mapTexture".to_owned(), function, count);

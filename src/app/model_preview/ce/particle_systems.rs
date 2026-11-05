@@ -14,10 +14,10 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::ce_attachments::{elements, has_flag, object_block};
-use super::ce_lights::{CeFlareView, posed_on};
-use super::ce_particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
-use super::*;
+use super::attachments::{elements, has_flag, object_block};
+use super::lights::{CeFlareView, posed_on};
+use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
+use super::super::*;
 use crate::core::source::TagSource;
 
 /// How long a system runs before the preview first shows it.
@@ -130,7 +130,7 @@ pub(crate) struct CeParticleSystemAt {
     change_color: Option<usize>,
 }
 
-impl super::ce_functions::ReadsOutputs for CeParticleSystemAt {
+impl super::functions::ReadsOutputs for CeParticleSystemAt {
     fn object(&self) -> u8 {
         self.object
     }
@@ -165,7 +165,7 @@ fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
 }
 
 fn argb_of(holder: TagStruct<'_>, name: &str) -> [f32; 4] {
-    let [red, green, blue, alpha] = super::ce_passes::argb(holder, name);
+    let [red, green, blue, alpha] = super::passes::argb(holder, name);
     [alpha, red, green, blue]
 }
 
@@ -180,7 +180,7 @@ fn read_physics(source: &TagSource, holder: TagStruct<'_>) -> Option<CePointPhys
     Some(CePointPhysics::read(&tag))
 }
 
-pub(super) fn read_pctl_def(source: &TagSource, path: &str) -> Option<CePctlDef> {
+pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &str) -> Option<CePctlDef> {
     let tag = load_referenced_tag_from_source(source, path, "particle_system", b"pctl").ok()?;
     let root = tag.root();
     let mut sheets: Vec<Arc<CeSpriteSheet>> = Vec::new();
@@ -194,7 +194,7 @@ pub(super) fn read_pctl_def(source: &TagSource, path: &str) -> Option<CePctlDef>
                 let real = |name: &str| state.read_real(name).unwrap_or(0.0);
                 // Tool's `sub_49BFC0`.
                 let radius = Some(real("radius multiplier")).filter(|radius| *radius > 0.0).unwrap_or(1.0);
-                let [red, green, blue, alpha] = super::ce_passes::argb(*state, "color multiplier");
+                let [red, green, blue, alpha] = super::passes::argb(*state, "color multiplier");
                 TypeState {
                     duration: bounds_of(*state, "duration bounds"),
                     transition: bounds_of(*state, "transition time bounds"),
@@ -274,7 +274,7 @@ fn function_slot(value: Option<i128>) -> Option<usize> {
 }
 
 /// The particle systems among the object's attachments.
-pub(super) fn read_ce_particle_systems(
+pub(in crate::app::model_preview) fn read_ce_particle_systems(
     source: &TagSource,
     object: &TagFile,
     owner: u8,

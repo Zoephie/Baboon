@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::ce_attachments::elements;
+use super::ce::attachments::elements;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::hlsl::emit::{Stage, Translated, translate_with};
 use crate::core::hlsl::parse::{Program, parse};

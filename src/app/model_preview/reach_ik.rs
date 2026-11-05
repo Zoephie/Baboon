@@ -8,7 +8,7 @@ use blam_tags::math::{Matrix4, RealPoint3d, RealQuaternion};
 use blam_tags::{Skeleton, TagFile};
 
 use super::attachment::{added, apart, axis_of, cross, dot, matrix_of, place_of, rigid_inverse, scaled, unit};
-use super::ce_attachments::elements;
+use super::ce::attachments::elements;
 use super::RenderModelPreviewNode;
 
 /// `e_animation_ik_chain_event_usage`: whose markers a target names.

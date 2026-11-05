@@ -386,11 +386,11 @@ pub(super) fn read_variant_instances(tag: &TagFile, placements: &[String], reach
     let Some(variants) = root.field_path("variants").and_then(|field| field.as_block()) else {
         return Vec::new();
     };
-    let groups: Vec<InstanceGroup> = super::ce_attachments::elements(root, "instance groups")
+    let groups: Vec<InstanceGroup> = super::ce::attachments::elements(root, "instance groups")
         .iter()
         .map(|group| InstanceGroup {
             choose_all: group.read_enum_name("choice").as_deref() == Some("choose all members"),
-            members: super::ce_attachments::elements(*group, "member list")
+            members: super::ce::attachments::elements(*group, "member list")
                 .iter()
                 .map(|member| InstanceGroupMember {
                     subgroup: usize::try_from(member.read_int_any("subgroup").unwrap_or(-1)).ok(),

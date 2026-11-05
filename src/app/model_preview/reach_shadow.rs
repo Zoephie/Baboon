@@ -4,7 +4,7 @@
 
 use blam_tags::TagFile;
 
-use super::ce_attachments::object_block;
+use super::ce::attachments::object_block;
 
 /// `c_rasterizer_states`' shadow generate biases when the model sets none
 /// (MCC .data 0x1420305C0/C4).

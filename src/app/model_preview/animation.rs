@@ -1677,7 +1677,7 @@ impl Baboon {
                     if let Some((clip, weapons)) = ce_clip {
                         let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
                         let class = held.map_or("unarmed", |weapon| weapon.class.as_str());
-                        state.animation.selected = super::ce_attachments::clip_after_weapon_change(
+                        state.animation.selected = super::ce::attachments::clip_after_weapon_change(
                             &entries,
                             &weapons.hidden_clips,
                             &clip,
@@ -2196,7 +2196,7 @@ fn decode_ce_animation(
     };
     // Then the unit aims and looks straight ahead.
     let name = animation.name.as_deref().unwrap_or_default();
-    for (index, frame) in super::ce_attachments::resting_aim(&antr, name) {
+    for (index, frame) in super::ce::attachments::resting_aim(&antr, name) {
         let Some(aim) = animations.get(index).filter(|aim| frame < aim.frame_count as usize) else {
             continue;
         };

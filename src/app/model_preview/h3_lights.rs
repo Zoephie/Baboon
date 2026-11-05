@@ -8,8 +8,8 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::attachment::{MarkerFrame, unit};
 use super::h3_effects::adopt_event_function;
-use super::ce_attachments::{elements, object_block};
-use super::ce_lights::{CeFlareView, CeSprite, posed_on};
+use super::ce::attachments::{elements, object_block};
+use super::ce::lights::{CeFlareView, CeSprite, posed_on};
 use super::h3_effects::{
     H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
 };

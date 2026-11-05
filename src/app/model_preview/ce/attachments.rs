@@ -6,11 +6,11 @@
 use blam_tags::math::Matrix4;
 use blam_tags::{TagFile, TagStruct};
 
-use super::ce_functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
-use super::h2_passes::{H2ChangeColors, read_h2_change_colors};
-use super::loading::build_render_preview;
-use super::*;
-use super::attachment::*;
+use super::functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
+use super::super::h2_passes::{H2ChangeColors, read_h2_change_colors};
+use super::super::loading::build_render_preview;
+use super::super::*;
+use super::super::attachment::*;
 use crate::core::source::TagSource;
 
 /// The stance a unit nobody is driving stands in.
@@ -86,7 +86,7 @@ const NO_WEAPON_IK: &[&str] = &[
     "r-foot",
 ];
 /// Whether the game keeps a held weapon's IK points on through a clip.
-pub(super) fn clip_runs_weapon_ik(clip: &str) -> bool {
+pub(in crate::app::model_preview) fn clip_runs_weapon_ik(clip: &str) -> bool {
     let last = clip.rsplit(' ').next().unwrap_or(clip);
     // `%1` numbers a clip's permutations.
     !NO_WEAPON_IK.contains(&last.split('%').next().unwrap_or(last))
@@ -126,7 +126,7 @@ fn resting_screen_frame(holder: TagStruct<'_>) -> usize {
 /// The screens over a clip for a unit aiming and looking straight ahead, in
 /// the order `unit_preprocess_node_orientations` applies them, each as an
 /// animation index and its frame.
-pub(super) fn resting_aim(graph: &TagFile, clip: &str) -> Vec<(usize, usize)> {
+pub(in crate::app::model_preview) fn resting_aim(graph: &TagFile, clip: &str) -> Vec<(usize, usize)> {
     let Some(screen) = aiming_screen_of(clip) else {
         return Vec::new();
     };
@@ -159,7 +159,7 @@ pub(super) fn resting_aim(graph: &TagFile, clip: &str) -> Vec<(usize, usize)> {
 pub(crate) struct CeWeaponIk {
     /// Which clips hold it: a Halo CE weapon class, the second word of their
     /// names, or a Halo 2 mode, the first.
-    pub(super) scope: String,
+    pub(in crate::app::model_preview) scope: String,
     hand: usize,
     elbow: usize,
     shoulder: usize,
@@ -170,22 +170,22 @@ pub(crate) struct CeWeaponIk {
     /// The marker on the weapon, in bind space.
     grip: Matrix4,
     /// The nodes below the hand, which move with it.
-    pub(super) carried: Vec<usize>,
+    pub(in crate::app::model_preview) carried: Vec<usize>,
 }
 
 impl CeWeaponIk {
-    pub(super) fn hand(&self) -> usize {
+    pub(in crate::app::model_preview) fn hand(&self) -> usize {
         self.hand
     }
 
     /// Whether a clip is one of the held weapon's, played with IK on.
-    pub(super) fn runs_through(&self, clip: &str) -> bool {
+    pub(in crate::app::model_preview) fn runs_through(&self, clip: &str) -> bool {
         clip.split(' ').any(|word| word.eq_ignore_ascii_case(&self.scope)) && clip_runs_weapon_ik(clip)
     }
 
     /// Pose the arm. `worlds` holds each node's posed transform, and
     /// `inverse_binds` what `skin` undoes of it.
-    pub(super) fn apply(&self, worlds: &mut [Matrix4], inverse_binds: &[Matrix4]) {
+    pub(in crate::app::model_preview) fn apply(&self, worlds: &mut [Matrix4], inverse_binds: &[Matrix4]) {
         let (Some(weapon), Some(inverse)) =
             (worlds.get(self.weapon_node).copied(), inverse_binds.get(self.weapon_node).copied())
         else {
@@ -207,7 +207,7 @@ impl CeWeaponIk {
     }
 }
 
-pub(super) fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'a>> {
+pub(in crate::app::model_preview) fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'a>> {
     let block = holder.field(name).and_then(|field| field.as_block());
     (0..block.as_ref().map_or(0, |block| block.len()))
         .filter_map(|index| block.as_ref()?.element(index))
@@ -216,7 +216,7 @@ pub(super) fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'
 
 /// Whether the flags field `name` has its option `option` set, the option
 /// named as the editors show it (its `#help` left out).
-pub(super) fn has_flag(holder: TagStruct<'_>, name: &str, option: &str) -> bool {
+pub(in crate::app::model_preview) fn has_flag(holder: TagStruct<'_>, name: &str, option: &str) -> bool {
     holder.field(name).and_then(|field| field.flag(option)).is_some_and(|flag| flag.is_set())
 }
 
@@ -340,7 +340,7 @@ fn hidden_clips(graph: &TagFile, weapon_label: &str) -> std::collections::BTreeS
 }
 
 /// `.weapon` tags of a loose folder, by path without the extension.
-pub(super) fn loose_weapon_paths(root: &std::path::Path) -> Vec<String> {
+pub(in crate::app::model_preview) fn loose_weapon_paths(root: &std::path::Path) -> Vec<String> {
     let mut found = Vec::new();
     let mut folders = vec![root.to_path_buf()];
     while let Some(folder) = folders.pop() {
@@ -377,7 +377,7 @@ fn equippable_of(source: &TagSource, graph: &TagFile) -> Vec<CeEquippable> {
 
 /// A biped's weapon choices, with `chosen` held. `known` spares the scan when
 /// only the choice changed.
-pub(super) fn biped_weapons(
+pub(in crate::app::model_preview) fn biped_weapons(
     source: &TagSource,
     object: &TagFile,
     chosen: Option<&str>,
@@ -398,7 +398,7 @@ pub(super) fn biped_weapons(
 
 /// The clip to play after a weapon change: the same one if it is still shown,
 /// or this weapon's idle in the same seat.
-pub(super) fn clip_after_weapon_change(
+pub(in crate::app::model_preview) fn clip_after_weapon_change(
     clips: &[PreviewAnimationEntry],
     hidden: &std::collections::BTreeSet<usize>,
     clip: &str,
@@ -414,7 +414,7 @@ pub(super) fn clip_after_weapon_change(
 }
 
 /// The struct of an object tag holding a block, down its inherited structs.
-pub(super) fn object_block<'a>(object: &'a TagFile, block: &str) -> Option<TagStruct<'a>> {
+pub(in crate::app::model_preview) fn object_block<'a>(object: &'a TagFile, block: &str) -> Option<TagStruct<'a>> {
     let mut holder = object.root();
     loop {
         if holder.field(block).is_some() {
@@ -425,7 +425,7 @@ pub(super) fn object_block<'a>(object: &'a TagFile, block: &str) -> Option<TagSt
 }
 
 /// The unit's first weapon, which it has ready, by path.
-pub(super) fn first_weapon(object: &TagFile) -> Option<String> {
+pub(in crate::app::model_preview) fn first_weapon(object: &TagFile) -> Option<String> {
     let weapons = object_block(object, "weapons")?.field("weapons")?.as_block()?;
     (0..weapons.len())
         .filter_map(|index| weapons.element(index)?.read_tag_ref_path("weapon"))
@@ -433,7 +433,7 @@ pub(super) fn first_weapon(object: &TagFile) -> Option<String> {
 }
 
 /// A marker of a held object, where holding it puts it.
-pub(super) fn attached_marker_frame(
+pub(in crate::app::model_preview) fn attached_marker_frame(
     marker: &RenderModelPreviewMarker,
     parent: &MarkerFrame,
     child: &MarkerFrame,
@@ -446,7 +446,7 @@ pub(super) fn attached_marker_frame(
 }
 
 /// An IK point of a weapon held on `parent`, if both markers and the arm exist.
-pub(super) fn weapon_ik(
+pub(in crate::app::model_preview) fn weapon_ik(
     preview: &RenderModelPreview,
     weapon: &RenderModelPreview,
     scope: &str,
@@ -481,7 +481,7 @@ pub(super) fn weapon_ik(
 }
 
 /// Hang the unit's ready weapon on it, returning the object that adds.
-pub(super) fn attach_ce_weapon(
+pub(in crate::app::model_preview) fn attach_ce_weapon(
     source: &TagSource,
     object: &TagFile,
     path: &str,
@@ -508,7 +508,7 @@ pub(super) fn attach_ce_weapon(
     for (marker, attach_to) in &hold.ik_points {
         preview.weapon_ik.extend(weapon_ik(preview, &attached, &hold.class, parent, child, marker, attach_to));
     }
-    let lights = super::ce_lights::read_attached_lights(source, &weapon, 1, &attached, parent, child);
+    let lights = super::lights::read_attached_lights(source, &weapon, 1, &attached, parent, child);
     preview.ce_lights.extend(lights);
     let markers = attached
         .markers

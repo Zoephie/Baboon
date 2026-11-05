@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-use super::ce_attachments::elements;
+use super::ce::attachments::elements;
 use super::h2_functions::H2FunctionValues;
 use super::h3_shaders::{H3Pass, H3Texture};
 use super::reach_shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};

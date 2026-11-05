@@ -167,7 +167,7 @@ pub(super) fn draw_model_viewport(
     let mut frame = frame;
     frame.h2_prt_clusters = frame.h2_object_prt_clusters();
     frame.ce_points = frame.ce_point_lights();
-    let firing = ce_firing::shots_moving(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, time);
+    let firing = ce::firing::shots_moving(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, time);
     if frame.h2_moves() || ce_events_running(data.geometry_id) || firing {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     }
@@ -940,9 +940,9 @@ struct ModelGpuFrame {
     /// under what is selected.
     h2_shown: H2Shown,
     /// Each object's point lights this frame, in step with `object_states`.
-    ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
+    ce_points: Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>,
     /// The panel's plays of Halo CE's event effects.
-    ce_plays: ce_particles::CeEventPlays,
+    ce_plays: ce::particles::CeEventPlays,
     /// Draw opaque Halo 2 materials through their passes.
     game_shaders: bool,
     default_lights: bool,
@@ -1195,7 +1195,7 @@ fn h2_functions_move(
 /// The opened object's functions, then those of what is attached to it.
 fn object_functions(
     data: &ModelPreviewData,
-) -> impl Iterator<Item = &ce_functions::CeObjectFunctions> {
+) -> impl Iterator<Item = &ce::functions::CeObjectFunctions> {
     data.ce_object_functions
         .iter()
         .chain(data.ce_attached.iter().filter_map(|object| object.functions.as_ref()))
@@ -1203,15 +1203,15 @@ fn object_functions(
 
 fn object_states(
     data: &ModelPreviewData,
-    set: &ce_functions::CeFunctionInputs,
-    shots: &ce_firing::CeShots,
+    set: &ce::functions::CeFunctionInputs,
+    shots: &ce::firing::CeShots,
     time: f32,
 ) -> Vec<CeObjectState> {
-    let state = |functions: Option<&ce_functions::CeObjectFunctions>, object, colors| {
+    let state = |functions: Option<&ce::functions::CeObjectFunctions>, object, colors| {
         let (outputs, active) = functions.map_or(([0.0; 4], [false; 4]), |functions| {
-            let fired = ce_firing::fired_input(&data.preview.ce_firing, shots, data.geometry_id, object, time);
+            let fired = ce::firing::fired_input(&data.preview.ce_firing, shots, data.geometry_id, object, time);
             let inputs = functions.with_fired(functions.inputs_for(set, (data.geometry_id, object)), fired);
-            functions.outputs_active(&inputs, ce_functions::object_time(time, object))
+            functions.outputs_active(&inputs, ce::functions::object_time(time, object))
         });
         CeObjectState { outputs, active, change_colors: h2_passes::ce_change_colors(colors) }
     };
@@ -1278,16 +1278,16 @@ impl ModelGpuFrame {
 
     /// `lights_prepare_for_object_dynamic`, for the opened object and what it
     /// holds, as one sphere around the model.
-    fn ce_point_lights(&self) -> Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]> {
+    fn ce_point_lights(&self) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
         self.ce_point_lights_with(&[])
     }
 
     /// The same, with lights the object's effects have made besides.
-    fn ce_point_lights_with(&self, made: &[ce_lights::CeLight]) -> Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]> {
+    fn ce_point_lights_with(&self, made: &[ce::lights::CeLight]) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
         if self.preview.ce_lights.is_empty() && made.is_empty() {
             return Vec::new();
         }
-        let lights: std::borrow::Cow<'_, [ce_lights::CeLight]> = if made.is_empty() {
+        let lights: std::borrow::Cow<'_, [ce::lights::CeLight]> = if made.is_empty() {
             std::borrow::Cow::Borrowed(&self.preview.ce_lights)
         } else {
             std::borrow::Cow::Owned(self.preview.ce_lights.iter().chain(made).cloned().collect())
@@ -1303,7 +1303,7 @@ impl ModelGpuFrame {
         };
         (0..self.object_states.len().max(1) as u8)
             .map(|object| {
-                ce_lights::point_light_rows(&lights, object, center, reach, state, bones)
+                ce::lights::point_light_rows(&lights, object, center, reach, state, bones)
             })
             .collect()
     }
@@ -1390,12 +1390,12 @@ fn ce_events_running(geometry_id: u64) -> bool {
 /// The panel's plays of `data`'s event effects, by index among its effects.
 pub(super) fn ce_event_plays(
     data: &ModelPreviewData,
-    counts: &ce_functions::CeEventCounts,
+    counts: &ce::functions::CeEventCounts,
     scales: [f32; 2],
-) -> ce_particles::CeEventPlays {
+) -> ce::particles::CeEventPlays {
     let effects = &data.preview.ce_effects;
     let count = |index| counts.get(&(data.geometry_id, index)).copied().unwrap_or(0);
-    ce_particles::CeEventPlays { counts: (0..effects.len()).map(count).collect(), scales }
+    ce::particles::CeEventPlays { counts: (0..effects.len()).map(count).collect(), scales }
 }
 
 /// Why drawing `geometry_id` stopped, if it panicked.
@@ -2076,22 +2076,22 @@ struct ModelGpuSlot {
     reach_cheap: reach_cheap_particles::ReachCheapField,
     reach_cheap_texture: Option<glow::NativeTexture>,
     /// Halo CE effect particles, and their images by effect, particle and image.
-    ce_particles: ce_particles::CeParticleField,
-    /// By [`ce_particles::def_key`], particle, then image.
+    ce_particles: ce::particles::CeParticleField,
+    /// By [`ce::particles::def_key`], particle, then image.
     ce_particle_textures: HashMap<usize, Vec<Vec<Option<glow::NativeTexture>>>>,
-    ce_contrails: ce_contrails::CeContrailField,
+    ce_contrails: ce::contrails::CeContrailField,
     ce_contrail_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     ce_light_volume_textures: Vec<Option<glow::NativeTexture>>,
     ce_lightning_textures: Vec<Option<glow::NativeTexture>>,
-    ce_glows: ce_widgets::CeGlowField,
-    ce_pctl: ce_particle_systems::CeParticleSystemField,
+    ce_glows: ce::widgets::CeGlowField,
+    ce_pctl: ce::particle_systems::CeParticleSystemField,
     /// By system, sheet, then image.
     ce_pctl_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
     /// Effects' particle systems: by effect, system, sheet, then image.
     ce_effect_pctl_textures: HashMap<usize, Vec<Vec<Vec<Option<glow::NativeTexture>>>>>,
     /// Effect shaders' second maps, by the map, made on first draw.
     ce_secondary_textures: HashMap<usize, glow::NativeTexture>,
-    ce_flags: ce_flags::CeFlagField,
+    ce_flags: ce::flags::CeFlagField,
     ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
     /// Halo 4's trailing tracers between frames.
@@ -2356,7 +2356,7 @@ impl ModelGpuSlot {
             for texture in self.ce_effect_flare_textures.drain().flat_map(|(_, lights)| lights).flatten().flatten() {
                 gl.delete_texture(texture);
             }
-            let reachable = ce_particles::reachable_defs(&frame.preview.ce_effects);
+            let reachable = ce::particles::reachable_defs(&frame.preview.ce_effects);
             self.ce_effect_flare_textures = reachable
                 .iter()
                 .map(|def| {
@@ -2364,7 +2364,7 @@ impl ModelGpuSlot {
                         let images = light.light.flare.iter().flat_map(|flare| &flare.images);
                         images.map(|image| upload_h2_image(gl, image)).collect()
                     });
-                    (ce_particles::def_key(def), lights.collect())
+                    (ce::particles::def_key(def), lights.collect())
                 })
                 .collect();
             for texture in self.antenna_textures.drain(..).flatten() {
@@ -2435,7 +2435,7 @@ impl ModelGpuSlot {
                             sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
                         }).collect()
                     });
-                    (ce_particles::def_key(def), systems.collect())
+                    (ce::particles::def_key(def), systems.collect())
                 })
                 .collect();
             self.ce_contrail_textures = frame
@@ -2452,7 +2452,7 @@ impl ModelGpuSlot {
                     let particles = def.particles.iter().map(|particle| {
                         particle.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
                     });
-                    (ce_particles::def_key(def), particles.collect())
+                    (ce::particles::def_key(def), particles.collect())
                 })
                 .collect();
             for texture in self.h2_liquid_textures.drain(..).flatten().flatten() {
@@ -3011,7 +3011,7 @@ fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones:
     let states = &frame.object_states;
     let inputs = |object: u8| {
         let state = states.get(object as usize);
-        ce_particles::CeObjectInputs {
+        ce::particles::CeObjectInputs {
                 active: state.map_or([false; 4], |state| state.active),
             outputs: state.map_or([0.0; 4], |state| state.outputs),
             change_colors: state.map_or([[1.0; 3]; 4], |state| state.change_colors),
@@ -3036,7 +3036,7 @@ fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones:
 /// A Halo CE sprite through the `effect` shader: its map, framebuffer blend
 /// function and nonlinear tint, each corner's color, its corners, and the
 /// shader's second map.
-type CeSprite = (glow::NativeTexture, i32, bool, [[f32; 4]; 4], [[f32; 5]; 4], Option<ce_particles::CeSecondaryDraw>);
+type CeSprite = (glow::NativeTexture, i32, bool, [[f32; 4]; 4], [[f32; 5]; 4], Option<ce::particles::CeSecondaryDraw>);
 
 /// What one of Halo CE's transparent groups draws.
 enum CeGroupDraw {
@@ -3044,7 +3044,7 @@ enum CeGroupDraw {
     Sprites(Vec<CeSprite>),
     /// Through the flares' plain color-times-map program: an antenna, or with
     /// `additive` a light volume, which `rasterizer_widget_begin(5, 1)` adds.
-    Plain { quads: Vec<ce_lights::CeAntennaQuad>, texture: glow::NativeTexture, additive: bool },
+    Plain { quads: Vec<ce::lights::CeAntennaQuad>, texture: glow::NativeTexture, additive: bool },
 }
 
 /// One of Halo CE's transparent groups, which `rasterizer_transparent_geometry_draw`
@@ -3059,7 +3059,7 @@ const CE_SORT_BIAS: f32 = 0.25;
 
 /// `z_sort`: how far in front of the eye the point lies along the view,
 /// negated, so the farthest sorts first; `sort bias` brings it nearer.
-fn ce_z_sort(view: &ce_lights::CeFlareView, point: [f32; 3], sort_bias: bool) -> f32 {
+fn ce_z_sort(view: &ce::lights::CeFlareView, point: [f32; 3], sort_bias: bool) -> f32 {
     let along: f32 = (0..3).map(|axis| (point[axis] - view.eye[axis]) * view.forward[axis]).sum();
     if sort_bias { CE_SORT_BIAS - along } else { -along }
 }
@@ -3116,7 +3116,7 @@ impl CeSpriteGroups {
         self.groups[at].2.push(sprite);
     }
 
-    fn sorted_by(self, view: &ce_lights::CeFlareView) -> impl Iterator<Item = CeGroup> {
+    fn sorted_by(self, view: &ce::lights::CeFlareView) -> impl Iterator<Item = CeGroup> {
         self.groups.into_iter().map(move |(sort_bias, by_bounds, sprites)| {
             let corners = sprites.iter().map(|sprite| &sprite.4);
             let centroid = if by_bounds { bounds_middle(corners) } else { mean_corner(corners) };
@@ -3135,7 +3135,7 @@ fn ce_groups(
     uploaded: &mut ModelGpuSlot,
     frame: &ModelGpuFrame,
     bones: Option<&[[f32; 4]]>,
-    view: &ce_lights::CeFlareView,
+    view: &ce::lights::CeFlareView,
 ) -> Vec<CeGroup> {
     let camera = &frame.camera;
     let effects = &frame.preview.ce_effects;
@@ -3369,7 +3369,7 @@ unsafe fn draw_ce_sprites(
                 None => gl.uniform_1_i32(effect_gl.mode.as_ref(), 0),
             }
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            let blend = ce_passes::framebuffer_blend(function);
+            let blend = ce::passes::framebuffer_blend(function);
             gl.blend_equation(gl_blend_equation(blend.equation));
             gl.blend_func(gl_blend_factor(blend.source), gl_blend_factor(blend.destination));
             gl.uniform_1_i32(effect_gl.blend.as_ref(), function);
@@ -4080,7 +4080,7 @@ struct ModelGlRenderer {
     ce_flares: Option<Option<CeFlareGl>>,
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
-    ce_points_now: Option<Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>>,
+    ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
     /// As `h2_bloom`.
     ce_effect_gl: Option<Option<CeEffectGl>>,
     /// As `h2_bloom`.
@@ -4419,7 +4419,7 @@ impl ModelGlRenderer {
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let uploaded = &mut self.slots[slot];
                 advance_ce_effects(uploaded, frame, bones);
-                let made: Vec<ce_lights::CeLight> =
+                let made: Vec<ce::lights::CeLight> =
                     uploaded.ce_particles.lights(&frame.preview.ce_effects).into_iter().map(|(_, _, light)| light).collect();
                 if !made.is_empty() {
                     self.ce_points_now = Some(frame.ce_point_lights_with(&made));
@@ -4756,7 +4756,7 @@ impl ModelGlRenderer {
             let parts = frame.visible_batches.iter().map(|&index| {
                 let place = frame.preview.batches.get(index).and_then(|batch| batch.sort_position);
                 let point = match place {
-                    Some((point, node)) => ce_lights::posed_on(node, point, [0.0; 3], bones).0,
+                    Some((point, node)) => ce::lights::posed_on(node, point, [0.0; 3], bones).0,
                     None => points.get(index).copied().unwrap_or(frame.camera.center),
                 };
                 (ce_z_sort(&view, point, false), Transparent::Part(index))
@@ -6331,8 +6331,8 @@ mod tests {
     use blam_tags::render_model::{GeometryPartType, RenderMeshPart, RenderVertex};
 
     /// An eye at the origin looking along +X.
-    fn looking_along_x() -> ce_lights::CeFlareView {
-        ce_lights::CeFlareView { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, 1.0, 0.0], up: [0.0, 0.0, 1.0] }
+    fn looking_along_x() -> ce::lights::CeFlareView {
+        ce::lights::CeFlareView { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, 1.0, 0.0], up: [0.0, 0.0, 1.0] }
     }
 
     /// `z_sort` puts the farther first, and `sort bias` a quarter unit nearer.
@@ -7815,9 +7815,9 @@ fn h2_antennas(
     frame: &ModelGpuFrame,
     textures: &[Option<glow::NativeTexture>],
     bones: Option<&[[f32; 4]]>,
-    view: &ce_lights::CeFlareView,
+    view: &ce::lights::CeFlareView,
     tips: &[Option<[f32; 3]>],
-) -> Vec<(Vec<ce_lights::CeAntennaQuad>, glow::NativeTexture, bool)> {
+) -> Vec<(Vec<ce::lights::CeAntennaQuad>, glow::NativeTexture, bool)> {
     let preview = &frame.preview;
     let textures = textures.iter().skip(preview.ce_antennas.len());
     preview
@@ -7852,9 +7852,9 @@ fn ce_sorts_transparents(frame: &ModelGpuFrame) -> bool {
     frame.render_mode.draws_shading() && frame.preview.batches.iter().any(|batch| batch.sort_position.is_some())
 }
 
-fn ce_flare_view(camera: &ModelGpuCamera) -> ce_lights::CeFlareView {
+fn ce_flare_view(camera: &ModelGpuCamera) -> ce::lights::CeFlareView {
     let along = |vector| unrotate_view_vector(camera.yaw, camera.pitch, vector);
-    ce_lights::CeFlareView {
+    ce::lights::CeFlareView {
         eye: h2_eye_position(camera),
         forward: along([0.0, 1.0, 0.0]),
         right: along([1.0, 0.0, 0.0]),
@@ -7890,8 +7890,8 @@ fn ce_flare_pixels(camera: &ModelGpuCamera, viewport: [i32; 2], center: [f32; 3]
 /// A sprite's four corners, all at the depth of its center.
 fn ce_flare_quad(
     camera: &ModelGpuCamera,
-    view: &ce_lights::CeFlareView,
-    sprite: &ce_lights::CeSprite,
+    view: &ce::lights::CeFlareView,
+    sprite: &ce::lights::CeSprite,
 ) -> [[f32; 6]; 4] {
     let (sine, cosine) = sprite.rotation.sin_cos();
     let center = sprite.center;
@@ -7916,8 +7916,8 @@ unsafe fn ce_flare_occlusion(
     gl: &glow::Context,
     flares: &CeFlareGl,
     camera: &ModelGpuCamera,
-    view: &ce_lights::CeFlareView,
-    patch: &ce_lights::CeSprite,
+    view: &ce::lights::CeFlareView,
+    patch: &ce::lights::CeSprite,
 ) -> Option<f32> {
     unsafe {
         let vertices = ce_flare_quad(camera, view, patch);
@@ -7952,8 +7952,8 @@ unsafe fn draw_flare_sprites(
     gl: &glow::Context,
     flares: &CeFlareGl,
     camera: &ModelGpuCamera,
-    view: &ce_lights::CeFlareView,
-    sprites: &[ce_lights::CeSprite],
+    view: &ce::lights::CeFlareView,
+    sprites: &[ce::lights::CeSprite],
     textures: &[Option<glow::NativeTexture>],
 ) {
     unsafe {

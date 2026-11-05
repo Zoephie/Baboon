@@ -16,9 +16,9 @@
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::ce_attachments::{elements, has_flag, object_block};
-use super::ce_functions::TICKS_PER_SECOND;
-use super::ce_particles::{CeEffectAt, Random, STEP};
+use super::attachments::{elements, has_flag, object_block};
+use super::functions::TICKS_PER_SECOND;
+use super::particles::{CeEffectAt, Random, STEP};
 
 /// Below this a recovery time is none: tool bakes a whole tick's fall.
 const LEAST_RECOVERY_TIME: f32 = 0.0001;
@@ -60,7 +60,7 @@ fn fall_per_tick(seconds: f32) -> f32 {
 
 /// The triggers of `weapon`, if it is one, with each firing effect found
 /// among `effects`, the object's event effects, by its path.
-pub(super) fn read_ce_weapon_firing(weapon: &TagFile, object: u8, effects: &[CeEffectAt]) -> Option<CeWeaponFiring> {
+pub(in crate::app::model_preview) fn read_ce_weapon_firing(weapon: &TagFile, object: u8, effects: &[CeEffectAt]) -> Option<CeWeaponFiring> {
     let holder = object_block(weapon, "triggers")?;
     let effect_index = |path: &str| {
         effects
@@ -243,7 +243,7 @@ impl CeWeaponShots {
 }
 
 /// What the panel's shots give `object`'s inputs at `time`, by name.
-pub(super) fn fired_input<'a>(
+pub(in crate::app::model_preview) fn fired_input<'a>(
     firing: &'a [CeWeaponFiring],
     shots: &'a CeShots,
     geometry: u64,
@@ -256,7 +256,7 @@ pub(super) fn fired_input<'a>(
 }
 
 /// Whether any shot fired on `geometry` still changes its weapon's inputs.
-pub(super) fn shots_moving(firing: &[CeWeaponFiring], shots: &CeShots, geometry: u64, time: f32) -> bool {
+pub(in crate::app::model_preview) fn shots_moving(firing: &[CeWeaponFiring], shots: &CeShots, geometry: u64, time: f32) -> bool {
     firing.iter().any(|weapon| shots.get(&(geometry, weapon.object)).is_some_and(|fired| fired.moving(weapon, time)))
 }
 

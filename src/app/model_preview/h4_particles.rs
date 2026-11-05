@@ -5,7 +5,7 @@
 
 use blam_tags::TagStruct;
 
-use super::ce_attachments::elements;
+use super::ce::attachments::elements;
 use super::h2_passes::tag_function_at;
 use super::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use crate::app::export::geometry::load_referenced_tag_from_source;

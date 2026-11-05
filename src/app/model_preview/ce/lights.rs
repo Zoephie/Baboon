@@ -1,12 +1,12 @@
 //! Halo CE's lens flares: what `attachments_new` hangs on an object as a
 //! `light`, and the sprites `rasterizer_lens_flares_draw` makes of one.
 
-use super::attachment::MarkerFrame;
-use super::ce_attachments::{attached_marker_frame, elements, object_block};
-use super::ce_passes::{argb, periodic_evaluate};
-use super::h2_passes::{H2Image, ce_color_interpolate};
-use super::materials::decode_h2_image;
-use super::*;
+use super::super::attachment::MarkerFrame;
+use super::attachments::{attached_marker_frame, elements, object_block};
+use super::passes::{argb, periodic_evaluate};
+use super::super::h2_passes::{H2Image, ce_color_interpolate};
+use super::super::materials::decode_h2_image;
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use blam_tags::TagFieldData;
 
@@ -51,7 +51,7 @@ pub(crate) struct CeAntennaQuad {
 }
 
 /// A point and direction on `node`, where the pose puts them.
-pub(super) fn posed_on(node: usize, position: [f32; 3], direction: [f32; 3], bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
+pub(in crate::app::model_preview) fn posed_on(node: usize, position: [f32; 3], direction: [f32; 3], bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
     let Some(rows) = bones.and_then(|bones| bones.get(node * 3..node * 3 + 3)) else {
         return (position, direction);
     };
@@ -106,28 +106,28 @@ impl CeAntenna {
 /// The first sprite of an antenna vertex's sequence, as `antenna_new` and
 /// `get_vertex_scale_by_distance` size it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct AntennaSprite {
+pub(in crate::app::model_preview) struct AntennaSprite {
     /// Left, right, top and bottom, across the bitmap.
-    pub(super) rect: [f32; 4],
-    pub(super) registration: [f32; 2],
+    pub(in crate::app::model_preview) rect: [f32; 4],
+    pub(in crate::app::model_preview) registration: [f32; 2],
     /// The image of the bitmap it is cut from.
-    pub(super) index: usize,
+    pub(in crate::app::model_preview) index: usize,
     /// What of the bitmap's width a sprite runs along.
-    pub(super) covered: f32,
+    pub(in crate::app::model_preview) covered: f32,
     /// That image's width, in texels.
-    pub(super) width: f32,
+    pub(in crate::app::model_preview) width: f32,
 }
 
 /// What Halo CE, 2 and 3 take off a sprite's pixels besides its spacing.
-pub(super) const ANTENNA_TRIM: f32 = 1.0;
+pub(in crate::app::model_preview) const ANTENNA_TRIM: f32 = 1.0;
 /// Reach's: `get_vertex_scale_by_distance` (the 360's 0x82C93A88, its
 /// constant at 0x82C93BFC) takes half a pixel.
-pub(super) const REACH_ANTENNA_TRIM: f32 = 0.5;
+pub(in crate::app::model_preview) const REACH_ANTENNA_TRIM: f32 = 0.5;
 
 /// `antenna_new`'s scale for a sprite, or none where a bitmap has no such
 /// sprite to draw: its `pixels`, `width · (right - left) - 2 · spacing -
 /// trim`, must be more than none.
-pub(super) fn antenna_sprite(bitmap: &TagFile, sequence: usize, trim: f32) -> Option<AntennaSprite> {
+pub(in crate::app::model_preview) fn antenna_sprite(bitmap: &TagFile, sequence: usize, trim: f32) -> Option<AntennaSprite> {
     let root = bitmap.root();
     let sequences = elements(root, "sequences");
     let sprite = *elements(*sequences.get(sequence)?, "sprites").first()?;
@@ -146,7 +146,7 @@ pub(super) fn antenna_sprite(bitmap: &TagFile, sequence: usize, trim: f32) -> Op
 /// object has none by that name (or the name is empty), the object's origin,
 /// where the game still draws it. The origin is known only for the opened
 /// object (`owner` 0); a held object's widget without its marker is left out.
-pub(super) fn marker_or_origin(
+pub(in crate::app::model_preview) fn marker_or_origin(
     markers: &[RenderModelPreviewMarker],
     name: &str,
     owner: u8,
@@ -196,7 +196,7 @@ fn read_antenna(source: &TagSource, path: &str, owner: u8, markers: &[RenderMode
 }
 
 /// The antennas among `object`'s widgets.
-pub(super) fn read_ce_antennas(
+pub(in crate::app::model_preview) fn read_ce_antennas(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -625,7 +625,7 @@ pub(crate) const CE_POINT_LIGHT_ROWS: usize = 6;
 
 /// `lights_prepare_for_object_dynamic` for one object: the two lights strongest
 /// at `center`, within `reach` of their radius.
-pub(super) fn point_light_rows(
+pub(in crate::app::model_preview) fn point_light_rows(
     lights: &[CeLight],
     object: u8,
     center: [f32; 3],
@@ -659,7 +659,7 @@ pub(super) fn point_light_rows(
 }
 
 /// Mark the outputs an object's lights take their value from.
-pub(super) fn mark_outputs_read(lights: &[CeLight], object: u8, read: &mut [bool; 4]) {
+pub(in crate::app::model_preview) fn mark_outputs_read(lights: &[CeLight], object: u8, read: &mut [bool; 4]) {
     let owned = lights.iter().filter(|light| light.object == object);
     for output in owned.filter_map(|light| light.primary) {
         read[output] = true;
@@ -738,7 +738,7 @@ pub(crate) struct CeEffectLightDef {
     falloff: i32,
 }
 
-pub(super) fn read_effect_light(source: &TagSource, path: &str) -> Option<CeEffectLightDef> {
+pub(in crate::app::model_preview) fn read_effect_light(source: &TagSource, path: &str) -> Option<CeEffectLightDef> {
     let mut light = read_light_tag(source, path)?;
     let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
     let root = tag.root();
@@ -768,7 +768,7 @@ fn transition_table(function: i32) -> [u8; 1024] {
 
 /// `transition_function_evaluate`: linear as it is, the rest read from their
 /// tables between neighbours.
-pub(super) fn transition_evaluate(function: i32, value: f32) -> f32 {
+pub(in crate::app::model_preview) fn transition_evaluate(function: i32, value: f32) -> f32 {
     // NaN goes to zero as the game's comparisons send it.
     let value = if value >= 0.0 { value.min(1.0) } else { 0.0 };
     if !(1..=5).contains(&function) {
@@ -802,7 +802,7 @@ impl CeEffectLightDef {
 
 /// The lights among `object`'s attachments, one per marker of the name.
 /// `frame` turns a marker to where the preview holds it, and its node.
-pub(super) fn read_ce_lights(
+pub(in crate::app::model_preview) fn read_ce_lights(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -846,7 +846,7 @@ pub(super) fn read_ce_lights(
 }
 
 /// The same, for a weapon held on `parent`.
-pub(super) fn read_attached_lights(
+pub(in crate::app::model_preview) fn read_attached_lights(
     source: &TagSource,
     object: &TagFile,
     owner: u8,

@@ -253,14 +253,14 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) h2_self_shadow: bool,
     pub(in crate::app) h2_prt: bool,
     /// What the panel set an opened Halo CE object's function inputs to.
-    pub(in crate::app) ce_function_inputs: super::ce_functions::CeFunctionInputs,
+    pub(in crate::app) ce_function_inputs: super::ce::functions::CeFunctionInputs,
     /// How many times the panel has played each Halo CE event effect, by
     /// model and index among the preview's effects.
-    pub(in crate::app) ce_event_counts: super::ce_functions::CeEventCounts,
+    pub(in crate::app) ce_event_counts: super::ce::functions::CeEventCounts,
     /// Scale A and scale B the panel plays Halo CE event effects at.
     pub(in crate::app) ce_event_scales: [f32; 2],
     /// The shots the panel has fired from Halo CE weapons' triggers.
-    pub(in crate::app) ce_shots: super::ce_firing::CeShots,
+    pub(in crate::app) ce_shots: super::ce::firing::CeShots,
     /// What the panel has set of a Halo 2 object's functions.
     pub(in crate::app) h2_function_inputs: super::h2_functions::H2FunctionInputs,
     /// A texture-resolve job is running for the loaded model.
@@ -332,7 +332,7 @@ impl Default for ModelPreviewState {
             h2_prt: true,
             ce_function_inputs: Default::default(),
             ce_event_counts: Default::default(),
-            ce_event_scales: super::ce_functions::CE_EVENT_SCALES,
+            ce_event_scales: super::ce::functions::CE_EVENT_SCALES,
             ce_shots: Default::default(),
             h2_function_inputs: Default::default(),
             textures_pending: false,
@@ -533,11 +533,11 @@ pub(in crate::app) struct ModelPreviewData {
     /// The Halo 2 object beside this model's change colors; empty otherwise.
     pub(in crate::app) h2_change_colors: H2ChangeColors,
     /// An opened Halo CE object's functions.
-    pub(in crate::app) ce_object_functions: Option<super::ce_functions::CeObjectFunctions>,
+    pub(in crate::app) ce_object_functions: Option<super::ce::functions::CeObjectFunctions>,
     /// What the opened Halo CE object brings with it.
-    pub(in crate::app) ce_attached: Vec<super::ce_attachments::CeAttachedObject>,
+    pub(in crate::app) ce_attached: Vec<super::ce::attachments::CeAttachedObject>,
     /// Halo CE bipeds: what the unit can hold.
-    pub(in crate::app) ce_weapons: Option<super::ce_attachments::CeBipedWeapons>,
+    pub(in crate::app) ce_weapons: Option<super::ce::attachments::CeBipedWeapons>,
     /// Halo 2: the functions of an opened object.
     pub(in crate::app) h2_object_functions: Option<super::h2_functions::H2ObjectFunctions>,
     /// Halo 2 units: what they can hold.

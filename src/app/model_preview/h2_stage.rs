@@ -6,7 +6,7 @@
 //! transforms. The preview has no fog, and the pixel shaders scale the scene
 //! by `color1.a`, so `color1` is left at 1.
 
-use super::ce_lights::CE_POINT_LIGHT_ROWS;
+use super::ce::lights::CE_POINT_LIGHT_ROWS;
 use super::h2_prt::H2_PRT_REGISTERS;
 use super::renderer::model_vertex_prelude;
 

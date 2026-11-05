@@ -5,8 +5,8 @@
 use blam_tags::{TagFile, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::ce_attachments::{elements, object_block};
-use super::ce_lights::posed_on;
+use super::ce::attachments::{elements, object_block};
+use super::ce::lights::posed_on;
 use super::h3_effects::marker_name;
 use super::*;
 use crate::core::source::TagSource;

@@ -9,7 +9,7 @@ use blam_tags::math::Matrix4;
 use blam_tags::{TagFile, TagStruct};
 
 use super::attachment::rigid_inverse;
-use super::ce_attachments::elements;
+use super::ce::attachments::elements;
 use super::h2_weapons::holder_of;
 use super::reach_ik::{ReachIkHolder, ReachIkMarker, two_bone_ik};
 use super::RenderModelPreviewNode;

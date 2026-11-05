@@ -7,10 +7,10 @@
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::ce_attachments::{elements, object_block};
-use super::ce_lights::posed_on;
-use super::ce_particles::CePointPhysics;
-use super::*;
+use super::attachments::{elements, object_block};
+use super::lights::posed_on;
+use super::particles::CePointPhysics;
+use super::super::*;
 use crate::core::source::TagSource;
 
 /// The time `flag_render` gives the update that settles a flag first.
@@ -202,7 +202,7 @@ fn cell_shapes(root: TagStruct<'_>, width: usize, height: usize, attachments: &[
 /// The flags among `object`'s widgets, added to `preview` as meshes.
 /// `markers` are the object's own, in the preview's space; `owner` is 0 for
 /// the opened object and 1 for the weapon it holds.
-pub(super) fn read_ce_flags(
+pub(in crate::app::model_preview) fn read_ce_flags(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -244,7 +244,7 @@ struct RunningFlag {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CeFlagField {
     time: Option<f32>,
-    ticks: super::ce_particles::CeTicks,
+    ticks: super::particles::CeTicks,
     running: Vec<RunningFlag>,
 }
 
@@ -389,7 +389,7 @@ impl CeFlagField {
             if ticks == 0 {
                 continue;
             }
-            let dt = ticks as f32 * super::ce_particles::STEP;
+            let dt = ticks as f32 * super::particles::STEP;
             for (flag, running) in flags.iter().zip(&mut self.running) {
                 running.update(flag, &attached_of(flag), ground, dt);
             }

@@ -8,7 +8,7 @@
 
 use blam_tags::TagFile;
 
-use super::ce_attachments::elements;
+use super::ce::attachments::elements;
 use super::*;
 
 /// The most any vertex carries: quadratic's nine.

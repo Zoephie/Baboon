@@ -9,10 +9,10 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagStruct};
 
 use super::attachment::{MarkerFrame, WeaponOption, merge_attached};
-use super::ce_attachments::{attached_marker_frame, elements, loose_weapon_paths, weapon_ik};
+use super::ce::attachments::{attached_marker_frame, elements, loose_weapon_paths, weapon_ik};
 use super::attachment::{attach_point, attach_vector};
 use super::loading::build_render_preview;
-use super::ce_attachments::CeWeaponIk;
+use super::ce::attachments::CeWeaponIk;
 use super::h2_passes::{h2_change_colors_for, read_h2_change_colors};
 use super::h3_cloth::ClothGame;
 use super::*;
@@ -835,7 +835,7 @@ pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (Marker
     preview: &mut RenderModelPreview,
     within: Option<&str>,
 ) {
-    let Some(holder) = super::ce_attachments::object_block(object, "weapons") else {
+    let Some(holder) = super::ce::attachments::object_block(object, "weapons") else {
         return;
     };
     for entry in elements(holder, "weapons") {
@@ -845,7 +845,7 @@ pub(super) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (Marker
         let Ok(weapon) = load_referenced_tag_from_source(source, &path, "weapon", b"weap") else {
             continue;
         };
-        let flags = super::ce_attachments::object_block(&weapon, "bounding radius")
+        let flags = super::ce::attachments::object_block(&weapon, "bounding radius")
             .and_then(|object| object.read_flag_names("flags"))
             .unwrap_or_default();
         if !flags.iter().any(|(_, flag)| flag.starts_with("extension of parent")) {

@@ -24,16 +24,7 @@ pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
 mod errors;
 mod attachment;
-mod ce_attachments;
-mod ce_functions;
-mod ce_lights;
-mod ce_contrails;
-mod ce_firing;
-mod ce_flags;
-mod ce_particle_systems;
-mod ce_particles;
-mod ce_passes;
-mod ce_widgets;
+mod ce;
 mod h2_bloom;
 pub(in crate::app) mod h2_functions;
 mod h2_contrails;
@@ -144,9 +135,9 @@ pub(crate) struct RenderModelPreview {
     /// hologram shader.
     pub h2_hologram_control: Option<String>,
     /// Halo CE: where a held weapon pulls the unit's hands.
-    pub weapon_ik: Vec<ce_attachments::CeWeaponIk>,
+    pub weapon_ik: Vec<ce::attachments::CeWeaponIk>,
     /// Halo CE: the lens flares of the object and what it holds.
-    pub ce_lights: Vec<ce_lights::CeLight>,
+    pub ce_lights: Vec<ce::lights::CeLight>,
     /// Halo 2 lens flares, on the markers of the object and what it holds.
     pub h2_flares: Vec<h2_lights::H2FlareAt>,
     /// Halo 2 sphere lights on the object and what it holds.
@@ -221,19 +212,19 @@ pub(crate) struct RenderModelPreview {
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,
     /// Halo CE: the antennas among the object's widgets.
-    pub ce_antennas: Vec<ce_lights::CeAntenna>,
+    pub ce_antennas: Vec<ce::lights::CeAntenna>,
     /// Halo CE effects the object's attachments hang on it, then those it
     /// names for its events.
-    pub ce_effects: Vec<ce_particles::CeEffectAt>,
+    pub ce_effects: Vec<ce::particles::CeEffectAt>,
     /// Halo CE weapons whose triggers the panel fires: the opened one, or
     /// the one the opened unit holds.
-    pub ce_firing: Vec<ce_firing::CeWeaponFiring>,
-    pub ce_contrails: Vec<ce_contrails::CeContrailAt>,
-    pub ce_light_volumes: Vec<ce_widgets::CeLightVolume>,
-    pub ce_lightning: Vec<ce_widgets::CeLightning>,
-    pub ce_glows: Vec<ce_widgets::CeGlow>,
-    pub ce_flags: Vec<ce_flags::CeFlagAt>,
-    pub ce_particle_systems: Vec<ce_particle_systems::CeParticleSystemAt>,
+    pub ce_firing: Vec<ce::firing::CeWeaponFiring>,
+    pub ce_contrails: Vec<ce::contrails::CeContrailAt>,
+    pub ce_light_volumes: Vec<ce::widgets::CeLightVolume>,
+    pub ce_lightning: Vec<ce::widgets::CeLightning>,
+    pub ce_glows: Vec<ce::widgets::CeGlow>,
+    pub ce_flags: Vec<ce::flags::CeFlagAt>,
+    pub ce_particle_systems: Vec<ce::particle_systems::CeParticleSystemAt>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1294,7 +1285,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
         data.ce_attached.get(held).map(|held| held.name.clone())
     };
     let time = renderer::preview_clock(ui);
-    let controls = ce_functions::CeEffectControls {
+    let controls = ce::functions::CeEffectControls {
         effects: &data.preview.ce_effects,
         firing: &data.preview.ce_firing,
         geometry: data.geometry_id,
@@ -1303,7 +1294,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
         scales: &mut state.ce_event_scales,
         time,
     };
-    ce_functions::draw_ce_event_effects(ui, controls, held_name);
+    ce::functions::draw_ce_event_effects(ui, controls, held_name);
     draw_h2_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.h2_object_functions {
         let time = ui.input(|input| input.time) as f32;
@@ -1330,13 +1321,13 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
                 }
             }
             let preview = &data.preview;
-            ce_lights::mark_outputs_read(&preview.ce_lights, object, &mut read);
-            ce_functions::mark_outputs_read(&preview.ce_effects, object, &mut read);
-            ce_functions::mark_outputs_read(&preview.ce_contrails, object, &mut read);
-            ce_functions::mark_outputs_read(&preview.ce_particle_systems, object, &mut read);
-            ce_functions::mark_outputs_read(&preview.ce_light_volumes, object, &mut read);
-            ce_functions::mark_outputs_read(&preview.ce_lightning, object, &mut read);
-            ce_functions::mark_outputs_read(&preview.ce_glows, object, &mut read);
+            ce::lights::mark_outputs_read(&preview.ce_lights, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce_effects, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce_contrails, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce_particle_systems, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce_light_volumes, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce_lightning, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce_glows, object, &mut read);
             read
         })
     };
@@ -1346,14 +1337,14 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
     });
     let own = data.ce_object_functions.iter().map(|functions| (0, None, functions));
     for (object, name, functions) in own.chain(attached) {
-        ce_functions::draw_ce_function_controls(
+        ce::functions::draw_ce_function_controls(
             ui,
             functions,
             name,
             (data.geometry_id, object),
             &mut state.ce_function_inputs,
             read(object),
-            ce_firing::fired_input(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, object, time),
+            ce::firing::fired_input(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, object, time),
         );
     }
 }

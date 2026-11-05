@@ -32,7 +32,7 @@ impl ReachCamo {
     pub(crate) fn read(source: &TagSource) -> Option<Self> {
         let globals = load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
         let root = globals.root();
-        let camo = super::ce_attachments::elements(root, "active camo").into_iter().next()?;
+        let camo = super::ce::attachments::elements(root, "active camo").into_iter().next()?;
         let curve = |name: &str| tag_function_at(&camo.descend(name)?, "function");
         Some(Self { distortion: curve("camo value to distortion")?, transparency: curve("camo value to transparency")? })
     }

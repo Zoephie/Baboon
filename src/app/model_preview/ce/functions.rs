@@ -9,8 +9,8 @@
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 use eframe::egui::{self, Ui};
 
-use super::ce_attachments::has_flag;
-use super::ce_passes::{option_index, periodic_evaluate};
+use super::attachments::has_flag;
+use super::passes::{option_index, periodic_evaluate};
 
 const INPUTS: [&str; 4] = ["A in", "B in", "C in", "D in"];
 /// `scale function by` and its like: nothing, four inputs, then four outputs.
@@ -19,7 +19,7 @@ const SOURCES: [&str; 9] =
 const MAP_TO: [&str; 6] = ["linear", "early", "very early", "late", "very late", "cosine"];
 const BOUNDS_MODES: [&str; 3] = ["clip", "clip and normalize", "scale to fit"];
 const ACTIVATING_ABOVE: f32 = 0.0001;
-pub(super) const TICKS_PER_SECOND: f32 = 30.0;
+pub(in crate::app::model_preview) const TICKS_PER_SECOND: f32 = 30.0;
 const OUTPUTS: [&str; 4] = ["A out", "B out", "C out", "D out"];
 
 /// An input's value on an object at rest, as the `*_export_function_values`
@@ -80,7 +80,7 @@ fn inverse(value: f32) -> f32 {
 /// opened one, 1 the weapon it holds): the game's time plus 57 ticks per
 /// object index, so like objects run out of step. The game uses the object's
 /// datum index; the owner stands in for it.
-pub(super) fn object_time(time: f32, owner: u8) -> f32 {
+pub(in crate::app::model_preview) fn object_time(time: f32, owner: u8) -> f32 {
     time + 57.0 * f32::from(owner) / TICKS_PER_SECOND
 }
 
@@ -100,9 +100,9 @@ impl CeFunction {
             turn_off_with: usize::try_from(block.read_int_any("turn off with").unwrap_or(-1)).ok(),
             rate: Some(real("period")).filter(|period| *period > 0.0).map_or(1.0, |period| 1.0 / period),
             scale_period_by: source("scale period by"),
-            function: option_index(block, "function", &super::ce_passes::PERIODIC_FUNCTIONS) as usize,
+            function: option_index(block, "function", &super::passes::PERIODIC_FUNCTIONS) as usize,
             scale_function_by: source("scale function by"),
-            wobble_function: option_index(block, "wobble function", &super::ce_passes::PERIODIC_FUNCTIONS)
+            wobble_function: option_index(block, "wobble function", &super::passes::PERIODIC_FUNCTIONS)
                 as usize,
             // Tool's postprocess (`sub_4A09A0`) leaves it be, and the game
             // multiplies the time by it.
@@ -164,7 +164,7 @@ impl CeFunction {
         if self.scale_result_by != 0 {
             value *= values[self.scale_result_by];
         }
-        let mut value = super::ce_lights::transition_evaluate(self.map_to as i32, value);
+        let mut value = super::lights::transition_evaluate(self.map_to as i32, value);
         if self.scale_by > 0.0 {
             value *= self.scale_by;
         }
@@ -296,7 +296,7 @@ impl CeObjectFunctions {
 
 /// A Halo CE feature that reads object outputs (`A out`..`D out`), so its
 /// object's panel knows which inputs do something.
-pub(super) trait ReadsOutputs {
+pub(in crate::app::model_preview) trait ReadsOutputs {
     /// Whose outputs: 0 the opened object, 1 the weapon it holds.
     fn object(&self) -> u8;
     /// The output slots it reads, 0 to 3.
@@ -304,7 +304,7 @@ pub(super) trait ReadsOutputs {
 }
 
 /// Sets `read[slot]` for each output `items` of `object` read.
-pub(super) fn mark_outputs_read<T: ReadsOutputs>(items: &[T], object: u8, read: &mut [bool; 4]) {
+pub(in crate::app::model_preview) fn mark_outputs_read<T: ReadsOutputs>(items: &[T], object: u8, read: &mut [bool; 4]) {
     for item in items.iter().filter(|item| item.object() == object) {
         for slot in item.outputs_read() {
             if let Some(read) = read.get_mut(slot) {
@@ -328,21 +328,21 @@ pub(crate) type CeEventCounts = std::collections::HashMap<(u64, usize), u32>;
 pub(crate) const CE_EVENT_SCALES: [f32; 2] = [1.0, 0.0];
 
 /// What the Effects section plays and fires, and where it keeps track.
-pub(super) struct CeEffectControls<'a> {
-    pub(super) effects: &'a [super::ce_particles::CeEffectAt],
-    pub(super) firing: &'a [super::ce_firing::CeWeaponFiring],
-    pub(super) geometry: u64,
-    pub(super) counts: &'a mut CeEventCounts,
-    pub(super) shots: &'a mut super::ce_firing::CeShots,
-    pub(super) scales: &'a mut [f32; 2],
+pub(in crate::app::model_preview) struct CeEffectControls<'a> {
+    pub(in crate::app::model_preview) effects: &'a [super::particles::CeEffectAt],
+    pub(in crate::app::model_preview) firing: &'a [super::firing::CeWeaponFiring],
+    pub(in crate::app::model_preview) geometry: u64,
+    pub(in crate::app::model_preview) counts: &'a mut CeEventCounts,
+    pub(in crate::app::model_preview) shots: &'a mut super::firing::CeShots,
+    pub(in crate::app::model_preview) scales: &'a mut [f32; 2],
     /// The preview's clock, which shots are fired at.
-    pub(super) time: f32,
+    pub(in crate::app::model_preview) time: f32,
 }
 
 /// A Fire button for each trigger of a weapon, and a Play button for each
 /// effect the objects name for their events, each under its object's name
 /// when it is not the opened one's, with the scales they go at.
-pub(super) fn draw_ce_event_effects(ui: &mut Ui, controls: CeEffectControls<'_>, object_name: impl Fn(u8) -> Option<String>) {
+pub(in crate::app::model_preview) fn draw_ce_event_effects(ui: &mut Ui, controls: CeEffectControls<'_>, object_name: impl Fn(u8) -> Option<String>) {
     let CeEffectControls { effects, firing, geometry, counts, shots, scales, time } = controls;
     let named = |object: u8, name: &str| object_name(object).map_or_else(|| name.to_owned(), |object| format!("{object}: {name}"));
     let events: Vec<(usize, String)> = effects
@@ -388,7 +388,7 @@ pub(super) fn draw_ce_event_effects(ui: &mut Ui, controls: CeEffectControls<'_>,
 /// `read` is which outputs the model's shaders read, once they have resolved:
 /// the rest cannot change the picture, whatever the game uses them for.
 /// `fired` is what the panel's shots give the inputs, by name.
-pub(super) fn draw_ce_function_controls(
+pub(in crate::app::model_preview) fn draw_ce_function_controls(
     ui: &mut Ui,
     functions: &CeObjectFunctions,
     name: Option<&str>,

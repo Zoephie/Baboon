@@ -8,11 +8,11 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::ce_attachments::{elements, object_block};
-use super::ce_lights::{
+use super::ce::attachments::{elements, object_block};
+use super::ce::lights::{
     ANTENNA_TRIM, AntennaSprite, CeAntennaQuad, CeFlareView, CeSprite, REACH_ANTENNA_TRIM, antenna_sprite, posed_on,
 };
-use super::ce_passes::argb;
+use super::ce::passes::argb;
 use super::h2_functions::H2FunctionValues;
 use super::h3_effects::{H3EffectTimes, adopt_event_function, for_each_attached_part, part_markers};
 use blam_tags::tag_function::h2::transition_evaluate;
@@ -624,7 +624,7 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
         .and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok())
-        .map(|tag| super::ce_particles::CePointPhysics::read(&tag));
+        .map(|tag| super::ce::particles::CePointPhysics::read(&tag));
     let reach = ReachAntennaSpring {
         strength: root.read_real("spring strength coefficient").unwrap_or(0.0),
         length: total_length,

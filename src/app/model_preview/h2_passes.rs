@@ -18,7 +18,7 @@ use blam_tags::tag_function::FunctionType;
 use super::h2_functions::H2FunctionValues;
 
 use super::h2_prt::H2PrtLight;
-use super::ce_passes::{CeModelAnimation, CeNumeric};
+use super::ce::passes::{CeModelAnimation, CeNumeric};
 use super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::materials::TextureImage;
 use crate::core::h2_pixel_shader::{

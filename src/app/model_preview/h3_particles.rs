@@ -10,8 +10,8 @@ use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
 use super::h3_effects::adopt_event_function;
-use super::ce_attachments::elements;
-use super::ce_lights::CeFlareView;
+use super::ce::attachments::elements;
+use super::ce::lights::CeFlareView;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::H3EffectOnsets;

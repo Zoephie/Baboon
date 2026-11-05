@@ -8,13 +8,13 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::ce_attachments::{elements, has_flag, object_block};
-use super::ce_lights::{CeFlareView, posed_on};
-use super::ce_particles::CePointPhysics;
-use super::ce_passes::argb;
-use super::h2_passes::H2Image;
-use super::materials::decode_h2_image;
-use super::*;
+use super::attachments::{elements, has_flag, object_block};
+use super::lights::{CeFlareView, posed_on};
+use super::particles::CePointPhysics;
+use super::passes::argb;
+use super::super::h2_passes::H2Image;
+use super::super::materials::decode_h2_image;
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -173,7 +173,7 @@ fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
 }
 
 /// The contrails among `object`'s attachments.
-pub(super) fn read_ce_contrails(
+pub(in crate::app::model_preview) fn read_ce_contrails(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -523,7 +523,7 @@ impl CeContrailField {
                         let distance = dot(to_eye, to_eye).sqrt().max(0.0001);
                         fade = (dot(normal, to_eye) / distance).abs();
                         if def.flags & EDGE_FADES_SLOWLY != 0 {
-                            fade = super::ce_lights::transition_evaluate(2, fade);
+                            fade = super::lights::transition_evaluate(2, fade);
                         }
                         if def.fade_mode == 2 {
                             fade = 1.0 - fade;
@@ -557,7 +557,7 @@ impl CeContrailField {
     }
 }
 
-impl super::ce_functions::ReadsOutputs for CeContrailAt {
+impl super::functions::ReadsOutputs for CeContrailAt {
     fn object(&self) -> u8 {
         self.object
     }

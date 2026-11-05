@@ -11,8 +11,8 @@ use blam_tags::tag_function::transition_function_evaluate;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::ce_attachments::{elements, object_block};
-use super::ce_lights::posed_on;
+use super::ce::attachments::{elements, object_block};
+use super::ce::lights::posed_on;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::{H2Image, tag_function_at};
 use super::h3_effects::{adopt_event_function, marker_name, part_markers};
