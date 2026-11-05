@@ -62,6 +62,104 @@ pub(crate) struct H4ParticleRender {
     pub(crate) custom_verts: [[[f32; 2]; 4]; 5],
     /// `psTintFactor.x`.
     pub(crate) tint_factor: f32,
+    /// What a particle model draws: its strip, variants and compression.
+    pub(crate) model: Option<H4ParticleModel>,
+}
+
+/// The most variants `vsMeshVariantList` holds (`k_maxMeshVariants`).
+const MOST_MESH_VARIANTS: usize = 15;
+
+/// A particle model as `default_particle_model_vs` reads it: the strip in
+/// `mesh_vertices`, `vsMeshVariantList`, and the compression that turns
+/// its unsigned-normalized words back into tag space.
+#[derive(Debug)]
+pub(crate) struct H4ParticleModel {
+    /// Five words a vertex: position as ushort4n (w unused), texcoord as
+    /// ushort2n, normal as half4 (w 0).
+    pub(crate) vertices: Vec<[u32; 5]>,
+    /// `m_meshVariantList_count_maxSize` and each variant's `(start, end)`,
+    /// as `m_variants` holds them.
+    pub(crate) variants: [[f32; 4]; MOST_MESH_VARIANTS + 1],
+    /// `vsRenderState.vertexCount`: the longest variant, each particle's strip.
+    pub(crate) vertex_count: u32,
+    /// `vs_mesh_position_compression_scale` and `_offset`.
+    pub(crate) position: [[f32; 4]; 2],
+    /// `vs_mesh_uv_compression_scale_offset`.
+    pub(crate) texcoord: [f32; 4],
+}
+
+impl H4ParticleModel {
+    /// Pack `strip` against its own bounds. The game encodes the tag's
+    /// vertices by their vertex type (MCC `halo4_tag_test` 0x1404E0C00) and
+    /// submits the tag's compression bounds with the stream (0x1403B2910);
+    /// packing the decompressed vertices over their own bounds gives the
+    /// vertex shader the same positions to 1/65535 of the extent.
+    pub(crate) fn of(strip: &blam_tags::ParticleModelStrip) -> Option<Self> {
+        if strip.variants.is_empty() || strip.max_size == 0 {
+            return None;
+        }
+        let positions: Vec<[f32; 3]> = strip
+            .vertices
+            .iter()
+            .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
+            .collect();
+        let texcoords: Vec<[f32; 2]> = strip
+            .vertices
+            .iter()
+            .map(|vertex| [vertex.texcoord.x, vertex.texcoord.y])
+            .collect();
+        let bounds = |values: &mut dyn Iterator<Item = f32>| {
+            values.fold([f32::INFINITY, f32::NEG_INFINITY], |[low, high], value| [low.min(value), high.max(value)])
+        };
+        let position_bounds: [[f32; 2]; 3] =
+            std::array::from_fn(|axis| bounds(&mut positions.iter().map(|position| position[axis])));
+        let texcoord_bounds: [[f32; 2]; 2] =
+            std::array::from_fn(|axis| bounds(&mut texcoords.iter().map(|texcoord| texcoord[axis])));
+        let unit = |value: f32, [low, high]: [f32; 2]| {
+            let extent = high - low;
+            let along = if extent > 0.0 { (value - low) / extent } else { 0.0 };
+            (along.clamp(0.0, 1.0) * 65535.0).round() as u32
+        };
+        let vertices = strip
+            .vertices
+            .iter()
+            .zip(&positions)
+            .zip(&texcoords)
+            .map(|((vertex, position), texcoord)| {
+                let [x, y, z] = std::array::from_fn(|axis| unit(position[axis], position_bounds[axis]));
+                let [u, v] = std::array::from_fn(|axis| unit(texcoord[axis], texcoord_bounds[axis]));
+                [
+                    x | (y << 16),
+                    z,
+                    u | (v << 16),
+                    pack_half2(vertex.normal.i, vertex.normal.j),
+                    pack_half2(vertex.normal.k, 0.0),
+                ]
+            })
+            .collect();
+        let mut variants = [[0.0; 4]; MOST_MESH_VARIANTS + 1];
+        let listed = strip.variants.len().min(MOST_MESH_VARIANTS);
+        variants[0] = [listed as f32, strip.max_size as f32, 0.0, 0.0];
+        for (slot, &(start, end)) in variants[1..].iter_mut().zip(&strip.variants) {
+            *slot = [start as f32, end as f32, 0.0, 0.0];
+        }
+        let extent = |[low, high]: [f32; 2]| high - low;
+        Some(Self {
+            vertices,
+            variants,
+            vertex_count: strip.max_size as u32,
+            position: [
+                [extent(position_bounds[0]), extent(position_bounds[1]), extent(position_bounds[2]), 0.0],
+                [position_bounds[0][0], position_bounds[1][0], position_bounds[2][0], 0.0],
+            ],
+            texcoord: [
+                extent(texcoord_bounds[0]),
+                extent(texcoord_bounds[1]),
+                texcoord_bounds[0][0],
+                texcoord_bounds[1][0],
+            ],
+        })
+    }
 }
 
 impl H4ParticleRender {
@@ -85,8 +183,9 @@ impl H4ParticleRender {
 pub(crate) fn read_h4_particle_render(
     source: &TagSource,
     root: TagStruct<'_>,
-    has_model: bool,
+    model: Option<&blam_tags::ParticleModelStrip>,
 ) -> Result<H4ParticleRender, String> {
+    let has_model = model.is_some();
     let material = root
         .descend("actual material?")
         .ok_or("no actual material")?;
@@ -194,6 +293,10 @@ pub(crate) fn read_h4_particle_render(
         // Tags whose layout predates it read 0: modulate.
         tint_factor: root.read_int_any("tint factor").unwrap_or(0) as f32,
         material,
+        model: match model {
+            Some(strip) => Some(H4ParticleModel::of(strip).ok_or("an empty particle model")?),
+            None => None,
+        },
     })
 }
 
@@ -567,6 +670,61 @@ mod tests {
     /// 0x40), depth fade alone among the runtime bits, a static frame, the
     /// whole sprite, `add_src_times_srcalpha`, and the unit quad for every
     /// custom set, as its bitmap has no tight bounds.
+    /// The rifle's casing packs into `mesh_vertices` so that the shader's
+    /// unpack (`UnpackUShort4N`, `UnpackUShort2N`, `UnpackHalf4`, then the
+    /// compression constants) gives back each strip vertex.
+    #[test]
+    fn the_rifle_casing_unpacks_to_its_strip() {
+        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        if !root.join("objects").is_dir() {
+            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
+            return;
+        }
+        let path = root.join("fx/reach/particles/models/weapons/bullet_casings/sniper_rifle/sniper_rifle.particle_model");
+        let strip = blam_tags::particle_model_strip(&blam_tags::TagFile::read(&path).unwrap()).unwrap();
+        let model = H4ParticleModel::of(&strip).unwrap();
+        assert_eq!(model.vertex_count, 78);
+        assert_eq!(model.variants[0], [1.0, 78.0, 0.0, 0.0]);
+        assert_eq!(model.variants[1], [0.0, 77.0, 0.0, 0.0]);
+        assert_eq!(model.vertices.len(), strip.vertices.len());
+        let ushort = |word: u32| [(word & 0xFFFF) as f32 / 65535.0, (word >> 16) as f32 / 65535.0];
+        // Normals are well inside half's normal range: no subnormals here.
+        let half = |word: u32| {
+            let one = |bits: u32| {
+                let (sign, exponent, mantissa) = ((bits >> 15) & 1, (bits >> 10) & 0x1F, bits & 0x3FF);
+                let magnitude = if exponent == 0 && mantissa == 0 {
+                    0.0
+                } else {
+                    (1.0 + mantissa as f32 / 1024.0) * 2f32.powi(exponent as i32 - 15)
+                };
+                if sign == 1 { -magnitude } else { magnitude }
+            };
+            [one(word & 0xFFFF), one(word >> 16)]
+        };
+        let [scale, offset] = model.position;
+        for (words, vertex) in model.vertices.iter().zip(&strip.vertices) {
+            let [x, y] = ushort(words[0]);
+            let [z, _] = ushort(words[1]);
+            let unpacked = [x * scale[0] + offset[0], y * scale[1] + offset[1], z * scale[2] + offset[2]];
+            let wanted = [vertex.position.x, vertex.position.y, vertex.position.z];
+            for axis in 0..3 {
+                let step = scale[axis] / 65535.0;
+                assert!((unpacked[axis] - wanted[axis]).abs() <= step, "{unpacked:?} {wanted:?}");
+            }
+            let [u, v] = ushort(words[2]);
+            let texcoord = [u * model.texcoord[0] + model.texcoord[2], v * model.texcoord[1] + model.texcoord[3]];
+            assert!((texcoord[0] - vertex.texcoord.x).abs() <= model.texcoord[0] / 65535.0);
+            assert!((texcoord[1] - vertex.texcoord.y).abs() <= model.texcoord[1] / 65535.0);
+            let [i, j] = half(words[3]);
+            let [k, w] = half(words[4]);
+            let normal = [vertex.normal.i, vertex.normal.j, vertex.normal.k];
+            for (got, want) in [i, j, k].iter().zip(normal) {
+                assert!((got - want).abs() < 1e-3, "{:?} {normal:?}", [i, j, k]);
+            }
+            assert_eq!(w, 0.0);
+        }
+    }
+
     #[test]
     fn the_equipment_icon_reads_its_draw() {
         let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
@@ -586,7 +744,7 @@ mod tests {
             b"prt3",
         )
         .unwrap();
-        let render = read_h4_particle_render(&source, tag.root(), false).unwrap();
+        let render = read_h4_particle_render(&source, tag.root(), None).unwrap();
         assert_eq!(render.flags, [0x40, DEPTH_FADE, STATIC_FRAME]);
         assert_eq!(render.material.blend_mode, BLEND_ADD_SRC_TIMES_SRCALPHA);
         assert_eq!(render.sprite, [-1.0, -1.0, 2.0, 2.0]);

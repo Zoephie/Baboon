@@ -1282,7 +1282,17 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     // `actual shader` is the deprecated render method's remains.
     let halo4 = source.game() == Some(GameId::Halo4);
     let h4 = match halo4 {
-        true => Some(Arc::new(super::h4_particles::read_h4_particle_render(source, root, model.is_some()).ok()?)),
+        true => {
+            // The GPU draws a model's strip whole, variant by variant.
+            let strip = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
+                Some(path) => {
+                    let tag = load_referenced_tag_from_source(source, &path, "particle_model", b"pmdf").ok()?;
+                    Some(blam_tags::particle_model_strip(&tag).ok()?)
+                }
+                None => None,
+            };
+            Some(Arc::new(super::h4_particles::read_h4_particle_render(source, root, strip.as_ref()).ok()?))
+        }
         false => None,
     };
     let shader = root.descend("actual shader?");

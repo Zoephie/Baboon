@@ -75,7 +75,7 @@ pub(super) unsafe fn draw_h4_light_volume(
         }
         let buffer = "vs_light_volume_state_buffer";
         if state
-            .bind_textures(gl, material, buffer, &draw.states, depth, placeholder)
+            .bind_textures(gl, material, buffer, &draw.states, None, depth, placeholder)
             .is_none()
         {
             return;

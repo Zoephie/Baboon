@@ -25,6 +25,8 @@ pub(super) struct H4EffectGl {
     programs: HashMap<usize, Option<LinkedProgram>>,
     textures: HashMap<(usize, String), Option<glow::NativeTexture>>,
     buffer: Option<(glow::NativeBuffer, glow::NativeTexture)>,
+    /// `mesh_vertices`: a particle model's strip, 20 bytes a vertex.
+    mesh: Option<(glow::NativeBuffer, glow::NativeTexture)>,
     vertex_array: Option<glow::NativeVertexArray>,
 }
 
@@ -159,21 +161,22 @@ impl H4EffectGl {
         uploaded
     }
 
-    /// The states, a word to a texel of an `R32UI` buffer texture.
-    unsafe fn upload_states<const WORDS: usize>(
-        &mut self,
+    /// `bytes`, a word to a texel of an `R32UI` buffer texture, through
+    /// `slot`'s buffer, which it makes the first time.
+    unsafe fn upload_words(
         gl: &glow::Context,
-        states: &[[u32; WORDS]],
+        slot: &mut Option<(glow::NativeBuffer, glow::NativeTexture)>,
+        bytes: &[u8],
     ) -> Option<glow::NativeTexture> {
         unsafe {
-            if self.buffer.is_none() {
+            if slot.is_none() {
                 let buffer = gl.create_buffer().ok()?;
                 let texture = gl.create_texture().ok()?;
-                self.buffer = Some((buffer, texture));
+                *slot = Some((buffer, texture));
             }
-            let (buffer, texture) = self.buffer?;
+            let (buffer, texture) = (*slot)?;
             gl.bind_buffer(glow::TEXTURE_BUFFER, Some(buffer));
-            gl.buffer_data_u8_slice(glow::TEXTURE_BUFFER, slice_bytes(states), glow::STREAM_DRAW);
+            gl.buffer_data_u8_slice(glow::TEXTURE_BUFFER, bytes, glow::STREAM_DRAW);
             gl.bind_texture(glow::TEXTURE_BUFFER, Some(texture));
             gl.tex_buffer(glow::TEXTURE_BUFFER, glow::R32UI, Some(buffer));
             gl.bind_buffer(glow::TEXTURE_BUFFER, None);
@@ -210,7 +213,8 @@ impl H4EffectGl {
     }
 
     /// Upload `states` and bind every sampler the pass reads: the states
-    /// as `buffer`, the scene's `depth` copy, and the material's maps.
+    /// as `buffer`, a particle model's strip as `mesh_vertices`, the scene's
+    /// `depth` copy, and the material's maps.
     #[allow(clippy::too_many_arguments)]
     pub(super) unsafe fn bind_textures<const WORDS: usize>(
         &mut self,
@@ -218,16 +222,22 @@ impl H4EffectGl {
         material: &H4EffectMaterial,
         buffer: &str,
         states: &[[u32; WORDS]],
+        mesh: Option<&[[u32; 5]]>,
         depth: Option<glow::NativeTexture>,
         placeholder: Option<glow::NativeTexture>,
     ) -> Option<()> {
         unsafe {
-            let uploaded = self.upload_states(gl, states)?;
+            let uploaded = Self::upload_words(gl, &mut self.buffer, slice_bytes(states))?;
+            let mesh = match mesh {
+                Some(mesh) => Some(Self::upload_words(gl, &mut self.mesh, slice_bytes(mesh))?),
+                None => None,
+            };
             let pass = &*material.pass;
             for (unit, (name, kind)) in pass.textures.iter().enumerate() {
                 gl.active_texture(glow::TEXTURE0 + unit as u32);
                 match name.as_str() {
                     name if name == buffer => gl.bind_texture(glow::TEXTURE_BUFFER, Some(uploaded)),
+                    "mesh_vertices" if mesh.is_some() => gl.bind_texture(glow::TEXTURE_BUFFER, mesh),
                     "psDepthSampler_texture" => {
                         gl.bind_texture(glow::TEXTURE_2D, depth.or(placeholder))
                     }

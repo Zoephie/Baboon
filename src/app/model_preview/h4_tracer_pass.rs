@@ -82,7 +82,7 @@ pub(super) unsafe fn draw_h4_tracer(
         }
         let buffer = "vs_tracer_profile_state_buffer";
         if state
-            .bind_textures(gl, material, buffer, &draw.states, depth, placeholder)
+            .bind_textures(gl, material, buffer, &draw.states, None, depth, placeholder)
             .is_none()
         {
             return;
