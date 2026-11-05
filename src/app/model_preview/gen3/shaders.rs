@@ -860,7 +860,7 @@ pub(crate) struct H3Material {
     pub(crate) animations: Vec<H3Animation>,
     pub(crate) shield: Option<Arc<H3Shield>>,
     /// Halo 4's per-draw functions and hologram rig.
-    pub(crate) h4: Option<Arc<super::super::h4_submit::H4Submit>>,
+    pub(crate) h4: Option<Arc<super::super::h4::submit::H4Submit>>,
 }
 
 /// Uniform values by name. Ordered only so the loader's snapshot prints them

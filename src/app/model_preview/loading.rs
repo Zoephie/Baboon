@@ -298,7 +298,7 @@ pub(super) fn load_model_preview(
     data.halo_ce = blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1;
     if let Some(source) = source.filter(|source| source.game() == Some(GameId::Halo4)) {
         // Just built: no other handle shares it, so this does not copy.
-        Arc::make_mut(&mut data.preview).h4_color_grading = super::h4_lighting::read_h4_color_grading(source);
+        Arc::make_mut(&mut data.preview).h4_color_grading = super::h4::lighting::read_h4_color_grading(source);
     }
     Ok(data)
 }
@@ -463,9 +463,9 @@ fn load_tag_preview(
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             preview.h4_bounding_sphere = read_h4_bounding_sphere(model_tag);
             preview.h4_change_color_count = read_h4_change_color_count(model_tag);
-            preview.h4_camo = super::h4_camo::H4Camo::read(source).map(std::sync::Arc::new);
-            preview.h4_shield = super::h4_shield::read_h4_shield(source, model);
-            preview.h4_shadow_caster = super::h4_shadow::h4_shadow_caster(model_tag);
+            preview.h4_camo = super::h4::camo::H4Camo::read(source).map(std::sync::Arc::new);
+            preview.h4_shield = super::h4::shield::read_h4_shield(source, model);
+            preview.h4_shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
             // The unit's markers its IK sets and chains place.
             let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
             preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);

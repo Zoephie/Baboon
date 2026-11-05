@@ -20,7 +20,7 @@ use super::effects::{
 use super::super::particles::inline_real;
 use super::shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::strips::EPSILON;
-use super::super::h4_particles::{f32_to_f16, pack_argb8};
+use super::super::h4::particles::{f32_to_f16, pack_argb8};
 use super::super::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
 use super::super::renderer::{H3_EXPOSURE, reach_alt_exposure};

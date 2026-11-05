@@ -30,10 +30,8 @@ pub(in crate::app) mod h2;
 pub(crate) mod cloth;
 pub(crate) mod gen3;
 pub(crate) mod h3;
+pub(crate) mod h4;
 pub(crate) mod particles;
-pub(crate) mod h4_shaders;
-mod h4_lighting;
-mod h4_submit;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod reach_antennas;
@@ -41,13 +39,6 @@ mod reach_ik;
 mod h4_ik;
 mod reach_cheap_particles;
 mod reach_lights;
-mod h4_lights;
-mod h4_flares;
-mod h4_camo;
-mod h4_shield;
-mod h4_shadow;
-mod h4_particles;
-mod h4_tracers;
 mod reach_blend_screens;
 mod reach_camo;
 mod reach_shadow;
@@ -144,20 +135,20 @@ pub(crate) struct RenderModelPreview {
     /// `combo` (frustum 1, specular 2), for its screen-space lights.
     pub reach_light_passes: Vec<Option<Arc<gen3::shaders::H3Pass>>>,
     /// Halo 4's attached `light`s and `cheap_light`s.
-    pub h4_lights: Vec<h4_lights::H4Light>,
-    pub h4_cheap_lights: Vec<h4_lights::H4CheapLight>,
+    pub h4_lights: Vec<h4::lights::H4Light>,
+    pub h4_cheap_lights: Vec<h4::lights::H4CheapLight>,
     /// Explicit 187 and 204's screen-space passes, by (physically correct,
     /// technique).
     pub h4_light_passes: std::collections::BTreeMap<(bool, usize), Arc<gen3::shaders::H3Pass>>,
     /// Halo 4's attached `lens_flare`s, and explicit 46's pass that draws them.
-    pub h4_flares: Vec<h4_flares::H4FlareAt>,
+    pub h4_flares: Vec<h4::flares::H4FlareAt>,
     pub h4_flare_pass: Option<Arc<gen3::shaders::H3Pass>>,
     /// `globals`' active camo, for a Halo 4 object.
-    pub h4_camo: Option<Arc<h4_camo::H4Camo>>,
+    pub h4_camo: Option<Arc<h4::camo::H4Camo>>,
     /// A Halo 4 object's shield impact.
-    pub h4_shield: Option<Arc<h4_shield::H4Shield>>,
+    pub h4_shield: Option<Arc<h4::shield::H4Shield>>,
     /// Whether a Halo 4 object shadows itself, and how.
-    pub h4_shadow_caster: Option<h4_shadow::H4ShadowCaster>,
+    pub h4_shadow_caster: Option<h4::shadow::H4ShadowCaster>,
     /// Reach's shield impact, as its damage sections choose it.
     pub reach_shield: Option<Arc<reach_shield::ReachShield>>,
     /// `globals`' active camo curves, for a Reach object.
@@ -170,7 +161,7 @@ pub(crate) struct RenderModelPreview {
     pub h3_flares: Vec<h3::lights::H3FlareAt>,
     pub h3_light_volumes: Vec<gen3::light_volumes::H3LightVolumeAt>,
     /// Halo 4's point-to-point tracers.
-    pub h4_tracers: Vec<h4_tracers::H4TracerAt>,
+    pub h4_tracers: Vec<h4::tracers::H4TracerAt>,
     pub h3_particles: Vec<Arc<particles::H3ParticleSystem>>,
     pub h3_strips: Vec<Arc<gen3::strips::H3StripAt>>,
     pub h3_cloth: Vec<cloth::H3ClothAt>,

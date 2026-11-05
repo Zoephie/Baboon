@@ -5,7 +5,7 @@
 
 use blam_tags::TagFile;
 
-use super::ce::attachments::object_block;
+use super::super::ce::attachments::object_block;
 
 /// `set_depth_biases(DynamicLightShadowBias, DynamicLightShadowSlopeScaledBias)`
 /// (X .data 0x86E98CA4/A8): the generate's biases, whatever the model sets.

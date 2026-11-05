@@ -7,10 +7,10 @@
 //! shader compiles. What blends draws `single_pass_single_probe`.
 
 use super::*;
-use crate::app::model_preview::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+use crate::app::model_preview::h4::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::Program;
-use crate::app::model_preview::h4_submit::{H4HologramPost, H4ScreenMaterial, H4Submit};
+use crate::app::model_preview::h4::submit::{H4HologramPost, H4ScreenMaterial, H4Submit};
 use blam_tags::material::{Material, MaterialShader, bake, shader_flags};
 
 /// Entry points (`entry_point_enum`) the passes are taken from.
@@ -334,7 +334,7 @@ pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mu
             // `c_render_active_camo` binds `globals`' distortion texture at s13.
             let camo_texture = caches
                 .h4_camo_texture
-                .get_or_insert_with(|| super::super::h4_camo::H4Camo::read(source).and_then(|camo| camo.texture))
+                .get_or_insert_with(|| super::super::h4::camo::H4Camo::read(source).and_then(|camo| camo.texture))
                 .clone();
             let camo_uniform = h3.camo.as_ref().and_then(|pass| {
                 pass.textures.iter().find(|(name, _)| name == "distortionTexture_texture").map(|(name, _)| name.clone())
@@ -454,7 +454,7 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
     let mut pass = super::super::gen3::shaders::pass_of(vertex, pixel);
     // The depth fade reads the preview's depth, where the pixel shader has one.
     if pass.pixel.contains("psDepthConstants") {
-        super::super::h4_shield::rewire_depth_fade(&mut pass)?;
+        super::super::h4::shield::rewire_depth_fade(&mut pass)?;
     }
     let pass = Arc::new(pass);
     let baked = {

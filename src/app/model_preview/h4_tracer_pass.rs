@@ -6,7 +6,7 @@
 //! `docs/h4-preview-research/tracers.md` §4.
 
 use super::h4_effect_gl::{H4EffectGl, material_functions};
-use super::h4_tracers::H4TracerDraw;
+use super::h4::tracers::H4TracerDraw;
 use super::materials::H4EffectMaterial;
 use super::*;
 use crate::core::hlsl::parse::Type;

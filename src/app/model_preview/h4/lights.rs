@@ -11,15 +11,15 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::{elements, object_block};
-use super::ce::lights::posed_on;
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::tag_function_at;
-use super::gen3::effects::{adopt_event_function, marker_name, part_markers};
-use super::gen3::shaders::H3Pass;
-use super::reach_lights::object_value;
-use super::*;
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::lights::posed_on;
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::tag_function_at;
+use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
+use super::super::gen3::shaders::H3Pass;
+use super::super::reach_lights::object_value;
+use super::super::*;
 use crate::core::hlsl::emit::Stage;
 use crate::core::source::TagSource;
 
@@ -759,8 +759,8 @@ pub(crate) fn h4_light_program(
         .get(index)?
         .read_tag_ref_path("explicit pixel shader")
         .filter(|path| !path.is_empty())?;
-    let shader = super::h4_shaders::H4ShaderSource::read(source, &path).ok()?;
-    shader.program(&super::h4_shaders::H4_DEFINES).ok()
+    let shader = super::shaders::H4ShaderSource::read(source, &path).ok()?;
+    shader.program(&super::shaders::H4_DEFINES).ok()
 }
 
 /// A technique's `tiny_position` pixel shader over a full-screen triangle.
@@ -769,10 +769,10 @@ pub(crate) fn h4_light_pass(
     technique: usize,
 ) -> Result<H3Pass, String> {
     let pixel =
-        super::h4_shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
+        super::shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
     Ok(H3Pass {
         fullscreen: true,
-        vertex: super::materials::h4_screen_vertex().to_owned(),
+        vertex: super::super::materials::h4_screen_vertex().to_owned(),
         pixel: pixel.source,
         uniforms: pixel.uniforms,
         textures: pixel.textures,

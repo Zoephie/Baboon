@@ -10,7 +10,7 @@ use blam_tags::material::{
 
 use std::sync::Arc;
 
-use super::gen3::shaders::{H3Pass, H3Texture, H3Value, H3Values};
+use super::super::gen3::shaders::{H3Pass, H3Texture, H3Value, H3Values};
 
 /// `e_material_extern`s 35 to 41: a hologram's key, fill and rim light
 /// directions (odd) and the scalars beside them (even).
@@ -112,7 +112,7 @@ pub(crate) struct H4HologramPost {
 
 /// The drawn object, as a material's functions read it.
 pub(crate) struct DrawnObject<'a> {
-    pub(crate) values: Option<&'a super::h2::functions::H2FunctionValues>,
+    pub(crate) values: Option<&'a super::super::h2::functions::H2FunctionValues>,
     pub(crate) time: f32,
     pub(crate) owner: u8,
 }
@@ -122,7 +122,7 @@ impl FunctionContext for DrawnObject<'_> {
     /// do not know reads as an idle object's.
     fn object_function(&self, name: &str) -> f32 {
         let known = self.values.and_then(|values| values.get(name)).copied();
-        known.unwrap_or_else(|| super::dx9::passes::object_input(name))
+        known.unwrap_or_else(|| super::super::dx9::passes::object_input(name))
     }
 
     fn time(&self) -> f32 {
@@ -371,7 +371,7 @@ mod tests {
         let root = std::path::Path::new(&root);
         let read = |path: &str| blam_tags::TagFile::read(root.join(path)).unwrap();
         let biped = read("objects/characters/storm_cortana/storm_cortana.biped");
-        let functions = super::super::h2::functions::read_h2_object_functions(&biped, None).unwrap();
+        let functions = super::super::super::h2::functions::read_h2_object_functions(&biped, None).unwrap();
         let material = blam_tags::material::Material::from_tag(&read(
             "objects/characters/storm_cortana/materials/storm_cortana_default/storm_cortana_default_body.material",
         ));
@@ -467,7 +467,7 @@ mod tests {
         let texture = baked.textures.iter().find(|texture| texture.frame_index_function.is_some()).expect("a framed texture");
         let function = texture.frame_index_function.unwrap();
         let bitmap = read(&format!("{}.bitmap", texture.bitmap.replace('\\', "/")));
-        let count = super::super::ce::attachments::elements(bitmap.root(), "bitmaps*").len();
+        let count = super::super::super::ce::attachments::elements(bitmap.root(), "bitmaps*").len();
         assert!(count > 1, "{count}");
         let mut submit = H4Submit::new(baked, 1, 8, None);
         submit.add_frames("selfillum_mapTexture".to_owned(), function, count);

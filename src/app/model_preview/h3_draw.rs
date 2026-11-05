@@ -657,9 +657,9 @@ pub(super) fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str,
         if name == "ps_lighting_constants" && frame.light_follows_camera {
             let camera = camera_to_world(frame);
             let backward = [camera[2], camera[6], camera[10]];
-            return Some(H3Value::FloatArray(super::h4_lighting::h4_turned_vmf(backward).to_vec()));
+            return Some(H3Value::FloatArray(super::h4::lighting::h4_turned_vmf(backward).to_vec()));
         }
-        return super::h4_lighting::h4_frame_value(name);
+        return super::h4::lighting::h4_frame_value(name);
     }
     if dialect == H3Dialect::Reach {
         if let Some(value) = reach_frame_value(frame, name, stops) {
@@ -962,7 +962,7 @@ impl ModelGlRenderer {
         let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
         // Halo 4: the sampler's frame-index function, on the object's values.
         if let Some(submit) = material.h4.as_ref().filter(|_| count > 0) {
-            let drawn = super::h4_submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
+            let drawn = super::h4::submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
             if let Some(index) = submit.frame(uniform, &drawn) {
                 return frame_key(uniform, index);
             }
@@ -999,20 +999,20 @@ impl ModelGlRenderer {
                     let object = batch.material_index as usize;
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                     let drawn =
-                        super::h4_submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
+                        super::h4::submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
                     let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
                     let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
                     let draw = match this.h4_draw {
                         Some(draw) => draw,
-                        None if albedo => super::h4_submit::H4Draw::Albedo,
-                        None if fringe => super::h4_submit::H4Draw::Fringe,
-                        None => super::h4_submit::H4Draw::Lit,
+                        None if albedo => super::h4::submit::H4Draw::Albedo,
+                        None if fringe => super::h4::submit::H4Draw::Fringe,
+                        None => super::h4::submit::H4Draw::Lit,
                     };
                     let mut values = submit.draw_values(draw, &drawn, h4_hologram_node(frame));
                     // Only the opened object's count is read; attached Halo 4
                     // objects bring geometry alone.
                     let count = if owner == 0 { frame.preview.h4_change_color_count } else { 0 };
-                    let colors = super::h4_submit::object_parameters(frame.change_colors_of(object), count);
+                    let colors = super::h4::submit::object_parameters(frame.change_colors_of(object), count);
                     values.insert("ps_material_object_parameters".to_owned(), H3Value::FloatArray(colors));
                     values
                 });
@@ -1411,7 +1411,7 @@ impl ModelGlRenderer {
             }
             if let Some(mask) = h4_mask {
                 self.h4_shadow_mask = Some(mask);
-                let floor = [0.0, super::super::h4_shadow::DIRECT_FLOOR, 0.0, 0.0];
+                let floor = [0.0, super::super::h4::shadow::DIRECT_FLOOR, 0.0, 0.0];
                 self.reach_pass_values = Some([("ps_bsp_lightmap_scale_constants", floor)].into_iter().collect());
             }
             for (batch, material) in opaque {
@@ -1685,10 +1685,10 @@ impl ModelGlRenderer {
         let camera = &frame.camera;
         let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
         values.insert(
-            super::h4_shield::DEPTH_DECODE,
+            super::h4::shield::DEPTH_DECODE,
             [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye],
         );
-        values.insert(super::h4_shield::WORLD_SCALE, [camera.scale; 4]);
+        values.insert(super::h4::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
             if let Some(targets) = self.h3_targets.as_ref() {
                 let [width, height] = targets.size;
@@ -1913,12 +1913,12 @@ impl ModelGlRenderer {
                 Some(H2Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
                 _ => return None,
             };
-            let (scale, offset) = super::super::h4_lighting::h4_grading_scale_offset(size);
+            let (scale, offset) = super::super::h4::lighting::h4_grading_scale_offset(size);
             self.h4_grading.map(|(_, texture)| super::h4_bloom::H4BloomGrading { texture, scale, offset })
         }
     }
 
-    /// Halo 4's `final_composite`: see `h4_lighting::H4_COMPOSITE_FRAGMENT`.
+    /// Halo 4's `final_composite`: see `h4::lighting::H4_COMPOSITE_FRAGMENT`.
     unsafe fn h4_composite(
         &mut self,
         gl: &glow::Context,
@@ -1928,7 +1928,7 @@ impl ModelGlRenderer {
         depth: Option<glow::NativeTexture>,
         screen: gen3::screen_effects::H3ScreenSettings,
     ) {
-        use super::super::h4_lighting::{H4_COMPOSITE_FRAGMENT, H4_DARK_MULTIPLIER};
+        use super::super::h4::lighting::{H4_COMPOSITE_FRAGMENT, H4_DARK_MULTIPLIER};
         unsafe {
             let grading = self.h4_grading_texture(gl, frame);
             if self.h4_composite_program.is_none() {
@@ -1952,7 +1952,7 @@ impl ModelGlRenderer {
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_scale").as_ref(), &scale);
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_offset").as_ref(), &offset);
             gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), H4_DARK_MULTIPLIER);
-            let filmic = super::super::h4_lighting::h4_filmic_params(super::super::h4_lighting::H4_FILMIC_CURVE, false);
+            let filmic = super::super::h4::lighting::h4_filmic_params(super::super::h4::lighting::H4_FILMIC_CURVE, false);
             gl.uniform_1_f32_slice(gl.get_uniform_location(program, "filmic").as_ref(), &filmic);
             gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
             gl.disable(glow::DEPTH_TEST);
@@ -1980,7 +1980,7 @@ impl ModelGlRenderer {
         frame: &ModelGpuFrame,
         slot: usize,
         batches: &[(RenderModelPreviewBatch, Arc<H3Material>)],
-        draw: super::super::h4_camo::H4CamoDraw,
+        draw: super::super::h4::camo::H4CamoDraw,
         size: [i32; 2],
     ) {
         /// `camo depth bias function`: the kit's constant, in a 24-bit

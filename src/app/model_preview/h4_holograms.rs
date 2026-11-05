@@ -20,7 +20,7 @@ use eframe::glow::{self, HasContext};
 use super::h3_draw::{frame_value, h3_set_cull, set_value, target_texture, upload_h2_image_linear};
 use super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value};
 use super::h4_bloom::H4BloomSettings;
-use super::h4_submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
+use super::h4::submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
 use super::*;
 
 /// `g_hologramBoundsScale` and `g_hologramBoundsExpand`'s defaults.
@@ -408,7 +408,7 @@ impl ModelGlRenderer {
             return;
         };
         unsafe {
-            use super::super::h4_lighting::{H4_FILMIC_CURVE, h4_filmic_params};
+            use super::super::h4::lighting::{H4_FILMIC_CURVE, h4_filmic_params};
             let view_inverse = h4_filmic_params(H4_FILMIC_CURVE, true);
             let [x0, y0, x1, y1] = picture.screen.crop;
             gl.enable(glow::SCISSOR_TEST);

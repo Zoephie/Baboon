@@ -846,7 +846,7 @@ pub(crate) struct H3ParticleLook {
     palette: H3ParticleProperty,
     pub(crate) shader: Arc<H3SpriteShader>,
     /// Halo 4's: drawn through its material from packed state, not as quads.
-    pub(crate) h4: Option<Arc<super::h4_particles::H4ParticleRender>>,
+    pub(crate) h4: Option<Arc<super::h4::particles::H4ParticleRender>>,
     /// Halo 3's colours are light, and Halo 2's are what shows.
     exposed: bool,
     /// Reach's: its own game time, lighting, exposure and shapes.
@@ -1293,7 +1293,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
                 }
                 None => None,
             };
-            Some(Arc::new(super::h4_particles::read_h4_particle_render(source, root, strip.as_ref()).ok()?))
+            Some(Arc::new(super::h4::particles::read_h4_particle_render(source, root, strip.as_ref()).ok()?))
         }
         false => None,
     };
@@ -4887,7 +4887,7 @@ impl H3ParticleSystem {
         time: f32,
         draws: &mut Vec<H4EmitterDraw>,
     ) {
-        use super::h4_particles::{H4ParticleState, pack_particle_state};
+        use super::h4::particles::{H4ParticleState, pack_particle_state};
         let system = self;
         let look = &*system.look;
         for (emitter, running) in system.emitters.iter().zip(running) {

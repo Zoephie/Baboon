@@ -7,7 +7,7 @@
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::gen3::shaders::{H3Sampler, H3Value};
-use super::h4_flares::{H4FlareDraw, H4FlareView};
+use super::h4::flares::{H4FlareDraw, H4FlareView};
 use super::*;
 
 /// The camera as the flares read it: a point's normalized device position,

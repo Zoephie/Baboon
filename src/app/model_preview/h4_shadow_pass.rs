@@ -5,7 +5,7 @@
 //! 87 without its normal test) into the mask the static pass reads. See
 //! `docs/h4-preview-research/shadow-camo-shields.md` §1.
 
-use super::h4_shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};
+use super::h4::shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};
 use super::*;
 use gen3::shaders::H3Material;
 

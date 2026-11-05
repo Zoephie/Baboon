@@ -31,7 +31,7 @@ pub(super) struct H4BloomSettings {
     hologram: bool,
 }
 
-/// The preview camera fx's bloom (`h4_lighting::H4_PREVIEW_STOPS` says
+/// The preview camera fx's bloom (`h4::lighting::H4_PREVIEW_STOPS` says
 /// whose): `bloom_highlight`, `bloom_inherent`, `bloom_self_illum`,
 /// `bloom_intensity` and the three colours of `m80_cam_fx_global`.
 pub(super) const VIEW_BLOOM: H4BloomSettings = H4BloomSettings {

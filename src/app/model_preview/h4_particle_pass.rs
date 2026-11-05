@@ -8,7 +8,7 @@
 use super::particles::H4EmitterDraw;
 use super::gen3::shaders::{H3Pass, H3Value};
 use super::h4_effect_gl::{H4EffectGl, material_functions};
-use super::h4_particles::{H4ParticleRender, custom_vert_registers};
+use super::h4::particles::{H4ParticleRender, custom_vert_registers};
 use super::*;
 use crate::core::hlsl::parse::Type;
 

@@ -314,7 +314,7 @@ pub(super) fn material_functions(
     material: &H4EffectMaterial,
     object: u8,
 ) -> H3Values {
-    let drawn = super::h4_submit::DrawnObject {
+    let drawn = super::h4::submit::DrawnObject {
         values: frame.h2_values_of_object(object),
         time: frame.time,
         owner: object,
@@ -326,7 +326,7 @@ pub(super) fn material_functions(
     ];
     material
         .submit
-        .draw_values(super::h4_submit::H4Draw::Lit, &drawn, identity)
+        .draw_values(super::h4::submit::H4Draw::Lit, &drawn, identity)
 }
 
 /// What every effect's constant `name` is, before the material's own.
@@ -351,21 +351,21 @@ fn shared_value(
         "s_atmosphere_fog_enable" | "s_atmosphere_fog_light_enable" => Some(H3Value::Integer(0)),
         name if name.starts_with("s_atmosphere_constant_") => floats([0.0; 4]),
         "vs_material_blend_constant" => floats(blend_constant(mode)),
-        "vs_bungie_exposure" => super::h4_lighting::h4_frame_value("ps_view_exposure"),
+        "vs_bungie_exposure" => super::h4::lighting::h4_frame_value("ps_view_exposure"),
         "vs_bungie_additive_scale_and_exposure" => {
-            super::h4_lighting::h4_frame_value("ps_view_self_illum_exposure")
+            super::h4::lighting::h4_frame_value("ps_view_self_illum_exposure")
         }
         "vs_alpha_blend_mode" | "ps_alpha_blend_mode" => floats([f32::from(mode), 0.0, 0.0, 0.0]),
         "ps_tiling_vpos_offset" => floats([0.0; 4]),
         // `ComputeDepthFade(fragpos · z)`: whole pixels.
         "psDepthConstants" => floats([0.0, 0.0, 1.0, 0.0]),
-        super::h4_shield::DEPTH_DECODE => floats([
+        super::h4::shield::DEPTH_DECODE => floats([
             camera.depth_scale * camera.depth_map[0],
             camera.depth_map[1],
             camera.perspective,
             eye,
         ]),
-        super::h4_shield::WORLD_SCALE => floats([camera.scale; 4]),
+        super::h4::shield::WORLD_SCALE => floats([camera.scale; 4]),
         other => h3_draw::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
             .or_else(|| functions.get(other).cloned())
             .or_else(|| material.values.get(other).cloned()),

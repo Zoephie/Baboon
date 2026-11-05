@@ -3,15 +3,15 @@
 //! setup_default_lighting(true)` leaves in the constants (X360 0x82A72368,
 //! MCC `sub_1408C3E60`), exposure, and the final composite.
 
-use super::gen3::shaders::H3Value;
-use super::*;
+use super::super::gen3::shaders::H3Value;
+use super::super::*;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 
 /// `s_dual_vmf_basis::SetDefaultLighting` (X360 0x82A3CF50, MCC
 /// `sub_1408E6B70`, the same immediates): two linear-SH lobes, the direct one
 /// straight down from above and a dimmer one from below. `[1].w` is the
 /// analytic scalar, `[3].w` the occlusion.
-pub(super) const H4_DEFAULT_VMF: [[f32; 4]; 4] = [
+pub(in crate::app::model_preview) const H4_DEFAULT_VMF: [[f32; 4]; 4] = [
     [0.0, 0.0, 1.0, 0.1],
     [3.0, 3.0, 3.0, 0.0],
     [0.0, 0.0, -0.8, 0.2],
@@ -40,7 +40,7 @@ const EXPOSURE_SCALE: f32 = 1.493_801_6;
 /// its colour grading so nothing is tinted. Its exposure auto-adjusts, and
 /// against a dark picture climbs to its `maximum`, +1, which is also the
 /// maximum of 70 of the kit's 110 auto-exposed camera fx.
-pub(super) const H4_PREVIEW_STOPS: f32 = 1.0;
+pub(in crate::app::model_preview) const H4_PREVIEW_STOPS: f32 = 1.0;
 
 /// The preview camera fx's `self_illum_preferred` (+1.5) and
 /// `self_illum_scale` "exposure change" (0): self-illumination, and the
@@ -52,13 +52,13 @@ const SELF_ILLUM_CHANGE: f32 = 0.0;
 /// linear strength, linear angle, toe strength, toe numerator, toe
 /// denominator, linear white point. Every one of the kit's 125 enabled
 /// curves is this one.
-pub(super) const H4_FILMIC_CURVE: [f32; 7] = [0.2, 0.3, 0.2, 0.2, 0.01, 0.4, 4.0];
+pub(in crate::app::model_preview) const H4_FILMIC_CURVE: [f32; 7] = [0.2, 0.3, 0.2, 0.2, 0.01, 0.4, 4.0];
 
 /// `SetFilmicToneCurveParameters` (X360 0x83AFD0A0): the five constants
 /// `ApplyFilmicToneCurve` and `InverseFilmicToneCurve` read, each a splat.
 /// A field within 1e-4 of zero makes the curve identity, whose constants
 /// differ for the inverse.
-pub(super) fn h4_filmic_params(curve: [f32; 7], inverse: bool) -> [f32; 5] {
+pub(in crate::app::model_preview) fn h4_filmic_params(curve: [f32; 7], inverse: bool) -> [f32; 5] {
     let [a, b, c, d, e, f, w] = curve;
     if curve.iter().any(|field| field.abs() < 1e-4) {
         return if inverse { [1.0, 0.0, 0.0, 1.0, 0.0] } else { [0.0, 1.0, 0.0, 0.0, 1.0] };
@@ -74,7 +74,7 @@ fn apply_filmic(params: [f32; 5], x: f32) -> f32 {
 }
 
 /// `c_camera_fx_values::get_render_exposure`: `2^stops / 1.4938016`.
-pub(super) fn h4_exposure(stops: f32) -> f32 {
+pub(in crate::app::model_preview) fn h4_exposure(stops: f32) -> f32 {
     stops.exp2() / EXPOSURE_SCALE
 }
 
@@ -82,14 +82,14 @@ pub(super) fn h4_exposure(stops: f32) -> f32 {
 /// `update` (0x83A963A0) leaving `v87 = (stops - preferred) · change +
 /// preferred`. Self-illumination, and the hologram composite, follow the
 /// scene's exposure only by `change`.
-pub(super) fn h4_illum_scale(stops: f32) -> f32 {
+pub(in crate::app::model_preview) fn h4_illum_scale(stops: f32) -> f32 {
     let illum_stops = (stops - SELF_ILLUM_PREFERRED) * SELF_ILLUM_CHANGE + SELF_ILLUM_PREFERRED;
     (illum_stops - stops).exp2()
 }
 
 /// `c_camera_fx_values::g_HDR_target_stops` (X360 0x86E3C54C): the HDR
 /// target holds light three stops down.
-pub(super) const H4_DARK_MULTIPLIER: f32 = 8.0;
+pub(in crate::app::model_preview) const H4_DARK_MULTIPLIER: f32 = 8.0;
 
 /// Light Follows Camera, the preview's own: the default lobes turned as one,
 /// by the shortest rotation that takes straight up to halfway between up and
@@ -98,7 +98,7 @@ pub(super) const H4_DARK_MULTIPLIER: f32 = 8.0;
 /// their colours and the energy stay the game's. Halo 4's lobes are both
 /// vertical, so the turn about the vertical that Halo 3 and Reach use would
 /// change nothing.
-pub(super) fn h4_turned_vmf(to_camera: [f32; 3]) -> [[f32; 4]; 4] {
+pub(in crate::app::model_preview) fn h4_turned_vmf(to_camera: [f32; 3]) -> [[f32; 4]; 4] {
     let up = [0.0, 0.0, 1.0];
     let half = [to_camera[0], to_camera[1], to_camera[2] + 1.0];
     let length = (half[0] * half[0] + half[1] * half[1] + half[2] * half[2]).sqrt();
@@ -125,7 +125,7 @@ pub(super) fn h4_turned_vmf(to_camera: [f32; 3]) -> [[f32; 4]; 4] {
 }
 
 /// A Halo 4 engine constant's value for an object here, by name.
-pub(super) fn h4_frame_value(name: &str) -> Option<H3Value> {
+pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<H3Value> {
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     match name {
         "ps_lighting_constants" => Some(H3Value::FloatArray(H4_DEFAULT_VMF.to_vec())),
@@ -161,11 +161,11 @@ pub(super) fn h4_frame_value(name: &str) -> Option<H3Value> {
 /// `globals\defaults\default`'s colour grading texture: the camera fx
 /// settings the game falls back on with no cluster to read others from
 /// (`c_player_view::setup_camera_fx_parameters`, X360 0x82B704C8).
-pub(super) fn read_h4_color_grading(source: &TagSource) -> Option<super::materials::H3Bitmap> {
+pub(in crate::app::model_preview) fn read_h4_color_grading(source: &TagSource) -> Option<super::super::materials::H3Bitmap> {
     let settings = load_referenced_tag_from_source(source, "globals\\defaults\\default", "camera_fx_settings", b"cfxs").ok()?;
     let grading = settings.root().descend("color_grading")?;
     let path = grading.read_tag_ref_path("color grading texture").filter(|path| !path.is_empty())?;
-    super::materials::read_h3_bitmap(source, &path, 0, crate::core::h2_pixel_shader::SamplerKind::Volume)
+    super::super::materials::read_h3_bitmap(source, &path, 0, crate::core::h2_pixel_shader::SamplerKind::Volume)
 }
 
 /// The light a white surface takes from the default lobes: `VMFDiffuse` for
@@ -283,7 +283,7 @@ mod tests {
 /// format, O7, decides whether the game's view decodes it, and either way
 /// the default lookup's output displays as sRGB(x²)]. Coverage is Reach's:
 /// what the object drew covers what lies behind it.
-pub(super) const H4_COMPOSITE_FRAGMENT: &str = "#version 410 core
+pub(in crate::app::model_preview) const H4_COMPOSITE_FRAGMENT: &str = "#version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
 uniform sampler2D scene_depth;
@@ -315,7 +315,7 @@ void main() {
 
 /// `SetColorGradingParameters` (X360 0x829B78E0): a lookup of `size` texels
 /// a side is read at `x (size - 1) / size + 0.5 / size`, its texel centres.
-pub(super) fn h4_grading_scale_offset(size: [usize; 3]) -> ([f32; 3], [f32; 3]) {
+pub(in crate::app::model_preview) fn h4_grading_scale_offset(size: [usize; 3]) -> ([f32; 3], [f32; 3]) {
     let scale = size.map(|side| (side.max(1) as f32 - 1.0) / side.max(1) as f32);
     let offset = size.map(|side| 0.5 / side.max(1) as f32);
     (scale, offset)

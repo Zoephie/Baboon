@@ -11,10 +11,10 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-use super::ce::attachments::elements;
-use super::h2::functions::H2FunctionValues;
-use super::gen3::shaders::{H3Pass, H3Texture};
-use super::reach_shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
+use super::super::ce::attachments::elements;
+use super::super::h2::functions::H2FunctionValues;
+use super::super::gen3::shaders::{H3Pass, H3Texture};
+use super::super::reach_shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::{Scalar, Type};
@@ -23,8 +23,8 @@ use crate::core::source::TagSource;
 /// `rasterizer_globals`' explicit shader 61, `shield_impact`.
 const SHIELD_IMPACT: usize = 61;
 /// What the preview's depth reads back as world distance with: as Reach's.
-pub(crate) const DEPTH_DECODE: &str = super::reach_shield::DEPTH_DECODE;
-pub(crate) const WORLD_SCALE: &str = super::reach_shield::WORLD_SCALE;
+pub(crate) const DEPTH_DECODE: &str = super::super::reach_shield::DEPTH_DECODE;
+pub(crate) const WORLD_SCALE: &str = super::super::reach_shield::WORLD_SCALE;
 
 /// The shield's settings, its textures under Halo 4's names, and its pass.
 #[derive(Debug)]
@@ -130,13 +130,13 @@ pub(crate) fn h4_shield_pass(source: &TagSource, technique: usize) -> Result<H3P
         .read_tag_ref_path("explicit pixel shader")
         .filter(|path| !path.is_empty())
         .ok_or("no pixel shader")?;
-    let program = super::h4_shaders::H4ShaderSource::read(source, &path)?
-        .program(&super::h4_shaders::H4_DEFINES)?;
+    let program = super::shaders::H4ShaderSource::read(source, &path)?
+        .program(&super::shaders::H4_DEFINES)?;
     let vertex =
-        super::h4_shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
+        super::shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
     let pixel =
-        super::h4_shaders::translate_technique(&program, technique, "_default", Stage::Pixel)?;
-    let mut pass = super::gen3::shaders::pass_of(vertex, pixel);
+        super::shaders::translate_technique(&program, technique, "_default", Stage::Pixel)?;
+    let mut pass = super::super::gen3::shaders::pass_of(vertex, pixel);
     rewire_depth_fade(&mut pass)?;
     Ok(pass)
 }

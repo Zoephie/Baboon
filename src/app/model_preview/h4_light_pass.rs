@@ -2,7 +2,7 @@
 //! X360 0x82A0A3F0): each attached light and cheap light, added through
 //! explicit shader 187 or 204. See `docs/h4-preview-research/lights.md`.
 
-use super::h4_lights::{H4LightBlend, H4LitLight};
+use super::h4::lights::{H4LightBlend, H4LitLight};
 use super::*;
 use gen3::shaders::H3Dialect;
 
@@ -71,7 +71,7 @@ impl ModelGlRenderer {
         );
         let eye = h2_eye_position(&frame.camera);
         let view_projection = h3_draw::view_projection(&frame.camera);
-        let exposure = match super::h4_lighting::h4_frame_value("ps_view_exposure") {
+        let exposure = match super::h4::lighting::h4_frame_value("ps_view_exposure") {
             Some(super::gen3::shaders::H3Value::Floats(exposure)) => exposure[0],
             _ => return,
         };
@@ -143,7 +143,7 @@ impl ModelGlRenderer {
                         // Its blend state is additive (1).
                         let value = if name == "ps_material_blend_constant" {
                             Some(super::gen3::shaders::H3Value::Floats(
-                                super::h4_submit::blend_constant(1),
+                                super::h4::submit::blend_constant(1),
                             ))
                         } else {
                             h3_draw::frame_value(frame, H3Dialect::Halo4, name, size, 0.0)

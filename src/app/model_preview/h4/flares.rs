@@ -10,15 +10,15 @@ use std::sync::Arc;
 use blam_tags::tag_function::transition_function_evaluate;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::{elements, object_block};
-use super::ce::lights::posed_on;
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::{H2Image, tag_function_at};
-use super::gen3::effects::{adopt_event_function, marker_name, part_markers};
-use super::materials::{H3Bitmap, read_h3_bitmap};
-use super::reach_lights::object_value;
-use super::*;
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::lights::posed_on;
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::{H2Image, tag_function_at};
+use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
+use super::super::materials::{H3Bitmap, read_h3_bitmap};
+use super::super::reach_lights::object_value;
+use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 
@@ -826,7 +826,7 @@ pub(crate) fn read_h4_flares(
 /// technique's `screen` pass draws every reflection.
 const LENS_FLARE: usize = 46;
 
-pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::gen3::shaders::H3Pass, String> {
+pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::super::gen3::shaders::H3Pass, String> {
     use crate::core::hlsl::emit::Stage;
     let globals = load_referenced_tag_from_source(
         source,
@@ -844,22 +844,22 @@ pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::gen3::shaders::
             .ok_or(format!("no {field}"))
     };
     let program = |path: &str| -> Result<_, String> {
-        super::h4_shaders::H4ShaderSource::read(source, path)?
-            .program(&super::h4_shaders::H4_DEFINES)
+        super::shaders::H4ShaderSource::read(source, path)?
+            .program(&super::shaders::H4_DEFINES)
     };
-    let vertex = super::h4_shaders::translate_technique(
+    let vertex = super::shaders::translate_technique(
         &program(&path("explicit vertex shader")?)?,
         0,
         "screen",
         Stage::Vertex,
     )?;
-    let pixel = super::h4_shaders::translate_technique(
+    let pixel = super::shaders::translate_technique(
         &program(&path("explicit pixel shader")?)?,
         0,
         "screen",
         Stage::Pixel,
     )?;
-    Ok(super::gen3::shaders::pass_of(vertex, pixel))
+    Ok(super::super::gen3::shaders::pass_of(vertex, pixel))
 }
 
 #[cfg(test)]

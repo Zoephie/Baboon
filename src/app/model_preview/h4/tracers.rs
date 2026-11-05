@@ -12,19 +12,19 @@ use std::sync::Arc;
 
 use blam_tags::{TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::elements;
-use super::ce::lights::posed_on;
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::tag_function_at;
-use super::gen3::effects::{
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::elements;
+use super::super::ce::lights::posed_on;
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::tag_function_at;
+use super::super::gen3::effects::{
     H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
     read_part_placement,
 };
-use super::particles::{read_ends, slerped};
-use super::h4_particles::{pack_argb8, pack_half2, pack_ushort2n};
-use super::materials::{H4EffectMaterial, resolve_h4_effect_material};
-use super::*;
+use super::super::particles::{read_ends, slerped};
+use super::particles::{pack_argb8, pack_half2, pack_ushort2n};
+use super::super::materials::{H4EffectMaterial, resolve_h4_effect_material};
+use super::super::*;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::source::TagSource;
 
@@ -524,7 +524,7 @@ fn seeds_of(index: usize) -> [f32; 2] {
 /// point to point, each location pair). A part runs only when the system's
 /// `point-to-point` agrees with its having a secondary location
 /// (`UpdateLocations` X 0x8296EB50).
-pub(super) fn read_h4_tracers(
+pub(in crate::app::model_preview) fn read_h4_tracers(
     source: &TagSource,
     object: &blam_tags::TagFile,
     owner: u8,
@@ -1629,7 +1629,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H4EK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, crate::core::game::GameId::Halo4);
+        let source = super::super::super::particles::loose_kit(&root, crate::core::game::GameId::Halo4);
         let path = "environments\\solo\\m90_sacrifice\\fx\\beams\\parts\\beam_beamhole";
         let tag =
             load_referenced_tag_from_source(&source, path, "tracer_system", b"trac").expect(path);

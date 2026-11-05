@@ -2095,7 +2095,7 @@ struct ModelGpuSlot {
     ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: gen3::strips::H3StripField,
     /// Halo 4's trailing tracers between frames.
-    h4_trails: h4_tracers::H4TracerField,
+    h4_trails: h4::tracers::H4TracerField,
     h3_onsets: gen3::effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
     h3_vision_clock: Option<(f32, f32)>,
@@ -4150,7 +4150,7 @@ struct ModelGlRenderer {
     h4_shadow_mask: Option<glow::NativeTexture>,
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
-    h4_draw: Option<h4_submit::H4Draw>,
+    h4_draw: Option<h4::submit::H4Draw>,
     /// Reach's self shadow: its map and mask, and the apply.
     reach_shadow: Option<reach_shadow_pass::ReachShadowTargets>,
     reach_shadow_program: Option<glow::NativeProgram>,
@@ -5295,7 +5295,7 @@ impl ModelGlRenderer {
                     // `cheap_particles_render.fx`: `lerp(ps_view_exposure.x,
                     // ps_view_self_illum_exposure.y, alpha)`.
                     let exposures = if first.library().halo4() {
-                        let channel = |name: &str, at: usize| match h4_lighting::h4_frame_value(name) {
+                        let channel = |name: &str, at: usize| match h4::lighting::h4_frame_value(name) {
                             Some(gen3::shaders::H3Value::Floats(value)) => value[at],
                             _ => 1.0,
                         };

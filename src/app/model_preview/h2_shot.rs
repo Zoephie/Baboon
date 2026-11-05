@@ -789,9 +789,9 @@ fn h4_light_passes_link() {
     };
     let gl = headless_gl();
     for physical in [false, true] {
-        let program = super::h4_lights::h4_light_program(&source, physical).expect("the light shader");
+        let program = super::h4::lights::h4_light_program(&source, physical).expect("the light shader");
         for technique in 0..16 {
-            let pass = super::h4_lights::h4_light_pass(&program, technique).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));
+            let pass = super::h4::lights::h4_light_pass(&program, technique).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));
             unsafe {
                 let linked = gl.create_program().unwrap();
                 for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
@@ -821,7 +821,7 @@ fn h4_flare_pass_links() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = headless_gl();
-    let pass = super::h4_flares::h4_flare_pass(&source).expect("the flare pass");
+    let pass = super::h4::flares::h4_flare_pass(&source).expect("the flare pass");
     for (name, _) in &pass.uniforms {
         eprintln!("NOTE flare UNIFORM {name}");
     }
@@ -844,7 +844,7 @@ fn h4_flare_pass_links() {
 /// pixel shader; `BLAM_TEST_H4EK` to the tags folder.
 #[test]
 fn h4_effect_passes_link() {
-    use super::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+    use super::h4::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
     use crate::core::hlsl::emit::Stage;
     let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
         return;
@@ -1048,7 +1048,7 @@ fn h3_sweep() {
 /// `H4_FOLDER` narrows to a folder under `shaders\material_shaders`.
 #[test]
 fn h4_sweep() {
-    use super::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+    use super::h4::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
     use crate::core::hlsl::emit::Stage;
     let Ok(limit) = std::env::var("H4_SWEEP") else {
         return;
@@ -1191,7 +1191,7 @@ fn h4_sweep() {
 /// and `BLAM_TEST_H4EK`. `H4_PASS_SOURCE` prints the GLSL too.
 #[test]
 fn h4_pass_inputs() {
-    use super::h4_shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+    use super::h4::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
     use crate::core::hlsl::emit::Stage;
     let Ok(spec) = std::env::var("H4_PASS") else {
         return;
