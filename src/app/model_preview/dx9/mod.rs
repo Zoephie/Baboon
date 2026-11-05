@@ -1,0 +1,5 @@
+//! The DX9 pipeline Halo CE and Halo 2 draw through: a shader's passes, and
+//! the vertex stages that feed them.
+
+pub(in crate::app) mod passes;
+pub(in crate::app) mod stage;

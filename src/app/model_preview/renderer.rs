@@ -2,14 +2,14 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
-use super::h2_passes::{
+use super::dx9::passes::{
     H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
     H2_DEFAULT_LIGHTS, H2_GLSL_VERSION, H2_LAYER_COUNT, H2_REFLECTION_SCALE, H2_SHADOWED_LIGHT,
     h2_change_colors_for, h2_normalization_face, h2_object_light_direction, h2_prt_object_lights,
 };
 use super::h2::bloom::H2Bloom;
-use super::h2_passes::{H2Clock, h2_prt_lights};
-use super::h2_stage::H2VertexStage;
+use super::dx9::passes::{H2Clock, h2_prt_lights};
+use super::dx9::stage::H2VertexStage;
 use super::h3_shaders::{H3Blend, H3Sampler};
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -1213,7 +1213,7 @@ fn object_states(
             let inputs = functions.with_fired(functions.inputs_for(set, (data.geometry_id, object)), fired);
             functions.outputs_active(&inputs, ce::functions::object_time(time, object))
         });
-        CeObjectState { outputs, active, change_colors: h2_passes::ce_change_colors(colors) }
+        CeObjectState { outputs, active, change_colors: dx9::passes::ce_change_colors(colors) }
     };
     let mut states = vec![state(data.ce_object_functions.as_ref(), 0, &data.h2_change_colors)];
     for (index, object) in data.ce_attached.iter().enumerate() {

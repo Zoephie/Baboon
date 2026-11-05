@@ -4,7 +4,7 @@
 use super::super::attachment::MarkerFrame;
 use super::attachments::{attached_marker_frame, elements, object_block};
 use super::passes::{argb, periodic_evaluate};
-use super::super::h2_passes::{H2Image, ce_color_interpolate};
+use super::super::dx9::passes::{H2Image, ce_color_interpolate};
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

@@ -7,7 +7,7 @@ use blam_tags::math::Matrix4;
 use blam_tags::{TagFile, TagStruct};
 
 use super::functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
-use super::super::h2_passes::{H2ChangeColors, read_h2_change_colors};
+use super::super::dx9::passes::{H2ChangeColors, read_h2_change_colors};
 use super::super::loading::build_render_preview;
 use super::super::*;
 use super::super::attachment::*;

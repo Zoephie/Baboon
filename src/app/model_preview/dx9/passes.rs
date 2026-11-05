@@ -15,12 +15,12 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 use blam_tags::tag_function::FunctionType;
 
-use super::h2::functions::H2FunctionValues;
+use super::super::h2::functions::H2FunctionValues;
 
-use super::h2::prt::H2PrtLight;
-use super::ce::passes::{CeModelAnimation, CeNumeric};
-use super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
-use super::materials::TextureImage;
+use super::super::h2::prt::H2PrtLight;
+use super::super::ce::passes::{CeModelAnimation, CeNumeric};
+use super::stage::{H2_TEXTURE_ROWS, H2VertexStage};
+use super::super::materials::TextureImage;
 use crate::core::h2_pixel_shader::{
     AlphaCompare, AlphaTest, PixelShaderOptions, SamplerKind, translate,
 };
@@ -626,12 +626,12 @@ fn animated_vector(animations: &[H2Animation], clock: H2Clock<'_>) -> Option<[f3
 }
 
 /// The bytes of a `mapping_function`, as the engine's H2 function.
-pub(super) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction> {
+pub(in crate::app::model_preview) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction> {
     tag_function_at(property, "function")
 }
 
 /// The same for a `mapping_function` of another name.
-pub(super) fn tag_function_at(holder: &TagStruct<'_>, name: &str) -> Option<TagFunction> {
+pub(in crate::app::model_preview) fn tag_function_at(holder: &TagStruct<'_>, name: &str) -> Option<TagFunction> {
     let Some(field) = holder.field_path(&format!("{name}/data")) else {
         return h2_laid_out_function(holder.descend(name)?);
     };
@@ -666,7 +666,7 @@ fn h2_laid_out_function(mapping: TagStruct<'_>) -> Option<TagFunction> {
 /// exports the name, which leaves boosts, hits and open doors off. A guess,
 /// for what has no object to ask: a Halo 2 object's functions answer from its
 /// type's exporters (`h2_functions`), which Halo 3 and ODST's are not yet.
-pub(super) fn object_input(name: &str) -> f32 {
+pub(in crate::app::model_preview) fn object_input(name: &str) -> f32 {
     match name {
         "alive" | "body_vitality" | "device_power" | "electrical_power" | "health" | "one"
         | "power" | "shield" | "shield_strength" | "shield_vitality" => 1.0,
@@ -1157,7 +1157,7 @@ pub(crate) enum H2Image {
 impl H2Image {
     /// Whether its pixels fill its size, which is how much GL reads.
     pub(crate) fn whole(&self) -> bool {
-        use super::materials::rgba_fills;
+        use super::super::materials::rgba_fills;
         match self {
             Self::Flat(image) => image.whole(),
             Self::Cube { size, faces } => faces.iter().all(|face| rgba_fills(face, &[*size, *size])),
@@ -1233,7 +1233,7 @@ pub(crate) struct H2DrawPass {
 
 impl H2DrawPass {
     /// A pass with nothing bound, its stage's values and textures to fill.
-    pub(super) fn new(stage: H2VertexStage, fragment: String, depth: H2Depth) -> Self {
+    pub(in crate::app::model_preview) fn new(stage: H2VertexStage, fragment: String, depth: H2Depth) -> Self {
         Self {
             stage,
             fragment,

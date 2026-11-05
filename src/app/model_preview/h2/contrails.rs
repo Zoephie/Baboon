@@ -11,7 +11,7 @@ use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::functions::H2FunctionValues;
 use super::lights::attachment_value;
-use super::super::h2_passes::H2Image;
+use super::super::dx9::passes::H2Image;
 use super::super::h3_effects::marker_name;
 use super::super::h3_shaders::H3Blend;
 use super::super::materials::decode_h2_image;

@@ -25,9 +25,8 @@ pub(in crate::app) mod derived;
 mod errors;
 mod attachment;
 mod ce;
+pub(in crate::app) mod dx9;
 pub(in crate::app) mod h2;
-pub(in crate::app) mod h2_passes;
-pub(in crate::app) mod h2_stage;
 mod h3_effects;
 pub(crate) mod h3_cloth;
 pub(crate) mod h3_leaves;
@@ -84,7 +83,7 @@ pub(in crate::app) use loading::build_render_preview;
 pub(in crate::app) use loading::prewarm_ce_mesh_sync_index;
 pub(in crate::app) use renderer::material_color;
 use renderer::*;
-use h2_passes::{H2ChangeColors, read_h2_change_colors};
+use dx9::passes::{H2ChangeColors, read_h2_change_colors};
 use variants::*;
 
 // The material resolver understands the render-method shaders validated for
@@ -286,7 +285,7 @@ pub(crate) struct RenderModelPreviewMaterial {
     pub overlay: bool,
     /// Halo 2: which of a model's damage or hologram shaders this is, drawn
     /// from no batch of its own while the object says so.
-    pub shield: Option<h2_passes::H2Layer>,
+    pub shield: Option<dx9::passes::H2Layer>,
     /// Halo CE: which image of each bitmap it draws, wrapping at their count.
     pub permutation: usize,
     /// Which object owns it, for its function outputs and change colors: 0

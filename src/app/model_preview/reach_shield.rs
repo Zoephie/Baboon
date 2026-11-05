@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::ce::attachments::elements;
 use super::h2::functions::H2FunctionValues;
-use super::h2_passes::tag_function_at;
+use super::dx9::passes::tag_function_at;
 use super::h3_shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
 use super::materials::decode_h2_image;
 use crate::core::h2_pixel_shader::SamplerKind;

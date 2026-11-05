@@ -17,7 +17,7 @@ use blam_tags::tag_function::FunctionType;
 
 use super::ce::attachments::elements;
 use super::h2::functions::H2FunctionValues;
-use super::h2_passes::H2Image;
+use super::dx9::passes::H2Image;
 use super::*;
 use crate::core::hlsl::emit::{Stage, Translated, translate};
 use crate::core::hlsl::parse::{TextureKind, Type, parse};

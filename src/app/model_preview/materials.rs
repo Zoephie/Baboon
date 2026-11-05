@@ -18,8 +18,8 @@ use super::h3_shaders::{
     H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
     H3Dialect, H3Sampler, H3Texels, H3Texture, H3Value,
 };
-use super::h2_stage::H2VertexStage;
-use super::h2_passes::{
+use super::dx9::stage::H2VertexStage;
+use super::dx9::passes::{
     H2DrawPass, H2Image, H2Layer, H2ParameterValue, H2_LAYER_COUNT, animation_function,
     h2_pass_needs_frame_texture, h2_shadow_passes, prepare_draw_pass,
     resolve_h2_layer_passes,

@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::core::source::MountedContainer;
-use super::h2_passes::{H2Layer, h2_prt_lights};
+use super::dx9::passes::{H2Layer, h2_prt_lights};
 use super::h2::prt::read_h2_prt;
 use super::h3_cloth::ClothGame;
 use blam_tags::iostore::IoStoreArchive;
@@ -4565,7 +4565,7 @@ pub(super) mod kit_object_tests {
         let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\scorpion\\scorpion", "vehicle", b"vehi");
         let colored = data.h2_attached.iter().find(|attached| attached.change_colors != [[1.0; 3]; 4]);
         let colored = colored.expect("a child with change colors");
-        let hull = super::super::h2_passes::h2_change_colors_for(&data.h2_change_colors, "default");
+        let hull = super::super::dx9::passes::h2_change_colors_for(&data.h2_change_colors, "default");
         assert_ne!(colored.change_colors, hull);
         let owned = data.preview.materials.iter().filter(|material| material.object == colored.owner);
         assert!(owned.count() > 0, "its materials read them");

@@ -13,7 +13,7 @@ use super::super::ce::attachments::{attached_marker_frame, elements, loose_weapo
 use super::super::attachment::{attach_point, attach_vector};
 use super::super::loading::build_render_preview;
 use super::super::ce::attachments::CeWeaponIk;
-use super::super::h2_passes::{h2_change_colors_for, read_h2_change_colors};
+use super::super::dx9::passes::{h2_change_colors_for, read_h2_change_colors};
 use super::super::h3_cloth::ClothGame;
 use super::super::*;
 use crate::core::source::TagSource;

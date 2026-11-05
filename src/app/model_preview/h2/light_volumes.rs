@@ -11,7 +11,7 @@ use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::functions::H2FunctionValues;
 use super::lights::H2EffectPart;
 use super::super::h3_effects::{adopt_event_function, for_each_attached_part, part_markers};
-use super::super::h2_passes::{H2Image, tag_function_at};
+use super::super::dx9::passes::{H2Image, tag_function_at};
 use super::super::h3_effects::marker_name;
 use super::super::materials::decode_h2_image;
 use super::super::*;

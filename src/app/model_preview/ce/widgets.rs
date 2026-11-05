@@ -10,7 +10,7 @@ use blam_tags::{TagFile, TagStruct};
 use super::attachments::{elements, has_flag, object_block};
 use super::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::passes::argb;
-use super::super::h2_passes::{H2Image, ce_color_interpolate};
+use super::super::dx9::passes::{H2Image, ce_color_interpolate};
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

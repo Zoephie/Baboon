@@ -23,7 +23,7 @@ use super::particle_systems::{
     unattached_quads, update_unattached,
 };
 use super::passes::{CeMapAnimation, argb, read_effect_map_animation};
-use super::super::h2_passes::{H2Image, ce_color_interpolate};
+use super::super::dx9::passes::{H2Image, ce_color_interpolate};
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

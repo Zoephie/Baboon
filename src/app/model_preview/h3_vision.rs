@@ -4,7 +4,7 @@
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::h2_passes::tag_function_at;
+use super::dx9::passes::tag_function_at;
 use super::materials::{H3Bitmap, read_h3_bitmap};
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

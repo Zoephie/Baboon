@@ -12,7 +12,7 @@ use super::attachments::{elements, has_flag, object_block};
 use super::lights::{CeFlareView, posed_on};
 use super::particles::CePointPhysics;
 use super::passes::argb;
-use super::super::h2_passes::H2Image;
+use super::super::dx9::passes::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

@@ -16,7 +16,7 @@ use super::super::ce::passes::argb;
 use super::functions::H2FunctionValues;
 use super::super::h3_effects::{H3EffectTimes, adopt_event_function, for_each_attached_part, part_markers};
 use blam_tags::tag_function::h2::transition_evaluate;
-use super::super::h2_passes::{
+use super::super::dx9::passes::{
     H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
 };
 use super::super::materials::{H3Bitmap, decode_h2_image, read_h3_bitmap};
