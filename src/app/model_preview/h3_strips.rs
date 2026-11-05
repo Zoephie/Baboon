@@ -2,7 +2,7 @@
 //! is worked out whole each frame; a contrail leaves profiles behind as its
 //! location moves, so one on a still object draws nothing, as in the game.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use blam_tags::{TagFunction, TagStruct};
@@ -878,7 +878,8 @@ pub(crate) struct H3StripField {
     time: Option<f32>,
     running: Vec<RunningContrail>,
     /// Per strip, one for each particle it follows, with when that began.
-    carried: Vec<HashMap<u64, (f32, RunningContrail)>>,
+    /// Ordered by the particle's id, so they draw in the same order every run.
+    carried: Vec<BTreeMap<u64, (f32, RunningContrail)>>,
 }
 
 impl H3StripAt {
@@ -1090,7 +1091,7 @@ impl H3StripField {
             self.running = (0..strips.len())
                 .map(|at| RunningContrail { random: at as u32 * 977 + 1, ..Default::default() })
                 .collect();
-            self.carried = vec![HashMap::new(); strips.len()];
+            self.carried = vec![BTreeMap::new(); strips.len()];
             self.time = Some(time);
         }
         let dt = time - self.time.unwrap_or(time);
