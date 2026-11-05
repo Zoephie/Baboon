@@ -597,8 +597,8 @@ impl H4FlareAt {
             std::array::from_fn(|axis| position[axis] - view.eye[axis]),
         );
         let opacity = transition_function_evaluate(flare.falloff_function, 1.0);
-        let reflection =
-            &flare.reflections[flare.occlusion_reflection.min(flare.reflections.len() - 1)];
+        // Past the last, the last.
+        let reflection = flare.reflections.get(flare.occlusion_reflection).or(flare.reflections.last())?;
         let parameters = self.parameters(
             reflection, scale, tint, position, forward, center, opacity, values, view, time,
         )?;
