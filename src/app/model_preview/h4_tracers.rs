@@ -18,7 +18,8 @@ use super::ce_lights::posed_on;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::tag_function_at;
 use super::h3_effects::{
-    H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame, read_part_placement,
+    H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
+    read_part_placement,
 };
 use super::h3_particles::{read_ends, slerped};
 use super::h4_particles::{pack_argb8, pack_half2, pack_ushort2n};
@@ -269,10 +270,10 @@ const PROPERTY_NAMES: [&str; 15] = [
     "profile intensity",
 ];
 
-/// One of a `tracer_system`'s `tracers`, as `PostprocessBlockCallback`
-/// (X 0x831FC270) leaves it.
+/// One of a `tracer_system`'s `tracers` as `PostprocessBlockCallback`
+/// (X 0x831FC270) leaves it, but for its material.
 #[derive(Debug)]
-pub(crate) struct H4TracerDefinition {
+pub(crate) struct TracerDefinition {
     /// `profile shape`: 0 ribbon, 1 cross, 2 n-gon, 3 horizontal, 4 vertical.
     shape: u32,
     ngon_sides: u32,
@@ -281,6 +282,11 @@ pub(crate) struct H4TracerDefinition {
     /// `1/origin range, origin cutoff, 1/edge range, edge cutoff`, the edge
     /// pair in radians.
     fade: [f32; 4],
+    /// `origin fade cutoff` and `range`, when it fades from its origin:
+    /// trailing profiles are split at both ends (`Tracer::Extend`).
+    origin_fade: Option<[f32; 2]>,
+    lifespan: TracerProperty,
+    acceleration: TracerProperty,
     length: TracerProperty,
     offset: TracerProperty,
     density: TracerProperty,
@@ -298,8 +304,22 @@ pub(crate) struct H4TracerDefinition {
     sort_bias: f32,
     /// `m_maxProfileCount`: none draws at 0.
     most_profiles: i32,
+}
+
+/// A tracer and the material it draws through.
+#[derive(Debug)]
+pub(crate) struct H4TracerDefinition {
+    tracer: TracerDefinition,
     pub(crate) material: H4EffectMaterial,
     sort_layer: i32,
+}
+
+impl std::ops::Deref for H4TracerDefinition {
+    type Target = TracerDefinition;
+
+    fn deref(&self) -> &TracerDefinition {
+        &self.tracer
+    }
 }
 
 /// `tracerProfileShapeEnum`'s index.
@@ -339,8 +359,8 @@ fn read_tracer(source: &TagSource, element: TagStruct<'_>) -> Option<H4TracerDef
         property.allocate_seeds(&mut used);
     }
     let [
-        _lifespan,
-        _acceleration,
+        lifespan,
+        acceleration,
         length,
         offset,
         size,
@@ -375,7 +395,7 @@ fn read_tracer(source: &TagSource, element: TagStruct<'_>) -> Option<H4TracerDef
     // `uv tiling` of 0 is 1, each way.
     let uv_tiling = vector("uv tiling").map(|tiling| if tiling == 0.0 { 1.0 } else { tiling });
     let most_profiles = (length.most() * density.most()) as i32;
-    Some(H4TracerDefinition {
+    let tracer = TracerDefinition {
         shape: shape_named(&element.read_enum_name("profile shape").unwrap_or_default()),
         ngon_sides: element
             .read_int_any("number of n-gon sides")
@@ -388,6 +408,9 @@ fn read_tracer(source: &TagSource, element: TagStruct<'_>) -> Option<H4TracerDef
             (edge_range * RADIANS).recip(),
             edge_cutoff * RADIANS,
         ],
+        origin_fade: (appearance & ORIGIN_FADED != 0).then_some([origin_cutoff, origin_range]),
+        lifespan,
+        acceleration,
         length,
         offset,
         density,
@@ -404,12 +427,15 @@ fn read_tracer(source: &TagSource, element: TagStruct<'_>) -> Option<H4TracerDef
         uv_scroll: vector("uv scrolling"),
         sort_bias: element.read_int_any("sort bias").unwrap_or(0) as f32 * SORT_BIAS_STEP,
         most_profiles,
+    };
+    Some(H4TracerDefinition {
+        tracer,
         sort_layer: i32::from(material.sort_layer).clamp(1, 3),
         material: resolved,
     })
 }
 
-impl H4TracerDefinition {
+impl TracerDefinition {
     /// Ribbons, horizontals and verticals are one strip, a cross two, an
     /// n-gon one a side.
     fn strips(&self) -> u32 {
@@ -461,13 +487,21 @@ impl TracerLod {
     }
 }
 
-/// A point-to-point tracer between two markers of the object it is
-/// attached to.
+/// Where a tracer runs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TracerPath {
+    /// From its location to the part's secondary location.
+    PointToPoint { end: (usize, [f32; 3]) },
+    /// Behind its location as it moves, its forward the marker's.
+    Trailing { forward: [f32; 3] },
+}
+
+/// A tracer at a marker of the object it is attached to.
 #[derive(Debug, Clone)]
 pub(crate) struct H4TracerAt {
     pub(crate) object: u8,
     start: (usize, [f32; 3]),
-    end: (usize, [f32; 3]),
+    path: TracerPath,
     only_under: Option<(String, String)>,
     scale_by: String,
     secondary_by: String,
@@ -486,10 +520,10 @@ fn seeds_of(index: usize) -> [f32; 2] {
     [first, step(first)].map(|state| (state >> 8) as f32 / (1u32 << 24) as f32)
 }
 
-/// The point-to-point tracers of an object's attached effects, one for each
-/// of a part's location pairs. A part draws only when the system's
+/// The tracers of an object's attached effects, one for each location (and,
+/// point to point, each location pair). A part runs only when the system's
 /// `point-to-point` agrees with its having a secondary location
-/// (`UpdateLocations` X 0x8296EB50); trailing ones draw nothing at rest.
+/// (`UpdateLocations` X 0x8296EB50).
 pub(super) fn read_h4_tracers(
     source: &TagSource,
     object: &blam_tags::TagFile,
@@ -503,9 +537,6 @@ pub(super) fn read_h4_tracers(
         if part.group != tracer_group {
             return;
         }
-        let Some(secondary) = part.secondary_marker.as_ref() else {
-            return;
-        };
         let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "tracer_system", b"trac")
         else {
             return;
@@ -514,10 +545,11 @@ pub(super) fn read_h4_tracers(
         let system_flags = root
             .read_flag_names("tracer system flags")
             .unwrap_or_default();
-        if !system_flags
+        let point_to_point = system_flags
             .iter()
-            .any(|(_, name)| name.starts_with("point-to-point"))
-        {
+            .any(|(_, name)| name.starts_with("point-to-point"));
+        if point_to_point != part.secondary_marker.is_some() {
+            // "… It won't render."
             return;
         }
         let lod = TracerLod::read(root);
@@ -527,22 +559,36 @@ pub(super) fn read_h4_tracers(
             .map(Arc::new)
             .collect();
         let (offset, yaw, pitch) = read_part_placement(part.part);
-        let ends = part.effect.locations(markers, secondary, &frame);
-        for (start, end) in part
-            .effect
-            .locations(markers, &part.marker, &frame)
-            .iter()
-            .zip(&ends)
-        {
+        let starts = part.effect.locations(markers, &part.marker, &frame);
+        let ends = match &part.secondary_marker {
+            Some(secondary) => part
+                .effect
+                .locations(markers, secondary, &frame)
+                .into_iter()
+                .map(Some)
+                .collect(),
+            None => vec![None; starts.len()],
+        };
+        for (start, end) in starts.iter().zip(ends) {
             let (place, node) = frame(start);
             let (place, node) = part.placed(place, node);
             let place = part_frame(&place, offset, yaw, pitch);
-            let (far, far_node) = frame(end);
+            let path = match end {
+                Some(end) => {
+                    let (far, far_node) = frame(&end);
+                    TracerPath::PointToPoint {
+                        end: (far_node, far.position),
+                    }
+                }
+                None => TracerPath::Trailing {
+                    forward: place.axes[0],
+                },
+            };
             for definition in &definitions {
                 tracers.push(H4TracerAt {
                     object: owner,
                     start: (node, place.position),
-                    end: (far_node, far.position),
+                    path,
                     only_under: start.only_under.clone(),
                     scale_by: part.effect.scale_by.clone(),
                     secondary_by: part.effect.secondary_by.clone(),
@@ -558,43 +604,76 @@ pub(super) fn read_h4_tracers(
     tracers
 }
 
-/// `RawTracerProfileState`'s sixteen words for a point-to-point profile
-/// (`tracer_stateless_setup.fx`): no age, velocity or random, the initial
-/// colour white at an exponent of 1 and the initial alpha 1.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct StatelessProfile {
+/// `TracerProfileState`, as the card holds it between frames.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct ProfileState {
     position: [f32; 3],
+    /// 0 to 1 over its lifespan; the vertex shader drops it at 1.
+    age: f32,
+    velocity: [f32; 3],
+    initial_alpha: f32,
+    random: [f32; 4],
     size: f32,
     intensity: f32,
     offset: [f32; 2],
+    /// Turns.
     rotation: f32,
     black_point: f32,
     palette: f32,
     percentile: f32,
+    /// How far along the tracer it is, in world units.
     length: f32,
+    lifespan: f32,
     color: [f32; 4],
+    /// `a` is an exponent: the colour goes by `2^a`.
+    initial_color: [f32; 4],
 }
 
-fn pack_stateless(profile: &StatelessProfile) -> [u32; 16] {
+/// `RawTracerProfileState`'s sixteen words (`tracer_parameters.fxh`).
+fn pack_profile(profile: &ProfileState) -> [u32; 16] {
     let [x, y, z] = profile.position.map(f32::to_bits);
+    let [vx, vy, vz] = profile.velocity;
+    let [r0, r1, r2, r3] = profile.random;
     [
         x,
         y,
         z,
-        0.0f32.to_bits(),
-        pack_half2(0.0, 0.0),
-        pack_half2(0.0, 1.0),
-        0,
-        0,
+        profile.age.to_bits(),
+        pack_half2(vx, vy),
+        pack_half2(vz, profile.initial_alpha),
+        pack_ushort2n(r0, r1),
+        pack_ushort2n(r2, r3),
         pack_half2(profile.size, profile.intensity),
         pack_half2(profile.offset[0], profile.offset[1]),
         pack_ushort2n(profile.rotation, profile.black_point),
         pack_ushort2n(profile.palette, profile.percentile),
-        pack_half2(profile.length, 0.0),
+        pack_half2(profile.length, profile.lifespan),
         pack_argb8(profile.color),
-        pack_argb8([1.0; 4]),
+        pack_argb8(profile.initial_color),
         0,
     ]
+}
+
+impl TracerDefinition {
+    /// What `tracer_stateless_setup.fx` and `tracer_update.fx` both set from
+    /// the properties: rotation, colour, size, offset, intensity, black
+    /// point and palette.
+    fn apply_properties(&self, state: &TracerState, profile: &mut ProfileState) {
+        let [red, green, blue] = self.color.color(state);
+        let [x, y, _] = self.profile_offset.vector(state);
+        profile.rotation = self.rotation.scalar(state).rem_euclid(1.0);
+        profile.color = [
+            red,
+            green,
+            blue,
+            self.alpha.scalar(state) * self.alpha2.scalar(state),
+        ];
+        profile.size = self.size.scalar(state);
+        profile.offset = [x, y];
+        profile.intensity = self.intensity.scalar(state);
+        profile.black_point = self.black_point.scalar(state).rem_euclid(1.0);
+        profile.palette = self.palette.scalar(state).rem_euclid(1.0);
+    }
 }
 
 /// One tracer's frame: `vs_tracerOverallState` and its profiles' packed
@@ -645,6 +724,15 @@ fn profile_count(length: f32, density: f32) -> usize {
     }
 }
 
+/// The per-tracer part of a frame: its states, and the seconds its system
+/// has run.
+struct TracerFrame {
+    state: TracerState,
+    since: f32,
+    /// Its event is running and its effect on: it lays profiles down.
+    live: bool,
+}
+
 impl H4TracerAt {
     pub(crate) fn only_under(&self) -> Option<&(String, String)> {
         self.only_under.as_ref()
@@ -675,26 +763,29 @@ impl H4TracerAt {
         self.definition.sort_bias
     }
 
-    /// Its sort position: `Tracer::Submit` hands over its location's.
-    pub(crate) fn origin(&self, bones: Option<&[[f32; 4]]>) -> [f32; 3] {
-        let (node, position) = self.start;
-        posed_on(node, position, [1.0, 0.0, 0.0], bones).0
+    /// Its location this frame, and its forward.
+    fn location(&self, bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
+        let forward = match self.path {
+            TracerPath::Trailing { forward } => forward,
+            TracerPath::PointToPoint { .. } => [1.0, 0.0, 0.0],
+        };
+        posed_on(self.start.0, self.start.1, forward, bones)
     }
 
-    /// The frame at `time`, or none while its event is not running, its
-    /// effect is off or it can make no profiles.
-    pub(crate) fn draw(
+    /// Its sort position: `Tracer::Submit` hands over its location's.
+    pub(crate) fn origin(&self, bones: Option<&[[f32; 4]]>) -> [f32; 3] {
+        self.location(bones).0
+    }
+
+    /// `TracerStates::UpdateStates` (X 0x82991E10) at `time`, from `at`.
+    fn frame(
         &self,
         values: Option<&H2FunctionValues>,
-        bones: Option<&[[f32; 4]]>,
+        at: [f32; 3],
         eye: [f32; 3],
         time: f32,
         onset: f32,
-    ) -> Option<H4TracerDraw> {
-        let tracer = &*self.definition;
-        if tracer.most_profiles <= 0 {
-            return None;
-        }
+    ) -> TracerFrame {
         let read = |name: &str| {
             if name.is_empty() {
                 return 1.0;
@@ -704,76 +795,37 @@ impl H4TracerAt {
                 .copied()
                 .unwrap_or(0.0)
         };
-        let effect_a = read(&self.scale_by);
-        if effect_a <= 0.0 {
-            return None;
-        }
         let since = time - onset;
-        let system_age = self.times.age(self.event, since)?;
-        let start = posed_on(self.start.0, self.start.1, [1.0, 0.0, 0.0], bones).0;
-        let end = posed_on(self.end.0, self.end.1, [1.0, 0.0, 0.0], bones).0;
-        // `SetStatelessPositionAndLength`: a beam of no length runs forward.
-        let span: [f32; 3] = std::array::from_fn(|axis| end[axis] - start[axis]);
-        let cap = length_of(span);
-        let direction = if cap > 0.0 {
-            span.map(|axis| axis / cap)
-        } else {
-            [1.0, 0.0, 0.0]
-        };
-        let from_eye: [f32; 3] = std::array::from_fn(|axis| start[axis] - eye[axis]);
-        let mut state = TracerState {
-            game_time: time,
-            tracer_seeds: self.seeds,
-            system_age,
-            lod: self.lod.at(length_of(from_eye)),
-            effect_a,
-            effect_b: read(&self.secondary_by),
-            ..Default::default()
-        };
-        // `Tracer::FrameAdvance`: the length held to the gap between the two.
-        let length = tracer.length.scalar(&state);
-        let capped = if cap == 0.0 || cap > length {
-            length
-        } else {
-            cap
-        };
-        state.length = capped;
-        let offset = tracer.offset.scalar(&state);
-        let density = tracer.density.scalar(&state);
-        let count = profile_count(capped, density);
-        let step = percentile_step(capped, density);
-        let states = (0..count)
-            .map(|index| {
-                let percentile = if index == count - 1 {
-                    1.0
-                } else {
-                    index as f32 * step
-                };
-                state.percentile = percentile;
-                let along = offset + capped * percentile;
-                let [red, green, blue] = tracer.color.color(&state);
-                let [x, y, _] = tracer.profile_offset.vector(&state);
-                pack_stateless(&StatelessProfile {
-                    position: std::array::from_fn(|axis| start[axis] + direction[axis] * along),
-                    size: tracer.size.scalar(&state),
-                    intensity: tracer.intensity.scalar(&state),
-                    offset: [x, y],
-                    rotation: tracer.rotation.scalar(&state).rem_euclid(1.0),
-                    black_point: tracer.black_point.scalar(&state).rem_euclid(1.0),
-                    palette: tracer.palette.scalar(&state).rem_euclid(1.0),
-                    percentile,
-                    length: percentile * capped,
-                    color: [
-                        red,
-                        green,
-                        blue,
-                        tracer.alpha.scalar(&state) * tracer.alpha2.scalar(&state),
-                    ],
-                })
-            })
-            .collect();
-        state.percentile = 0.0;
-        let inputs = std::array::from_fn(|index| state.of(index as u8));
+        let effect_a = read(&self.scale_by);
+        let age = self.times.age(self.event, since);
+        let from_eye: [f32; 3] = std::array::from_fn(|axis| at[axis] - eye[axis]);
+        TracerFrame {
+            state: TracerState {
+                game_time: time,
+                tracer_seeds: self.seeds,
+                system_age: age.unwrap_or(1.0),
+                lod: self.lod.at(length_of(from_eye)),
+                effect_a,
+                effect_b: read(&self.secondary_by),
+                ..Default::default()
+            },
+            since,
+            live: effect_a > 0.0 && age.is_some(),
+        }
+    }
+
+    /// `SetMaterialState`'s overall state around `states`.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_of(
+        &self,
+        state: &TracerState,
+        since: f32,
+        [step, capped, offset]: [f32; 3],
+        origin: [f32; 3],
+        direction: [f32; 3],
+        states: Vec<[u32; 16]>,
+    ) -> H4TracerDraw {
+        let tracer = &*self.definition;
         let random = |flag: u32, seed: f32| {
             if tracer.appearance & flag != 0 {
                 seed
@@ -781,7 +833,7 @@ impl H4TracerAt {
                 0.0
             }
         };
-        Some(H4TracerDraw {
+        H4TracerDraw {
             shape: tracer.shape as f32,
             ngon_sides: tracer.ngon_sides as f32,
             appearance: tracer.appearance as f32,
@@ -795,13 +847,455 @@ impl H4TracerAt {
                 random(RANDOM_U_OFFSET, self.seeds[0]),
                 random(RANDOM_V_OFFSET, self.seeds[1]),
             ],
-            origin: start,
+            origin,
             direction,
             fade: tracer.fade,
-            inputs,
+            inputs: std::array::from_fn(|index| {
+                if index == 1 {
+                    0.0
+                } else {
+                    state.of(index as u8)
+                }
+            }),
             strips: tracer.strips(),
             states,
-        })
+        }
+    }
+
+    /// Whether it trails its location, and so runs in an [`H4TracerField`].
+    pub(crate) fn trails(&self) -> bool {
+        matches!(self.path, TracerPath::Trailing { .. })
+    }
+
+    /// A point-to-point tracer's frame at `time`, or none while its event is
+    /// not running, its effect is off or it can make no profiles.
+    pub(crate) fn draw(
+        &self,
+        values: Option<&H2FunctionValues>,
+        bones: Option<&[[f32; 4]]>,
+        eye: [f32; 3],
+        time: f32,
+        onset: f32,
+    ) -> Option<H4TracerDraw> {
+        let TracerPath::PointToPoint { end } = self.path else {
+            return None;
+        };
+        let tracer = &*self.definition;
+        if tracer.most_profiles <= 0 {
+            return None;
+        }
+        let start = self.origin(bones);
+        let TracerFrame {
+            mut state,
+            since,
+            live,
+        } = self.frame(values, start, eye, time, onset);
+        if !live {
+            return None;
+        }
+        let end = posed_on(end.0, end.1, [1.0, 0.0, 0.0], bones).0;
+        // `SetStatelessPositionAndLength`: a beam of no length runs forward.
+        let span: [f32; 3] = std::array::from_fn(|axis| end[axis] - start[axis]);
+        let cap = length_of(span);
+        let direction = if cap > 0.0 {
+            span.map(|axis| axis / cap)
+        } else {
+            [1.0, 0.0, 0.0]
+        };
+        // `Tracer::FrameAdvance`: the length held to the gap between the two.
+        let length = tracer.length.scalar(&state);
+        let capped = if cap == 0.0 || cap > length {
+            length
+        } else {
+            cap
+        };
+        state.length = capped;
+        let offset = tracer.offset.scalar(&state);
+        let density = tracer.density.scalar(&state);
+        let count = profile_count(capped, density);
+        let step = percentile_step(capped, density);
+        // `tracer_stateless_setup.fx`: no age, velocity or random, the
+        // initial colour white at an exponent of 1, the initial alpha 1.
+        let states = (0..count)
+            .map(|index| {
+                let percentile = if index == count - 1 {
+                    1.0
+                } else {
+                    index as f32 * step
+                };
+                state.percentile = percentile;
+                let mut profile = ProfileState {
+                    position: std::array::from_fn(|axis| {
+                        start[axis] + direction[axis] * (offset + capped * percentile)
+                    }),
+                    initial_alpha: 1.0,
+                    percentile,
+                    length: percentile * capped,
+                    initial_color: [1.0; 4],
+                    ..Default::default()
+                };
+                tracer.apply_properties(&state, &mut profile);
+                pack_profile(&profile)
+            })
+            .collect();
+        Some(self.draw_of(
+            &state,
+            since,
+            [step, capped, offset],
+            start,
+            direction,
+            states,
+        ))
+    }
+}
+
+/// `TracerGpu::k_profilesPerRow`.
+const PROFILES_PER_ROW: usize = 16;
+/// `Tracer::k_maxProfilesSpawnedPerFrame`, `…Constrained`, and the count
+/// past which the constrained one holds (`k_profileSpawnConstraintThreshold`).
+const SPAWNED_PER_FRAME: usize = 10;
+const SPAWNED_PER_FRAME_CONSTRAINED: usize = 2;
+const SPAWN_CONSTRAINT_THRESHOLD: usize = 25;
+/// `tracerAppearanceFlags`: `profile opacity from scale a`.
+const OPACITY_FROM_SCALE_A: u32 = 1 << 2;
+/// What `Tracer::Extend` and `PlaceProfilesToPoint` take for no distance.
+const PLACE_EPSILON: f32 = 1e-4;
+
+/// A row of the card's profiles: they are freed together once the longest
+/// lifespan among them has run (`TracerGpu::FrameAdvance`).
+#[derive(Debug, Clone, Default)]
+struct TrailRow {
+    slots: Vec<ProfileState>,
+    timer: f32,
+}
+
+/// A trailing tracer's `Tracer` and `TracerGpu` between frames.
+#[derive(Debug, Clone, Default)]
+struct RunningTracer {
+    /// Oldest first, all but the newest full.
+    rows: Vec<TrailRow>,
+    /// The last real profile's place, and whether there is one yet.
+    last_placed: [f32; 3],
+    placed_real: bool,
+    /// The last real profile's length along the trail (`Tracer+60`).
+    length: f32,
+    /// The newest slot holds the temporary leading profile.
+    leading_temporary: bool,
+    location: Option<[f32; 3]>,
+    speed: f32,
+    random: u32,
+}
+
+impl RunningTracer {
+    fn next_seed(&mut self) -> f32 {
+        self.random = self
+            .random
+            .wrapping_mul(1_664_525)
+            .wrapping_add(1_013_904_223);
+        (self.random >> 16) as f32 / 65_535.0
+    }
+
+    fn count(&self) -> usize {
+        self.rows.iter().map(|row| row.slots.len()).sum()
+    }
+
+    /// `QueueProfile` / `AllocateProfile` (X 0x82BA4A78): a temporary
+    /// profile last time is written over; else the newest row takes it, or a
+    /// new one does. No more than a strip holds.
+    fn queue(&mut self, profile: ProfileState, temporary: bool) {
+        let timer = (1.0 - profile.age) * profile.lifespan;
+        if self.leading_temporary
+            && let Some(row) = self.rows.last_mut()
+            && let Some(slot) = row.slots.last_mut()
+        {
+            *slot = profile;
+            row.timer = row.timer.max(timer);
+            self.leading_temporary = temporary;
+            return;
+        }
+        if self.count() >= MOST_PROFILES {
+            return;
+        }
+        if self
+            .rows
+            .last()
+            .is_none_or(|row| row.slots.len() >= PROFILES_PER_ROW)
+        {
+            self.rows.push(TrailRow::default());
+        }
+        let row = self.rows.last_mut().expect("a row");
+        row.slots.push(profile);
+        row.timer = row.timer.max(timer);
+        self.leading_temporary = temporary;
+    }
+
+    /// `CreateProfile` and `InitializeProfile` (X 0x829C2A98, 0x82B9B070):
+    /// `distance` on from the last real profile.
+    fn create(
+        &mut self,
+        tracer: &TracerDefinition,
+        state: &TracerState,
+        temporary: bool,
+        direction: [f32; 3],
+        distance: f32,
+    ) {
+        // The temporary leading profile is reused, its seeds and all.
+        let reused = self
+            .leading_temporary
+            .then(|| self.rows.last().and_then(|row| row.slots.last()))
+            .flatten();
+        let random = match reused {
+            Some(profile) => profile.random,
+            None => std::array::from_fn(|_| self.next_seed()),
+        };
+        let profile_state = TracerState {
+            profile_seeds: random,
+            ..*state
+        };
+        let position =
+            std::array::from_fn(|axis| self.last_placed[axis] + direction[axis] * distance);
+        let length = if self.placed_real {
+            self.length + distance
+        } else {
+            0.0
+        };
+        let opacity_from_a = tracer.appearance & OPACITY_FROM_SCALE_A != 0;
+        let profile = ProfileState {
+            position,
+            random,
+            length,
+            lifespan: tracer.lifespan.scalar(&profile_state),
+            initial_alpha: if opacity_from_a { state.effect_a } else { 1.0 },
+            // No lightmap: white at an exponent of 0.
+            initial_color: [1.0, 1.0, 1.0, 0.0],
+            ..Default::default()
+        };
+        if !temporary {
+            self.placed_real = true;
+            self.last_placed = position;
+            self.length = length;
+        }
+        self.queue(profile, temporary);
+    }
+
+    /// `Tracer::Extend` (X 0x829C2840): an origin fade gets profiles at
+    /// both its ends; with none, the first stretch gets a tiny one.
+    fn extend(
+        &mut self,
+        tracer: &TracerDefinition,
+        state: &TracerState,
+        temporary: bool,
+        direction: [f32; 3],
+        by: f32,
+    ) {
+        let mut current = self.length;
+        let last = current + by;
+        if let Some([cutoff, range]) = tracer.origin_fade {
+            for boundary in [cutoff, cutoff + range] {
+                if current + PLACE_EPSILON < boundary && boundary < last - PLACE_EPSILON {
+                    self.create(tracer, state, false, direction, boundary - current);
+                    current = boundary;
+                }
+            }
+        } else if current < PLACE_EPSILON && last > PLACE_EPSILON {
+            self.create(tracer, state, false, direction, 2.0 * PLACE_EPSILON);
+        }
+        self.create(tracer, state, temporary, direction, last - current);
+    }
+
+    /// `PlaceProfilesToPoint` (X 0x82995628): profiles a density apart up to
+    /// `at`, no more than the frame's allowance, and a temporary one at `at`
+    /// itself while the effect runs.
+    fn place_to(
+        &mut self,
+        tracer: &TracerDefinition,
+        state: &TracerState,
+        at: [f32; 3],
+        spawned: &mut usize,
+    ) {
+        let moved: [f32; 3] = std::array::from_fn(|axis| at[axis] - self.last_placed[axis]);
+        let distance = length_of(moved);
+        if self.placed_real && distance <= PLACE_EPSILON {
+            return;
+        }
+        let direction = if distance > 0.0 {
+            moved.map(|axis| axis / distance)
+        } else {
+            [0.0; 3]
+        };
+        let wanted = distance * tracer.density.scalar(state);
+        let allowance = if *spawned < SPAWN_CONSTRAINT_THRESHOLD {
+            SPAWNED_PER_FRAME
+        } else {
+            SPAWNED_PER_FRAME_CONSTRAINED
+        };
+        let whole = if wanted.is_finite() {
+            (wanted.max(0.0) as usize).min(allowance)
+        } else {
+            allowance
+        };
+        *spawned += whole;
+        let steps = wanted.min(whole as f32);
+        let mut remaining = distance;
+        let mut left = steps;
+        while left >= 1.0 {
+            let step = distance / steps;
+            self.extend(tracer, state, false, direction, step);
+            remaining -= step;
+            left -= 1.0;
+        }
+        if !self.placed_real || remaining > PLACE_EPSILON {
+            self.extend(tracer, state, true, direction, remaining);
+        }
+    }
+
+    /// `TracerGpu::FrameAdvance`'s spawned branch: rows past their time go;
+    /// the rest age, move and take their properties (`tracer_update.fx`),
+    /// each by its buffer slot's place.
+    fn update(&mut self, tracer: &TracerDefinition, state: &TracerState, dt: f32) {
+        self.rows.retain(|row| row.timer >= 0.0);
+        if self.rows.is_empty() {
+            self.leading_temporary = false;
+        }
+        let count = self.count();
+        let step = percentile_step(self.length, tracer.density.scalar(state));
+        for (at, row) in self.rows.iter_mut().enumerate() {
+            row.timer -= dt;
+            for (within, profile) in row.slots.iter_mut().enumerate() {
+                if profile.age >= 1.0 {
+                    continue;
+                }
+                let before = TracerState {
+                    profile_age: profile.age,
+                    percentile: profile.percentile,
+                    profile_seeds: profile.random,
+                    ..*state
+                };
+                profile.age += dt / profile.lifespan;
+                let acceleration = tracer.acceleration.vector(&before);
+                let moving = profile.position.iter_mut().zip(&mut profile.velocity);
+                for ((place, velocity), push) in moving.zip(acceleration) {
+                    *place += *velocity * dt;
+                    *velocity += push * dt;
+                }
+                tracer.apply_properties(&before, profile);
+                let index = at * PROFILES_PER_ROW + within;
+                profile.percentile = if index + 1 == count {
+                    1.0
+                } else {
+                    index as f32 * step
+                };
+            }
+        }
+    }
+}
+
+/// What a slot keeps of its trailing tracers from frame to frame.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct H4TracerField {
+    time: Option<f32>,
+    running: Vec<RunningTracer>,
+}
+
+impl H4TracerField {
+    /// Run the trailing tracers up to `time`, their locations where `bones`
+    /// has them: `PulseAll`, then each one's update.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn advance(
+        &mut self,
+        tracers: &[H4TracerAt],
+        values: impl Fn(u8) -> Option<H2FunctionValues>,
+        onsets: &mut H3EffectOnsets,
+        bones: Option<&[[f32; 4]]>,
+        eye: [f32; 3],
+        time: f32,
+    ) {
+        if self.running.len() != tracers.len() || self.time.is_none_or(|last| time < last) {
+            self.running = (0..tracers.len())
+                .map(|at| RunningTracer {
+                    random: (at as u32).wrapping_mul(977) | 1,
+                    ..Default::default()
+                })
+                .collect();
+            self.time = Some(time);
+        }
+        let dt = time - self.time.unwrap_or(time);
+        self.time = Some(time);
+        if dt <= 0.0 {
+            return;
+        }
+        // `PulseAll` sets the frame's allowance going once for every tracer.
+        let mut spawned = 0;
+        for (tracer, running) in tracers.iter().zip(&mut self.running) {
+            if !tracer.trails() {
+                continue;
+            }
+            let (at, _) = tracer.location(bones);
+            let last = running.location.replace(at);
+            if last.is_none() {
+                running.last_placed = at;
+            }
+            running.speed = last.map_or(0.0, |last| {
+                length_of(std::array::from_fn(|axis| last[axis] - at[axis])) / dt
+            });
+            let values = values(tracer.object);
+            let onset = onsets.of(tracer.object, &tracer.scale_by, values.as_ref(), time);
+            let TracerFrame {
+                mut state, live, ..
+            } = tracer.frame(values.as_ref(), at, eye, time, onset);
+            state.speed = running.speed;
+            state.length = running.length;
+            if live {
+                running.place_to(&tracer.definition, &state, at, &mut spawned);
+            }
+            running.update(&tracer.definition, &state, dt);
+        }
+    }
+
+    /// The trailing tracer at `index`'s frame, or none while it has one
+    /// profile or fewer (`TracerGpu::Render`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw(
+        &self,
+        index: usize,
+        tracer: &H4TracerAt,
+        values: Option<&H2FunctionValues>,
+        bones: Option<&[[f32; 4]]>,
+        eye: [f32; 3],
+        time: f32,
+        onset: f32,
+    ) -> Option<H4TracerDraw> {
+        let running = self.running.get(index)?;
+        if running.count() <= 1 {
+            return None;
+        }
+        let (origin, forward) = tracer.location(bones);
+        let TracerFrame {
+            mut state, since, ..
+        } = tracer.frame(values, origin, eye, time, onset);
+        state.speed = running.speed;
+        state.length = running.length;
+        let definition = &*tracer.definition;
+        let step = percentile_step(running.length, definition.density.scalar(&state));
+        let offset = definition.offset.scalar(&state);
+        let states = running
+            .rows
+            .iter()
+            .flat_map(|row| &row.slots)
+            .map(pack_profile)
+            .collect();
+        let direction = {
+            let length = length_of(forward).max(1e-6);
+            forward.map(|axis| axis / length)
+        };
+        Some(tracer.draw_of(
+            &state,
+            since,
+            [step, running.length, offset],
+            origin,
+            direction,
+            states,
+        ))
     }
 }
 
@@ -890,37 +1384,228 @@ mod tests {
         assert_eq!(lod.at(25.0), 0.0);
     }
 
-    /// A point-to-point profile has no age, velocity or random, an initial
-    /// alpha of 1 and a white initial colour at an exponent of 1, which
-    /// doubles its colour.
+    /// `RawTracerProfileState`: position and age as they are, velocity and
+    /// initial alpha, size and intensity, offset, length and lifespan as
+    /// halves, random, rotation, black point, palette and place as
+    /// truncated ushorts, the colours as ARGB8.
     #[test]
-    fn a_stateless_profile_packs_as_the_setup_writes_it() {
-        let profile = StatelessProfile {
+    fn a_profile_packs_as_the_card_reads_it() {
+        let profile = ProfileState {
             position: [1.0, 2.0, 3.0],
+            age: 0.5,
+            velocity: [0.0, 0.0, 2.0],
+            initial_alpha: 1.0,
+            random: [1.0, 0.0, 0.5, 0.0],
             size: 0.5,
             intensity: 2.0,
-            offset: [0.0, 0.0],
             rotation: 0.25,
-            black_point: 0.0,
             palette: 0.5,
             percentile: 1.0,
             length: 3.0,
+            lifespan: 2.0,
             color: [1.0, 0.0, 0.0, 0.5],
+            initial_color: [1.0, 1.0, 1.0, 0.0],
+            ..Default::default()
         };
-        let words = pack_stateless(&profile);
-        assert_eq!(words[..4], [1.0f32, 2.0, 3.0, 0.0].map(f32::to_bits));
-        assert_eq!(words[5] >> 16, 0x3C00, "initial alpha 1");
+        let words = pack_profile(&profile);
+        assert_eq!(words[..4], [1.0f32, 2.0, 3.0, 0.5].map(f32::to_bits));
+        assert_eq!(
+            words[5],
+            0x4000 | (0x3C00 << 16),
+            "velocity z 2, initial alpha 1"
+        );
+        assert_eq!(words[6], 65535);
+        assert_eq!(words[7], 32767);
         assert_eq!(words[8], 0x3800 | (0x4000 << 16), "size 0.5, intensity 2");
         assert_eq!(words[10] & 0xFFFF, 16383, "a quarter turn");
         assert_eq!(words[11] >> 16, 65535, "the last profile's place");
-        assert_eq!(words[12] & 0xFFFF, 0x4200, "length 3");
+        assert_eq!(words[12], 0x4200 | (0x4000 << 16), "length 3, lifespan 2");
         assert_eq!(words[13], (127 << 24) | (255 << 16));
-        assert_eq!(words[14], u32::MAX);
-        let other = pack_stateless(&StatelessProfile {
+        assert_eq!(words[14], 0x00FF_FFFF, "white at an exponent of 0");
+        let other = pack_profile(&ProfileState {
             rotation: 0.5,
             ..profile
         });
         assert_ne!(other[10], words[10]);
+    }
+
+    fn fixed(value: f32) -> TracerProperty {
+        TracerProperty {
+            function: function(FunctionType::Constant, value, value),
+            ..property(FunctionType::Constant, INVALID, INVALID)
+        }
+    }
+
+    /// A ribbon two profiles a unit, each living `lifespan`.
+    fn trail(lifespan: f32, origin_fade: Option<[f32; 2]>) -> TracerDefinition {
+        TracerDefinition {
+            shape: 0,
+            ngon_sides: 0,
+            appearance: 0,
+            fade: [0.0; 4],
+            origin_fade,
+            lifespan: fixed(lifespan),
+            acceleration: fixed(0.0),
+            length: fixed(1.0),
+            offset: fixed(0.0),
+            density: fixed(2.0),
+            size: fixed(1.0),
+            profile_offset: fixed(0.0),
+            rotation: fixed(0.0),
+            color: fixed(1.0),
+            alpha: fixed(1.0),
+            alpha2: fixed(1.0),
+            black_point: fixed(0.0),
+            palette: fixed(0.0),
+            intensity: fixed(1.0),
+            uv_tiling: [1.0; 2],
+            uv_scroll: [0.0; 2],
+            sort_bias: 0.0,
+            most_profiles: 2,
+        }
+    }
+
+    /// Run `running` along `path`, a frame of `dt` at each point.
+    fn run(tracer: &TracerDefinition, running: &mut RunningTracer, path: &[[f32; 3]], dt: f32) {
+        let state = TracerState {
+            effect_a: 1.0,
+            ..Default::default()
+        };
+        for &at in path {
+            if running.location.replace(at).is_none() {
+                running.last_placed = at;
+            }
+            let mut spawned = 0;
+            running.place_to(tracer, &state, at, &mut spawned);
+            running.update(tracer, &state, dt);
+        }
+    }
+
+    /// At rest only the temporary leading profile sits at the origin, so
+    /// `Render` has one profile and draws nothing.
+    #[test]
+    fn a_trail_at_rest_keeps_one_profile() {
+        let tracer = trail(1.0, None);
+        let mut running = RunningTracer {
+            random: 1,
+            ..Default::default()
+        };
+        run(&tracer, &mut running, &[[0.0; 3]; 10], 0.1);
+        assert_eq!(running.count(), 1);
+        assert!(running.leading_temporary);
+    }
+
+    /// Moving lays profiles a density apart behind the location, oldest
+    /// first along the trail, with the leading one written over each frame.
+    #[test]
+    fn a_moving_trail_lays_profiles_behind_it() {
+        let tracer = trail(10.0, None);
+        let mut running = RunningTracer {
+            random: 1,
+            ..Default::default()
+        };
+        let path: Vec<[f32; 3]> = (0..4).map(|step| [step as f32, 0.0, 0.0]).collect();
+        run(&tracer, &mut running, &path, 0.1);
+        // The tiny first stretch over the leading profile, two in the first
+        // unit, then one (1.9996 a unit, floored) and two: the floor drops
+        // what a frame's distance falls short of.
+        assert_eq!(running.count(), 6);
+        assert!((running.length - 3.0).abs() < 1e-3, "{}", running.length);
+        let lengths: Vec<f32> = running
+            .rows
+            .iter()
+            .flat_map(|row| &row.slots)
+            .map(|profile| profile.length)
+            .collect();
+        assert!(
+            lengths.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{lengths:?}"
+        );
+        let x = running.rows.last().unwrap().slots.last().unwrap().position[0];
+        assert!((x - 3.0).abs() < 1e-3, "the newest is at the location: {x}");
+    }
+
+    /// An origin fade gets real profiles at both its ends, so the fade runs
+    /// straight between them. Before the first real one a profile's length
+    /// stays 0 (`InitializeProfile`), so the first lands at the cutoff with
+    /// none.
+    #[test]
+    fn an_origin_fade_gets_profiles_at_its_ends() {
+        let tracer = TracerDefinition {
+            density: fixed(0.1),
+            ..trail(10.0, Some([1.0, 0.5]))
+        };
+        let mut running = RunningTracer {
+            random: 1,
+            ..Default::default()
+        };
+        run(&tracer, &mut running, &[[0.0; 3], [3.0, 0.0, 0.0]], 0.1);
+        let profiles: Vec<&ProfileState> = running.rows.iter().flat_map(|row| &row.slots).collect();
+        let places: Vec<f32> = profiles.iter().map(|profile| profile.position[0]).collect();
+        assert_eq!(places.len(), 3, "{places:?}");
+        assert!(
+            (places[0] - 1.0).abs() < 1e-4 && (places[1] - 1.5).abs() < 1e-4,
+            "{places:?}"
+        );
+        let lengths: Vec<f32> = profiles.iter().map(|profile| profile.length).collect();
+        assert_eq!(lengths, [0.0, 0.5, 2.0]);
+        assert!(
+            running.leading_temporary,
+            "the last reaches the location for now"
+        );
+    }
+
+    /// No more than ten profiles a frame, two once the frame has had 25.
+    #[test]
+    fn a_frame_lays_down_no_more_than_its_allowance() {
+        let tracer = TracerDefinition {
+            density: fixed(100.0),
+            ..trail(10.0, None)
+        };
+        let state = TracerState {
+            effect_a: 1.0,
+            ..Default::default()
+        };
+        let mut running = RunningTracer {
+            random: 1,
+            placed_real: true,
+            ..Default::default()
+        };
+        let mut spawned = 0;
+        running.place_to(&tracer, &state, [5.0, 0.0, 0.0], &mut spawned);
+        assert_eq!(spawned, 10);
+        let mut late = RunningTracer {
+            random: 1,
+            placed_real: true,
+            ..Default::default()
+        };
+        let mut spawned = 30;
+        late.place_to(&tracer, &state, [5.0, 0.0, 0.0], &mut spawned);
+        assert_eq!(spawned, 32);
+    }
+
+    /// A row goes as a whole once its longest lifespan has run; until then a
+    /// dead profile stays, aged past 1, for the vertex shader to drop.
+    #[test]
+    fn profiles_die_a_row_at_a_time() {
+        let tracer = trail(0.5, None);
+        let mut running = RunningTracer {
+            random: 1,
+            ..Default::default()
+        };
+        run(&tracer, &mut running, &[[0.0; 3], [2.0, 0.0, 0.0]], 0.1);
+        let laid = running.count();
+        assert!(laid > 1);
+        let state = TracerState::default();
+        for _ in 0..5 {
+            running.update(&tracer, &state, 0.1);
+        }
+        assert_eq!(running.count(), laid, "still within the row's time");
+        assert!(running.rows[0].slots[0].age >= 1.0);
+        for _ in 0..3 {
+            running.update(&tracer, &state, 0.1);
+        }
+        assert_eq!(running.count(), 0);
     }
 
     #[test]
@@ -964,7 +1649,9 @@ mod tests {
         let at = H4TracerAt {
             object: 0,
             start: (usize::MAX, [0.0; 3]),
-            end: (usize::MAX, [0.0, 0.0, 4.0]),
+            path: TracerPath::PointToPoint {
+                end: (usize::MAX, [0.0, 0.0, 4.0]),
+            },
             only_under: None,
             scale_by: String::new(),
             secondary_by: String::new(),

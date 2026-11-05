@@ -2099,6 +2099,8 @@ struct ModelGpuSlot {
     ce_flags: ce_flags::CeFlagField,
     ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     h3_strips: h3_strips::H3StripField,
+    /// Halo 4's trailing tracers between frames.
+    h4_trails: h4_tracers::H4TracerField,
     h3_onsets: h3_effects::H3EffectOnsets,
     /// How long VISR has been on, as of when.
     h3_vision_clock: Option<(f32, f32)>,
@@ -2179,6 +2181,7 @@ impl ModelGpuSlot {
                 ce_flags: Default::default(),
                 ce_glow_textures: Vec::new(),
                 h3_strips: Default::default(),
+                h4_trails: Default::default(),
                 h3_onsets: Default::default(),
                 h3_vision_clock: None,
                 h3_cloth: Default::default(),
@@ -2513,6 +2516,7 @@ impl ModelGpuSlot {
         self.h3_particles = Default::default();
         self.reach_cheap = Default::default();
         self.h3_strips = Default::default();
+        self.h4_trails = Default::default();
         self.h3_leaves = Default::default();
         self.h3_cloth = Default::default();
         self.reach_antennas = Default::default();
@@ -5002,6 +5006,11 @@ impl ModelGlRenderer {
                 };
                 uploaded.h3_strips.advance(&frame.preview.h3_strips, values, &mut uploaded.h3_onsets, tracks, bones, frame.time);
             }
+            if !cursor_advanced && frame.preview.h4_tracers.iter().any(|tracer| tracer.trails()) {
+                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                let tracers = &frame.preview.h4_tracers;
+                uploaded.h4_trails.advance(tracers, values, &mut uploaded.h3_onsets, bones, view.eye, frame.time);
+            }
             // `c_transparency_renderer` sorts far to near, each from its location.
             enum Sprites {
                 Volume(usize),
@@ -5065,7 +5074,12 @@ impl ModelGlRenderer {
                         }
                         let values = frame.h2_values_of_object(at.object);
                         let onset = uploaded.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
-                        if let Some(draw) = at.draw(values, bones, view.eye, frame.time, onset) {
+                        let draw = if at.trails() {
+                            uploaded.h4_trails.draw(index, at, values, bones, view.eye, frame.time, onset)
+                        } else {
+                            at.draw(values, bones, view.eye, frame.time, onset)
+                        };
+                        if let Some(draw) = draw {
                             let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
                             h4_tracer_pass::draw_h4_tracer(
                                 gl,
