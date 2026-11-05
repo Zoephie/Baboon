@@ -231,21 +231,17 @@ pub(super) fn draw_model_viewport(
             }
             painter.circle_filled(joint, 2.5, Color32::WHITE);
             painter.circle_stroke(joint, 2.5, Stroke::new(1.0_f32, Color32::BLACK));
-            if let Some(distance) = hover_pos.map(|pos| screen_edge_length(pos, joint)) {
-                if distance <= 6.0 && hovered.is_none_or(|(_, _, closest)| distance < closest) {
-                    hovered = Some((index, joint, distance));
-                }
+            if let Some(distance) = hover_pos.map(|pos| screen_edge_length(pos, joint))
+                && distance <= 6.0
+                && hovered.is_none_or(|(_, _, closest)| distance < closest)
+            {
+                hovered = Some((index, joint, distance));
             }
         }
-        if let Some((index, position, _)) = hovered {
-            if let Some(node) = data.preview.nodes.get(index) {
-                draw_preview_hover_label(
-                    &painter,
-                    position + Vec2::new(7.0, -7.0),
-                    &node.name,
-                    ARMATURE_COLOR,
-                );
-            }
+        if let Some((index, position, _)) = hovered
+            && let Some(node) = data.preview.nodes.get(index)
+        {
+            draw_preview_hover_label(&painter, position + Vec2::new(7.0, -7.0), &node.name, ARMATURE_COLOR);
         }
     }
 
@@ -3897,11 +3893,11 @@ unsafe fn copy_frame(gl: &glow::Context, copy: &mut Option<FrameCopy>) -> Option
         if width <= 0 || height <= 0 {
             return None;
         }
-        if copy.as_ref().is_some_and(|copy| copy.size != [width, height]) {
-            if let Some(old) = copy.take() {
-                gl.delete_texture(old.texture);
-                gl.delete_framebuffer(old.framebuffer);
-            }
+        if copy.as_ref().is_some_and(|copy| copy.size != [width, height])
+            && let Some(old) = copy.take()
+        {
+            gl.delete_texture(old.texture);
+            gl.delete_framebuffer(old.framebuffer);
         }
         let drawn_to = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
         if copy.is_none() {
@@ -4273,10 +4269,7 @@ impl ModelGlRenderer {
     fn new(gl: &glow::Context) -> Result<Self, String> {
         let shader_version = eframe::egui_glow::ShaderVersion::get(gl);
         let modern = shader_version.is_new_shader_interface();
-        let precision = shader_version
-            .is_embedded()
-            .then_some("precision mediump float;\n")
-            .unwrap_or("");
+        let precision = if shader_version.is_embedded() { "precision mediump float;\n" } else { "" };
         let (vertex_source, fragment_source) =
             model_shader_sources(shader_version.version_declaration(), modern, precision);
 
@@ -5479,11 +5472,11 @@ impl ModelGlRenderer {
             || self.h2_material_ready(frame, material, H2Layer::Prt)
             || (Self::h2_passes(frame, material, lightmap).is_empty()
                 && (self.h2_material_ready(frame, material, H2Layer::Overlay)
-                    || (!frame
+                    || (frame
                         .textures
                         .as_ref()
                         .and_then(|textures| textures.get(material))
-                        .is_some_and(|material| material.get(TextureSlot::Base).is_some())
+                        .is_none_or(|material| material.get(TextureSlot::Base).is_none())
                         && self.h2_material_ready(frame, material, H2Layer::SelfIllumination))))
     }
 
@@ -7076,11 +7069,13 @@ mod tests {
 
     #[test]
     fn error_visibility_follows_its_owning_model_layer() {
-        let mut state = ModelPreviewState::default();
-        state.overlays_loaded = true;
-        state.show_render = true;
-        state.show_collision = false;
-        state.show_physics = true;
+        let mut state = ModelPreviewState {
+            overlays_loaded: true,
+            show_render: true,
+            show_collision: false,
+            show_physics: true,
+            ..Default::default()
+        };
         assert!(model_layer_visible(&state, ModelPreviewLayer::Render));
         assert!(!model_layer_visible(&state, ModelPreviewLayer::Collision));
         assert!(model_layer_visible(&state, ModelPreviewLayer::Physics));

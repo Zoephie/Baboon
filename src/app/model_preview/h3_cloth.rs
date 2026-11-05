@@ -1202,11 +1202,11 @@ mod tests {
 
     #[test]
     fn halo_2_links_pull_a_stretched_sheet_back_with_the_pin_held() {
-        let (mut cloth, mut running, pins) = hung();
+        let (mut cloth, _, pins) = hung();
         cloth.game = ClothGame::Halo2;
         cloth.pins.truncate(1);
         let pins = &pins[..1];
-        running = RunningCloth::at_rest(&cloth, pins, [0.0; 3]);
+        let mut running = RunningCloth::at_rest(&cloth, pins, [0.0; 3]);
         running.places[15][1] += 0.3;
         for _ in 0..200 {
             running.relax_h2(&cloth, pins);

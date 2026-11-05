@@ -484,16 +484,16 @@ fn h3_stored_mips(tag: &TagFile, index: usize, image: &H2Image) -> Option<Vec<H2
             .map(|level| {
                 let data = crate::app::editor::build_bitmap_preview(tag, index, level as usize).ok()?;
                 let (width, height) = (side(width, level), side(height, level));
-                (data.width as usize == width && data.height as usize == height).then(|| {
-                    H2Image::Flat(TextureImage {
+                (data.width as usize == width && data.height as usize == height).then_some(H2Image::Flat(
+                    TextureImage {
                         rgba: data.rgba,
                         width,
                         height,
                         repeat_x: top.repeat_x,
                         repeat_y: top.repeat_y,
                         scale: top.scale,
-                    })
-                })
+                    },
+                ))
             })
             .collect(),
         H2Image::Cube { size, .. } if *size == width as usize => {
@@ -957,7 +957,7 @@ fn prepare_h3_material(
             material.textures.push(H3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
         }
         if dialect == H3Dialect::Reach {
-            reach_environment_maps(source, &**pass, &mut material, caches);
+            reach_environment_maps(source, pass, &mut material, caches);
         }
     }
     Ok(material)

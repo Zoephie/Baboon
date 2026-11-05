@@ -245,7 +245,7 @@ pub(super) fn muted_nodes(nodes: &[RenderModelPreviewNode], names: &[String]) ->
     let mut muted = vec![false; nodes.len()];
     for (index, node) in nodes.iter().enumerate() {
         let parent_muted = usize::try_from(node.parent).ok().and_then(|parent| muted.get(parent)).copied().unwrap_or(false);
-        muted[index] = parent_muted || names.iter().any(|name| *name == node.name);
+        muted[index] = parent_muted || names.contains(&node.name);
     }
     muted
 }
@@ -649,7 +649,7 @@ mod tests {
                     z: 0.25,
                 },
                 RealQuaternion {
-                    i: 0.2588190,
+                    i: 0.258819,
                     j: 0.0,
                     k: 0.0,
                     w: 0.9659258,
@@ -2141,10 +2141,9 @@ fn ce_idle_beneath<'a, 'tag>(
     let mut words = name.split(' ');
     let idle = format!("{} {} idle", words.next()?, words.next()?);
     let idle = [idle.clone(), format!("{idle}%0")];
-    let found = animations.iter().find(|clip| {
+    animations.iter().find(|clip| {
         clip.frame_count > 0 && clip.name.as_ref().is_some_and(|name| idle.contains(name))
-    });
-    found
+    })
 }
 
 fn decode_ce_animation(

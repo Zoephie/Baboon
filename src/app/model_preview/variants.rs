@@ -430,15 +430,11 @@ pub(super) fn read_named_string_exact(
         let name = field.name();
         if field_name_matches(name, expected) {
             match field.value()? {
-                TagFieldData::StringId(id) | TagFieldData::OldStringId(id) => {
-                    if !id.string.is_empty() {
-                        return Some(id.string);
-                    }
+                TagFieldData::StringId(id) | TagFieldData::OldStringId(id) if !id.string.is_empty() => {
+                    return Some(id.string);
                 }
-                TagFieldData::String(value) | TagFieldData::LongString(value) => {
-                    if !value.is_empty() {
-                        return Some(value);
-                    }
+                TagFieldData::String(value) | TagFieldData::LongString(value) if !value.is_empty() => {
+                    return Some(value);
                 }
                 _ => {}
             }

@@ -926,7 +926,7 @@ fn enum_values(stage: TagStruct<'_>, after: &str) -> Vec<i32> {
             let value = match field.value()? {
                 TagFieldData::CharEnum { value, .. } => value as i32,
                 TagFieldData::ShortEnum { value, .. } => value as i32,
-                TagFieldData::LongEnum { value, .. } => value as i32,
+                TagFieldData::LongEnum { value, .. } => value,
                 _ => return None,
             };
             let keep = started;
@@ -2190,8 +2190,8 @@ mod tests {
         assert_eq!(decal_bias(&flags(&["two-sided", "decal"])), TRANSPARENT_DECAL_DEPTH_BIAS);
         assert_eq!(decal_bias(&flags(&["two-sided"])), 0.0);
         // A bias pulls toward the viewer, by what a 24 bit buffer can hold.
-        assert!(MODEL_DECAL_DEPTH_BIAS < TRANSPARENT_DECAL_DEPTH_BIAS);
-        assert!(TRANSPARENT_DECAL_DEPTH_BIAS < 0.0);
+        const { assert!(MODEL_DECAL_DEPTH_BIAS < TRANSPARENT_DECAL_DEPTH_BIAS) };
+        const { assert!(TRANSPARENT_DECAL_DEPTH_BIAS < 0.0) };
     }
 
     #[test]

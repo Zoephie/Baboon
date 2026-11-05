@@ -1470,7 +1470,7 @@ fn hsv_interpolate(lower: [f32; 3], upper: [f32; 3], u: f32, long_way: bool) -> 
 /// permutation, as an unplaced object has.
 fn ce_change_color(permutations: &[H2ChangePermutation], channel: usize) -> [f32; 3] {
     let pick = (channel as f32 * 431.12894).rem_euclid(1.0);
-    let u = (channel as f32 * 0.71210998).rem_euclid(1.0);
+    let u = (channel as f32 * 0.71211).rem_euclid(1.0);
     // Tool bakes the weights to a running share of the whole, shared out
     // evenly where a block has none.
     let unweighted = permutations.iter().all(|entry| entry.weight <= 0.0);

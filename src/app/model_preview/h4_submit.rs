@@ -314,7 +314,7 @@ pub(crate) fn hologram_rows(externs: &[[u8; 4]], pixel: &[[f32; 4]], node: [[f32
         let Some(row) = rows.get_mut(row).filter(|_| row < 3) else { continue };
         let Some(start) = usize::from(register).checked_sub(usize::from(PIXEL_REGISTERS.0)) else { continue };
         let start = start * 4 + usize::from(offset);
-        if (index - HOLOGRAM_EXTERNS.start()) % 2 == 0 {
+        if (index - HOLOGRAM_EXTERNS.start()).is_multiple_of(2) {
             let Some(&[x, y, z]) = lanes.get(start..start + 3) else { continue };
             let turned: [f32; 3] = std::array::from_fn(|axis| node[axis][0] * x + node[axis][1] * y + node[axis][2] * z);
             let length = turned.iter().map(|lane| lane * lane).sum::<f32>().sqrt();

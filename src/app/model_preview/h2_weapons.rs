@@ -297,7 +297,7 @@ impl H2UnitWeapons {
         let slotted: BTreeSet<&str> = self
             .graph
             .iter()
-            .filter(|entry| entry.class == class && kinds.iter().any(|held| *held == entry.kind))
+            .filter(|entry| entry.class == class && kinds.contains(&entry.kind))
             .flat_map(|entry| entry.slots.iter().filter_map(|(_, clip)| clip.as_deref()))
             .collect();
         let mut hidden = BTreeSet::new();
@@ -1005,9 +1005,9 @@ mod tests {
     #[test]
     fn descendants_survive_a_parent_cycle_and_a_parent_past_the_end() {
         let node = |parent: i16| RenderModelPreviewNode { parent, ..Default::default() };
-        let mut preview = RenderModelPreview::default();
         // 0 is the root; 1 and 2 are each other's parent; 3's is past the end.
-        preview.nodes = vec![node(-1), node(2), node(1), node(9), node(0)];
+        let preview =
+            RenderModelPreview { nodes: vec![node(-1), node(2), node(1), node(9), node(0)], ..Default::default() };
         assert_eq!(descendants(&preview, 0), vec![4]);
     }
 

@@ -462,10 +462,10 @@ pub(super) struct H3Program {
 impl H3Program {
     pub(super) unsafe fn location(&mut self, gl: &glow::Context, name: &str) -> Option<glow::NativeUniformLocation> {
         if let Some(found) = self.locations.get(name) {
-            return found.clone();
+            return *found;
         }
         let found = unsafe { gl.get_uniform_location(self.program, name) };
-        self.locations.insert(name.to_owned(), found.clone());
+        self.locations.insert(name.to_owned(), found);
         found
     }
 }

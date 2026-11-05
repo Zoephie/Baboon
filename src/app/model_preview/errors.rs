@@ -381,7 +381,7 @@ mod tests {
     fn read_h2_tag(path: &Path, definition: &str) -> TagFile {
         let bytes = std::fs::read(path).expect("read shipped Halo 2 tag");
         let layout =
-            blam_tags::layout::TagLayout::from_json(&definitions_root().join(H2_GAME).join(definition))
+            blam_tags::layout::TagLayout::from_json(definitions_root().join(H2_GAME).join(definition))
                 .expect("load Halo 2 classic layout");
         blam_tags::classic::read_classic_tag_file(&bytes, layout).expect("decode shipped Halo 2 tag")
     }

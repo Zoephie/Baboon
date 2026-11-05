@@ -451,7 +451,7 @@ impl CheapEmitterTag {
     /// `names`.
     fn spawn_parameters(&self, names: &[String]) -> [[f32; 4]; 5] {
         let modifier = self.scale_modifier.clamp(0.0, 2.0) * 4.0 * 127.0 / 2.0;
-        let inverse = |lifetime: f32| (if lifetime <= 0.000_099_999_997 { 0.000_099_999_997 } else { lifetime }).recip();
+        let inverse = |lifetime: f32| (if lifetime <= 0.0001 { 0.0001 } else { lifetime }).recip();
         let [directionality, speed, subframe] = [self.directionality, self.speed, self.subframe];
         let (shortest, longest) = (inverse(self.lifetime[0]), inverse(self.lifetime[1]));
         let indices = self.types.each_ref().map(|name| names.iter().position(|known| known == name));

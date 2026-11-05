@@ -328,7 +328,7 @@ fn read_strip_look(source: &TagSource, element: TagStruct<'_>, beam: bool) -> Op
         origin_fade: fade(real("origin fade range"), real("origin fade cutoff"), 1.0),
         edge_fade: fade(real("edge fade range"), real("edge fade cutoff"), degrees),
         angle_fade: (by_range && (angle_range != 0.0 || angle_begin != 0.0))
-            .then(|| [angle_range * degrees, angle_begin * degrees]),
+            .then_some([angle_range * degrees, angle_begin * degrees]),
         sort_bias: if reach { element.read_int_any("sort bias").unwrap_or(0) as f32 * SORT_BIAS_STEP } else { 0.0 },
         reach,
         shader: Arc::new(shader),

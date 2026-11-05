@@ -1263,7 +1263,7 @@ fn ce_mesh_parts(
         .skeletal
         .iter()
         .map(|(region, perm, name, mesh, mats)| UeMeshPart {
-            mesh: &**mesh,
+            mesh,
             region: region.clone(),
             permutation: perm.clone(),
             name: name.clone(),
@@ -1275,7 +1275,7 @@ fn ce_mesh_parts(
         .iter()
         .map(
             |(region, perm, name, mesh, bone, mats, xf, wa)| UeStaticPart {
-                mesh: &**mesh,
+                mesh,
                 bone_name: bone.clone(),
                 region: region.clone(),
                 permutation: perm.clone(),
@@ -1291,7 +1291,7 @@ fn ce_mesh_parts(
         .iter()
         .map(
             |(region, perm, name, mesh, node, mats, anchor)| UeWorldPart {
-                mesh: &**mesh,
+                mesh,
                 node_name: node.clone(),
                 head_anchor: *anchor,
                 region: region.clone(),
@@ -1642,12 +1642,10 @@ fn ce_path_index(containers: &[MountedContainer]) -> Arc<CePathIndex> {
 /// map + import/export tables live at the front, before the bulky export data),
 /// falling back to a full read for the rare header that exceeds the window.
 fn ce_read_header(archive: &IoStoreArchive, path: &str) -> Option<FZenPackageHeader> {
-    if let Ok(bytes) = archive.read_prefix(path, 192 * 1024) {
-        if let Ok(hdr) =
-            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
-        {
-            return Some(hdr);
-        }
+    if let Ok(bytes) = archive.read_prefix(path, 192 * 1024)
+        && let Ok(hdr) = FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+    {
+        return Some(hdr);
     }
     let bytes = archive.read(path).ok()?;
     FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None).ok()
@@ -3744,11 +3742,13 @@ mod tests {
             state.region_selections = super::super::variants::compute_variant_selection(data, chosen);
         }
         // Its first permutation is not the one a variant gives it.
-        let mut collision = RenderModelPreview::default();
-        collision.regions = vec![RenderModelPreviewRegion {
-            name: "collision only".to_owned(),
-            permutations: vec!["~broken".to_owned(), "whole".to_owned()],
-        }];
+        let collision = RenderModelPreview {
+            regions: vec![RenderModelPreviewRegion {
+                name: "collision only".to_owned(),
+                permutations: vec!["~broken".to_owned(), "whole".to_owned()],
+            }],
+            ..Default::default()
+        };
         let key = fixture.key.clone();
         fixture.app.handle_model_overlays_built(stamp, key, geometry_id, Some(collision), None, Vec::new());
         let state = fixture.state();

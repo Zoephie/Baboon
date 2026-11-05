@@ -7,17 +7,13 @@ pub(in crate::app) const DEFAULT_MODEL_PREVIEW_SIZE: f32 = 1.0;
 pub(in crate::app) const MIN_MODEL_PREVIEW_SIZE: f32 = 0.8;
 pub(in crate::app) const MAX_MODEL_PREVIEW_SIZE: f32 = 2.6;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(in crate::app) enum BitmapPanelTab {
+    #[default]
     Fields,
     Texture,
 }
 
-impl Default for BitmapPanelTab {
-    fn default() -> Self {
-        Self::Fields
-    }
-}
 
 /// Background fill behind the bitmap preview image. Helps judge alpha edges
 /// against light/dark/saturated backdrops.
@@ -179,8 +175,6 @@ pub(in crate::app) struct BitmapPreviewData {
     pub(in crate::app) type_name: String,
     pub(in crate::app) rgba: Vec<u8>,
 }
-
-/// One differing leaf field between two compared tags (Tag Diff).
 
 /// Cross-frame model selection and camera state.
 /// `loaded_key` prevents data and variant choices from being reused for a newly

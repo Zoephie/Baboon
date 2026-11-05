@@ -20,6 +20,7 @@ const DEFAULT_DUAL_VMF: [[f32; 4]; 4] = [
 
 /// The same sample's analytical light (+76), directional: the light
 /// `convert_light_for_object_lighting` hands on with no level.
+#[allow(clippy::approx_constant, reason = "a sampled direction, not 1/√2; the constant's bits differ")]
 const DEFAULT_LIGHT_DIRECTION: [f32; 3] = [-0.122788, -0.696364, 0.707107];
 const DEFAULT_LIGHT_COLOR: [f32; 3] = [4.659558, 3.947189, 3.600812];
 
@@ -400,7 +401,7 @@ mod tests {
     #[test]
     fn a_lit_particle_takes_the_default_samples_bright_dark_and_ambient() {
         let light = reach_particle_light();
-        assert!(close(light.direction, [-0.122788, -0.696364, 0.707107]), "{:?}", light.direction);
+        assert!(close(light.direction, DEFAULT_LIGHT_DIRECTION), "{:?}", light.direction);
         assert!(close(light.bright, [1.739811, 1.439954, 1.336653]), "{:?}", light.bright);
         assert!(close(light.dark, [0.486346, 0.385685, 0.456724]), "{:?}", light.dark);
         assert!(close(light.ambient, [1.066938, 0.893373, 0.896688]), "{:?}", light.ambient);

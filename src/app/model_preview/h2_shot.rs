@@ -425,8 +425,7 @@ pub(super) fn render(
             }
         }
     }
-    let mut state = ModelPreviewState::default();
-    state.h2_light_follows_camera = !options.fixed_light;
+    let mut state = ModelPreviewState { h2_light_follows_camera: !options.fixed_light, ..Default::default() };
     let variant = options.variant.as_ref();
     let variant = variant.and_then(|name| data.variants.iter().position(|variant| &variant.name == name));
     reset_model_preview_selection(&mut state, &data, variant.or(default_variant_index(&data)));
@@ -469,7 +468,7 @@ pub(super) fn render(
         Some("textured_wire") => ModelRenderMode::TexturedWireframe,
         _ => state.render_mode,
     };
-    let frame = ModelGpuFrame {
+    let mut frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
         mesh_id: data.mesh_id,
@@ -541,11 +540,9 @@ pub(super) fn render(
                 .map_or("", |variant| variant.name.as_str()),
         ),
     };
-    let mut frame = frame;
     frame.object_moves =
         super::object_moves(&data, &state.h2_function_inputs, time, frame.h2_values.as_ref());
     eprintln!("NOTE moves {}", frame.h2_moves());
-    let mut frame = frame;
     frame.h2_prt_clusters = frame.h2_object_prt_clusters();
     frame.ce_points = frame.ce_point_lights();
     unsafe {

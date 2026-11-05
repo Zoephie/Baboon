@@ -830,8 +830,9 @@ mod tests {
     }
 
     /// The forge's white light is a physically correct point that draws
-    /// from the first frame: its outer cone is the identity on `game seconds
-    /// + 1`, and its default colour interpolation leaves the colour alone.
+    /// from the first frame: its outer cone is the identity on
+    /// `game seconds + 1`, and its default colour interpolation leaves the
+    /// colour alone.
     /// The Marines' monocle light, colour 0 in the kit, never draws.
     #[test]
     fn the_forge_light_draws_and_the_monocle_light_does_not() {

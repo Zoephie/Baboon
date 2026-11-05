@@ -966,7 +966,7 @@ mod tests {
     #[test]
     fn dark_flare_only_and_out_of_reach_lights_add_nothing() {
         let lit = light(Vec::new());
-        assert_eq!(rows(&[lit.clone()], 0, 0.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
+        assert_eq!(rows(std::slice::from_ref(&lit), 0, 0.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
         let mut flare_only = lit.clone();
         flare_only.dynamic = false;
         assert_eq!(rows(&[flare_only], 0, 1.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);

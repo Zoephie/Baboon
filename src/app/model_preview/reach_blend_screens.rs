@@ -11,7 +11,7 @@ use super::ce_attachments::elements;
 use super::h2_passes::tag_function_at;
 
 /// The weights' `EPS`.
-const EPS: f32 = 0.000_099_999_997;
+const EPS: f32 = 0.0001;
 /// `private flags`: the graph mixes on its data-driven board.
 const DATA_DRIVEN: i128 = 1 << 3;
 /// A screen's `flags`.
