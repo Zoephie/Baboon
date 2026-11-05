@@ -188,8 +188,11 @@ struct CheapTypeTag {
     color: [f32; 4],
     intensity: f32,
     fade_start: f32,
-    /// `size`'s upper bound; the lower is never read.
+    /// `size`'s upper bound; Reach never reads the lower.
     size: f32,
+    /// Halo 4's: `size`'s lower bound, and the `turbulence type` it takes.
+    size_lower: f32,
+    turbulence_type: i64,
     stretch: f32,
     texture: i64,
     y_scale: f32,
@@ -216,6 +219,8 @@ impl CheapTypeTag {
             intensity: real("intensity0"),
             fade_start: real("fade start"),
             size: element.read_real_bounds("size").upper,
+            size_lower: element.read_real_bounds("size").lower,
+            turbulence_type: index("turbulence type"),
             stretch: real("motion blur stretch"),
             texture: index("texture"),
             y_scale: real("texture y scale"),
@@ -226,7 +231,14 @@ impl CheapTypeTag {
     /// the type texture, as type `own` of a library with `textures` maps.
     /// No change of type is a change to itself, a texture out of range is
     /// the first, and a screen-facing type's y scale is negated.
-    fn compiled(&self, own: usize, textures: usize) -> CheapType {
+    ///
+    /// Halo 4's (`halo4`) are laid out as its shaders read them
+    /// (`cheap_particles_update.fx`, `cheap_particles_render.fx`): the
+    /// turbulence type's place in an array of `k_maxTypes` in `PHYSICS.w`,
+    /// the depth range in `COLLISION.x`, and `size`'s bounds and the fade in
+    /// row 3. No Halo 4 tool was at hand; the kit's shipped type texture
+    /// agrees (`kit_halo_4s_type_table_matches_the_shipped_type_texture`).
+    fn compiled(&self, own: usize, textures: usize, halo4: bool) -> CheapType {
         let texture = usize::try_from(self.texture).ok().filter(|texture| *texture < textures).unwrap_or(0);
         let change = usize::try_from(self.change).unwrap_or(own) as f32;
         let fade = (1.0 - self.fade_start).clamp(1e-4, 1.0).recip();
@@ -234,12 +246,20 @@ impl CheapTypeTag {
         let [red, green, blue, alpha] = self.color;
         let intensity = self.intensity;
         let mut rows = [[0.0; 4]; 5];
-        rows[PHYSICS] = [self.drag, self.gravity, self.turbulence, self.depth_range];
-        rows[COLLISION] = [0.0, self.elasticity, self.death, change];
         rows[COLOR0] = [red * intensity, green * intensity, blue * intensity, alpha];
-        rows[FADE] = [0.0, 0.0, 0.0, fade];
         let place = (texture as f32 + 0.5) / textures.max(1) as f32;
         rows[RENDER] = [place, self.size, self.stretch, facing * self.y_scale];
+        if !halo4 {
+            rows[PHYSICS] = [self.drag, self.gravity, self.turbulence, self.depth_range];
+            rows[COLLISION] = [0.0, self.elasticity, self.death, change];
+            rows[FADE] = [0.0, 0.0, 0.0, fade];
+            return CheapType { rows, texture };
+        }
+        let turbulence = usize::try_from(self.turbulence_type).unwrap_or(0).min(MOST_TURBULENCE_TYPES - 1);
+        let array = (turbulence as f32 + 0.5) / MOST_TURBULENCE_TYPES as f32;
+        rows[PHYSICS] = [self.drag, self.gravity, self.turbulence, array];
+        rows[COLLISION] = [self.depth_range, self.elasticity, self.death, change];
+        rows[FADE] = [self.size_lower, self.size, 0.0, fade];
         CheapType { rows, texture }
     }
 }
@@ -254,6 +274,47 @@ struct CheapType {
     texture: usize,
 }
 
+/// `CheapParticleTurbulenceType::k_maxTypes`, the layers of Halo 4's
+/// turbulence array.
+const MOST_TURBULENCE_TYPES: usize = 8;
+
+/// Halo 4's `cheap_particles_update.fx`: the turbulence type's array layer,
+/// `PHYSICS.w · layers − 0.5`, and its transform, `(int)(4 · PHYSICS.w)`.
+/// The two agree only for type 0; past it the transform is another type's
+/// (type 1 and 3 take 0 and 1), as the game has it.
+fn turbulence_of(place: f32) -> (usize, usize) {
+    let layer = (place * MOST_TURBULENCE_TYPES as f32 - 0.5).round().max(0.0) as usize;
+    (layer, (4.0 * place).max(0.0) as usize)
+}
+
+/// A kind of turbulence: the map its push is read from, and `turb du dt`,
+/// `turb dv dt`, `turb du dp` and `turb dv dp`.
+#[derive(Debug)]
+struct CheapTurbulence {
+    texels: CheapTexels,
+    rates: [f32; 4],
+    /// Halo 4's push spans -1 to 1 of what the map holds
+    /// (`GenerateRandomInRange(…, -1, 1)`); Reach's is the map's own.
+    centered: bool,
+}
+
+impl CheapTurbulence {
+    fn read(source: &TagSource, holder: TagStruct<'_>, centered: bool) -> Option<Self> {
+        let path = holder.read_tag_ref_path("turbulence").filter(|path| !path.is_empty())?;
+        Some(Self {
+            texels: CheapTexels::read(source, &path)?,
+            rates: ["turb du dt", "turb dv dt", "turb du dp", "turb dv dp"].map(|name| holder.read_real(name).unwrap_or(0.0)),
+            centered,
+        })
+    }
+
+    /// The push at ring slot `index`, by `transform`.
+    fn push(&self, index: usize, transform: [f32; 4]) -> [f32; 4] {
+        let sample = self.texels.generate(index as f32, transform);
+        if self.centered { sample.map(|value| value * 2.0 - 1.0) } else { sample }
+    }
+}
+
 /// A `cheap_particle_type_library`, with the maps the shaders bind from it.
 /// The game binds the one `rasterizer_globals` names (`shader_setup_type_library`,
 /// the 360's 0x82DB2B50); every kit emitter names the same
@@ -263,10 +324,11 @@ pub(crate) struct CheapLibrary {
     names: Vec<String>,
     types: Vec<CheapType>,
     random: CheapTexels,
-    turbulence: CheapTexels,
-    /// `turb du dt`, `turb dv dt`, `turb du dp` and `turb dv dp`.
-    turbulence_rates: [f32; 4],
+    /// Reach's one turbulence; Halo 4's `turbulence types`.
+    turbulence: Vec<CheapTurbulence>,
     render: Option<CheapRenderTexture>,
+    /// Halo 4's: per-type turbulence, its own rows, sizes and exposure.
+    halo4: bool,
 }
 
 impl CheapLibrary {
@@ -276,14 +338,27 @@ impl CheapLibrary {
         let textures = elements(root, "textures").len();
         let types = elements(root, "types");
         let map = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
+        let halo4 = source.game() == Some(GameId::Halo4);
+        // Halo 4 binds `turbulenceTexture`, an array the tool builds from
+        // these; the kit's is stale (8 layers for 4 types, none matching),
+        // so each type's own map stands in [inferred].
+        let turbulence: Vec<CheapTurbulence> = if halo4 {
+            let kinds = elements(root, "turbulence types");
+            kinds.iter().map(|kind| CheapTurbulence::read(source, *kind, true)).collect::<Option<_>>()?
+        } else {
+            vec![CheapTurbulence::read(source, root, false)?]
+        };
         Some(Self {
             names: types.iter().map(|element| element.read_string_id("name").unwrap_or_default()).collect(),
-            types: types.iter().enumerate().map(|(at, element)| CheapTypeTag::read(*element).compiled(at, textures)).collect(),
+            types: types
+                .iter()
+                .enumerate()
+                .map(|(at, element)| CheapTypeTag::read(*element).compiled(at, textures, halo4))
+                .collect(),
             random: CheapTexels::read(source, &map("random")?)?,
-            turbulence: CheapTexels::read(source, &map("turbulence")?)?,
-            turbulence_rates: ["turb du dt", "turb dv dt", "turb du dp", "turb dv dp"]
-                .map(|name| root.read_real(name).unwrap_or(0.0)),
+            turbulence,
             render: map("render_texture").and_then(|path| CheapRenderTexture::read(source, &path)),
+            halo4,
         })
     }
 
@@ -295,6 +370,11 @@ impl CheapLibrary {
 
     pub(crate) fn render_texture(&self) -> Option<&CheapRenderTexture> {
         self.render.as_ref()
+    }
+
+    /// Whether it is Halo 4's, which lights by its own exposures.
+    pub(crate) fn halo4(&self) -> bool {
+        self.halo4
     }
 }
 
@@ -799,8 +879,8 @@ pub(crate) struct ReachCheapField {
     /// One generator per emitter, seeded so a held pose repeats; the game's
     /// is the local seed [inferred: preview convention].
     random: Vec<Random>,
-    /// The turbulence's `(u, v)` phase.
-    phase: [f32; 2],
+    /// Each kind of turbulence's `(u, v)` phase.
+    phases: Vec<[f32; 2]>,
 }
 
 impl Default for ReachCheapField {
@@ -825,7 +905,7 @@ impl ReachCheapField {
             particles: vec![EMPTY; MOST_PARTICLES],
             cursor: 0,
             random: (0..emitters).map(|at| Random((at as u32 + 1).wrapping_mul(977))).collect(),
-            phase: [0.0; 2],
+            phases: Vec::new(),
         }
     }
 
@@ -886,18 +966,27 @@ impl ReachCheapField {
         self.time = Some(time);
     }
 
-    /// `update_particles` (the 360's 0x82DB3790) and `update.hlsl`: the
+    /// `update_particles` (Reach: the 360's 0x82DB3790; Halo 4: the 360's
+    /// 0x82F2BCF8, MCC 0x140384020) and the update shader: each kind of
     /// turbulence's phase moves by the frame, and every live particle ages
-    /// and, unless at rest, moves by drag, gravity and the turbulence (which
-    /// moves its place, not its velocity), at the shaders' step.
+    /// and, unless at rest, moves by drag, gravity and its type's turbulence
+    /// (which moves its place, not its velocity), at the shaders' step.
     fn update(&mut self, library: &CheapLibrary, dt: f32) {
-        let [du_dt, dv_dt, du_dp, dv_dp] = library.turbulence_rates;
-        self.phase = [frac(self.phase[0] + du_dt * dt), frac(self.phase[1] + dv_dt * dt)];
-        let turbulence = [du_dp, dv_dp, self.phase[0], self.phase[1]];
+        self.phases.resize(library.turbulence.len(), [0.0; 2]);
+        let transforms: Vec<[f32; 4]> = library
+            .turbulence
+            .iter()
+            .zip(&mut self.phases)
+            .map(|(turbulence, phase)| {
+                let [du_dt, dv_dt, du_dp, dv_dp] = turbulence.rates;
+                *phase = [frac(phase[0] + du_dt * dt), frac(phase[1] + dv_dt * dt)];
+                [du_dp, dv_dp, phase[0], phase[1]]
+            })
+            .collect();
         let dt = dt.min(MOST_SHADER_STEP);
         for (index, particle) in self.particles.iter_mut().enumerate() {
             if particle.age.abs() < 1.0 {
-                update_particle(particle, index, library, turbulence, dt);
+                update_particle(particle, index, library, &transforms, dt);
             }
         }
     }
@@ -941,7 +1030,7 @@ impl ReachCheapField {
     /// lighting. There is no fog to scatter in.
     pub(crate) fn vertices(&self, library: &CheapLibrary, view: &CeFlareView) -> Vec<ReachCheapVertex> {
         let mut vertices = Vec::new();
-        for particle in &self.particles {
+        for (index, particle) in self.particles.iter().enumerate() {
             if particle.age.abs() > 1.0 {
                 continue;
             }
@@ -950,6 +1039,14 @@ impl ReachCheapField {
                 continue;
             };
             let [_, size, stretch_factor, y_scale] = found.rows[RENDER];
+            // Halo 4's lies between `size`'s bounds, by a cheap hash of the
+            // slot (`frac(index · 0.863182394)`).
+            let size = if library.halo4 {
+                let [lower, upper, _, _] = found.rows[FADE];
+                lower + (upper - lower) * frac(index as f32 * 0.863_182_4)
+            } else {
+                size
+            };
             let to_particle = unit(minus(particle.position, view.eye));
             // Pulled 1 cm toward the camera.
             let place: [f32; 3] = std::array::from_fn(|axis| particle.position[axis] - to_particle[axis] * 0.01);
@@ -990,18 +1087,22 @@ impl ReachCheapField {
 }
 
 /// `update.hlsl`'s `update_particle` for a live particle at ring slot
-/// `index`, with the turbulence's `(du_dp, dv_dp, phase)` and the shaders'
-/// `dt`.
-fn update_particle(particle: &mut CheapParticle, index: usize, library: &CheapLibrary, turbulence: [f32; 4], dt: f32) {
+/// `index`, with each kind of turbulence's `(du_dp, dv_dp, phase)` and the
+/// shaders' `dt`.
+fn update_particle(particle: &mut CheapParticle, index: usize, library: &CheapLibrary, transforms: &[[f32; 4]], dt: f32) {
     let kind = usize::try_from(particle.parameters[0]).unwrap_or(usize::MAX);
-    let [drag, gravity, strength, _] = library.row(kind, PHYSICS);
+    let [drag, gravity, strength, place] = library.row(kind, PHYSICS);
+    let (layer, transform) = if library.halo4 { turbulence_of(place) } else { (0, 0) };
     let gravity = -gravity;
     particle.age += sign(particle.age) * particle.delta_age * dt;
     if particle.age >= 0.0 {
         // The library's `turbulence` on the sampler the shader calls
         // `velocity_texture`, point sampled [inferred: MCC's filter mode 2
         // was not mapped].
-        let push = library.turbulence.generate(index as f32, turbulence);
+        let push = match (library.turbulence.get(layer), transforms.get(transform)) {
+            (Some(turbulence), Some(transform)) => turbulence.push(index, *transform),
+            _ => [0.0; 4],
+        };
         for axis in 0..3 {
             particle.position[axis] += (particle.velocity[axis] + push[axis] * strength) * dt;
         }
@@ -1041,12 +1142,15 @@ void main() {
 pub(super) const CHEAP_PARTICLE_FRAGMENT: &str = "#version 330 core
 uniform sampler2DArray u_render;
 uniform float u_exposure;
+// Halo 4 runs from its exposure to its self-illumination one by alpha;
+// Reach's two are the same.
+uniform float u_self_illum;
 in vec3 v_texcoord;
 in vec4 v_color;
 out vec4 out_color;
 void main() {
     vec4 texel = texture(u_render, v_texcoord, -0.5) * v_color;
-    out_color = vec4(texel.rgb * u_exposure, texel.a);
+    out_color = vec4(texel.rgb * mix(u_exposure, u_self_illum, texel.a), texel.a);
 }
 ";
 
@@ -1074,7 +1178,7 @@ mod tests {
             change: -1,
             ..Default::default()
         }
-        .compiled(0, 14)
+        .compiled(0, 14, false)
     }
 
     fn library(types: Vec<CheapType>, turbulence: [f32; 4]) -> CheapLibrary {
@@ -1082,9 +1186,13 @@ mod tests {
             names: (0..types.len()).map(|at| format!("type{at}")).collect(),
             types,
             random: texels(1, 1, vec![[0.5, 0.5, 0.5, 0.5]]),
-            turbulence: texels(1, 1, vec![turbulence]),
-            turbulence_rates: [0.1, 0.05, 0.1, 0.05],
+            turbulence: vec![CheapTurbulence {
+                texels: texels(1, 1, vec![turbulence]),
+                rates: [0.1, 0.05, 0.1, 0.05],
+                centered: false,
+            }],
             render: None,
+            halo4: false,
         }
     }
 
@@ -1257,15 +1365,16 @@ mod tests {
             stretch: 2.5,
             texture: 2,
             y_scale: 0.5,
+            ..Default::default()
         };
-        let rows = tag.compiled(9, 14).rows;
+        let rows = tag.compiled(9, 14, false).rows;
         assert_eq!(rows[PHYSICS], [1.5, 4.0, 0.5, 0.1]);
         assert_eq!(rows[COLLISION], [0.0, 0.5, 0.7, 9.0], "none changes to itself");
         assert_eq!(rows[COLOR0], [30.0, 15.0, 7.5, 0.0]);
         assert_eq!(rows[FADE], [0.0, 0.0, 0.0, 4.0]);
         assert_eq!(rows[RENDER], [2.5 / 14.0, 0.2, 2.5, -0.5]);
         let other = CheapTypeTag { change: 3, velocity_facing: true, texture: 20, fade_start: 1.0, ..tag };
-        let rows = other.compiled(9, 14).rows;
+        let rows = other.compiled(9, 14, false).rows;
         assert_eq!(rows[COLLISION][3], 3.0);
         assert_eq!(rows[RENDER][0], 0.5 / 14.0, "a texture out of range is the first");
         assert_eq!(rows[RENDER][3], 0.5, "velocity facing keeps its sign");
@@ -1393,14 +1502,14 @@ mod tests {
     fn the_update_drags_falls_and_turbulates_the_place_only() {
         let library = library(vec![kind(1.0, 4.0, 2.0)], [0.5, 0.0, 0.0, 0.0]);
         let mut particle = CheapParticle { position: [0.0; 3], age: 0.5, velocity: [1.0, 0.0, 0.0], delta_age: 0.5, parameters: [0; 4] };
-        update_particle(&mut particle, 0, &library, [0.0; 4], 0.1);
+        update_particle(&mut particle, 0, &library, &[[0.0; 4]], 0.1);
         assert!((particle.age - 0.55).abs() < 1e-6);
         assert!((particle.position[0] - (1.0 + 0.5 * 2.0) * 0.1).abs() < 1e-6, "{:?}", particle.position);
         assert!((particle.position[2] + 4.0 * 0.01).abs() < 1e-6, "gravity pulls down");
         assert!((particle.velocity[0] - 0.9).abs() < 1e-6, "dragged, and the turbulence is not in it");
         assert!((particle.velocity[2] + 0.4).abs() < 1e-6);
         let mut resting = CheapParticle { age: -0.5, ..particle };
-        update_particle(&mut resting, 0, &library, [0.0; 4], 0.1);
+        update_particle(&mut resting, 0, &library, &[[0.0; 4]], 0.1);
         assert_eq!(resting.position, particle.position, "at rest it stays");
         assert!((resting.age + 0.55).abs() < 1e-6, "and ages away from 0");
     }
@@ -1414,7 +1523,7 @@ mod tests {
         field.particles[0] = CheapParticle { position: [0.0; 3], age: 0.1, velocity: [1.0, 0.0, 0.0], delta_age: 0.0, parameters: [0; 4] };
         field.update(&library, 2.0);
         assert_eq!(field.particles[0].position[0], 0.5, "not 2");
-        assert!((field.phase[0] - 0.2).abs() < 1e-6, "{:?}", field.phase);
+        assert!((field.phases[0][0] - 0.2).abs() < 1e-6, "{:?}", field.phases);
         field.update(&library, 0.25);
         assert_eq!(field.particles[0].position[0], 0.75);
     }
@@ -1515,7 +1624,7 @@ mod tests {
     fn a_quads_colour_fades_from_its_fade_start() {
         let mut tag = CheapTypeTag { color: [1.0, 1.0, 1.0, 0.5], intensity: 2.0, size: 1.0, y_scale: 1.0, fade_start: 0.5, ..Default::default() };
         tag.change = -1;
-        let library = library(vec![tag.compiled(0, 14)], [0.0; 4]);
+        let library = library(vec![tag.compiled(0, 14, false)], [0.0; 4]);
         let mut field = ReachCheapField::fresh(0);
         let at = |age: f32| CheapParticle { position: [0.0; 3], age, velocity: [0.0; 3], delta_age: 0.0, parameters: [0, 127, -64, 0] };
         field.particles[0] = at(0.25);
@@ -1524,6 +1633,98 @@ mod tests {
         field.particles[0] = at(0.75);
         let half = field.vertices(&library, &view())[0].color;
         assert!((half[0] - full[0] * 0.5).abs() < 1e-5 && (half[3] - 0.25).abs() < 1e-6, "{half:?}");
+    }
+
+    /// Halo 4's turbulence type is a place in an array of eight: the layer
+    /// is the type, the transform `(int)(4 · place)` only type 0's.
+    #[test]
+    fn halo_4_takes_its_turbulence_layer_and_transform_as_the_shader_does() {
+        let place = |kind: usize| (kind as f32 + 0.5) / MOST_TURBULENCE_TYPES as f32;
+        assert_eq!(turbulence_of(place(0)), (0, 0));
+        assert_eq!(turbulence_of(place(1)), (1, 0), "type 1 borrows type 0's transform");
+        assert_eq!(turbulence_of(place(2)), (2, 1));
+        assert_eq!(turbulence_of(place(3)), (3, 1));
+    }
+
+    /// Halo 4's push is its type's own turbulence, spanning -1 to 1 of the
+    /// map; Reach's one map pushes as it is.
+    #[test]
+    fn halo_4_pushes_by_its_types_turbulence_centered() {
+        let tag = CheapTypeTag { turbulence: 1.0, turbulence_type: 2, change: -1, size: 1.0, ..Default::default() };
+        let mut library = library(vec![tag.compiled(0, 14, true)], [0.0; 4]);
+        let kind = |value: f32| CheapTurbulence { texels: texels(1, 1, vec![[value, value, value, 1.0]]), rates: [0.0; 4], centered: true };
+        library.turbulence = vec![kind(0.5), kind(0.5), kind(1.0)];
+        library.halo4 = true;
+        let still = CheapParticle { position: [0.0; 3], age: 0.5, velocity: [0.0; 3], delta_age: 0.0, parameters: [0; 4] };
+        let mut particle = still;
+        update_particle(&mut particle, 0, &library, &[[0.0; 4]; 2], 0.1);
+        assert!((particle.position[0] - 0.1).abs() < 1e-6, "layer 2, 1 centered to 1: {:?}", particle.position);
+        library.turbulence[2] = kind(0.5);
+        let mut centered = still;
+        update_particle(&mut centered, 0, &library, &[[0.0; 4]; 2], 0.1);
+        assert_eq!(centered.position, [0.0; 3], "the map's middle pushes nothing");
+        library.halo4 = false;
+        library.turbulence = vec![CheapTurbulence { centered: false, ..kind(0.5) }];
+        let mut reach = still;
+        update_particle(&mut reach, 0, &library, &[[0.0; 4]], 0.1);
+        assert!((reach.position[0] - 0.05).abs() < 1e-6, "Reach's map as it is: {:?}", reach.position);
+    }
+
+    /// Halo 4's quad is sized between `size`'s bounds by its slot; Reach's
+    /// is the upper bound.
+    #[test]
+    fn halo_4_sizes_each_quad_between_its_bounds() {
+        let tag = CheapTypeTag { size_lower: 1.0, size: 3.0, y_scale: 1.0, change: -1, color: [1.0; 4], ..Default::default() };
+        let mut library = library(vec![tag.compiled(0, 14, true)], [0.0; 4]);
+        library.halo4 = true;
+        let mut field = ReachCheapField::fresh(0);
+        let particle = CheapParticle { position: [0.0; 3], age: 0.0, velocity: [0.0; 3], delta_age: 0.0, parameters: [0, 127, -64, 0] };
+        field.particles[0] = particle;
+        field.particles[1] = particle;
+        let width = |quad: &[ReachCheapVertex]| {
+            let values = quad.iter().map(|vertex| vertex.place[0]);
+            (values.clone().fold(f32::MIN, f32::max) - values.fold(f32::MAX, f32::min)) * 63.5 / 64.0
+        };
+        let quads = field.vertices(&library, &view());
+        let (first, second) = (width(&quads[..6]), width(&quads[6..]));
+        // Slot 0 hashes to 0, slot 1 to frac(0.863…).
+        assert!((first - 1.0).abs() < 1e-4, "{first}");
+        assert!((second - (1.0 + 2.0 * 0.863_182_4)).abs() < 1e-3, "{second}");
+        library.halo4 = false;
+        let reach = field.vertices(&library, &view());
+        assert!((width(&reach[..6]) - 3.0).abs() < 1e-4);
+    }
+
+    /// With `BLAM_TEST_H4EK`: Halo 4's shipped type texture is the compile of
+    /// its library's types, all five rows of all 152, and its four kinds of
+    /// turbulence read.
+    #[test]
+    fn kit_halo_4s_type_table_matches_the_shipped_type_texture() {
+        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
+            eprintln!("skipping: BLAM_TEST_H4EK is not set");
+            return;
+        };
+        let source = super::super::h3_particles::loose_kit(&root, GameId::Halo4);
+        let library = CheapLibrary::read(&source, "fx\\cheap_particles\\global").expect("the library");
+        assert!(library.halo4());
+        assert_eq!((library.types.len(), library.turbulence.len()), (152, 4));
+        let tag = load_referenced_tag_from_source(&source, "fx\\cheap_particles\\global_type_texture", "bitmap", b"bitm").unwrap();
+        let bitmap = blam_tags::bitmap::Bitmap::new(&tag).unwrap();
+        let image = bitmap.image(0).unwrap();
+        let pixels = image.pixel_bytes().unwrap();
+        let half = |at: usize| half_to_f32(u16::from_le_bytes([pixels[at], pixels[at + 1]]));
+        let mut checked = 0;
+        for (index, found) in library.types.iter().enumerate() {
+            for row in 0..5 {
+                let texel: [f32; 4] = std::array::from_fn(|channel| half(((row * 256 + index) * 4 + channel) * 2));
+                for (got, want) in texel.iter().zip(found.rows[row]) {
+                    assert!((got - want).abs() <= (0.01 * want.abs()).max(2e-3), "type {index} row {row}: {texel:?} against {:?}", found.rows[row]);
+                }
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 760);
+        assert!(library.render_texture().is_some(), "the render texture array reads");
     }
 
     /// The type texture the kit ships is the compile of the library's types:

@@ -3936,6 +3936,7 @@ struct ReachCheapGl {
     vertex_array: glow::NativeVertexArray,
     buffer: glow::NativeBuffer,
     exposure: Option<glow::NativeUniformLocation>,
+    self_illum: Option<glow::NativeUniformLocation>,
 }
 
 impl ReachCheapGl {
@@ -3945,7 +3946,9 @@ impl ReachCheapGl {
     /// colour alone (`set_color_write_enable(0, 7)`); here alpha is what
     /// covers the preview's background, so it is written as the other
     /// premultiplied sprites write it.
-    unsafe fn draw(&self, gl: &glow::Context, vertices: &[[f32; CHEAP_FLOATS]], texture: glow::NativeTexture, stops: f32) {
+    /// `exposures` are the exposure and the self-illumination exposure the
+    /// colour runs between by alpha: Halo 4's two, or Reach's one twice.
+    unsafe fn draw(&self, gl: &glow::Context, vertices: &[[f32; CHEAP_FLOATS]], texture: glow::NativeTexture, [exposure, self_illum]: [f32; 2]) {
         unsafe {
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.vertex_array));
@@ -3953,7 +3956,8 @@ impl ReachCheapGl {
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(vertices), glow::STREAM_DRAW);
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(texture));
-            gl.uniform_1_f32(self.exposure.as_ref(), reach_exposure(stops)[0]);
+            gl.uniform_1_f32(self.exposure.as_ref(), exposure);
+            gl.uniform_1_f32(self.self_illum.as_ref(), self_illum);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(false);
@@ -3984,7 +3988,7 @@ unsafe fn reach_cheap_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
         }
         gl.use_program(Some(program));
         gl.uniform_1_i32(gl.get_uniform_location(program, "u_render").as_ref(), 0);
-        Some(ReachCheapGl { program, vertex_array, buffer, exposure: gl.get_uniform_location(program, "u_exposure") })
+        Some(ReachCheapGl { program, vertex_array, buffer, exposure: gl.get_uniform_location(program, "u_exposure"), self_illum: gl.get_uniform_location(program, "u_self_illum") })
     }
 }
 
@@ -5271,7 +5275,19 @@ impl ModelGlRenderer {
                             [a, b, c, d, e, f, g, h, i, j, k]
                         })
                         .collect();
-                    cheap.draw(gl, &vertices, texture, stops);
+                    // `cheap_particles_render.fx`: `lerp(ps_view_exposure.x,
+                    // ps_view_self_illum_exposure.y, alpha)`.
+                    let exposures = if first.library().halo4() {
+                        let channel = |name: &str, at: usize| match h4_lighting::h4_frame_value(name) {
+                            Some(h3_shaders::H3Value::Floats(value)) => value[at],
+                            _ => 1.0,
+                        };
+                        [channel("ps_view_exposure", 0), channel("ps_view_self_illum_exposure", 1)]
+                    } else {
+                        let exposure = reach_exposure(stops)[0];
+                        [exposure, exposure]
+                    };
+                    cheap.draw(gl, &vertices, texture, exposures);
                 }
             }
             if matches!(stage, SpriteStage::FartherThan(_) | SpriteStage::Distortions) {
