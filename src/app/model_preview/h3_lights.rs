@@ -1042,30 +1042,48 @@ mod tests {
         }
     }
 
-    /// `BLAM_TEST_H3EK`: each `occlusion offset direction` reads by its
-    /// option's name, as `lens_flare_render_internal` uses it: toward the
-    /// viewer, along the marker, or not moved. 0 is toward the viewer.
+    /// `BLAM_TEST_H3EK` and `BLAM_TEST_HREK`: each `occlusion offset
+    /// direction` reads by its option's name, as `lens_flare_render_internal`
+    /// uses it: toward the viewer, along the marker, or not moved. 0 is toward
+    /// the viewer.
     #[test]
-    fn halo_3_flares_read_their_occlusion_offset_direction() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::Halo3),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
-        for (path, direction) in [
-            ("fx\\cinematics\\010la_jungle_intro\\01\\hatch", OcclusionOffset::TowardViewer),
+    fn flares_read_their_occlusion_offset_direction() {
+        use crate::core::game::GameId;
+        let kits = [
             (
-                "levels\\multi\\s3d_sky_bridgenew\\shaders\\lighting\\flare_projector_illum",
-                OcclusionOffset::MarkerForward,
+                "BLAM_TEST_H3EK",
+                GameId::Halo3,
+                [
+                    "fx\\cinematics\\010la_jungle_intro\\01\\hatch",
+                    "levels\\multi\\s3d_sky_bridgenew\\shaders\\lighting\\flare_projector_illum",
+                    "levels\\multi\\s3d_avalanche\\sky\\shaders\\flare_sun_ava_01",
+                ],
             ),
-            ("levels\\multi\\s3d_avalanche\\sky\\shaders\\flare_sun_ava_01", OcclusionOffset::None),
-        ] {
-            let flare = read_h3_flare(&source, path).unwrap();
-            assert_eq!(flare.occlusion_offset_direction, direction, "{path}");
+            (
+                "BLAM_TEST_HREK",
+                GameId::HaloReach,
+                [
+                    "cinematics\\070lk_credits\\fx\\slipspace_anamorphic",
+                    "objects\\vehicles\\human\\warthog\\fx\\running\\headlights",
+                    "levels\\dlc\\cex_beaver_creek\\fx\\ca_beaver_rainbow",
+                ],
+            ),
+        ];
+        let directions = [OcclusionOffset::TowardViewer, OcclusionOffset::MarkerForward, OcclusionOffset::None];
+        for (variable, game, paths) in kits {
+            let Ok(root) = std::env::var(variable) else {
+                eprintln!("skipping: {variable} is not set");
+                continue;
+            };
+            let source = TagSource::LooseFolder {
+                root: root.into(),
+                game: Some(game),
+                definitions_root: crate::core::bundled::locate_definitions_root(),
+            };
+            for (path, direction) in paths.into_iter().zip(directions) {
+                let flare = read_h3_flare(&source, path).unwrap_or_else(|| panic!("{path}"));
+                assert_eq!(flare.occlusion_offset_direction, direction, "{path}");
+            }
         }
     }
 
