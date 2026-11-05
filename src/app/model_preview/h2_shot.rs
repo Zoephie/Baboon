@@ -225,15 +225,105 @@ fn object_kind(kind: &str) -> (&'static str, &'static [u8; 4]) {
     }
 }
 
-/// Takes `shot`, and gives back its pixels (RGBA, bottom row first) and the
-/// load's geometry id, which names its slot in `renderer`.
+/// What [`render`] gives back of a shot.
+pub(super) struct Rendered {
+    /// RGBA, bottom row first.
+    pub(super) pixels: Vec<u8>,
+    /// The load's, which names its slot in the renderer.
+    pub(super) geometry_id: u64,
+    /// [`gl_state`] as the paint left it.
+    pub(super) gl_state: String,
+}
+
+/// The GL state a paint leaves, a line per setting. Bindings say only whether
+/// something is bound (the framebuffer, whether it is the shot's own), as GL
+/// names follow creation order, which a change of order alone would move.
+fn gl_state(gl: &glow::Context, target: glow::NativeFramebuffer) -> String {
+    use glow::HasContext as _;
+    let mut out = String::new();
+    let mut put = |name: &str, value: String| {
+        out.push_str(name);
+        out.push(' ');
+        out.push_str(&value);
+        out.push('\n');
+    };
+    unsafe {
+        for (name, capability) in [
+            ("blend", glow::BLEND),
+            ("depth_test", glow::DEPTH_TEST),
+            ("cull_face", glow::CULL_FACE),
+            ("scissor_test", glow::SCISSOR_TEST),
+            ("stencil_test", glow::STENCIL_TEST),
+            ("framebuffer_srgb", glow::FRAMEBUFFER_SRGB),
+            ("polygon_offset_fill", glow::POLYGON_OFFSET_FILL),
+            ("sample_alpha_to_coverage", glow::SAMPLE_ALPHA_TO_COVERAGE),
+            ("program_point_size", glow::PROGRAM_POINT_SIZE),
+        ] {
+            put(name, gl.is_enabled(capability).to_string());
+        }
+        for (name, parameter) in [
+            ("blend_src_rgb", glow::BLEND_SRC_RGB),
+            ("blend_dst_rgb", glow::BLEND_DST_RGB),
+            ("blend_src_alpha", glow::BLEND_SRC_ALPHA),
+            ("blend_dst_alpha", glow::BLEND_DST_ALPHA),
+            ("blend_equation_rgb", glow::BLEND_EQUATION_RGB),
+            ("blend_equation_alpha", glow::BLEND_EQUATION_ALPHA),
+            ("depth_func", glow::DEPTH_FUNC),
+            ("depth_writemask", glow::DEPTH_WRITEMASK),
+            ("cull_face_mode", glow::CULL_FACE_MODE),
+            ("front_face", glow::FRONT_FACE),
+            ("active_texture", glow::ACTIVE_TEXTURE),
+            ("pack_alignment", glow::PACK_ALIGNMENT),
+            ("unpack_alignment", glow::UNPACK_ALIGNMENT),
+            ("stencil_writemask", glow::STENCIL_WRITEMASK),
+        ] {
+            put(name, format!("{:#x}", gl.get_parameter_i32(parameter)));
+        }
+        let mut mask = [0; 4];
+        gl.get_parameter_i32_slice(glow::COLOR_WRITEMASK, &mut mask);
+        put("color_writemask", format!("{mask:?}"));
+        // egui_glow does not restore it, so a wireframe left here would draw
+        // the UI that way.
+        let mut polygon_mode = [0; 2];
+        gl.get_parameter_i32_slice(glow::POLYGON_MODE, &mut polygon_mode);
+        put("polygon_mode", format!("{polygon_mode:x?}"));
+        let mut viewport = [0; 4];
+        gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+        put("viewport", format!("{viewport:?}"));
+        let framebuffer = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
+        put("draw_framebuffer", if framebuffer == Some(target) { "shot" } else if framebuffer.is_some() { "other" } else { "none" }.to_owned());
+        let read = gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING);
+        put("read_framebuffer", if read == Some(target) { "shot" } else if read.is_some() { "other" } else { "none" }.to_owned());
+        for (name, parameter) in [
+            ("program", glow::CURRENT_PROGRAM),
+            ("vertex_array", glow::VERTEX_ARRAY_BINDING),
+            ("array_buffer", glow::ARRAY_BUFFER_BINDING),
+            ("renderbuffer", glow::RENDERBUFFER_BINDING),
+        ] {
+            put(name, (gl.get_parameter_i32(parameter) != 0).to_string());
+        }
+        // Which units hold a 2D texture, then back to the unit that was active.
+        let active = gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32;
+        let bound: Vec<u32> = (0..16)
+            .filter(|unit| {
+                gl.active_texture(glow::TEXTURE0 + unit);
+                gl.get_parameter_i32(glow::TEXTURE_BINDING_2D) != 0
+            })
+            .collect();
+        gl.active_texture(active);
+        put("texture_2d_units", format!("{bound:?}"));
+    }
+    out
+}
+
+/// Takes `shot` with `renderer`.
 pub(super) fn render(
     gl: &Arc<glow::Context>,
     renderer: &mut ModelGlRenderer,
     source: &TagSource,
     shot: &Shot,
     options: &ShotOptions,
-) -> (Vec<u8>, u64) {
+) -> Rendered {
     let names = match source {
         TagSource::LooseFolder { definitions_root, .. } => {
             TagNameIndex::load_game(definitions_root, options.game).unwrap()
@@ -522,6 +612,7 @@ pub(super) fn render(
         }
         renderer.paint(gl, &frame);
         assert_eq!(gl.get_error(), 0, "GL error during the frame");
+        let gl_state = gl_state(gl, framebuffer);
         let mut pixels = vec![0u8; (width * height * 4) as usize];
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
         gl.read_pixels(
@@ -533,7 +624,7 @@ pub(super) fn render(
             glow::UNSIGNED_BYTE,
             glow::PixelPackData::Slice(Some(&mut pixels)),
         );
-        (pixels, data.geometry_id)
+        Rendered { pixels, geometry_id: data.geometry_id, gl_state }
     }
 }
 
@@ -543,6 +634,8 @@ pub(in crate::app::model_preview) struct Shown {
     pub(in crate::app::model_preview) pixels: Vec<u8>,
     /// A line per simulation field its slot kept: [`super::super::gates::field_lines`].
     pub(in crate::app::model_preview) simulation: String,
+    /// A line per GL setting the paint left.
+    pub(in crate::app::model_preview) gl_state: String,
 }
 
 /// Takes each shot in one headless context, from the kit `source` reads.
@@ -552,12 +645,12 @@ pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, S
     shots
         .iter()
         .map(|(shot, options)| {
-            let (pixels, geometry_id) = render(&gl, &mut renderer, source, shot, options);
+            let Rendered { pixels, geometry_id, gl_state } = render(&gl, &mut renderer, source, shot, options);
             let mut simulation = String::new();
             renderer.for_each_simulation(geometry_id, |name, state| {
                 super::super::gates::field_lines(&mut simulation, name, &state);
             });
-            Shown { pixels, simulation }
+            Shown { pixels, simulation, gl_state }
         })
         .collect()
 }
@@ -592,7 +685,7 @@ fn h2_shot() {
             pitch: f[5].parse().unwrap(),
             kind: None,
         };
-        std::fs::write(f[1], render(&gl, &mut renderer, &source, &shot, &options).0).unwrap();
+        std::fs::write(f[1], render(&gl, &mut renderer, &source, &shot, &options).pixels).unwrap();
     }
 }
 

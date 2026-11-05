@@ -460,10 +460,11 @@ fn save_png(path: &std::path::Path, pixels: &[u8]) {
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 }
 
-/// G-px and G-sim: each object of [`PIXEL_SET`], in each of [`LOOKS`], draws
-/// the same pixels as before, and its slot keeps the same simulations (a line
-/// per field, under `sim/`). Blessing keeps every shot as a PNG beside the
-/// hashes; a shot that differs is saved under `changed/` to set against it.
+/// G-px, G-sim and G-gl: each object of [`PIXEL_SET`], in each of [`LOOKS`],
+/// draws the same pixels as before, its slot keeps the same simulations (a
+/// line per field, under `sim/`), and the paint leaves GL as it did (under
+/// `gl/`). Blessing keeps every shot as a PNG beside the hashes; a shot that
+/// differs is saved under `changed/` to set against it.
 #[cfg(target_os = "macos")]
 #[test]
 fn gate_pixels() {
@@ -473,7 +474,7 @@ fn gate_pixels() {
         eprintln!("skipping: BABOON_GATE_DIR is not set");
         return;
     };
-    let (sim_dir, dir) = (dir.join("sim"), dir.join("px"));
+    let (sim_dir, gl_dir, dir) = (dir.join("sim"), dir.join("gl"), dir.join("px"));
     let bless = std::env::var_os("BABOON_GATE_BLESS").is_some();
     let mut failures = Vec::new();
     for (variable, game, objects) in PIXEL_SET {
@@ -514,9 +515,13 @@ fn gate_pixels() {
         );
         let mut snapshot = String::new();
         let mut simulations = String::new();
+        let mut gl_states = String::new();
         for (name, shown) in names.iter().zip(&images) {
             for row in shown.simulation.lines() {
                 let _ = writeln!(simulations, "{name} {row}");
+            }
+            for row in shown.gl_state.lines() {
+                let _ = writeln!(gl_states, "{name} {row}");
             }
             let pixels = &shown.pixels;
             let hash = pixels.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
@@ -532,6 +537,8 @@ fn gate_pixels() {
         }
         let simulated = bless_or_compare(&sim_dir, &format!("{game:?}.txt"), &simulations);
         failures.extend(simulated.err());
+        let left = bless_or_compare(&gl_dir, &format!("{game:?}.txt"), &gl_states);
+        failures.extend(left.err());
         if let Err(report) = bless_or_compare(&dir, &format!("{game:?}.txt"), &snapshot) {
             for (name, shown) in names.iter().zip(&images) {
                 let pixels = &shown.pixels;
