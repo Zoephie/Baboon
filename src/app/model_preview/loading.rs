@@ -429,7 +429,9 @@ fn load_tag_preview(
             return Err("This object has no model to preview.".to_owned());
         };
         let model = &model;
-        let mut data = load_model_preview(model, entry, names, Some(source), settings)?;
+        // `load_tag_preview`, not `load_model_preview`: the object's own load
+        // already adds what that adds (the H4 colour grading, read once).
+        let mut data = load_tag_preview(model, entry, names, Some(source), settings)?;
         data.default_variant = object_default_variant(model_tag);
         let mut notes = std::mem::take(&mut data.notes);
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
