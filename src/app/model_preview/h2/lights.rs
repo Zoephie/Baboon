@@ -2006,7 +2006,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::super::h3_particles::loose_kit(&root, crate::core::game::GameId::HaloReach);
+        let source = super::super::super::particles::loose_kit(&root, crate::core::game::GameId::HaloReach);
         let path = "objects\\vehicles\\human\\warthog\\bitmaps\\antenna";
         let bitmap = load_referenced_tag_from_source(&source, path, "bitmap", b"bitm").unwrap();
         let reach = antenna_sprite(&bitmap, 0, REACH_ANTENNA_TRIM).unwrap();

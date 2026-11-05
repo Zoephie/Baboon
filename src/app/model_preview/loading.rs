@@ -862,11 +862,11 @@ fn read_h3_object_features(source: &TagSource, model_tag: &TagFile, model: &TagF
     preview.h3_flares.extend(super::h3_lights::light_flares(&preview.h3_lights));
     preview.h3_light_volumes =
         super::h3_light_volumes::read_h3_light_volumes(source, model_tag, 0, &preview.markers, frame);
-    let systems = super::h3_particles::read_h3_particles(source, model_tag, 0, &preview.markers, frame);
+    let systems = super::particles::read_h3_particles(source, model_tag, 0, &preview.markers, frame);
     preview.h3_particles = systems.into_iter().map(Arc::new).collect();
     let strips = super::h3_strips::read_h3_strips(source, model_tag, 0, &preview.markers, frame);
     preview.h3_strips = strips.into_iter().map(Arc::new).collect();
-    let carried = super::h3_particles::carried_strips(&preview.h3_particles);
+    let carried = super::particles::carried_strips(&preview.h3_particles);
     preview.h3_strips.extend(carried);
     preview.h3_screen_effects =
         super::h3_screen_effects::read_h3_screen_effects(source, model_tag, 0, &preview.markers, frame);
@@ -908,7 +908,7 @@ fn read_h2_object_features(source: &TagSource, model_tag: &TagFile, preview: &mu
     });
     (preview.h2_flares, preview.h2_point_lights, preview.h2_gel_lights) = found;
     preview.h2_antennas = super::h2::lights::read_h2_antennas(source, model_tag, &markers);
-    let systems = super::h3_particles::read_h3_particles(source, model_tag, 0, &markers, |marker| {
+    let systems = super::particles::read_h3_particles(source, model_tag, 0, &markers, |marker| {
         let place = super::attachment::MarkerFrame {
             axes: marker.axes,
             position: marker.position,

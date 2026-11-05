@@ -5,7 +5,7 @@
 //! `SetMaterialRenderState`'s constants. See
 //! `docs/h4-preview-research/particles.md`.
 
-use super::h3_particles::H4EmitterDraw;
+use super::particles::H4EmitterDraw;
 use super::h3_shaders::{H3Pass, H3Value};
 use super::h4_effect_gl::{H4EffectGl, material_functions};
 use super::h4_particles::{H4ParticleRender, custom_vert_registers};

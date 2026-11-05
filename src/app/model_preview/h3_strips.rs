@@ -14,7 +14,7 @@ use super::ce::lights::{CeFlareView, posed_on};
 use super::h2::functions::H2FunctionValues;
 use super::dx9::passes::tag_function_at;
 use super::h3_effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, read_part_placement};
-use super::h3_particles::{
+use super::particles::{
     H3ParticleVertex, H3SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader, slerped,
 };
 use super::*;
@@ -1489,7 +1489,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return None;
         };
-        Some(super::super::h3_particles::loose_kit(&root, GameId::HaloReach))
+        Some(super::super::particles::loose_kit(&root, GameId::HaloReach))
     }
 
     fn looks_of(source: &TagSource, path: &str, group: &str, code: &[u8; 4], blocks: &str) -> Vec<StripLook> {
@@ -1507,7 +1507,7 @@ mod tests {
             return;
         };
         let beams = looks_of(&source, "objects\\weapons\\rifle\\focus_rifle\\fx\\projectile_3p", "beam_system", b"beam", "beams");
-        use super::super::h3_particles::H3ParticleAlbedo;
+        use super::super::particles::H3ParticleAlbedo;
         assert_eq!(beams[1].shader.albedo, H3ParticleAlbedo::Palette2dPlasma);
         assert_eq!(beams[2].shader.albedo, H3ParticleAlbedo::PalettePlasma);
         for plasma in &beams[1..3] {
@@ -1532,7 +1532,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H3EK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::Halo3);
+        let source = super::super::particles::loose_kit(&root, GameId::Halo3);
         let beams = looks_of(&source, "objects\\equipment\\autoturret\\fx\\projectile", "beam_system", b"beam", "beams");
         assert!(!beams.is_empty());
         for beam in &beams {

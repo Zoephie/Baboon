@@ -19,7 +19,7 @@ use super::h3_effects::{
     CHEAP_PARTICLE_EMITTER, H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
     read_part_placement,
 };
-use super::h3_particles::{PRE_ROLL, Random, particle_game_time};
+use super::particles::{PRE_ROLL, Random, particle_game_time};
 use super::reach_lights::object_value;
 use super::*;
 use crate::core::source::TagSource;
@@ -1704,7 +1704,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H4EK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::Halo4);
+        let source = super::super::particles::loose_kit(&root, GameId::Halo4);
         let library = CheapLibrary::read(&source, "fx\\cheap_particles\\global").expect("the library");
         assert!(library.halo4());
         assert_eq!((library.types.len(), library.turbulence.len()), (152, 4));
@@ -1735,7 +1735,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
         let library = CheapLibrary::read(&source, "globals\\global").expect("the library");
         assert_eq!(library.types.len(), 60);
         let tag = load_referenced_tag_from_source(&source, "globals\\global_type_texture", "bitmap", b"bitm").unwrap();
@@ -1767,7 +1767,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
         let path = "levels\\solo\\m52\\fx\\city_damage_fx\\building_electrical_fire";
         let object = load_referenced_tag_from_source(&source, path, "effect_scenery", b"efsc").unwrap();
         let marker = RenderModelPreviewMarker {
@@ -1811,7 +1811,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
         let path = "levels\\solo\\m45\\fx\\space_junk_huge";
         let object = load_referenced_tag_from_source(&source, path, "effect_scenery", b"efsc").unwrap();
         let marker = RenderModelPreviewMarker {

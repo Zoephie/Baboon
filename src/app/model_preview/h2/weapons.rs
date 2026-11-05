@@ -661,7 +661,7 @@ fn fold_attached(
         let markers = &attached.markers;
         // Particle systems carry the held object's event effects (`firing
         // effect` and the rest), which its owner's panel plays by name.
-        let particles = super::super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+        let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
         let particles: Vec<_> = particles.into_iter().map(|system| Arc::new(system.on_attached(name))).collect();
         preview.h3_particles.extend(particles);
         let volumes = super::light_volumes::read_h2_light_volumes(source, object, owner, markers, frame);
@@ -717,9 +717,9 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     let flares = super::super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
     let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
-    let particles = super::super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
     let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
-    let carried = super::super::h3_particles::carried_strips(&particles);
+    let carried = super::super::particles::carried_strips(&particles);
     preview.h3_particles.extend(particles);
     preview.h3_strips.extend(carried);
     let strips = super::super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
@@ -760,9 +760,9 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     preview.h3_light_volumes.extend(named!(volumes, name));
     let cheap = super::super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
     preview.reach_cheap_emitters.extend(named!(cheap, name));
-    let particles = super::super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
     let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
-    let carried = super::super::h3_particles::carried_strips(&particles);
+    let carried = super::super::particles::carried_strips(&particles);
     preview.h3_particles.extend(particles);
     preview.h3_strips.extend(carried);
     let strips = super::super::h3_strips::read_h3_strips(source, object, owner, markers, frame);
@@ -804,7 +804,7 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderMode
     preview.h4_lights.extend(named!(lights, name));
     preview.h4_cheap_lights.extend(named!(cheap, name));
     super::super::h4_lights::read_h4_light_passes(source, preview);
-    let particles = super::super::h3_particles::read_h3_particles(source, object, owner, markers, frame);
+    let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
     preview.h3_particles.extend(named!(particles, name).map(Arc::new));
     let volumes = super::super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
@@ -855,7 +855,7 @@ pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPr
             read_h3_attached_features(source, &weapon, owner, markers, frame, within, preview);
             continue;
         }
-        let particles = super::super::h3_particles::read_h3_particles(source, &weapon, owner, markers, frame);
+        let particles = super::super::particles::read_h3_particles(source, &weapon, owner, markers, frame);
         preview.h3_particles.extend(named!(particles, within).map(Arc::new));
         let (flares, lights, gels) = super::lights::read_h2_flares(source, &weapon, owner, markers, frame);
         preview.h2_flares.extend(named!(flares, within));

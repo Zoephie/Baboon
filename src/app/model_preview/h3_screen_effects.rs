@@ -800,7 +800,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
         for (path, layer) in [
             ("fx\\screen_fx\\camera_fx\\dead_static_overlay", ScreenLayer::PostUi),
             ("objects\\characters\\spartans\\fx\\night_vision\\night_vision", ScreenLayer::PreTransparents),
@@ -820,7 +820,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
         let path = "objects\\characters\\spartans\\fx\\damage_feedback\\body_damage_screen_distortion";
         let tag = load_referenced_tag_from_source(&source, path, "area_screen_effect", b"sefc").expect(path);
         assert!(!elements(tag.root(), "screen effects").is_empty());

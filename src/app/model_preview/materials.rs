@@ -411,7 +411,7 @@ fn resolve_one_material(
     let values = Values {
         resolved: resolved.as_ref(),
         method: &render_method,
-        sort_layer: shader.root().descend("render_method").map_or(2, super::h3_particles::h3_sort_layer),
+        sort_layer: shader.root().descend("render_method").map_or(2, super::particles::h3_sort_layer),
     };
     let mut textures = MaterialTextures {
         used_shader_parameters_only: resolved.is_none(),

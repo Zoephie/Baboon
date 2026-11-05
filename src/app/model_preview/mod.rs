@@ -31,7 +31,7 @@ mod h3_effects;
 pub(crate) mod h3_cloth;
 pub(crate) mod h3_leaves;
 pub(crate) mod h3_light_volumes;
-pub(crate) mod h3_particles;
+pub(crate) mod particles;
 pub(crate) mod h3_screen_effects;
 pub(crate) mod h3_vision;
 pub(crate) mod h3_strips;
@@ -178,7 +178,7 @@ pub(crate) struct RenderModelPreview {
     pub h3_light_volumes: Vec<h3_light_volumes::H3LightVolumeAt>,
     /// Halo 4's point-to-point tracers.
     pub h4_tracers: Vec<h4_tracers::H4TracerAt>,
-    pub h3_particles: Vec<Arc<h3_particles::H3ParticleSystem>>,
+    pub h3_particles: Vec<Arc<particles::H3ParticleSystem>>,
     pub h3_strips: Vec<Arc<h3_strips::H3StripAt>>,
     pub h3_cloth: Vec<h3_cloth::H3ClothAt>,
     pub h3_leaves: Vec<Arc<h3_leaves::H3LeavesAt>>,

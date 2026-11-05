@@ -17,7 +17,7 @@ use super::dx9::passes::tag_function_at;
 use super::h3_effects::{
     H3EffectTimes, for_each_attached_part, part_frame, read_part_placement,
 };
-use super::h3_particles::inline_real;
+use super::particles::inline_real;
 use super::h3_shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::h3_strips::EPSILON;
 use super::h4_particles::{f32_to_f16, pack_argb8};
@@ -539,7 +539,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         blend,
         sampler,
         bitmap,
-        sort_layer: super::h3_particles::h3_sort_layer(shader),
+        sort_layer: super::particles::h3_sort_layer(shader),
         reach,
         circular,
         depth_fade,
@@ -1289,7 +1289,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
         let first = |path: &str| {
             let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
             read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path)
@@ -1312,7 +1312,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H3EK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::Halo3);
+        let source = super::super::particles::loose_kit(&root, GameId::Halo3);
         let path = "objects\\characters\\masterchief\\fx\\flashlight";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
         let volume = read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path);
@@ -1390,7 +1390,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H4EK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, GameId::Halo4);
+        let source = super::super::particles::loose_kit(&root, GameId::Halo4);
         let path = "objects\\vehicles\\covenant\\turrets\\plasma_turret\\fx\\tripod_light_volume";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
         let volume = read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path);

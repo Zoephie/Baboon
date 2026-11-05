@@ -8,7 +8,7 @@ use blam_tags::TagFile;
 use super::ce::attachments::{elements, object_block};
 use super::h3_cloth::{H3Wind, away_from_pole, turned_about};
 use super::h3_effects::marker_name;
-use super::h3_particles::{H3ParticleVertex, H3SpriteShader};
+use super::particles::{H3ParticleVertex, H3SpriteShader};
 use super::h3_shaders::H3Blend;
 use super::materials::read_h3_bitmap;
 use super::renderer::H3_EXPOSURE;

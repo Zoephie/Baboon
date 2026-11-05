@@ -2071,7 +2071,7 @@ struct ModelGpuSlot {
     h2_contrail_textures: Vec<Option<glow::NativeTexture>>,
     h2_liquid_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     h2_contrails: h2::contrails::H2ContrailField,
-    h3_particles: h3_particles::H3ParticleField,
+    h3_particles: particles::H3ParticleField,
     /// Reach's cheap particles, and their library's render texture array.
     reach_cheap: reach_cheap_particles::ReachCheapField,
     reach_cheap_texture: Option<glow::NativeTexture>,
@@ -2310,7 +2310,7 @@ impl ModelGpuSlot {
             for texture in drained.flatten().flatten() {
                 gl.delete_texture(texture);
             }
-            let maps = |look: &h3_particles::H3SpriteShader| {
+            let maps = |look: &particles::H3SpriteShader| {
                 let [base, alpha, palette, second] = look.samplers;
                 [
                     (&look.base_map, base),
@@ -3730,7 +3730,7 @@ void main() {
 const PARTICLE_FLOATS: usize = 24;
 
 /// A run of vertices as the particle program takes them.
-fn particle_floats(camera: &ModelGpuCamera, drawn: &[h3_particles::H3ParticleVertex]) -> Vec<[f32; PARTICLE_FLOATS]> {
+fn particle_floats(camera: &ModelGpuCamera, drawn: &[particles::H3ParticleVertex]) -> Vec<[f32; PARTICLE_FLOATS]> {
     drawn
         .iter()
         .map(|vertex| {
@@ -3796,7 +3796,7 @@ impl H3ParticleGl {
     unsafe fn draw(
         &self,
         gl: &glow::Context,
-        look: &h3_particles::H3SpriteShader,
+        look: &particles::H3SpriteShader,
         vertices: &[[f32; PARTICLE_FLOATS]],
         textures: [Option<glow::NativeTexture>; 4],
         no_map: Option<glow::NativeTexture>,
@@ -3823,7 +3823,7 @@ impl H3ParticleGl {
             gl.uniform_1_f32(self.fade.as_ref(), range);
             gl.uniform_4_f32_slice(self.depth.as_ref(), &scene_depth_terms(camera));
             gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
-            if look.albedo == h3_particles::H3ParticleAlbedo::H2Distortion {
+            if look.albedo == particles::H3ParticleAlbedo::H2Distortion {
                 let mut viewport = [0; 4];
                 gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
                 let [x, y, width, height] = viewport.map(|value| value as f32);
@@ -5230,7 +5230,7 @@ impl ModelGlRenderer {
                         }
                         let vertices = particle_floats(camera, &drawn);
                         let mut textures = uploaded.particle_textures.get(index).copied().unwrap_or_default();
-                        if system.look.shader.albedo == h3_particles::H3ParticleAlbedo::H2Distortion {
+                        if system.look.shader.albedo == particles::H3ParticleAlbedo::H2Distortion {
                             // `sub_915630`: before a pass that reads `GLOBAL particle
                             // distortion`, the frame as it stands is copied there.
                             textures[2] = copy_frame(gl, &mut self.h2_distortion_copy);

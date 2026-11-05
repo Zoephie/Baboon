@@ -21,7 +21,7 @@ use super::h3_effects::{
     H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
     read_part_placement,
 };
-use super::h3_particles::{read_ends, slerped};
+use super::particles::{read_ends, slerped};
 use super::h4_particles::{pack_argb8, pack_half2, pack_ushort2n};
 use super::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::*;
@@ -1629,7 +1629,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H4EK is not set");
             return;
         };
-        let source = super::super::h3_particles::loose_kit(&root, crate::core::game::GameId::Halo4);
+        let source = super::super::particles::loose_kit(&root, crate::core::game::GameId::Halo4);
         let path = "environments\\solo\\m90_sacrifice\\fx\\beams\\parts\\beam_beamhole";
         let tag =
             load_referenced_tag_from_source(&source, path, "tracer_system", b"trac").expect(path);
