@@ -24,6 +24,7 @@ use crate::core::hlsl::emit::Stage;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::named_function::NamedFunction;
 
 const SMALLEST: f32 = 1e-4;
 /// Halo 4's simulation rate.
@@ -51,20 +52,19 @@ const POINT_PHYSICALLY_CORRECT: usize = 204;
 /// A light's function: `light_function`, its `Mapping` beside the names of
 /// what drives it.
 #[derive(Debug, Clone)]
-struct H4LightFunction {
-    input: String,
-    range: String,
-    function: Arc<TagFunction>,
+struct H4LightFunction(NamedFunction);
+
+impl std::ops::Deref for H4LightFunction {
+    type Target = NamedFunction;
+
+    fn deref(&self) -> &NamedFunction {
+        &self.0
+    }
 }
 
 impl H4LightFunction {
     fn read(root: TagStruct<'_>, name: &str) -> Option<Self> {
-        let holder = root.descend(name)?;
-        Some(Self {
-            input: holder.read_string_id("Input Variable").unwrap_or_default(),
-            range: holder.read_string_id("Range Variable").unwrap_or_default(),
-            function: Arc::new(tag_function_at(&holder, "Mapping")?),
-        })
+        NamedFunction::read(root, name).map(Self)
     }
 
     /// `light_function::EvaluateFunction` (X360 0x84BCA490): a named input

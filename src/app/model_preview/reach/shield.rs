@@ -5,17 +5,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use blam_tags::{TagFile, TagFunction, TagStruct};
+use blam_tags::{TagFile, TagStruct};
 
 use super::super::ce::attachments::elements;
 use super::super::h2::functions::H2FunctionValues;
-use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
 use super::super::materials::decode_h2_image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::named_function::NamedFunction;
 
 /// `shield_impact` `flags`.
 const PROCEDURAL_UV: &str = "use procedural uv generation";
@@ -35,20 +35,19 @@ pub(crate) const WORLD_SCALE: &str = "reach_shield_world_scale";
 /// A `shield_impact` function: `shield_color_function_struct` and
 /// `shield_scalar_function_struct`.
 #[derive(Debug, Clone)]
-struct ShieldChannel {
-    input: String,
-    range: String,
-    function: Arc<TagFunction>,
+struct ShieldChannel(NamedFunction);
+
+impl std::ops::Deref for ShieldChannel {
+    type Target = NamedFunction;
+
+    fn deref(&self) -> &NamedFunction {
+        &self.0
+    }
 }
 
 impl ShieldChannel {
     fn read(root: TagStruct<'_>, name: &str) -> Option<Self> {
-        let holder = root.descend(name)?;
-        Some(Self {
-            input: holder.read_string_id("Input Variable").unwrap_or_default(),
-            range: holder.read_string_id("Range Variable").unwrap_or_default(),
-            function: Arc::new(tag_function_at(&holder, "Mapping")?),
-        })
+        NamedFunction::read(root, name).map(Self)
     }
 
     /// `eval_string_id`: what `render_object_internal` knows by name, then

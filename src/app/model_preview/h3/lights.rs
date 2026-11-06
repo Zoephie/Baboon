@@ -23,6 +23,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::named_function::NamedFunction;
 
 /// `flags` of a `light`.
 const ALLOW_SHADOWS_AND_GELS: i128 = 1;
@@ -37,20 +38,19 @@ const DEFAULT_RANGE: f32 = 0.5;
 const SMALLEST: f32 = 1e-6;
 
 #[derive(Debug, Clone)]
-struct H3Channel {
-    input: String,
-    range: String,
-    function: Arc<TagFunction>,
+struct H3Channel(NamedFunction);
+
+impl std::ops::Deref for H3Channel {
+    type Target = NamedFunction;
+
+    fn deref(&self) -> &NamedFunction {
+        &self.0
+    }
 }
 
 impl H3Channel {
     fn read(root: TagStruct<'_>, name: &str) -> Option<Self> {
-        let holder = root.descend(name)?;
-        Some(Self {
-            input: holder.read_string_id("Input Variable").unwrap_or_default(),
-            range: holder.read_string_id("Range Variable").unwrap_or_default(),
-            function: Arc::new(tag_function_at(&holder, "Mapping")?),
-        })
+        NamedFunction::read(root, name).map(Self)
     }
 
     /// `light_update`: seconds alive, unless an object function is named.

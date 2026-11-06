@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use blam_tags::{TagFile, TagFunction, TagStruct};
+use blam_tags::{TagFile, TagFunction};
 
 use super::super::attachment::MarkerFrame;
 use super::super::ce::attachments::{elements, object_block};
@@ -18,6 +18,7 @@ use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::cross;
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::named_function::NamedFunction;
 
 /// `light_update_state`'s range when no function names one.
 const DEFAULT_RANGE: f32 = 0.5;
@@ -43,26 +44,6 @@ pub(crate) enum ReachLightMethod {
     /// Shadow-mapped, re-rendering what it lights. No attached object light
     /// in the kit uses it, and it is not drawn.
     Rerender,
-}
-
-/// A function of a light: `light_color_function_struct` and
-/// `light_scalar_function_struct`.
-#[derive(Debug, Clone)]
-struct ReachChannel {
-    input: String,
-    range: String,
-    function: Arc<TagFunction>,
-}
-
-impl ReachChannel {
-    fn read(root: TagStruct<'_>, name: &str) -> Option<Self> {
-        let holder = root.descend(name)?;
-        Some(Self {
-            input: holder.read_string_id("Input Variable").unwrap_or_default(),
-            range: holder.read_string_id("Range Variable").unwrap_or_default(),
-            function: Arc::new(tag_function_at(&holder, "Mapping")?),
-        })
-    }
 }
 
 /// `object_get_function_value_simple`: no name reads full, and a name the
@@ -92,8 +73,8 @@ struct ReachLightTag {
     hotspot: f32,
     falloff_speed: f32,
     near_fading: f32,
-    color: ReachChannel,
-    intensity: ReachChannel,
+    color: NamedFunction,
+    intensity: NamedFunction,
     /// Version 2 and before: the intensity rescaled by `1 / distance diffusion`.
     intensity_scale: f32,
 }
@@ -129,8 +110,8 @@ fn read_light_tag(source: &TagSource, path: &str) -> Option<ReachLightTag> {
         0.0 => 1.0,
         scale => scale,
     };
-    let color = ReachChannel::read(root, "color")?;
-    let intensity = ReachChannel::read(root, "intensity")?;
+    let color = NamedFunction::read(root, "color")?;
+    let intensity = NamedFunction::read(root, "intensity")?;
     // The old intensity scaled by `distance diffusion`, 10 when unset.
     let diffusion = real("distance diffusion");
     let intensity_scale = match (version <= 2, diffusion <= SMALLEST) {
