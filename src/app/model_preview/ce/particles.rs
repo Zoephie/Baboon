@@ -806,7 +806,7 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
             let tint = |name: &str| argb(entry, name);
             entries.push(CeEffectParticle {
                 location: entry.read_int_any("location").unwrap_or(0).max(0) as usize,
-                first_person_only: entry.read_enum_name("create").as_deref() == Some("only in first person"),
+                first_person_only: entry.field("create").is_some_and(|create| create.enum_is("only in first person")),
                 created: created_here(entry),
                 direction: direction_of(entry, "relative direction"),
                 offset: match entry.field("relative offset").and_then(|field| field.value()) {
@@ -839,9 +839,8 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
     if events.is_empty() || (particles.is_empty() && lights.is_empty() && systems.is_empty()) {
         return None;
     }
-    let flags = root.read_flag_names("flags").unwrap_or_default();
     Some(CeEffectDef {
-        deleted_when_off: flags.iter().any(|(_, name)| name == "deleted when attachment deactivates"),
+        deleted_when_off: has_flag(root, "flags", "deleted when attachment deactivates"),
         loop_start: index("loop start event"),
         loop_stop: index("loop stop event"),
         locations,
@@ -1742,8 +1741,8 @@ struct Made<'a> {
 /// (`effect_allowed_by_environment`: water needs water under the point, and
 /// space only is never made).
 fn created_here(entry: TagStruct<'_>) -> bool {
-    let environment = entry.read_enum_name("create in");
-    let violence = entry.read_enum_name("violence mode");
+    let environment = entry.read_enum_option("create in");
+    let violence = entry.read_enum_option("violence mode");
     matches!(environment.as_deref(), None | Some("any environment" | "air only"))
         && violence.as_deref() != Some("nonviolent mode only")
 }

@@ -663,7 +663,7 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<H2DrawPass> {
 
 /// A shader's option by name, with a list's position standing for its value.
 pub(in crate::app::model_preview) fn option_index(root: TagStruct<'_>, field: &str, options: &[&str]) -> i32 {
-    let name = root.read_enum_name(field);
+    let name = root.read_enum_option(field);
     options.iter().position(|option| name.as_deref() == Some(*option)).unwrap_or(0) as i32
 }
 
