@@ -1117,7 +1117,7 @@ impl ModelGlRenderer {
         }
         let uploaded = &mut self.slots[slot];
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-        let written = uploaded.simulations.h3_cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
+        let written = uploaded.simulations.cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
         for (first, moved) in written {
             unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
         }
@@ -1203,7 +1203,7 @@ impl ModelGlRenderer {
                 let view = ce_flare_view(&frame.camera);
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let effects = &frame.preview.h3_screen_effects;
-                gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.simulations.h3_onsets, bones, &view, frame.time)
+                gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
             };
             self.reach_stops = if reach { screen.stops() } else { 0.0 };
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
@@ -1324,7 +1324,7 @@ impl ModelGlRenderer {
                 }
                 let values = frame.h2_values_of_object(light.object);
                 let colors = frame.change_colors_of_object(light.object);
-                let onset = self.slots[slot].simulations.h3_onsets.of(light.object, light.scale_name(), values, frame.time);
+                let onset = self.slots[slot].simulations.effect_onsets.of(light.object, light.scale_name(), values, frame.time);
                 let Some(lit) = light.lit(values, &colors, bones, frame.time, onset) else {
                     continue;
                 };

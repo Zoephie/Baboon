@@ -2033,7 +2033,8 @@ impl ModelSlotLru {
 #[derive(Default)]
 struct SlotSimulations {
     h2_contrails: h2::contrails::H2ContrailField,
-    h3_particles: particles::H3ParticleField,
+    /// Halo 2's and the gen3 games' particle systems.
+    particles: particles::H3ParticleField,
     /// Reach's cheap particles.
     reach_cheap: particles::cheap::ReachCheapField,
     ce_contrails: ce::contrails::CeContrailField,
@@ -2042,9 +2043,12 @@ struct SlotSimulations {
     h3_strips: gen3::strips::H3StripField,
     /// Halo 4's trailing tracers between frames.
     h4_trails: h4::tracers::H4TracerField,
-    h3_onsets: gen3::effects::H3EffectOnsets,
-    h3_cloth: cloth::H3ClothField,
-    reach_antennas: antennas::spring::ReachAntennaField,
+    /// When each effect began, for Halo 2's and the gen3 games' effect parts.
+    effect_onsets: gen3::effects::H3EffectOnsets,
+    /// Halo 2's and the gen3 games' cloth.
+    cloth: cloth::H3ClothField,
+    /// Every antenna's spring.
+    antennas: antennas::spring::ReachAntennaField,
     h3_leaves: h3::leaves::H3LeafField,
     /// Halo CE effect particles.
     ce_particles: ce::particles::CeParticleField,
@@ -2060,32 +2064,32 @@ impl SlotSimulations {
     fn each(&self, mut visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
         let Self {
             h2_contrails,
-            h3_particles,
+            particles,
             reach_cheap,
             ce_contrails,
             ce_glows,
             ce_flags,
             h3_strips,
             h4_trails,
-            h3_onsets,
-            h3_cloth,
-            reach_antennas,
+            effect_onsets,
+            cloth,
+            antennas,
             h3_leaves,
             ce_particles,
             ce_pctl,
             h3_vision_clock,
         } = self;
         visit("h2_contrails", h2_contrails);
-        visit("h3_particles", h3_particles);
+        visit("particles", particles);
         visit("reach_cheap", reach_cheap);
         visit("ce_contrails", ce_contrails);
         visit("ce_glows", ce_glows);
         visit("ce_flags", ce_flags);
         visit("h3_strips", h3_strips);
         visit("h4_trails", h4_trails);
-        visit("h3_onsets", h3_onsets);
-        visit("h3_cloth", h3_cloth);
-        visit("reach_antennas", reach_antennas);
+        visit("effect_onsets", effect_onsets);
+        visit("cloth", cloth);
+        visit("antennas", antennas);
         visit("h3_leaves", h3_leaves);
         visit("ce_particles", ce_particles);
         visit("ce_pctl", ce_pctl);
@@ -4455,7 +4459,7 @@ impl ModelGlRenderer {
                             continue;
                         }
                         let values = frame.h2_values_of_object(point.object);
-                        let onsets = &mut self.slots[slot].simulations.h3_onsets;
+                        let onsets = &mut self.slots[slot].simulations.effect_onsets;
                         let onset = onsets.of(point.object, point.scale_name(), values, frame.time);
                         let Some(light) = point.lit(values, bones, frame.time, onset) else {
                             continue;
@@ -4486,7 +4490,7 @@ impl ModelGlRenderer {
                             continue;
                         }
                         let values = frame.h2_values_of_object(gel.object);
-                        let onsets = &mut self.slots[slot].simulations.h3_onsets;
+                        let onsets = &mut self.slots[slot].simulations.effect_onsets;
                         let onset = onsets.of(gel.object, gel.scale_name(), values, frame.time);
                         let Some((light, rows)) = gel.lit(values, bones, frame.time, onset) else {
                             continue;
@@ -4745,7 +4749,7 @@ impl ModelGlRenderer {
                         continue;
                     }
                     let values = frame.h2_values_of_object(at.object);
-                    let onset = uploaded.simulations.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                    let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                     for (volume, texture) in at.volumes().iter().zip(textures) {
                         let Some(texture) = texture else {
                             continue;
@@ -4822,7 +4826,7 @@ impl ModelGlRenderer {
                 gl.color_mask(true, true, true, h3);
             }
             let tips = if antennas {
-                uploaded.simulations.reach_antennas.advance(&frame.preview.h2_antennas, bones, frame.time)
+                uploaded.simulations.antennas.advance(&frame.preview.h2_antennas, bones, frame.time)
             } else {
                 Vec::new()
             };
@@ -4872,7 +4876,7 @@ impl ModelGlRenderer {
                 // The grid, or under the object if that hangs below it.
                 let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
                 let ground = lowest.fold(0.0, f32::min);
-                uploaded.simulations.h3_particles.advance(systems, values, &mut uploaded.simulations.h3_onsets, bones, view.eye, ground, frame.time);
+                uploaded.simulations.particles.advance(systems, values, &mut uploaded.simulations.effect_onsets, bones, view.eye, ground, frame.time);
             }
             if !cursor_advanced {
                 uploaded.simulations.h3_leaves.advance(&frame.preview.h3_leaves, frame.time);
@@ -4880,20 +4884,20 @@ impl ModelGlRenderer {
             if !cursor_advanced && !frame.preview.reach_cheap_emitters.is_empty() {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
                 let (emitters, shown) = (&frame.preview.reach_cheap_emitters, &frame.reach_cheap_shown);
-                uploaded.simulations.reach_cheap.advance(emitters, shown, values, &mut uploaded.simulations.h3_onsets, bones, view.eye, frame.time);
+                uploaded.simulations.reach_cheap.advance(emitters, shown, values, &mut uploaded.simulations.effect_onsets, bones, view.eye, frame.time);
             }
             if !cursor_advanced && !frame.preview.h3_strips.is_empty() {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
-                let (systems, particles) = (&frame.preview.h3_particles, &uploaded.simulations.h3_particles);
+                let (systems, particles) = (&frame.preview.h3_particles, &uploaded.simulations.particles);
                 let tracks = |strip: &Arc<gen3::strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
                     particles.tracks_of(systems, strip).into_iter().map(|track| (track.id, track.place)).collect()
                 };
-                uploaded.simulations.h3_strips.advance(&frame.preview.h3_strips, values, &mut uploaded.simulations.h3_onsets, tracks, bones, frame.time);
+                uploaded.simulations.h3_strips.advance(&frame.preview.h3_strips, values, &mut uploaded.simulations.effect_onsets, tracks, bones, frame.time);
             }
             if !cursor_advanced && frame.preview.h4_tracers.iter().any(|tracer| tracer.trails()) {
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
                 let tracers = &frame.preview.h4_tracers;
-                uploaded.simulations.h4_trails.advance(tracers, values, &mut uploaded.simulations.h3_onsets, bones, view.eye, frame.time);
+                uploaded.simulations.h4_trails.advance(tracers, values, &mut uploaded.simulations.effect_onsets, bones, view.eye, frame.time);
             }
             // `c_transparency_renderer` sorts far to near, each from its location.
             enum Sprites {
@@ -4920,7 +4924,7 @@ impl ModelGlRenderer {
             let distorting = matches!(stage, SpriteStage::Distortions);
             let systems = systems
                 .filter(|(_, system)| system.look.shader.distortion.is_some() == distorting)
-                .map(|(at, system)| (layered(system.look.shader.sort_layer, uploaded.simulations.h3_particles.distance(at, system, bones, &view)), Sprites::System(at)));
+                .map(|(at, system)| (layered(system.look.shader.sort_layer, uploaded.simulations.particles.distance(at, system, bones, &view)), Sprites::System(at)));
             let strips = frame.preview.h3_strips.iter().enumerate();
             let strips = strips
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
@@ -4957,7 +4961,7 @@ impl ModelGlRenderer {
                             continue;
                         }
                         let values = frame.h2_values_of_object(at.object);
-                        let onset = uploaded.simulations.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                        let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                         let draw = if at.trails() {
                             uploaded.simulations.h4_trails.draw(index, at, values, bones, view.eye, frame.time, onset)
                         } else {
@@ -4989,7 +4993,7 @@ impl ModelGlRenderer {
                         // Halo 4's: through their material, from packed state.
                         if let Some(material) = at.h4_material() {
                             let values = frame.h2_values_of_object(at.object);
-                            let onset = uploaded.simulations.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                            let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                             if let Some(draw) = at.h4_draw(values, bones, &view, frame.time, onset) {
                                 let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
                                 h4_light_volume_pass::draw_h4_light_volume(
@@ -5033,7 +5037,7 @@ impl ModelGlRenderer {
                             gl.uniform_1_f32(flares.fade.as_ref(), range);
                         }
                         let values = frame.h2_values_of_object(at.object);
-                        let onset = uploaded.simulations.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                        let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                         for quad in at.quads(values, bones, &view, frame.time, onset, stops) {
                             let vertices = quad.corners.map(|[x, y, z, u, v]| {
                                 let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
@@ -5059,8 +5063,8 @@ impl ModelGlRenderer {
                         // Halo 4's: through their material, from packed state.
                         if let Some(render) = system.look.h4.as_ref() {
                             let values = frame.h2_values_of_object(system.object);
-                            let onset = uploaded.simulations.h3_onsets.of(system.object, system.scale_name(), values, frame.time);
-                            let draws = uploaded.simulations.h3_particles.h4_draws(index, system, values, bones, &view, frame.time, onset);
+                            let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
+                            let draws = uploaded.simulations.particles.h4_draws(index, system, values, bones, &view, frame.time, onset);
                             if !draws.is_empty() {
                                 let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
                                 h4_particle_pass::draw_h4_particles(
@@ -5085,9 +5089,9 @@ impl ModelGlRenderer {
                         };
                         let values = frame.h2_values_of_object(system.object);
                         let lighting = h3_draw::h3_lighting_constants(frame);
-                        let onset = uploaded.simulations.h3_onsets.of(system.object, system.scale_name(), values, frame.time);
+                        let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
                         let drawn =
-                            uploaded.simulations.h3_particles.vertices(index, system, values, bones, &view, &lighting, frame.time, onset, stops);
+                            uploaded.simulations.particles.vertices(index, system, values, bones, &view, &lighting, frame.time, onset, stops);
                         if drawn.is_empty() {
                             continue;
                         }
@@ -5123,7 +5127,7 @@ impl ModelGlRenderer {
                             continue;
                         };
                         let values = frame.h2_values_of_object(strip.object);
-                        let onset = uploaded.simulations.h3_onsets.of(strip.object, strip.scale_name(), values, frame.time);
+                        let onset = uploaded.simulations.effect_onsets.of(strip.object, strip.scale_name(), values, frame.time);
                         let lighting = h3_draw::h3_lighting_constants(frame);
                         let drawn = uploaded.simulations.h3_strips.vertices(index, strip, values, bones, &view, &lighting, frame.time, onset, stops);
                         if drawn.is_empty() {
@@ -5226,7 +5230,7 @@ impl ModelGlRenderer {
                     continue;
                 }
                 let values = frame.h2_values_of_object(at.object);
-                let onset = uploaded.simulations.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                 let event_time = at.event_time(frame.time, onset);
                 // A light's own flare goes out with its light.
                 let colors = frame.change_colors_of_object(at.object);
@@ -5266,7 +5270,7 @@ impl ModelGlRenderer {
                 };
                 let values = frame.h2_values_of_object(at.object);
                 let colors = frame.change_colors_of_object(at.object);
-                let onset = uploaded.simulations.h3_onsets.of(at.object, at.scale_name(), values, frame.time);
+                let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                 let sprites = at.sprites(values, &colors, bones, &view, frame.time, onset, occlusion);
                 let Some(textures) = uploaded.flare_textures.get(first_h2 + index) else {
                     continue;
