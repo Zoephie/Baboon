@@ -1174,9 +1174,8 @@ impl ModelGlRenderer {
             // Halo 4's holograms draw apart from the scene (`RenderHolograms`).
             let (mut holograms, mut batches): (Vec<_>, Vec<_>) =
                 batches.into_iter().partition(|(_, material)| super::h4_holograms::draws_as_hologram(material));
-            // A model's materials are all of one game.
-            let reach = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Reach);
-            let halo4 = batches.iter().any(|(_, material)| material.dialect == H3Dialect::Halo4);
+            let reach = frame.preview.game == Some(GameId::HaloReach);
+            let halo4 = frame.preview.game == Some(GameId::Halo4);
             // Halo 4's full camo (`render_object_mesh_parts`): a camo object's
             // parts draw only into the shadow and as camo, so nothing of it
             // lands in the light; below full transparency its lit base does.
