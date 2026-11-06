@@ -1780,6 +1780,17 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(H4.0, H4.1, "device_machine", "device/object/lightmap shadow mode", Old::Value(0), "default"),
     row(H4.0, H4.1, "device_machine", "device/object/lightmap shadow mode", Old::Value(1), "never"),
     row(H4.0, H4.1, "device_machine", "device/object/lightmap shadow mode", Old::Value(2), "always"),
+    // h4::tracers and materials::h4
+    row(H4.0, H4.1, "tracer_system", "tracer system flags", Old::Prefix(&["point-to-point"]), "point-to-point"),
+    row(H4.0, H4.1, "tracer_system", "tracers/flags", Old::Prefix(&["disabled for debugging"]), "disabled for debugging"),
+    row(H4.0, H4.1, "tracer_system", "tracers/profile shape", Old::Value(0), "aligned ribbon"),
+    row(H4.0, H4.1, "tracer_system", "tracers/profile shape", Old::Value(1), "cross"),
+    row(H4.0, H4.1, "tracer_system", "tracers/profile shape", Old::Value(2), "n-gon"),
+    // horizontal and vertical have no rows: 15 older tags list only the first three shapes.
+    row(H4.0, H4.1, "tracer_system", "tracers/length/Output Modifier", Old::Value(1), "Plus"),
+    row(H4.0, H4.1, "tracer_system", "tracers/length/Output Modifier", Old::Value(2), "Times"),
+    row(H4.0, H4.1, "tracer_system", "tracers/length/Input Variable", Old::Value(13), "tracer length"),
+    row(H4.0, H4.1, "bitmap", "bitmaps/type", Old::Value(2), "cube map"),
     // ce::particle_systems
     row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x1), "type states loop"),
     after(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x2), "type states loop"),
