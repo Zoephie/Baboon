@@ -220,6 +220,14 @@ pub(in crate::app::model_preview) fn has_flag(holder: TagStruct<'_>, name: &str,
     holder.field(name).and_then(|field| field.flag(option)).is_some_and(|flag| flag.is_set())
 }
 
+/// [`has_flag`] for an option older layouts label otherwise: the first of
+/// `labels` the field's layout names.
+pub(in crate::app::model_preview) fn has_flag_labelled(holder: TagStruct<'_>, name: &str, labels: &[&str]) -> bool {
+    let field = holder.field(name);
+    let flag = field.and_then(|field| labels.iter().find_map(|label| field.flag(label)));
+    flag.is_some_and(|flag| flag.is_set())
+}
+
 /// The function slot an `A out` to `D out` option names (a Halo CE change
 /// color's `A` to `D`, a Halo 2 one's `primary` to `quaternary`), 0 to 3:
 /// none for `none`, for a number its list does not name, and for no field.

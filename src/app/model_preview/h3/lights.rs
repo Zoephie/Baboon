@@ -24,12 +24,10 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::named_function::NamedFunction;
+use crate::app::model_preview::ce::attachments::{has_flag, has_flag_labelled};
 
-/// `flags` of a `light`.
-const ALLOW_SHADOWS_AND_GELS: i128 = 1;
-const FIRST_PERSON_ONLY: i128 = 4;
-/// `type`.
-const FRUSTUM: i128 = 1;
+/// `allow shadows and gels`, and what older layouts label it.
+const SHADOWS_AND_GELS: [&str; 3] = ["allow shadows and gels", "allow shadows ", "expensive light"];
 /// What `add_simple_light_to_draw_list` falls back on.
 const FALLBACK_DISTANCE: f32 = 5.0;
 const FALLBACK_CONE: f32 = 0.5;
@@ -245,17 +243,16 @@ impl H3Light {
 fn read_h3_light(source: &TagSource, path: &str) -> Option<H3LightTag> {
     let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
     let root = tag.root();
-    let flags = root.read_int_any("flags").unwrap_or(0);
-    if flags & FIRST_PERSON_ONLY != 0 {
+    if has_flag(root, "flags", "render first person only") {
         return None;
     }
     let gel = root.read_tag_ref_path("gel bitmap").filter(|gel| !gel.is_empty());
     let gel = gel
-        .filter(|_| flags & ALLOW_SHADOWS_AND_GELS != 0)
+        .filter(|_| has_flag_labelled(root, "flags", &SHADOWS_AND_GELS))
         .and_then(|gel| decode_h2_image(source, &gel, SamplerKind::Texture2D, 0))
         .map(Arc::new);
     Some(H3LightTag {
-        frustum: root.read_int_any("type") == Some(FRUSTUM),
+        frustum: root.field("type").is_some_and(|field| field.enum_is("frustum")),
         destroy_after: root.read_real("destroy light after").unwrap_or(0.0),
         maximum_distance: root.read_real("maximum distance").unwrap_or(0.0),
         near_width: root.read_real("frustum near width").unwrap_or(0.0),
@@ -526,8 +523,6 @@ struct H3EffectScale {
     scaled: bool,
 }
 
-const NO_OCCLUSION_TEST: i128 = 2;
-const ONLY_FIRST_PERSON_FLARE: i128 = 4;
 /// `occlusion offset direction`: where the occlusion quad moves
 /// `occlusion offset distance` to (`lens_flare_render_internal`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -556,13 +551,11 @@ fn block_function(root: TagStruct<'_>, block: &str) -> Option<Arc<TagFunction>> 
 fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
     let tag = load_referenced_tag_from_source(source, path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
-    let flags = root.read_int_any("flags").unwrap_or(0);
-    if flags & ONLY_FIRST_PERSON_FLARE != 0 {
+    if has_flag(root, "flags", "only render in first person") {
         return None;
     }
     let reflection = *elements(root, "reflections").first()?;
-    let reflection_flags = reflection.read_flag_names("flags").unwrap_or_default();
-    let reflected = |wanted: &str| reflection_flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let reflected = |wanted: &str| has_flag(reflection, "flags", wanted);
     let bitmap = root.read_tag_ref_path("bitmap").filter(|bitmap| !bitmap.is_empty());
     let override_map = reflection.read_tag_ref_path("bitmapOverride").filter(|bitmap| !bitmap.is_empty());
     let bitmap = override_map.or(bitmap)?;
@@ -595,7 +588,7 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         cones: [fade("falloff angle"), fade("cutoff angle")],
         near_fade: [fade("near fade begin distance"), fade("near fade end distance")],
         far_fade: [fade("near fade distance"), fade("far fade distance")],
-        tests_occlusion: flags & NO_OCCLUSION_TEST == 0,
+        tests_occlusion: !has_flag(root, "flags", "no occlusion test"),
         falloff: root.read_int_any("falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
         occlusion_offset: fade("occlusion offset distance"),
         occlusion_offset_direction: OcclusionOffset::read(root),
@@ -614,7 +607,7 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         age_rotation: block_function(root, "age rotation"),
         time_color: H3FlareColor::read(root, "time color"),
         age_color: H3FlareColor::read(root, "age color"),
-        rotation_function: match root.read_enum_name("rotation function").as_deref() {
+        rotation_function: match root.read_enum_option("rotation function").as_deref() {
             Some("rotation A") => 1,
             Some("rotation B") => 2,
             Some("rotation-translation") => 3,
