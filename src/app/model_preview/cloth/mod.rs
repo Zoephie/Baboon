@@ -5,7 +5,7 @@
 use blam_tags::{TagFile, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::ce::attachments::{elements, object_block};
+use super::ce::attachments::{elements, has_flag, object_block};
 use super::ce::lights::posed_on;
 use super::gen3::effects::marker_name;
 use super::*;
@@ -537,8 +537,6 @@ fn read_cloth(
     // The bounding sphere's middle, carried as a marker of the object's own.
     let middle = RenderModelPreviewMarker { position: center, scale: 1.0, ..Default::default() };
     let (middle, middle_node) = frame(&middle);
-    let flags = root.read_flag_names("flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     let placed = |name: &str| -> Vec<(usize, [f32; 3])> {
         let named = markers.iter().filter(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(name));
         named
@@ -570,7 +568,7 @@ fn read_cloth(
         })
         .collect();
     let links = generate_links(&places, &indices, real("longest_rod", 1.0, 10.0));
-    let top = flagged("Uses grid attach top");
+    let top = has_flag(root, "flags", "Uses grid attach top");
     let pins = cloth_pins(attach, secondary, [size[0], high], places.len(), top, game);
     let cloth = H3ClothAt {
         places,

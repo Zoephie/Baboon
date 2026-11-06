@@ -24,8 +24,8 @@ const NOTHING_CLASS: usize = 4;
 fn vision_class(object: &TagFile) -> usize {
     match &object.header.group_tag.to_be_bytes() {
         b"bipd" | b"crea" | b"gint" => {
-            let team = object.root().descend("unit").and_then(|unit| unit.read_enum_name("default team"));
-            usize::from(team.as_deref() == Some("player"))
+            let team = object.root().descend("unit").and_then(|unit| unit.field("default team"));
+            usize::from(team.is_some_and(|team| team.enum_is("player")))
         }
         b"vehi" | b"weap" | b"eqip" | b"mach" | b"ctrl" => 0,
         b"argd" | b"term" => 3,

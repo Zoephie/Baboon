@@ -389,7 +389,7 @@ pub(super) fn read_variant_instances(tag: &TagFile, placements: &[String], reach
     let groups: Vec<InstanceGroup> = super::ce::attachments::elements(root, "instance groups")
         .iter()
         .map(|group| InstanceGroup {
-            choose_all: group.read_enum_name("choice").as_deref() == Some("choose all members"),
+            choose_all: group.field("choice").is_some_and(|choice| choice.enum_is("choose all members")),
             members: super::ce::attachments::elements(*group, "member list")
                 .iter()
                 .map(|member| InstanceGroupMember {
