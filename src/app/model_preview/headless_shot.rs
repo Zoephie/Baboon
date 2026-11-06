@@ -1444,3 +1444,36 @@ fn made_targets_are_deleted_unless_kept() {
         assert_eq!(held(&gl), 0);
     }
 }
+
+/// [`PostScope`](super::super::gl::scope::PostScope) gives back the
+/// framebuffer, viewport and scissor a pass found, whatever it left.
+#[test]
+fn a_post_scope_restores_what_it_found() {
+    use super::super::gl::scope::PostScope;
+    use super::super::gl::target::{ColorTarget, Sampling, Texels};
+    let gl = headless_gl();
+    unsafe {
+        let found = ColorTarget::new(&gl, [8, 8], Texels::RGBA8, Sampling::NEAREST).unwrap();
+        let other = ColorTarget::new(&gl, [8, 8], Texels::RGBA8, Sampling::NEAREST).unwrap();
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(found.framebuffer));
+        gl.viewport(1, 2, 3, 4);
+        gl.scissor(2, 3, 4, 5);
+        gl.enable(glow::SCISSOR_TEST);
+        let scope = PostScope::capture(&gl);
+        assert_eq!(scope.size(), [3, 4]);
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(other.framebuffer));
+        gl.viewport(0, 0, 8, 8);
+        gl.scissor(0, 0, 1, 1);
+        gl.disable(glow::SCISSOR_TEST);
+        scope.restore(&gl);
+        let (mut viewport, mut scissor) = ([0; 4], [0; 4]);
+        gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+        gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut scissor);
+        assert_eq!(gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING), Some(found.framebuffer));
+        assert_eq!((viewport, scissor), ([1, 2, 3, 4], [2, 3, 4, 5]));
+        assert!(gl.is_enabled(glow::SCISSOR_TEST));
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        found.delete(&gl);
+        other.delete(&gl);
+    }
+}

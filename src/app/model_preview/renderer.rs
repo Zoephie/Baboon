@@ -2,6 +2,7 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::gl::link::link;
+use super::gl::scope::PostScope;
 use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use super::*;
 use super::dx9::passes::{
@@ -1459,7 +1460,7 @@ fn paint_model_gl(
         }
         // A panic part way through leaves the scene target bound; what the
         // frame drew into goes back, so the rest of the window still draws.
-        let state = unsafe { H2FramebufferState::capture(gl) };
+        let state = unsafe { PostScope::capture(gl) };
         let painted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { renderer.paint(gl, frame) }));
         if let Err(panic) = painted {
             unsafe {
@@ -2627,49 +2628,6 @@ fn grid_line_color(background: [f32; 3]) -> [f32; 3] {
     const STEP: f32 = 0.11;
     let step = if background_is_dark(background) { STEP } else { -STEP };
     background.map(|channel| (channel + step).clamp(0.0, 1.0))
-}
-
-/// The framebuffer state a render target borrows and must return.
-struct H2FramebufferState {
-    framebuffer: Option<glow::NativeFramebuffer>,
-    viewport: [i32; 4],
-    scissor: [i32; 4],
-    scissored: bool,
-}
-
-impl H2FramebufferState {
-    unsafe fn capture(gl: &glow::Context) -> Self {
-        unsafe {
-            let (mut viewport, mut scissor) = ([0; 4], [0; 4]);
-            gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
-            gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut scissor);
-            Self {
-                framebuffer: gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING),
-                viewport,
-                scissor,
-                scissored: gl.is_enabled(glow::SCISSOR_TEST),
-            }
-        }
-    }
-
-    fn size(&self) -> [i32; 2] {
-        [self.viewport[2].max(1), self.viewport[3].max(1)]
-    }
-
-    unsafe fn restore(&self, gl: &glow::Context) {
-        unsafe {
-            gl.bind_framebuffer(glow::FRAMEBUFFER, self.framebuffer);
-            let [x, y, width, height] = self.viewport;
-            gl.viewport(x, y, width, height);
-            if self.scissored {
-                gl.enable(glow::SCISSOR_TEST);
-            } else {
-                gl.disable(glow::SCISSOR_TEST);
-            }
-            let [x, y, width, height] = self.scissor;
-            gl.scissor(x, y, width, height);
-        }
-    }
 }
 
 /// One linked Halo 2 pass program. Uniforms are looked up once by name: a
@@ -5410,12 +5368,12 @@ impl ModelGlRenderer {
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
-    ) -> Option<H2FramebufferState> {
+    ) -> Option<PostScope> {
         if !frame.game_shaders || !self.h2_supported {
             return None;
         }
         unsafe {
-            let state = H2FramebufferState::capture(gl);
+            let state = PostScope::capture(gl);
             let size = state.size();
             if self.h2_scene.as_ref().is_none_or(|scene| scene.size != size) {
                 if let Some(old) = self.h2_scene.take() {
@@ -5440,7 +5398,7 @@ impl ModelGlRenderer {
 
     /// Copy the scene target to where the frame belonged, and put everything
     /// back.
-    unsafe fn finish_h2_scene(&self, gl: &glow::Context, state: H2FramebufferState) {
+    unsafe fn finish_h2_scene(&self, gl: &glow::Context, state: PostScope) {
         let Some(scene) = &self.h2_scene else {
             return;
         };
@@ -5488,7 +5446,7 @@ impl ModelGlRenderer {
             return;
         }
         unsafe {
-            let state = H2FramebufferState::capture(gl);
+            let state = PostScope::capture(gl);
             let size = state.size();
             if self.h2_target.as_ref().is_none_or(|target| target.size != size) {
                 if let Some(old) = self.h2_target.take() {
@@ -5539,7 +5497,7 @@ impl ModelGlRenderer {
             };
             let h3 = self.h3_draws(frame);
             let size = if h3 { H3_SHADOW_MAP_SIZE } else { H2_SHADOW_MAP_SIZE };
-            let state = H2FramebufferState::capture(gl);
+            let state = PostScope::capture(gl);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.disable(glow::SCISSOR_TEST);
             gl.depth_mask(true);
