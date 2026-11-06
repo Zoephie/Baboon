@@ -716,6 +716,59 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(HCE.0, HCE.1, "glow", "trailing particle distribution", Old::Value(0), "emit vertically"),
     row(HCE.0, HCE.1, "glow", "trailing particle distribution", Old::Value(1), "emit normal (up)"),
     row(HCE.0, HCE.1, "glow", "trailing particle distribution", Old::Value(2), "emit randomly"),
+    // ce::passes
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "flags", Old::Bit(0x1), "alpha-tested"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "flags", Old::Bit(0x2), "decal"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "flags", Old::Bit(0x4), "two-sided"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "flags", Old::Bit(0x8), "first map is in screenspace"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "flags", Old::Bit(0x80), "numeric"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "maps/flags", Old::Bit(0x2), "alpha replicate"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "maps/flags", Old::Bit(0x4), "u-clamped"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "maps/flags", Old::Bit(0x8), "v-clamped"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "extra flags", Old::Bit(0x1), "don't fade active-camouflage"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "extra flags", Old::Bit(0x2), "numeric countdown timer"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago", "extra flags", Old::Bit(0x4), "custom edition blending"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "flags", Old::Bit(0x1), "alpha-tested"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "flags", Old::Bit(0x2), "decal"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "flags", Old::Bit(0x4), "two-sided"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "flags", Old::Bit(0x8), "first map is in screenspace"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "flags", Old::Bit(0x80), "numeric"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "4 stage maps/flags", Old::Bit(0x2), "alpha replicate"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "4 stage maps/flags", Old::Bit(0x4), "u-clamped"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "4 stage maps/flags", Old::Bit(0x8), "v-clamped"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "2 stage maps/flags", Old::Bit(0x2), "alpha replicate"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "2 stage maps/flags", Old::Bit(0x4), "u-clamped"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "2 stage maps/flags", Old::Bit(0x8), "v-clamped"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "extra flags", Old::Bit(0x1), "don't fade active-camouflage"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "extra flags", Old::Bit(0x2), "numeric countdown timer"),
+    row(HCE.0, HCE.1, "shader_transparent_chicago_extended", "extra flags", Old::Bit(0x4), "custom edition blending"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "flags", Old::Bit(0x1), "alpha-tested"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "flags", Old::Bit(0x2), "decal"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "flags", Old::Bit(0x4), "two-sided"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "flags", Old::Bit(0x8), "first map is in screenspace"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "flags", Old::Bit(0x80), "numeric"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "maps/flags", Old::Bit(0x2), "u-clamped"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "maps/flags", Old::Bit(0x4), "v-clamped"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "stages/flags", Old::Bit(0x1), "color mux"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "stages/flags", Old::Bit(0x2), "alpha mux"),
+    row(HCE.0, HCE.1, "shader_transparent_generic", "stages/flags", Old::Bit(0x4), "A-out controls color0 animation"),
+    row(HCE.0, HCE.1, "shader_transparent_glass", "flags", Old::Bit(0x1), "alpha-tested"),
+    row(HCE.0, HCE.1, "shader_transparent_glass", "flags", Old::Bit(0x2), "decal"),
+    row(HCE.0, HCE.1, "shader_transparent_glass", "flags", Old::Bit(0x4), "two-sided"),
+    row(HCE.0, HCE.1, "shader_transparent_glass", "flags", Old::Bit(0x8), "bump map is specular mask"),
+    row(HCE.0, HCE.1, "shader_transparent_meter", "flags", Old::Bit(0x1), "decal"),
+    row(HCE.0, HCE.1, "shader_transparent_meter", "flags", Old::Bit(0x2), "two-sided"),
+    row(HCE.0, HCE.1, "shader_transparent_meter", "flags", Old::Bit(0x4), "flash color is negative"),
+    row(HCE.0, HCE.1, "shader_transparent_meter", "flags", Old::Bit(0x8), "tint mode-2"),
+    row(HCE.0, HCE.1, "shader_transparent_water", "flags", Old::Bit(0x1), "base map alpha modulates reflection"),
+    row(HCE.0, HCE.1, "shader_transparent_water", "flags", Old::Bit(0x2), "base map color modulates background"),
+    row(HCE.0, HCE.1, "shader_model", "flags", Old::Bit(0x1), "detail after reflection"),
+    row(HCE.0, HCE.1, "shader_model", "flags", Old::Bit(0x2), "two-sided"),
+    row(HCE.0, HCE.1, "shader_model", "flags", Old::Bit(0x4), "not alpha-tested"),
+    row(HCE.0, HCE.1, "shader_model", "flags", Old::Bit(0x8), "alpha-blended decal"),
+    row(HCE.0, HCE.1, "shader_model", "flags", Old::Bit(0x40), "multipurpose map uses OG Xbox channel order"),
+    row(HCE.0, HCE.1, "globals", "rasterizer data/flags", Old::Bit(0x1), "tint edge density"),
+    row(HCE.0, HCE.1, "shader_environment", "flags", Old::Bit(0x1), "alpha-tested"),
     // ce::particle_systems
     row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x1), "type states loop"),
     after(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x2), "type states loop"),
@@ -805,21 +858,33 @@ fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out:
             }
         }
         None => {
-            let Some(field) = holder.field(path) else {
+            // A struct can hold several fields of one name (a shader's own
+            // `flags` beside its kind's); the one with the option is read.
+            let named: Vec<_> = holder.fields().filter(|field| field.clean_name() == path).collect();
+            let Some(field) = named.iter().find(|field| field.flag(row.name).is_some()).or(named.first()).copied() else {
                 return;
             };
-            let Some(value) = holder.read_int_any(path) else {
-                return;
+            let options = match field.options() {
+                Some(blam_tags::TagOptions::Flags(options)) => options,
+                _ => Vec::new(),
             };
             let old = match row.old {
-                Old::Bit(bit) => value & bit != 0,
-                Old::Value(number) => value == number,
+                Old::Bit(bit) => {
+                    let index = bit.trailing_zeros() as usize;
+                    options.get(index).is_some_and(|option| option.is_set)
+                }
+                Old::Value(number) => match field.value().and_then(|value| match value {
+                    blam_tags::TagFieldData::CharEnum { value, .. } => Some(i128::from(value)),
+                    blam_tags::TagFieldData::ShortEnum { value, .. } => Some(i128::from(value)),
+                    blam_tags::TagFieldData::LongEnum { value, .. } => Some(i128::from(value)),
+                    _ => None,
+                }) {
+                    Some(value) => value == number,
+                    None => return,
+                },
             };
             let found = field.flag(row.name).map(|option| option.bit() + u32::from(row.after));
-            let set = |index: u32| match field.options() {
-                Some(blam_tags::TagOptions::Flags(options)) => options.get(index as usize).is_some_and(|option| option.is_set),
-                _ => false,
-            };
+            let set = |index: u32| options.get(index as usize).is_some_and(|option| option.is_set);
             let named = match found {
                 None => Named::Missing,
                 Some(index) => {
