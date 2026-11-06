@@ -1521,12 +1521,8 @@ pub(super) mod h4_holograms;
 pub(super) mod gen3_shadow;
 #[path = "gen3_screen_lights.rs"]
 pub(super) mod gen3_screen_lights;
-#[path = "h4_light_pass.rs"]
-mod h4_light_pass;
 #[path = "h4_flare_pass.rs"]
 mod h4_flare_pass;
-#[path = "h4_shadow_pass.rs"]
-mod h4_shadow_pass;
 
 /// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
 /// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
@@ -4134,8 +4130,6 @@ pub(super) struct RenderCore {
     h4_camo_scene: Option<glow::NativeTexture>,
     /// Halo 4's self shadow: its map, blurs and mask, the three screen
     /// programs, and the mask while the static pass reads it.
-    h4_shadow: Option<h4_shadow_pass::H4ShadowTargets>,
-    h4_shadow_programs: Option<[Option<glow::NativeProgram>; 3]>,
     pub(in crate::app::model_preview) h4_shadow_mask: Option<glow::NativeTexture>,
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
@@ -4186,7 +4180,7 @@ pub(super) struct RenderCore {
     /// One sampler location per slot, in `TextureSlot` order.
     samplers: [Option<glow::NativeUniformLocation>; SLOT_COUNT],
     /// Bound to every slot a material lacks; see [`Self::bind_material`].
-    placeholder: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) placeholder: Option<glow::NativeTexture>,
 }
 
 /// One material's textures on the GPU, in `TextureSlot` order.
@@ -4292,8 +4286,6 @@ impl RenderCore {
                 h4_holograms: None,
                 h4_flare_geometry: None,
                 h4_camo_scene: None,
-                h4_shadow: None,
-                h4_shadow_programs: None,
                 h4_shadow_mask: None,
                 h4_draw: None,
                 reach_view_projection: None,

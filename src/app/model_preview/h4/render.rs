@@ -14,6 +14,10 @@ use super::camo::H4CamoDraw;
 /// their picture, the camo and what it draws over, and the shadow mask.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct H4Game {
+    /// The shadow's depth, blurs and mask, kept between frames, and its
+    /// horizontal, vertical and apply programs.
+    pub(super) shadow: Option<super::shadow_pass::H4ShadowTargets>,
+    pub(super) shadow_programs: Option<[Option<glow::NativeProgram>; 3]>,
     holograms: Vec<Gen3Batch>,
     hologram: Option<HologramPicture>,
     camo: Option<H4CamoDraw>,
@@ -59,7 +63,7 @@ impl Gen3Game for H4Game {
         _scene: glow::NativeFramebuffer,
     ) -> bool {
         self.mask = if cx.frame.self_shadow && self.camo.is_none_or(|draw| draw.has_base) {
-            unsafe { cx.core.draw_h4_shadow(cx.gl, cx.frame, cx.slot, batches) }
+            unsafe { self.draw_shadow(cx, batches) }
         } else {
             None
         };
@@ -78,7 +82,7 @@ impl Gen3Game for H4Game {
     /// what blends.
     unsafe fn screen_lights(&mut self, cx: &mut FrameCx<'_>, _lit: &[super::super::reach::lights::ReachLitLight], accumulation: glow::NativeFramebuffer) {
         unsafe {
-            cx.core.draw_h4_lights(cx.gl, cx.frame, accumulation);
+            self.draw_lights(cx, accumulation);
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
             h3_set_cull(cx.gl, cx.frame);
             cx.gl.depth_func(glow::LEQUAL);

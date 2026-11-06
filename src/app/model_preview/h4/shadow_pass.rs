@@ -5,10 +5,15 @@
 //! 87 without its normal test) into the mask the static pass reads. See
 //! `docs/h4-preview-research/shadow-camo-shields.md` §1.
 
-use super::gl::target::{Made, Sampling, Texels};
-use super::h4::shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};
-use super::*;
-use gen3::shaders::H3Material;
+use eframe::glow::{self, HasContext};
+
+use super::super::gen3::render::Gen3Batch;
+use super::super::gl::target::{Made, Sampling, Texels};
+use super::super::renderer::gen3_shadow::shadow_casters;
+use super::super::renderer::h3_draw::{h4_matrix, screen_program};
+use super::super::renderer::{FrameCx, RenderCore};
+use super::render::H4Game;
+use super::shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};
 
 /// `HorizontalBlurVariancePS`: five depths across, weighted by
 /// `ps_gaussian_parameters[0]`, and their squares.
@@ -106,7 +111,7 @@ void main() {
 ";
 
 /// The depth map, its two blurs, and the mask, kept between frames.
-pub(super) struct H4ShadowTargets {
+pub(in crate::app::model_preview) struct H4ShadowTargets {
     map_size: i32,
     depth: glow::NativeTexture,
     depth_framebuffer: glow::NativeFramebuffer,
@@ -143,7 +148,7 @@ impl H4ShadowTargets {
         }
     }
 
-    pub(super) unsafe fn delete(&self, gl: &glow::Context) {
+    pub(in crate::app::model_preview) unsafe fn delete(&self, gl: &glow::Context) {
         unsafe {
             gl.delete_framebuffer(self.depth_framebuffer);
             gl.delete_texture(self.depth);
@@ -157,19 +162,15 @@ impl H4ShadowTargets {
     }
 }
 
-impl RenderCore {
+impl H4Game {
     /// The object's shadow into its mask, if it casts one: the mask, or none.
     /// Reads the depth and normals the albedo pass left.
-    pub(in crate::app::model_preview) unsafe fn draw_h4_shadow(
-        &mut self,
-        gl: &glow::Context,
-        frame: &ModelGpuFrame,
-        slot: usize,
-        batches: &[(RenderModelPreviewBatch, Arc<H3Material>)],
-    ) -> Option<glow::NativeTexture> {
+    pub(super) unsafe fn draw_shadow(&mut self, cx: &mut FrameCx<'_>, batches: &[Gen3Batch]) -> Option<glow::NativeTexture> {
+        let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
+        let core: &mut RenderCore = cx.core;
         let caster = frame.preview.h4_shadow_caster?;
         let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) =
-            self.h3_targets.as_ref().map(|targets| {
+            core.h3_targets.as_ref().map(|targets| {
                 (
                     targets.size,
                     targets.albedo_framebuffer,
@@ -185,21 +186,21 @@ impl RenderCore {
             .sum::<f32>()
             .sqrt();
         let camera = H4ShadowCamera::new(H4ShadowCamera::DOWN, center, radius);
-        let casters = gen3_shadow::shadow_casters(batches);
+        let casters = shadow_casters(batches);
         if casters.is_empty() {
             return None;
         }
         unsafe {
-            let stale = self.h4_shadow.as_ref().is_some_and(|targets| {
+            let stale = self.shadow.as_ref().is_some_and(|targets| {
                 targets.map_size != camera.pixels || targets.mask_size != size
             });
-            if stale && let Some(old) = self.h4_shadow.take() {
+            if stale && let Some(old) = self.shadow.take() {
                 old.delete(gl);
             }
-            if self.h4_shadow.is_none() {
-                self.h4_shadow = H4ShadowTargets::new(gl, camera.pixels, size);
+            if self.shadow.is_none() {
+                self.shadow = H4ShadowTargets::new(gl, camera.pixels, size);
             }
-            let targets = self.h4_shadow.as_ref()?;
+            let targets = self.shadow.as_ref()?;
             let (depth, depth_framebuffer, blurs, mask, mask_framebuffer) = (
                 targets.depth,
                 targets.depth_framebuffer,
@@ -207,22 +208,22 @@ impl RenderCore {
                 targets.mask,
                 targets.mask_framebuffer,
             );
-            if self.h4_shadow_programs.is_none() {
-                self.h4_shadow_programs = Some(
+            if self.shadow_programs.is_none() {
+                self.shadow_programs = Some(
                     [HORIZONTAL_FRAGMENT, VERTICAL_FRAGMENT, APPLY_FRAGMENT]
-                        .map(|fragment| h3_draw::screen_program(gl, fragment)),
+                        .map(|fragment| screen_program(gl, fragment)),
                 );
             }
-            let [Some(horizontal), Some(vertical), Some(apply)] = self.h4_shadow_programs? else {
+            let [Some(horizontal), Some(vertical), Some(apply)] = self.shadow_programs? else {
                 return None;
             };
             // `render_shadow_generate` (X360 0x83A99FA0): depth alone, biased.
             let view_projection = camera.view_projection;
             let bias = [SLOPE_BIAS, DEPTH_BIAS];
-            self.generate_shadow_depth(gl, frame, slot, &casters, depth_framebuffer, camera.pixels, view_projection, bias);
+            core.generate_shadow_depth(gl, frame, slot, &casters, depth_framebuffer, camera.pixels, view_projection, bias);
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::CULL_FACE);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(core.h3_empty_array(gl)));
             // Explicit 85: the horizontal blur from the depth, then the vertical.
             let gaussian = camera.gaussian();
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(blurs[0].1));
@@ -244,12 +245,12 @@ impl RenderCore {
                 &gaussian[1],
             );
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
-            Self::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
+            RenderCore::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
             // `setup_targets_shadow_mask`'s white, then the apply.
             let textures = [("scene_depth", depth_copy), ("normals", normal), ("variance", blurs[1].0)];
-            Self::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0; 4], apply, textures, &view_projection)?;
+            RenderCore::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0; 4], apply, textures, &view_projection)?;
             let at = |name: &str| gl.get_uniform_location(apply, name);
-            let axis = h3_draw::h4_matrix(frame, "ps_worldspace_normal_axis")?;
+            let axis = h4_matrix(frame, "ps_worldspace_normal_axis")?;
             let axis: [f32; 9] = axis.try_into().ok()?;
             gl.uniform_3_f32_slice(at("shadow_direction").as_ref(), &camera.direction_in(&axis));
             // `min(1, 2·fade)` with the fade byte full at a preview's framing
@@ -261,7 +262,7 @@ impl RenderCore {
             gl.uniform_1_f32(at("knockout").as_ref(), 0.0);
             gl.uniform_1_i32(at("normal_test").as_ref(), i32::from(!caster.hires));
             // Green and blue alone.
-            self.draw_shadow_apply(gl, slot, [false, true, true, false]);
+            core.draw_shadow_apply(gl, slot, [false, true, true, false]);
             Some(mask)
         }
     }
