@@ -3,11 +3,11 @@
 //! blurred and added to the one above. The final composite adds the top level
 //! ahead of its tone curve.
 
-use super::gl::chain::ScreenChain;
-use super::gl::target::{ColorTarget, Made, Sampling, Texels};
+use super::super::gl::chain::ScreenChain;
+use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
-use super::h3_draw::screen_program;
+use super::super::renderer::h3_draw::screen_program;
 
 /// `globals\default.camera_fx_settings`.
 const BLOOM_POINT: f32 = 1.2;
@@ -98,13 +98,13 @@ impl Levels {
     }
 }
 
-pub(super) struct H3Bloom {
+pub(in crate::app::model_preview) struct H3Bloom {
     chain: ScreenChain,
     levels: Option<Levels>,
 }
 
 impl H3Bloom {
-    pub(super) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
+    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
         unsafe { Some(Self { chain: ScreenChain { program: screen_program(gl, FRAGMENT)?, nothing }, levels: None }) }
     }
 
@@ -140,7 +140,7 @@ impl H3Bloom {
 
     /// What the final composite adds. Leaves `scene` bound, and the viewport and
     /// scissor as they were.
-    pub(super) unsafe fn build(
+    pub(in crate::app::model_preview) unsafe fn build(
         &mut self,
         gl: &glow::Context,
         vertex_array: glow::NativeVertexArray,

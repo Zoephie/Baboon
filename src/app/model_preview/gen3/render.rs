@@ -78,22 +78,18 @@ pub(in crate::app::model_preview) trait Gen3Game {
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         size: [i32; 2],
-    ) -> Option<glow::NativeTexture> {
-        unsafe { cx.core.h3_built_bloom(cx.gl, framebuffer, accumulation, size) }
-    }
+    ) -> Option<glow::NativeTexture>;
 
     /// The lit scene and its bloom onto `framebuffer`.
     unsafe fn composite(
         &mut self,
         cx: &mut FrameCx<'_>,
-        _framebuffer: glow::NativeFramebuffer,
+        framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
         screen: H3ScreenSettings,
-        _size: [i32; 2],
-    ) {
-        unsafe { cx.core.h3_composite(cx.gl, accumulation, bloom, screen) }
-    }
+        size: [i32; 2],
+    );
 }
 
 /// Halo 3's, ODST's, Reach's and Halo 4's drawing: the slot's own draw, then

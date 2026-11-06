@@ -1506,8 +1506,6 @@ fn paint_model_gl(
 #[cfg(all(test, target_os = "macos"))]
 #[path = "headless_shot.rs"]
 pub(super) mod headless_shot;
-#[path = "h3_bloom.rs"]
-mod h3_bloom;
 pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
 #[path = "h3_draw.rs"]
 pub(super) mod h3_draw;
@@ -3973,6 +3971,8 @@ pub(super) trait GameRender {
 pub(super) struct LegacyRender {
     /// What Halo 2's bloom covers, from the shading to the finish.
     bloom_order: Option<Vec<usize>>,
+    /// Halo 3's hooks, for a frame with gen3 materials and no gen3 game.
+    h3: h3::render::H3Game,
 }
 
 impl GameRender for LegacyRender {
@@ -3981,7 +3981,7 @@ impl GameRender for LegacyRender {
     }
 
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
-        self.bloom_order = unsafe { cx.core.legacy_shade(cx.gl, cx.frame, cx.slot) };
+        self.bloom_order = unsafe { cx.core.legacy_shade(&mut self.h3, cx.gl, cx.frame, cx.slot) };
     }
 
     unsafe fn finish(&mut self, cx: &mut FrameCx<'_>) {
@@ -4105,14 +4105,12 @@ pub(super) struct RenderCore {
     /// Linked passes by their address, or the pass that failed to link: each
     /// holds its pass, so no other pass can come to have its address.
     h3_programs: HashMap<usize, Result<Rc<h3_draw::H3Program>, Arc<gen3::shaders::H3Pass>>>,
-    h3_composite_program: Option<glow::NativeProgram>,
     h3_blur_program: Option<glow::NativeProgram>,
     h3_vision_program: Option<glow::NativeProgram>,
     h3_suck_program: Option<glow::NativeProgram>,
     h3_vision_mask: Option<glow::NativeTexture>,
     /// How much of its effect the `shader_screen` drawing now is.
     h3_screen_alpha: Option<f32>,
-    h3_bloom: Option<h3_bloom::H3Bloom>,
     /// The picture as Halo 4's camo reads it, bytes as they are.
     pub(in crate::app::model_preview) h4_camo_scene: Option<glow::NativeTexture>,
     /// Halo 4's self shadow: its map, blurs and mask, the three screen
@@ -4260,13 +4258,11 @@ impl RenderCore {
                 h3_targets: None,
                 h3_light: None,
                 h3_programs: HashMap::new(),
-                h3_composite_program: None,
                 h3_blur_program: None,
                 h3_vision_program: None,
                 h3_suck_program: None,
                 h3_vision_mask: None,
                 h3_screen_alpha: None,
-                h3_bloom: None,
                 h4_camo_scene: None,
                 h4_shadow_mask: None,
                 h4_draw: None,
@@ -4468,14 +4464,20 @@ impl RenderCore {
     /// Today's shading, for every game: the slot draw, the gen3 pipeline,
     /// the dx9 lit passes, transparents and shields. What Halo 2 blooms over,
     /// if it does.
-    pub(super) unsafe fn legacy_shade(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) -> Option<Vec<usize>> {
+    pub(super) unsafe fn legacy_shade(
+        &mut self,
+        h3: &mut h3::render::H3Game,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) -> Option<Vec<usize>> {
         unsafe {
             self.prepare_h2_programs(gl, frame);
             self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials));
             if self.h3_draws(frame) {
                 let order = frame.visible_batches.clone();
                 // Only a game without hooks of its own lands here: Halo 3's.
-                self.draw_h3(&mut h3::render::H3Game, gl, frame, slot, &order);
+                self.draw_h3(h3, gl, frame, slot, &order);
             }
             if frame.game_shaders && self.h2_camo_on(frame) {
                 let order = frame.visible_batches.clone();
