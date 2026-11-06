@@ -9,16 +9,16 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
-use super::super::gen3::effects::{marker_name, part_markers};
+use super::super::gen3::effects::part_markers;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::cross;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::named_function::NamedFunction;
+use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 
 /// `light_update_state`'s range when no function names one.
 const DEFAULT_RANGE: f32 = 0.5;
@@ -392,26 +392,10 @@ pub(crate) fn read_reach_lights(
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
 ) -> (Vec<ReachLight>, Vec<ReachCheapLight>) {
     let (mut lights, mut cheap) = (Vec::new(), Vec::new());
-    let Some(block) = object_block(object, "attachments") else {
-        return (lights, cheap);
-    };
     let light_group = u32::from_be_bytes(*b"ligh");
     let cheap_group = u32::from_be_bytes(*b"gldf");
-    for attachment in elements(block, "attachments") {
-        let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
-            continue;
-        };
-        if path.is_empty() || (group != light_group && group != cheap_group) {
-            continue;
-        }
-        // No marker is the object's root.
-        let name = marker_name(attachment, "marker");
-        let name = if name.is_empty() { "root".to_owned() } else { name };
-        let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
-        let secondary_by = attachment.read_string_id("secondary scale").unwrap_or_default();
-        // The tag's first option is none; the channels follow.
-        let change_color = attachment.read_int_any("change color").and_then(|color| usize::try_from(color - 1).ok());
-        let force_on = attachment.read_flag_names("flags").unwrap_or_default().iter().any(|(_, flag)| flag.starts_with("force always on"));
+    for attachment in object_attachments(object, &[light_group, cheap_group]) {
+        let ObjectAttachment { group, path, marker: name, scale_by, secondary_by, change_color, force_on } = attachment;
         if group == light_group {
             let Some(tag) = read_light_tag(source, &path).filter(|tag| !tag.first_person_only).map(Arc::new) else {
                 continue;

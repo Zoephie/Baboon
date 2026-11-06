@@ -12,11 +12,11 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::attachments::elements;
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
-use super::super::gen3::effects::{marker_name, part_markers};
+use super::super::gen3::effects::part_markers;
 use super::super::gen3::shaders::H3Pass;
 use super::super::reach::lights::object_value;
 use super::super::*;
@@ -25,6 +25,7 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::named_function::NamedFunction;
+use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 
 const SMALLEST: f32 = 1e-4;
 /// Halo 4's simulation rate.
@@ -555,40 +556,11 @@ pub(crate) fn read_h4_lights(
     lone_weapon: bool,
 ) -> (Vec<H4Light>, Vec<H4CheapLight>) {
     let (mut lights, mut cheap) = (Vec::new(), Vec::new());
-    let Some(block) = object_block(object, "attachments") else {
-        return (lights, cheap);
-    };
     let light_group = u32::from_be_bytes(*b"ligh");
     let cheap_group = u32::from_be_bytes(*b"gldf");
     let mut light_tags: HashMap<String, Option<Arc<H4LightTag>>> = HashMap::new();
-    for attachment in elements(block, "attachments") {
-        let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
-            continue;
-        };
-        if path.is_empty() || (group != light_group && group != cheap_group) {
-            continue;
-        }
-        let name = marker_name(attachment, "marker");
-        let name = if name.is_empty() {
-            "root".to_owned()
-        } else {
-            name
-        };
-        let scale_by = attachment
-            .read_string_id("primary scale")
-            .unwrap_or_default();
-        let secondary_by = attachment
-            .read_string_id("secondary scale")
-            .unwrap_or_default();
-        // The first option is none; the channels follow.
-        let change_color = attachment
-            .read_int_any("change color")
-            .and_then(|color| usize::try_from(color - 1).ok());
-        let force_on = attachment
-            .read_flag_names("flags")
-            .unwrap_or_default()
-            .iter()
-            .any(|(_, flag)| flag.starts_with("force always on"));
+    for attachment in object_attachments(object, &[light_group, cheap_group]) {
+        let ObjectAttachment { group, path, marker: name, scale_by, secondary_by, change_color, force_on } = attachment;
         if group == light_group {
             let tag = light_tags
                 .entry(path.clone())

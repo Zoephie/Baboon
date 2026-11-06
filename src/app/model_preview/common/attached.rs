@@ -1,6 +1,6 @@
 //! What every kind of thing an object carries shares: the region it shows
-//! under, and how it is renamed when the object it hangs on is brought into
-//! another's preview.
+//! under, how it is renamed when the object it hangs on is brought into
+//! another's preview, and how Reach and Halo 4 read an object's attachments.
 
 /// A light, flare, volume, strip, particle system or the like that hangs on
 /// an object.
@@ -20,6 +20,57 @@ pub(in crate::app::model_preview) fn rename_region(only_under: &mut Option<(Stri
     if let Some((region, _)) = only_under {
         *region = format!("{name}: {region}");
     }
+}
+
+/// One entry of an object's `attachments` block, as Reach and Halo 4 read it.
+pub(in crate::app::model_preview) struct ObjectAttachment {
+    pub(in crate::app::model_preview) group: u32,
+    pub(in crate::app::model_preview) path: String,
+    /// The marker it hangs on; none is the object's root.
+    pub(in crate::app::model_preview) marker: String,
+    pub(in crate::app::model_preview) scale_by: String,
+    pub(in crate::app::model_preview) secondary_by: String,
+    /// The tag's first option is none; the change colour channels follow.
+    pub(in crate::app::model_preview) change_color: Option<usize>,
+    /// `force always on`.
+    pub(in crate::app::model_preview) force_on: bool,
+}
+
+/// `object`'s attachments whose type is one of `groups`, with a path, as
+/// Reach and Halo 4 read them. Halo 3 and earlier read theirs differently
+/// (no root default, the change colour as stored) and keep their own scans.
+pub(in crate::app::model_preview) fn object_attachments(
+    object: &blam_tags::TagFile,
+    groups: &[u32],
+) -> Vec<ObjectAttachment> {
+    use crate::app::model_preview::ce::attachments::{elements, object_block};
+    use crate::app::model_preview::gen3::effects::marker_name;
+    let Some(block) = object_block(object, "attachments") else {
+        return Vec::new();
+    };
+    elements(block, "attachments")
+        .into_iter()
+        .filter_map(|attachment| {
+            let (group, path) = attachment.read_tag_ref_with_group("type")?;
+            if path.is_empty() || !groups.contains(&group) {
+                return None;
+            }
+            let marker = marker_name(attachment, "marker");
+            Some(ObjectAttachment {
+                group,
+                path,
+                marker: if marker.is_empty() { "root".to_owned() } else { marker },
+                scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
+                secondary_by: attachment.read_string_id("secondary scale").unwrap_or_default(),
+                change_color: attachment.read_int_any("change color").and_then(|color| usize::try_from(color - 1).ok()),
+                force_on: attachment
+                    .read_flag_names("flags")
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|(_, flag)| flag.starts_with("force always on")),
+            })
+        })
+        .collect()
 }
 
 /// What an attached object brings, renamed after it when it has a name, so

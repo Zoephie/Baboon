@@ -11,11 +11,11 @@ use blam_tags::tag_function::transition_function_evaluate;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::attachments::elements;
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::{H2Image, tag_function_at};
-use super::super::gen3::effects::{marker_name, part_markers};
+use super::super::gen3::effects::part_markers;
 use super::super::materials::{H3Bitmap, read_h3_bitmap};
 use super::super::reach::lights::object_value;
 use super::super::*;
@@ -23,6 +23,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_unless_under_micro};
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 
 const SMALLEST: f32 = 1e-4;
 /// `lens_flares_render`'s least visible share that draws.
@@ -737,18 +738,10 @@ pub(crate) fn read_h4_flares(
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
 ) -> Vec<H4FlareAt> {
     let mut flares = Vec::new();
-    let Some(block) = object_block(object, "attachments") else {
-        return flares;
-    };
     let lens_group = u32::from_be_bytes(*b"lens");
     let mut read: Vec<(String, Option<Arc<H4LensFlare>>)> = Vec::new();
-    for attachment in elements(block, "attachments") {
-        let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
-            continue;
-        };
-        if group != lens_group || path.is_empty() {
-            continue;
-        }
+    for attachment in object_attachments(object, &[lens_group]) {
+        let ObjectAttachment { path, marker: name, scale_by, secondary_by, change_color, .. } = attachment;
         let flare = match read.iter().find(|(known, _)| *known == path) {
             Some((_, flare)) => flare.clone(),
             None => {
@@ -760,22 +753,6 @@ pub(crate) fn read_h4_flares(
         let Some(flare) = flare.filter(|flare| flare.flags & FIRST_PERSON_ONLY == 0) else {
             continue;
         };
-        // No marker is the object's root.
-        let name = marker_name(attachment, "marker");
-        let name = if name.is_empty() {
-            "root".to_owned()
-        } else {
-            name
-        };
-        let scale_by = attachment
-            .read_string_id("primary scale")
-            .unwrap_or_default();
-        let secondary_by = attachment
-            .read_string_id("secondary scale")
-            .unwrap_or_default();
-        let change_color = attachment
-            .read_int_any("change color")
-            .and_then(|color| usize::try_from(color - 1).ok());
         for marker in part_markers(markers, &name, false) {
             let (place, node) = frame(&marker);
             flares.push(H4FlareAt {
