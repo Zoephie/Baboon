@@ -30,6 +30,7 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::random::{high_bits, lcg_step};
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::ce::attachments::{has_flag, has_flag_labelled};
 
 /// Seconds run before the first frame, so a held pose has its particles.
 pub(super) const PRE_ROLL: f32 = 6.0;
@@ -317,8 +318,8 @@ impl H3ParticleProperty {
     /// A property with its randoms not yet given seeds, for Reach, which
     /// gathers what a definition's properties read before allocating any.
     fn unallocated(property: TagStruct<'_>) -> Option<Self> {
-        let input = |field: &str| H3ParticleInput::named(&property.read_enum_name(field).unwrap_or_default());
-        let adds = match property.read_enum_name("Output Modifier").as_deref() {
+        let input = |field: &str| H3ParticleInput::named(&property.read_enum_option(field).unwrap_or_default());
+        let adds = match property.read_enum_option("Output Modifier").as_deref() {
             Some("Plus") => Some(true),
             Some("Times") => Some(false),
             _ => None,
@@ -594,7 +595,7 @@ fn particle_update(
     any_attachments: bool,
     movement_flagged: impl Fn(&str) -> bool,
 ) -> (H3ParticleUpdate, bool) {
-    let plain_movement = !["collide with", "swarm", "wind"].iter().any(|wanted| movement_flagged(wanted));
+    let plain_movement = !(collides(&movement_flagged) || movement_flagged("swarm") || movement_flagged("wind"));
     if system_flagged("force cpu updating") {
         (H3ParticleUpdate::Cpu, false)
     } else if system_flagged("force gpu updating") {
@@ -614,11 +615,26 @@ fn flagged_controllers(flagged: impl Fn(&str) -> bool) -> Vec<H3ParticleControll
     [
         (flagged("physics"), H3ParticleController::Physics),
         (flagged("swarm"), H3ParticleController::Flock),
-        (flagged("collide with"), H3ParticleController::Collider),
+        (collides(&flagged), H3ParticleController::Collider),
     ]
     .into_iter()
     .filter_map(|(on, controller)| on.then_some(controller))
     .collect()
+}
+
+/// The movement flags that each add a collider.
+const COLLIDE_WITH: [&str; 6] = [
+    "collide with structure",
+    "collide with media",
+    "collide with water",
+    "collide with scenery",
+    "collide with vehicles",
+    "collide with bipeds",
+];
+
+/// Whether any of [`COLLIDE_WITH`] is set (Halo 2 and 3 call water `media`).
+fn collides(flagged: impl Fn(&str) -> bool) -> bool {
+    COLLIDE_WITH.iter().any(|flag| flagged(flag))
 }
 
 /// One parameter of a flagged movement kind as tool leaves it
@@ -657,7 +673,7 @@ fn chained_parameter(
     seeds: &mut SeedAllocator,
     depth: usize,
 ) -> Option<H3ParticleProperty> {
-    let of_kind = |entry: &TagStruct<'_>| entry.read_enum_name("type").as_deref() == Some(kind);
+    let of_kind = |entry: &TagStruct<'_>| entry.read_enum_option("type").as_deref() == Some(kind);
     let entry = elements(holder, "movements").into_iter().find(of_kind);
     let parameters = entry.map(|entry| elements(entry, "parameters")).unwrap_or_default();
     if let Some(found) = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id)) {
@@ -678,7 +694,7 @@ fn h2_controllers(source: &TagSource, movement: TagStruct<'_>) -> Vec<H3Particle
     let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
     movements
         .into_iter()
-        .filter_map(|entry| match entry.read_enum_name("type").as_deref() {
+        .filter_map(|entry| match entry.read_enum_option("type").as_deref() {
             Some("physics") => Some(H3ParticleController::Physics),
             Some("collider") => Some(H3ParticleController::Collider),
             _ => None,
@@ -1014,7 +1030,7 @@ pub(super) fn loose_kit(root: &str, game: GameId) -> TagSource {
 
 /// `sort layer`, by option name: what is unset is `normal`.
 pub(super) fn h3_sort_layer(shader: TagStruct<'_>) -> i32 {
-    match shader.read_enum_name("sort layer").as_deref() {
+    match shader.read_enum_option("sort layer").as_deref() {
         Some("pre-pass") => 1,
         Some("post-pass") => 3,
         _ => 2,
@@ -1160,7 +1176,7 @@ fn sprite_xform(shader: TagStruct<'_>, name: &str) -> [f32; 4] {
             continue;
         };
         let value = function.evaluate(0.0, 0.0);
-        match animated.read_enum_name("type").as_deref() {
+        match animated.read_enum_option("type").as_deref() {
             Some("scale uniform") => xform[..2].fill(value),
             Some("scale x") => xform[0] = value,
             Some("scale y") => xform[1] = value,
@@ -1303,10 +1319,8 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         false => None,
     };
     let shader = root.descend("actual shader?");
-    let flags = root.read_flag_names("appearance flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
-    let animation = root.read_flag_names("animation flags").unwrap_or_default();
-    let animated = |wanted: &str| animation.iter().any(|(_, name)| name.starts_with(wanted));
+    let flagged = |wanted: &str| has_flag(root, "appearance flags", wanted);
+    let animated = |wanted: &str| has_flag(root, "animation flags", wanted);
     let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
     let offset = root.read_point2d("center offset");
     let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
@@ -1315,11 +1329,10 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         Some(shader) => read_frames(source, shader, first, [offset.x, offset.y], start, one_shot),
         None => (vec![[0.0, 0.0, 1.0, 1.0]], [0.0, 0.0, 1.0, 1.0]),
     };
-    let billboard = H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default());
+    let billboard = H3Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
     // Halo 4's simulation is Reach's, with terms of its own.
     let reach = matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4));
-    let main_flags = root.read_flag_names("main flags").unwrap_or_default();
-    let cheap = reach && main_flags.iter().any(|(_, name)| name.starts_with("uses cheap shader"));
+    let cheap = reach && has_flag(root, "main flags", "uses cheap shader");
     const PROPERTIES: [&str; 7] =
         ["aspect ratio", "color", "intensity", "alpha", "frame index", "animation rate", "palette animation"];
     let mut properties = unallocated_properties(root, PROPERTIES)?;
@@ -1355,14 +1368,14 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         intensity_fades: flagged("intensity affects alpha"),
         model,
         vertical: flagged("bitmap authored vertically"),
-        dies_on_ground: main_flags.iter().any(|(_, name)| name.starts_with("dies on structure collision")),
-        dies_at_rest: main_flags.iter().any(|(_, name)| name.starts_with("dies at rest")),
+        dies_on_ground: has_flag(root, "main flags", "dies on structure collision"),
+        dies_at_rest: has_flag(root, "main flags", "dies at rest"),
         tint_from_lightmap: flagged("tint from lightmap"),
         double_sided: flagged("double-sided"),
         attachments: elements(root, "attachments")
             .iter()
             .filter_map(|attachment| {
-                let trigger = match attachment.read_enum_name("trigger").as_deref() {
+                let trigger = match attachment.read_enum_option("trigger").as_deref() {
                     Some("birth") => H3ParticleTrigger::Birth,
                     Some("death") => H3ParticleTrigger::Death,
                     Some("collision") => H3ParticleTrigger::Collision,
@@ -1471,8 +1484,7 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
     let map_name = if distorts { "bump_map" } else { "alpha_map_texture" };
     let map = parameter(map_name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
     let plate = load_referenced_tag_from_source(source, &map, "bitmap", b"bitm").ok()?;
-    let flags = root.read_flag_names("flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let flagged = |wanted: &str| has_flag(root, "flags", wanted);
     let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
     let (frames, corner) = read_h2_frames(&plate, first);
     // `sub_53CEA0`: `first + random % count`, held inside the bitmap's.
@@ -1499,7 +1511,7 @@ fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3Par
         ..H3SpriteShader::plain(blend)
     };
     let mut seeds = SeedAllocator::default();
-    let billboard = H3Billboard::named(&root.read_enum_name("particle billboard style").unwrap_or_default());
+    let billboard = H3Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
     let mut property = |name: &str| H3ParticleProperty::named(root, name, &mut seeds);
     let (color, alpha, scale, rotation, frame) =
         (property("color")?, property("alpha")?, property("scale")?, property("rotation")?, property("frame index")?);
@@ -1704,14 +1716,13 @@ fn read_collider_of(source: &TagSource, movement: TagStruct<'_>, seeds: &mut See
     let own = elements(movement, "movements");
     let held = template.as_ref().map(|tag| tag.root());
     let collides = |holder: Option<TagStruct<'_>>| {
-        let flags = holder.and_then(|holder| holder.read_flag_names("flags")).unwrap_or_default();
-        flags.iter().any(|(_, name)| name.starts_with("collide with structure"))
+        holder.is_some_and(|holder| has_flag(holder, "flags", "collide with structure"))
     };
     if !collides(Some(movement)) && !collides(held) {
         return None;
     }
     let movements = if own.is_empty() { held.map_or(Vec::new(), |root| elements(root, "movements")) } else { own };
-    let entry = movements.into_iter().find(|entry| entry.read_enum_name("type").as_deref() == Some("collider"))?;
+    let entry = movements.into_iter().find(|entry| entry.read_enum_option("type").as_deref() == Some("collider"))?;
     let mut by_id = |id: i128| {
         let parameters = elements(entry, "parameters");
         let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
@@ -2072,7 +2083,7 @@ fn read_movement(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAl
         .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
     let own = elements(movement, "movements");
     let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
-    let physics = movements.into_iter().find(|entry| entry.read_enum_name("type").as_deref() == Some("physics"))?;
+    let physics = movements.into_iter().find(|entry| entry.read_enum_option("type").as_deref() == Some("physics"))?;
     let by_id = |id: i128, seeds: &mut SeedAllocator| {
         let parameters = elements(physics, "parameters");
         let found = parameters.into_iter().find(|parameter| parameter.read_int_any("parameter id") == Some(id))?;
@@ -2132,10 +2143,10 @@ fn read_emitter(
     // Halo 4 seeds and moves as Reach does, with terms of its own.
     let halo4 = source.game() == Some(GameId::Halo4);
     let reach = source.game() == Some(GameId::HaloReach) || halo4;
-    let shape = H3EmissionShape::named(&emitter.read_enum_name("emission shape").unwrap_or_default())?;
+    let shape = H3EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
     let mut properties = unallocated_properties(emitter, EMITTER_PROPERTIES)?;
-    let movement_flags = emitter.descend("particle movement").and_then(|movement| movement.read_flag_names("flags"));
-    let movement_flagged = |wanted: &str| movement_flags.iter().flatten().any(|(_, name)| name.starts_with(wanted));
+    let movement = emitter.descend("particle movement");
+    let movement_flagged = |wanted: &str| movement.is_some_and(|movement| has_flag(movement, "flags", wanted));
     let (live_forever, disable_velocity) = (system_flagged("particles live forever"), system_flagged("disable velocity"));
     let (update, card_at_rest) = particle_update(system_flagged, look.any_attachments, movement_flagged);
     let controllers = flagged_controllers(movement_flagged);
@@ -2189,15 +2200,14 @@ fn read_emitter(
         black_point,
     ] = properties;
     let scroll = emitter.read_vec2("uv scrolling");
-    let emitter_flags = emitter.read_flag_names("emitter flags").unwrap_or_default();
     let raw_scale = emitter.read_point3d("axis scale");
     Some(H3Emitter {
         update,
         card_lerps: reach,
         card_at_rest,
         spawn_slack: 0.0,
-        axis: H3ParticleAxis::named(&emitter.read_enum_name("particle axis (for models)").unwrap_or_default()),
-        reference_axis: match emitter.read_enum_name("particle reference axis").as_deref() {
+        axis: H3ParticleAxis::named(&emitter.read_enum_option("particle axis (for models)").unwrap_or_default()),
+        reference_axis: match emitter.read_enum_option("particle reference axis").as_deref() {
             Some("y") => 1,
             Some("z") => 2,
             _ => 0,
@@ -2213,7 +2223,7 @@ fn read_emitter(
         bunched: false,
         rotation_given: false,
         volume_random: reach
-            && emitter_flags.iter().any(|(_, name)| name.starts_with("volume emitter particle velocities are random")),
+            && has_flag(emitter, "emitter flags", "volume emitter particle velocities are random"),
         axis_scale: if reach { reach_axis_scale([raw_scale.x, raw_scale.y, raw_scale.z]) } else { [1.0; 3] },
         turbulence,
         h4: halo4.then(|| {
@@ -2327,7 +2337,7 @@ fn read_h2_emitter(
     flagged: &impl Fn(&str) -> bool,
 ) -> Option<H3Emitter> {
     let mut seeds = SeedAllocator::default();
-    let shape = H3EmissionShape::named(&emitter.read_enum_name("emission shape").unwrap_or_default())?;
+    let shape = H3EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
     let mut property = |name: &str| H3ParticleProperty::named(emitter, name, &mut seeds);
     let (radius, angle, rate, lifespan) = (
         property("emission radius")?,
@@ -2454,9 +2464,13 @@ struct H3SystemParts {
     emitters: Vec<Arc<H3Emitter>>,
 }
 
+/// A system's `lod always 1.0`, and what older layouts label it.
+const LOD_ALWAYS_ONE: [&str; 3] = ["lod always 1.0", "ignore lod (render always)", "lod always 1"];
+/// A system's `particles die when effect ends`, and its older label.
+const DIE_WITH_EFFECT: [&str; 2] = ["particles die when effect ends", "die when orphaned"];
+
 fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3SystemParts> {
-    let flags = system.read_flag_names("flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let flagged = |wanted: &str| has_flag(system, "flags", wanted);
     if !part_runs_by(system, "environment", "disposition") {
         return None;
     }
@@ -2477,10 +2491,10 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
         return None;
     }
     let real = |field: &str| system.read_real(field).unwrap_or(0.0);
-    let cutoff = if flagged("override near fade") { real("near fade override") } else { real("near fade cutoff") };
+    let cutoff = if flagged("override near fade (use with caution)") { real("near fade override") } else { real("near fade cutoff") };
     Some(H3SystemParts {
         hidden: flagged("don't render system"),
-        die_with_effect: flagged("particles die when effect ends"),
+        die_with_effect: has_flag_labelled(system, "flags", &DIE_WITH_EFFECT),
         lod: {
             let raw = [
                 real("LOD in distance"),
@@ -2488,18 +2502,18 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
                 real("LOD feather in delta"),
                 real("LOD feather out delta"),
             ];
-            let any_camera = system.read_int_any("camera mode") == Some(0);
+            let any_camera = system.field("camera mode").is_some_and(|field| field.enum_is("independent of camera mode"));
             let rates = emitters.iter().map(|emitter| emitter.rate.most());
             if h2 {
                 Some(h2_baked_lod(raw, any_camera, rates))
-            } else if !(flagged("lod always 1.0") || flagged("ignore lod")) {
+            } else if !has_flag_labelled(system, "flags", &LOD_ALWAYS_ONE) {
                 Some(if look.reach { reach_baked_lod(raw) } else { baked_lod(raw, any_camera, rates) })
             } else {
                 None
             }
         },
         sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
-        world: system.read_enum_name("coordinate system").as_deref() == Some("world"),
+        world: system.read_enum_option("coordinate system").as_deref() == Some("world"),
         near_range: near_fade_range(look.reach, real("near fade range")),
         near_cutoff: cutoff,
         look,
@@ -4178,8 +4192,8 @@ mod tests {
     #[test]
     fn tool_puts_an_emitter_on_the_card_only_when_nothing_needs_the_processor() {
         use H3ParticleUpdate::{Cpu, Gpu};
-        let named =
-            |names: &'static [&'static str]| move |wanted: &str| names.iter().any(|name| name.starts_with(wanted));
+        // The set options, as has_flag names them.
+        let named = |names: &'static [&'static str]| move |wanted: &str| names.contains(&wanted);
         let decide = |system: &'static [&'static str], attachments, movement: &'static [&'static str]| {
             particle_update(named(system), attachments, named(movement))
         };
@@ -4188,10 +4202,10 @@ mod tests {
         assert_eq!(decide(&[], true, &["physics"]), (Cpu, false), "attachments play on the processor");
         assert_eq!(decide(&[], false, &["physics", "collide with structure"]), (Cpu, true), "on to the card at rest");
         assert_eq!(decide(&[], false, &["swarm"]), (Cpu, true));
-        assert_eq!(decide(&["force gpu updating{force gpu rendering}"], true, &["wind"]), (Gpu, false));
-        let force_cpu = &["force cpu updating{force cpu rendering}"];
+        assert_eq!(decide(&["force gpu updating"], true, &["wind"]), (Gpu, false));
+        let force_cpu = &["force cpu updating"];
         assert_eq!(decide(force_cpu, false, &["collide with structure"]), (Cpu, false), "forced stays put");
-        let both = &["force cpu updating{force cpu rendering}", "force gpu updating{force gpu rendering}"];
+        let both = &["force cpu updating", "force gpu updating"];
         assert_eq!(decide(both, false, &[]), (Cpu, false), "forcing the processor wins");
     }
 
@@ -4200,8 +4214,8 @@ mod tests {
     #[test]
     fn movements_follow_the_flags_in_tools_order() {
         use H3ParticleController::{Collider, Flock, Physics};
-        let named =
-            |names: &'static [&'static str]| move |wanted: &str| names.iter().any(|name| name.starts_with(wanted));
+        // The set options, as has_flag names them.
+        let named = |names: &'static [&'static str]| move |wanted: &str| names.contains(&wanted);
         assert_eq!(flagged_controllers(named(&["collide with bipeds", "swarm", "physics"])), [Physics, Flock, Collider]);
         assert_eq!(flagged_controllers(named(&[])), []);
     }
