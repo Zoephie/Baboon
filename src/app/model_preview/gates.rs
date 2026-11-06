@@ -394,7 +394,7 @@ fn gate_load() {
 
 /// What G-px shoots of each game: a biped, a vehicle, and something that
 /// moves at rest (the phantom does for Halo 3 and ODST), each in every
-/// [`LOOKS`].
+/// [`LOOKS`]; Reach and Halo 4 each have a Warthog for their screen lights.
 #[cfg(target_os = "macos")]
 const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
     (
@@ -442,6 +442,8 @@ const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
             ("objects\\characters\\spartans\\spartans", "biped"),
             ("objects\\vehicles\\covenant\\banshee\\banshee", "vehicle"),
             ("objects\\characters\\cortana\\cortana", "biped"),
+            // Its lights are screen-space, drawn in the `lit` look.
+            ("objects\\vehicles\\human\\warthog\\warthog", "vehicle"),
         ],
     ),
     (
@@ -483,6 +485,13 @@ const LOOKS: &[(&str, Look)] = &[
     }),
     ("bloom", |options| options.bloom = true),
     ("shadow", |options| options.shadow = true),
+    // Lights hung on these are off at rest: the Warthogs' screen lights among
+    // them, which no other look draws.
+    ("lit", |options| {
+        options.functions = ["driver_seat_power", "brakelights", "illumination"]
+            .map(|name| (name.to_owned(), 1.0))
+            .to_vec();
+    }),
 ];
 
 /// Saves a shot as a PNG, upright.
