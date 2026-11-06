@@ -12,33 +12,39 @@ struct SearchState {
     query: String,
 }
 
-/// Use for value-selection dropdowns throughout the app. The native trigger
-/// retains its sizing and identity; the popup owns overflow, search and rows.
+/// Value-selection dropdowns with a stationary search field and one scrolling
+/// results pane. Wrapping a native combo would add a competing scroll area.
 pub(in crate::app) struct ValueComboBox {
-    native: egui::ComboBox,
+    salt: egui::IdSalt,
+    width: Option<f32>,
+    text: egui::WidgetText,
+    truncate: bool,
     height: Option<f32>,
 }
 
 impl ValueComboBox {
     pub(in crate::app) fn from_id_salt(salt: impl egui::AsIdSalt) -> Self {
         Self {
-            native: egui::ComboBox::from_id_salt(salt),
+            salt: egui::IdSalt::new(salt),
+            width: None,
+            text: "".into(),
+            truncate: false,
             height: None,
         }
     }
 
     pub(in crate::app) fn width(mut self, width: f32) -> Self {
-        self.native = self.native.width(width);
+        self.width = Some(width);
         self
     }
 
     pub(in crate::app) fn selected_text(mut self, text: impl Into<egui::WidgetText>) -> Self {
-        self.native = self.native.selected_text(text);
+        self.text = text.into();
         self
     }
 
     pub(in crate::app) fn truncate(mut self) -> Self {
-        self.native = self.native.truncate();
+        self.truncate = true;
         self
     }
 
@@ -56,12 +62,43 @@ impl ValueComboBox {
             .height
             .unwrap_or(ui.spacing().combo_height)
             .min((ui.ctx().content_rect().height() - 80.0).max(32.0));
-        // The native outer scroll area stays at its content height. Only the
-        // results scroll, so the search box never disappears with the rows.
-        self.native
-            .height(f32::INFINITY)
+        let label = self.text.text().to_owned();
+        let width = self.width.unwrap_or(ui.spacing().combo_width);
+        let background = ui.painter().add(egui::Shape::Noop);
+        let id = ui.make_persistent_id(self.salt);
+        let response = ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
+            // ButtonStyle subtracts each state's border from its padding before
+            // the per-button override. Our separately painted border must not
+            // affect layout, including hover expansion and pressed states.
+            let widgets = &mut ui.visuals_mut().widgets;
+            for visuals in [&mut widgets.noninteractive, &mut widgets.inactive,
+                &mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
+                visuals.bg_stroke = Stroke::NONE;
+                visuals.expansion = 0.0;
+            }
+            // Keep egui's frame margins; Baboon paints the visible frame below.
+            ui.add_sized(Vec2::new(width, ui.spacing().interact_size.y), egui::Button::new(self.text).right_text("")
+                .frame(true).fill(Color32::TRANSPARENT).stroke(Stroke::NONE)
+                .wrap_mode(if self.truncate { egui::TextWrapMode::Truncate } else { egui::TextWrapMode::Extend })
+                .min_size(Vec2::new(width, ui.spacing().interact_size.y)))
+        }).inner;
+        let popup_id = egui::Popup::default_response_id(&response);
+        let visuals = if egui::Popup::is_id_open(ui.ctx(), popup_id) {
+            &ui.visuals().widgets.open
+        } else { ui.style().interact(&response) };
+        ui.painter().set(background, egui::Shape::rect_filled(response.rect.expand(visuals.expansion), visuals.corner_radius, visuals.bg_fill));
+        ui.painter().rect_stroke(response.rect.expand(visuals.expansion), visuals.corner_radius, visuals.bg_stroke, egui::StrokeKind::Inside);
+        let center = egui::pos2(response.rect.right() - ui.spacing().button_padding.x - 7.0, response.rect.center().y);
+        ui.painter().add(egui::Shape::convex_polygon(vec![
+            center + egui::vec2(-4.0, -2.5), center + egui::vec2(4.0, -2.5), center + egui::vec2(0.0, 2.5),
+        ], visuals.fg_stroke.color, Stroke::NONE));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), label.as_str()));
+        let inner = egui::Popup::menu(&response)
+            .width(response.rect.width())
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show_ui(ui, |ui| value_dropdown_contents(ui, limit, contents))
+            .show(|ui| value_dropdown_contents(ui, limit, contents))
+            .map(|popup| popup.inner);
+        egui::InnerResponse { inner, response }
     }
 }
 
@@ -316,6 +353,10 @@ mod tests {
         option_font_size: Option<f32>,
         nested: bool,
         shortened: bool,
+        scroll_bars: Vec<egui::Rect>,
+        trigger_y: f32,
+        tag_field: bool,
+        trigger_text_pos: Option<egui::Pos2>,
     }
 
     impl Demo {
@@ -337,6 +378,10 @@ mod tests {
                 option_font_size: None,
                 nested: false,
                 shortened: false,
+                scroll_bars: Vec::new(),
+                trigger_y: 0.0,
+                tag_field: false,
+                trigger_text_pos: None,
             }
         }
 
@@ -354,11 +399,13 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    let response = ValueComboBox::from_id_salt("value_dropdown_test")
+                    ui.add_space(self.trigger_y);
+                    let combo = ValueComboBox::from_id_salt("value_dropdown_test")
                         .width(180.0)
                         .height(self.height)
-                        .selected_text(&self.options[self.selected])
-                        .show_ui(ui, |ui| {
+                        .selected_text(&self.options[self.selected]);
+                    let tag_field = self.tag_field;
+                    let contents = |ui: &mut ValueComboUi<'_>| {
                             for (index, label) in self.options.iter().enumerate() {
                                 let text: egui::WidgetText = self.option_font_size.map_or_else(
                                     || label.into(),
@@ -375,7 +422,12 @@ mod tests {
                                     self.rows.push((index, row.rect));
                                 }
                             }
-                        });
+                        };
+                    let response = if tag_field {
+                        ui.horizontal(|ui| crate::app::editor::fields::combo_box_with_scroll(ui, combo, contents).0).inner
+                    } else {
+                        combo.show_ui(ui, contents)
+                    };
                     self.trigger = response.response.rect;
                     self.open = response.inner.is_some();
                 },
@@ -386,6 +438,15 @@ mod tests {
                 }
                 _ => None,
             });
+            self.trigger_text_pos = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == self.options[self.selected] => Some(text.pos),
+                _ => None,
+            });
+            self.scroll_bars = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.rect.width() >= 1.0 && rect.rect.width() <= 16.0
+                    && rect.rect.height() >= 8.0 && shape.clip_rect.intersects(rect.rect) => Some(rect.rect),
+                _ => None,
+            }).collect();
             self.texts = output
                 .shapes
                 .iter()
@@ -418,13 +479,99 @@ mod tests {
         fn open(&mut self) {
             self.settle();
             self.click(self.trigger.center());
-            assert!(self.open, "the native dropdown opens");
+            assert!(self.open, "the dropdown opens");
         }
 
         fn search(&mut self, query: &str) {
             self.click(self.search.expect("overflowing values have search"));
             self.frame(vec![egui::Event::Text(query.to_owned())]);
             self.settle();
+        }
+    }
+
+    #[test]
+    fn dropdown_trigger_text_stays_fixed_across_interaction_states() {
+        for tag_field in [false, true] {
+            let mut demo = Demo::new(vec!["constant".into()], 180.0);
+            demo.tag_field = tag_field;
+            demo.settle();
+            let idle = (demo.trigger, demo.trigger_text_pos.unwrap());
+            let at = demo.trigger.center();
+            demo.frame(vec![egui::Event::PointerMoved(at)]);
+            demo.settle();
+            assert_eq!((demo.trigger, demo.trigger_text_pos.unwrap()), idle, "hover must not shift text or bounds");
+            demo.frame(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+            demo.frame(vec![]);
+            assert_eq!((demo.trigger, demo.trigger_text_pos.unwrap()), idle, "press must not shift text or bounds");
+            demo.frame(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+            demo.settle();
+            assert!(demo.open);
+            assert_eq!((demo.trigger, demo.trigger_text_pos.unwrap()), idle, "opening must not shift text or bounds");
+        }
+    }
+
+    #[test]
+    fn dropdown_triggers_keep_the_standard_left_padding() {
+        for tag_field in [false, true] {
+            let ctx = egui::Context::default();
+            ctx.set_global_style(foundation_style());
+            let mut rect = egui::Rect::NOTHING;
+            let mut padding = 0.0;
+            let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                padding = ui.spacing().button_padding.x;
+                let combo = ValueComboBox::from_id_salt("padded_trigger").width(180.0).selected_text("constant");
+                rect = if tag_field {
+                    ui.horizontal(|ui| crate::app::editor::fields::combo_box_with_scroll(ui, combo, |_| {}).0.response.rect).inner
+                } else { combo.show_ui(ui, |_| {}).response.rect };
+            });
+            let text_x = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "constant" => Some(text.pos.x),
+                _ => None,
+            }).unwrap();
+            assert!((text_x - rect.left() - padding).abs() < 0.5,
+                "tag_field={tag_field}: expected {padding}px left padding, got {}", text_x - rect.left());
+        }
+    }
+
+    #[test]
+    fn halo2_hud_dropdown_scrollbar_drag_moves_the_results() {
+        let schema: serde_json::Value = serde_json::from_str(include_root_str!(
+            "definitions/halo2_mcc/new_hud_definition.json"
+        )).unwrap();
+        let options: Vec<String> = schema["enums_flags"]["input 1"]["options"].as_array().unwrap()
+            .iter().map(|value| value.as_str().unwrap().to_owned()).collect();
+        for (tag_field, scale, top) in [
+            (false, 1.0, 0.0), (true, 1.0, 0.0), (true, 1.25, 200.0),
+            (true, 1.5, 200.0), (true, 1.75, 0.0), (true, 1.75, 350.0), (true, 2.0, 200.0),
+        ] {
+            let mut demo = Demo::new(options.clone(), 420.0);
+            demo.ctx.set_pixels_per_point(scale);
+            demo.trigger_y = top;
+            demo.tag_field = tag_field;
+            demo.open();
+            let search = demo.search;
+            let before = demo.rows[0].1.top();
+            let thumb = *demo.scroll_bars.last().expect("the popup paints a scrollbar");
+            let start = thumb.center();
+            demo.frame(vec![egui::Event::PointerMoved(start)]);
+            demo.frame(vec![egui::Event::PointerButton { pos: start, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+            let end = start + egui::vec2(0.0, 100.0);
+            demo.frame(vec![egui::Event::PointerMoved(end)]);
+            demo.frame(vec![egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+            demo.settle();
+            assert!(demo.open, "dragging the scrollbar must keep the picker open");
+            let distance = before - demo.rows[0].1.top();
+            assert!(distance > 100.0, "tag_field={tag_field}, scale={scale}, top={top}: a 100px thumb drag moved results only {distance}px; bars {:?}", demo.scroll_bars);
+            assert_eq!(demo.search, search, "search stays stationary while results scroll");
+            let before_wheel = demo.rows[0].1.top();
+            let over_results = demo.scroll_bars[0].center() - egui::vec2(40.0, 0.0);
+            demo.frame(vec![egui::Event::PointerMoved(over_results), egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -150.0), modifiers: Default::default(),
+                phase: egui::TouchPhase::Move,
+            }]);
+            demo.settle();
+            assert!(before_wheel - demo.rows[0].1.top() > 50.0, "the wheel still scrolls the results");
+            assert_eq!(demo.selected, 0, "scrolling does not select an input");
         }
     }
 

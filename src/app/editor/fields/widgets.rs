@@ -1016,17 +1016,14 @@ pub(in crate::app) fn picker_button(
     foreground: Color32,
     enabled: bool,
 ) -> egui::Response {
-    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     let response = ui
         .scope(|ui| {
             if !enabled {
                 ui.disable();
             }
-            if open {
-                ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                    ui.visuals().widgets.open.weak_bg_fill;
-            }
-            ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
+            crate::app::ui_kit::with_open_dropdown_visuals(ui, Some(popup_id), |ui| {
+                ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
+            })
         })
         .inner;
     let foreground = if !enabled || !ui.is_enabled() {
