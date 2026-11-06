@@ -598,6 +598,213 @@ fn gate_pixels() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// What the code read an option as before reading it by name.
+#[derive(Clone, Copy, Debug)]
+enum Old {
+    /// `value & bit != 0`.
+    Bit(i128),
+    /// `value == n`.
+    Value(i128),
+}
+
+/// G-opt: one option read the old way and by name, over every kit tag of a
+/// group. `path` walks blocks to the field: each segment but the last is a
+/// block whose every element is read.
+struct OptionRow {
+    kit: &'static str,
+    game: GameId,
+    extension: &'static str,
+    path: &'static str,
+    old: Old,
+    name: &'static str,
+    /// A control, which must disagree, so the gate shows it can fail.
+    control: bool,
+}
+
+const fn row(kit: &'static str, game: GameId, extension: &'static str, path: &'static str, old: Old, name: &'static str) -> OptionRow {
+    OptionRow { kit, game, extension, path, old, name, control: false }
+}
+
+const HCE: (&str, GameId) = ("BLAM_TEST_HCEEK", GameId::HaloCe);
+const H2: (&str, GameId) = ("BLAM_TEST_H2EK", GameId::Halo2);
+
+/// Every option the refactor reads by name, against the number it replaced.
+const OPTION_ROWS: &[OptionRow] = &[
+    // A control: the wrong name for a bit.
+    OptionRow { control: true, ..row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x1), "dies at rest") },
+    // ce::particles
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x1), "can animate backwards"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x2), "animation stops at rest"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x4), "animation starts on random frame"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x8), "animate once per frame"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x10), "dies at rest"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x20), "dies on contact with structure"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x40), "tint from diffuse texture"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x100), "dies on contact with air"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x200), "self-illuminated"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x400), "random horizontal mirroring"),
+    row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x800), "random vertical mirroring"),
+    row(HCE.0, HCE.1, "particle", "shader flags", Old::Bit(0x2), "nonlinear tint"),
+    row(HCE.0, HCE.1, "point_physics", "flags", Old::Bit(0x2), "collides with structures"),
+    row(HCE.0, HCE.1, "point_physics", "flags", Old::Bit(0x20), "no gravity"),
+    row(H2.0, H2.1, "point_physics", "flags", Old::Bit(0x2), "collides with structures"),
+    row(H2.0, H2.1, "point_physics", "flags", Old::Bit(0x20), "no gravity"),
+    row(HCE.0, HCE.1, "effect", "events/parts/flags", Old::Bit(0x1), "face down regardless of location (decals)"),
+    row(HCE.0, HCE.1, "effect", "events/particles/flags", Old::Bit(0x8), "interpolate tint as HSV"),
+    row(HCE.0, HCE.1, "effect", "events/particles/flags", Old::Bit(0x10), "... across the long hue path"),
+    row(HCE.0, HCE.1, "effect", "events/particles/distribution function", Old::Value(0), "start"),
+    row(HCE.0, HCE.1, "effect", "events/particles/distribution function", Old::Value(1), "end"),
+    row(HCE.0, HCE.1, "effect", "events/particles/distribution function", Old::Value(2), "constant"),
+    row(HCE.0, HCE.1, "effect", "events/particles/distribution function", Old::Value(3), "buildup"),
+    row(HCE.0, HCE.1, "effect", "events/particles/distribution function", Old::Value(4), "falloff"),
+    row(HCE.0, HCE.1, "effect", "events/particles/distribution function", Old::Value(5), "buildup and falloff"),
+    row(HCE.0, HCE.1, "particle", "anchor", Old::Value(0), "with primary"),
+    row(HCE.0, HCE.1, "particle", "anchor", Old::Value(1), "with screen space"),
+    row(HCE.0, HCE.1, "particle", "anchor", Old::Value(2), "zsprite"),
+    row(HCE.0, HCE.1, "effect", "events/particles/flags", Old::Bit(0x1), "stay attached to marker"),
+    row(HCE.0, HCE.1, "effect", "events/particles/flags", Old::Bit(0x2), "random initial angle"),
+    row(HCE.0, HCE.1, "effect", "events/particles/flags", Old::Bit(0x4), "tint from object color"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x1), "velocity"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x2), "velocity delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x4), "velocity cone angle"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x8), "angular velocity"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x10), "angular velocity delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x20), "count"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x40), "count delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x80), "distribution radius"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x100), "distribution radius delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x200), "particle radius"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x400), "particle radius delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/A scales values", Old::Bit(0x800), "tint"),
+    row(HCE.0, HCE.1, "effect", "events/parts/A scales values", Old::Bit(0x1), "velocity"),
+    row(HCE.0, HCE.1, "effect", "events/parts/A scales values", Old::Bit(0x2), "velocity delta"),
+    row(HCE.0, HCE.1, "effect", "events/parts/A scales values", Old::Bit(0x4), "velocity cone angle"),
+    row(HCE.0, HCE.1, "effect", "events/parts/A scales values", Old::Bit(0x8), "angular velocity"),
+    row(HCE.0, HCE.1, "effect", "events/parts/A scales values", Old::Bit(0x10), "angular velocity delta"),
+    row(HCE.0, HCE.1, "effect", "events/parts/A scales values", Old::Bit(0x20), "type-specific scale"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x1), "velocity"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x2), "velocity delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x4), "velocity cone angle"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x8), "angular velocity"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x10), "angular velocity delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x20), "count"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x40), "count delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x80), "distribution radius"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x100), "distribution radius delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x200), "particle radius"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x400), "particle radius delta"),
+    row(HCE.0, HCE.1, "effect", "events/particles/B scales values", Old::Bit(0x800), "tint"),
+    row(HCE.0, HCE.1, "effect", "events/parts/B scales values", Old::Bit(0x1), "velocity"),
+    row(HCE.0, HCE.1, "effect", "events/parts/B scales values", Old::Bit(0x2), "velocity delta"),
+    row(HCE.0, HCE.1, "effect", "events/parts/B scales values", Old::Bit(0x4), "velocity cone angle"),
+    row(HCE.0, HCE.1, "effect", "events/parts/B scales values", Old::Bit(0x8), "angular velocity"),
+    row(HCE.0, HCE.1, "effect", "events/parts/B scales values", Old::Bit(0x10), "angular velocity delta"),
+    row(HCE.0, HCE.1, "effect", "events/parts/B scales values", Old::Bit(0x20), "type-specific scale"),
+];
+
+/// Every `(old, by name)` pair `path` reaches under `holder`; `None` by name
+/// where the field's list has no such option.
+fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out: &mut Vec<(bool, Option<bool>)>) {
+    match path.split_once('/') {
+        Some((block, rest)) => {
+            let Some(block) = holder.field(block).and_then(|field| field.as_block()) else {
+                return;
+            };
+            for element in block.iter() {
+                read_both(element, rest, row, out);
+            }
+        }
+        None => {
+            let Some(field) = holder.field(path) else {
+                return;
+            };
+            let Some(value) = holder.read_int_any(path) else {
+                return;
+            };
+            let old = match row.old {
+                Old::Bit(bit) => value & bit != 0,
+                Old::Value(number) => value == number,
+            };
+            let named = field.flag(row.name).map(|option| match row.old {
+                Old::Bit(_) => option.is_set(),
+                Old::Value(_) => field.enum_is(row.name),
+            });
+            out.push((old, named));
+        }
+    }
+}
+
+/// G-opt: each option in [`OPTION_ROWS`] reads the same by name as by number
+/// over every tag of its group in its kit, and its name is in every tag's
+/// list. Each control must disagree.
+#[test]
+fn gate_options() {
+    use crate::core::source::read_tag_from_bytes;
+    let definitions = crate::core::bundled::locate_definitions_root();
+    let mut failures = Vec::new();
+    let mut groups: Vec<(&str, GameId, &str)> = OPTION_ROWS.iter().map(|row| (row.kit, row.game, row.extension)).collect();
+    groups.sort_by_key(|(kit, _, extension)| (*kit, *extension));
+    groups.dedup();
+    for (kit, game, extension) in groups {
+        let Ok(root) = std::env::var(kit) else {
+            eprintln!("skipping {game:?} {extension}: {kit} is not set");
+            continue;
+        };
+        let rows: Vec<&OptionRow> =
+            OPTION_ROWS.iter().filter(|row| row.kit == kit && row.extension == extension).collect();
+        // Per row: tags, elements, disagreeing tags, tags missing the name.
+        let mut tallies = vec![(0usize, 0usize, Vec::<String>::new(), Vec::<String>::new()); rows.len()];
+        let suffix = format!(".{extension}");
+        for entry in walkdir::WalkDir::new(&root).into_iter().filter_map(Result::ok) {
+            let path = entry.path();
+            if !path.to_string_lossy().ends_with(&suffix) {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(path) else { continue };
+            // A classic tag's layout follows its header's group, which Halo 2
+            // stores reversed; MCC tags carry their own.
+            let group = blam_tags::classic::ClassicHeader::parse(&bytes)
+                .map_or(0, |(header, _)| u32::from_be_bytes(header.group_tag));
+            let Ok(tag) = read_tag_from_bytes(&bytes, Some(game), Some(&definitions), group) else {
+                continue;
+            };
+            let name = path.strip_prefix(&root).unwrap_or(path).display().to_string();
+            for (row, tally) in rows.iter().zip(&mut tallies) {
+                let mut read = Vec::new();
+                read_both(tag.root(), row.path, row, &mut read);
+                if read.is_empty() {
+                    continue;
+                }
+                tally.0 += 1;
+                tally.1 += read.len();
+                if read.iter().any(|(_, named)| named.is_none()) {
+                    tally.3.push(name.clone());
+                } else if read.iter().any(|(old, named)| Some(*old) != *named) {
+                    tally.2.push(name.clone());
+                }
+            }
+        }
+        for (row, (tags, elements, disagree, missing)) in rows.iter().zip(&tallies) {
+            eprintln!(
+                "{game:?} {extension} {} {:?} {:?}: {tags} tags, {elements} reads, {} disagree, {} missing",
+                row.path, row.old, row.name, disagree.len(), missing.len()
+            );
+            let first = |list: &Vec<String>| list.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+            if row.control {
+                if disagree.is_empty() {
+                    failures.push(format!("control {} {:?} never disagreed", row.name, row.old));
+                }
+            } else if !disagree.is_empty() || !missing.is_empty() || *tags == 0 {
+                failures.push(format!(
+                    "{game:?} {extension} {} {:?} {:?}: {tags} tags; disagree {} ({}); missing {} ({})",
+                    row.path, row.old, row.name, disagree.len(), first(disagree), missing.len(), first(missing)
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn field_lines_name_each_top_level_field() {
     #[derive(Debug)]
