@@ -20,6 +20,7 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot};
 use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::ce::attachments::has_flag;
 
 const OCTAVES: usize = 9;
 /// `liquid_arc_state_new`'s random starts, which never need to be the game's.
@@ -77,9 +78,7 @@ fn function_of(holder: TagStruct<'_>, name: &str) -> Option<TagFunction> {
 }
 
 fn read_arc(source: &TagSource, arc: TagStruct<'_>, glow: Option<&Arc<H2Image>>) -> Option<LiquidArc> {
-    let flags = arc.read_flag_names("flags").unwrap_or_default();
-    let octaves = arc.read_flag_names("octave flags").unwrap_or_default();
-    let sprites = arc.read_enum_name("sprite count")?.split(' ').next()?.parse().ok()?;
+    let sprites = arc.read_enum_option("sprite count")?.split(' ').next()?.parse().ok()?;
     let cores = elements(arc, "cores").into_iter().filter_map(|core| {
         Some(LiquidCore {
             thickness: function_of(core, "thickness")?,
@@ -93,7 +92,7 @@ fn read_arc(source: &TagSource, arc: TagStruct<'_>, glow: Option<&Arc<H2Image>>)
     let bitmap = own.and_then(|path| read_h2_bitmap(source, &path)).or_else(|| glow.cloned());
     Some(LiquidArc {
         sprites,
-        relative_up: flags.iter().any(|(_, name)| name.starts_with("basis marker-relative")),
+        relative_up: has_flag(arc, "flags", "basis marker-relative"),
         length: arc.read_real("natural length")?,
         instances: arc.read_int_any("instances")?.clamp(0, 8) as usize,
         spread: arc.read_real("instance spread angle")?,
@@ -105,10 +104,7 @@ fn read_arc(source: &TagSource, arc: TagStruct<'_>, glow: Option<&Arc<H2Image>>)
         frequencies: std::array::from_fn(|octave| {
             arc.read_real(&format!("octave {} frequency", octave + 1)).unwrap_or(0.0)
         }),
-        octaves: std::array::from_fn(|octave| {
-            let wanted = format!("octave {}", octave + 1);
-            octaves.iter().any(|(_, name)| *name == wanted)
-        }),
+        octaves: std::array::from_fn(|octave| has_flag(arc, "octave flags", &format!("octave {}", octave + 1))),
         range_scale: function_of(arc, "range-scale")?,
         brightness_scale: function_of(arc, "brightness-scale")?,
         cores: cores.collect(),
@@ -165,7 +161,7 @@ pub(in crate::app::model_preview) fn read_h2_liquids(
             continue;
         };
         let root = tag.root();
-        if root.read_enum_name("type").as_deref() != Some("standard") {
+        if root.read_enum_option("type").as_deref() != Some("standard") {
             continue;
         }
         let Some(scale_by) = driver_of(source, object, &path) else {

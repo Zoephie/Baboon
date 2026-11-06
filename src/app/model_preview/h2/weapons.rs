@@ -18,6 +18,7 @@ use super::super::cloth::ClothGame;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::attached::{Attached, named};
+use crate::app::model_preview::ce::attachments::has_flag;
 
 /// The mode a unit nobody controls is in.
 const RESTING_MODE: &str = "combat";
@@ -27,8 +28,6 @@ const UNARMED: &str = "unarmed";
 /// `unit_animation_set_weapon`'s class with something in the left hand.
 const DUAL: &str = "dual";
 const IDLE: &str = "idle";
-/// `playback flags` bit a clip turns weapon IK off with.
-const DISABLE_WEAPON_IK: i128 = 1 << 3;
 /// Base actions `unit_weapon_ik_allowed` turns weapon IK off for.
 const NO_IK_ACTIONS: &[&str] = &[
     "flying_front",
@@ -85,8 +84,6 @@ const IK_OVERLAYS: &[&str] = &[
 const AIM_OVERLAY: &str = "aim_";
 const GRIP: &str = "grip";
 const ARM_OFFSETS: &str = "arm_offsets";
-/// `model flags` bit of a skeleton node on the left arm.
-const LEFT_ARM_MEMBER: i128 = 1 << 5;
 const CAN_BE_DUAL: &str = "can be dual wielded";
 const ONLY_DUAL: &str = "can only be dual wielded";
 
@@ -427,7 +424,7 @@ pub(in crate::app::model_preview) fn left_arm_nodes(graph: &TagFile) -> Vec<bool
         return Vec::new();
     };
     let member = |node: &TagStruct<'_>| {
-        node.read_int_any("model flags").is_some_and(|flags| flags & LEFT_ARM_MEMBER != 0)
+        has_flag(*node, "model flags", "left arm member")
     };
     elements(holder, "skeleton nodes").iter().map(member).collect()
 }
@@ -437,9 +434,8 @@ fn clips_without_ik(graph: &TagFile) -> BTreeSet<String> {
         return BTreeSet::new();
     };
     let flagged = elements(holder, "animations").into_iter().filter(|clip| {
-        // Reach calls them `user flags`; the bits are the same.
-        let flags = clip.read_int_any("playback flags").or_else(|| clip.read_int_any("user flags"));
-        flags.is_some_and(|flags| flags & DISABLE_WEAPON_IK != 0)
+        // Reach and Halo 4 call them `user flags`.
+        has_flag(*clip, "playback flags", "disable weapon ik") || has_flag(*clip, "user flags", "disable weapon ik")
     });
     flagged.filter_map(|clip| clip.read_string_id("name")).collect()
 }
@@ -453,11 +449,6 @@ fn accepts(graph: &[GraphEntry], class: &str, kind: &str) -> bool {
             && entry.class == class
             && (entry.kind == kind || entry.kind == ANY)
     })
-}
-
-fn weapon_flags(weapon: &TagFile) -> Vec<String> {
-    let names = holder_of(weapon.root(), "magazines").and_then(|holder| holder.read_flag_names("flags"));
-    names.unwrap_or_default().into_iter().map(|(_, name)| name).collect()
 }
 
 fn string_id_in(tag: &TagFile, name: &str) -> String {
@@ -513,8 +504,9 @@ pub(in crate::app::model_preview) fn unit_weapons(
                     let class = string_id_in(&weapon, "weapon class");
                     let kind = string_id_in(&weapon, "weapon name");
                     accepts(&graph, &class, &kind).then(|| {
-                        let flags = weapon_flags(&weapon);
-                        let has = |flag: &str| flags.iter().any(|name| name.starts_with(flag));
+                        // The weapon's own `flags` sit beside its `magazines`.
+                        let holder = holder_of(weapon.root(), "magazines");
+                        let has = |flag: &str| holder.is_some_and(|holder| has_flag(holder, "flags", flag));
                         H2Equippable {
                             option: WeaponOption {
                                 name: tag_path::name(&path).to_owned(),
@@ -835,10 +827,8 @@ pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPr
         let Ok(weapon) = load_referenced_tag_from_source(source, &path, "weapon", b"weap") else {
             continue;
         };
-        let flags = super::super::ce::attachments::object_block(&weapon, "bounding radius")
-            .and_then(|object| object.read_flag_names("flags"))
-            .unwrap_or_default();
-        if !flags.iter().any(|(_, flag)| flag.starts_with("extension of parent")) {
+        let object = super::super::ce::attachments::object_block(&weapon, "bounding radius");
+        if !object.is_some_and(|object| has_flag(object, "flags", "extension of parent")) {
             continue;
         }
         if blam_tags::game::Game::of(&weapon) == blam_tags::game::Game::Halo3 {

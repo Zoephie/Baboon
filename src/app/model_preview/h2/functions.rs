@@ -16,6 +16,7 @@ use crate::app::ui_kit::ThemedCheckbox;
 use super::super::ce::attachments::{elements, object_block};
 use super::super::dx9::passes::{object_input, tag_function_at};
 use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
+use crate::app::model_preview::ce::attachments::has_flag;
 
 /// What the panel has set, by object geometry and input name.
 pub(crate) type H2FunctionInputs = HashMap<(u64, String), f32>;
@@ -42,9 +43,7 @@ struct FunctionFlags {
 
 impl FunctionFlags {
     fn read(entry: TagStruct<'_>) -> Self {
-        let names = entry.read_flag_names("flags").unwrap_or_default();
-        // Option names carry their explanation after a `#`.
-        let set = |wanted: &str| names.iter().any(|(_, name)| name.split('#').next() == Some(wanted));
+        let set = |wanted: &str| has_flag(entry, "flags", wanted);
         Self {
             invert: set("invert"),
             mapping_does_not_control_active: set("mapping does not controls active"),

@@ -21,6 +21,7 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{checked_unit, cross};
 use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::ce::attachments::has_flag;
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
@@ -45,12 +46,11 @@ impl PointPhysics {
     fn read(tag: &TagFile) -> Option<Self> {
         let root = tag.root();
         let density = root.read_real("density")?;
-        let flags = root.read_flag_names("flags").unwrap_or_default();
         Some(Self {
             mass: density * MASS_OF_DENSITY,
             density,
             air_friction: root.read_real("air friction")? * FRICTION_SCALE,
-            no_gravity: flags.iter().any(|(_, name)| name.starts_with("no gravity")),
+            no_gravity: has_flag(root, "flags", "no gravity"),
         })
     }
 
@@ -119,8 +119,7 @@ fn read_state(source: &TagSource, state: TagStruct<'_>) -> Option<PointState> {
             _ => [0.0; 4],
         }
     };
-    let flags = state.read_flag_names("scale flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name == wanted);
+    let flagged = |wanted: &str| has_flag(state, "scale flags", wanted);
     let physics = state.read_tag_ref_path("physics").filter(|path| !path.is_empty());
     let physics = physics.and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok());
     Some(PointState {
@@ -173,8 +172,7 @@ pub(in crate::app::model_preview) fn read_h2_contrails(
         if states.len() < 2 {
             continue;
         }
-        let flags = root.read_flag_names("flags").unwrap_or_default();
-        let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+        let flagged = |wanted: &str| has_flag(root, "flags", wanted);
         let speed = root.read_real_bounds("point velocity");
         let bitmap = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
         let bitmap = bitmap.and_then(|path| decode_h2_image(source, &path, SamplerKind::Texture2D, 0)).map(Arc::new);
@@ -192,12 +190,12 @@ pub(in crate::app::model_preview) fn read_h2_contrails(
                 rate: root.read_real("point generation rate").unwrap_or(0.0),
                 speed: [speed.lower, speed.upper],
                 cone: root.read_real("point velocity cone angle").unwrap_or(0.0),
-                render_type: root.read_enum_name("render type").unwrap_or_default(),
+                render_type: root.read_enum_option("render type").unwrap_or_default(),
                 repeats: root.read_real("texture repeats u").unwrap_or(1.0),
                 repeats_v: root.read_real("texture repeats v").unwrap_or(1.0),
                 fade_first: !flagged("first point unfaded"),
                 fade_last: !flagged("last point unfaded"),
-                blend: blend_named(&root.read_enum_name("framebuffer blend function").unwrap_or_default()),
+                blend: blend_named(&root.read_enum_option("framebuffer blend function").unwrap_or_default()),
                 states: Arc::clone(&states),
                 bitmap: bitmap.clone(),
             });

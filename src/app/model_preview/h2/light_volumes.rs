@@ -19,6 +19,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::dot;
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::ce::attachments::has_flag;
 
 /// `sprites[256]`.
 const MOST_SPRITES: usize = 256;
@@ -93,8 +94,7 @@ fn function_of(holder: TagStruct<'_>, name: &str) -> Option<TagFunction> {
 }
 
 fn read_volume(source: &TagSource, volume: TagStruct<'_>, glow: Option<&Arc<H2Image>>) -> Option<H2Volume> {
-    let flags = volume.read_flag_names("flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let flagged = |wanted: &str| has_flag(volume, "flags", wanted);
     let aspect = elements(volume, "aspect").first().and_then(|aspect| {
         Some(VolumeAspect {
             along: function_of(*aspect, "along axis")?,
