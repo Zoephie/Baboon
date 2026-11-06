@@ -592,7 +592,12 @@ impl LoadedSourceData {
     /// entry index. Whether there was one.
     pub fn remove_entry(&mut self, key: &str, pending_folders: &[String]) -> bool {
         let before = self.entries.len() + self.all_entries.len();
-        self.entries.retain(|entry| entry.key != key);
+        let loose = matches!(self.source, TagSource::LooseFolder { .. });
+        if loose {
+            tree::remove_loaded_folder_entry(&mut self.tree, &mut self.entries, key);
+        } else {
+            self.entries.retain(|entry| entry.key != key);
+        }
         self.all_entries.retain(|entry| entry.key != key);
         let removed = self.entries.len() + self.all_entries.len() != before;
         if let (TagSource::LooseFolder { root, .. }, Some(game)) =
@@ -600,7 +605,18 @@ impl LoadedSourceData {
         {
             let _ = delete_entry_index_row(game, root, key);
         }
-        self.rebuild_trees(pending_folders);
+        if loose {
+            // Deleting a file leaves its directories intact. Rebuilding the
+            // lazy tree would unload their rows for a frame and clamp the
+            // browser's scroll offset to the top before they load again.
+            self.group_tree = build_group_tree(if self.all_entries.is_empty() {
+                &self.entries
+            } else {
+                &self.all_entries
+            });
+        } else {
+            self.rebuild_trees(pending_folders);
+        }
         removed
     }
 

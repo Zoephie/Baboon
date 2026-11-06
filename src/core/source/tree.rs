@@ -531,6 +531,33 @@ pub(crate) fn build_folder_directory_tree(root: &Path) -> Result<TagTree> {
     Ok(tree)
 }
 
+/// Remove a tag without unloading folders, remapping every positional entry
+/// index after compacting the lazy list. Empty directories stay materialized.
+pub(super) fn remove_loaded_folder_entry(tree: &mut TagTree, entries: &mut Vec<TagEntry>, key: &str) {
+    let mut indices = Vec::with_capacity(entries.len());
+    let mut next = 0;
+    entries.retain(|entry| {
+        let keep = entry.key != key;
+        indices.push(keep.then_some(next));
+        if keep { next += 1; }
+        keep
+    });
+    fn remap(entries: &mut Vec<usize>, children: &mut [TagTreeNode], indices: &[Option<usize>]) {
+        entries.retain_mut(|index| {
+            if let Some(next) = indices[*index] {
+                *index = next;
+                true
+            } else {
+                false
+            }
+        });
+        for child in children {
+            remap(&mut child.entries, &mut child.children, indices);
+        }
+    }
+    remap(&mut tree.entries, &mut tree.children, &indices);
+}
+
 fn list_direct_child_nodes(root: &Path, rel_path: &Path) -> Result<Vec<TagTreeNode>> {
     let rel_path: PathBuf = rel_path.components().collect();
     let folder = root.join(&rel_path);
@@ -1169,6 +1196,42 @@ mod tests {
         }
     }
 
+    /// Deleting from an earlier folder must not unload it or leave stale
+    /// positional indices in other loaded folders, including nested ones.
+    #[test]
+    fn removing_a_loose_entry_preserves_loaded_folders_and_remaps_other_folders() {
+        let root = temp_dir("remove_loaded_entry");
+        for rel in ["a/first.model", "b/nested/second.model", "b/nested/third.model", "unopened/last.model"] {
+            let path = root.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            write_fake_tag(&path, b"hlmt");
+        }
+        let mut source = loose_source(&root, None, Vec::new(), Vec::new());
+        source.tree = build_folder_directory_tree(&root).unwrap();
+        for folder in ["a", "b"] {
+            let node = source.tree.children.iter_mut().find(|node| node.label == folder).unwrap();
+            load_folder_node_entries(&root, node, &mut source.entries, &source.names).unwrap();
+            for child in &mut node.children {
+                load_folder_node_entries(&root, child, &mut source.entries, &source.names).unwrap();
+            }
+        }
+        let key = source.entries[0].key.clone();
+        fs::remove_file(root.join("a/first.model")).unwrap();
+        assert!(source.remove_entry(&key, &[]));
+        let a = &source.tree.children[0];
+        assert!(a.entries_loaded && a.children_loaded && a.entries.is_empty());
+        let nested = &source.tree.children[1].children[0];
+        assert!(nested.entries_loaded && nested.children_loaded);
+        assert_eq!(nested.entries, vec![0, 1]);
+        assert!(source.entries[nested.entries[0]].display_path.ends_with("second.model"));
+        assert!(source.entries[nested.entries[1]].display_path.ends_with("third.model"));
+        let unopened = &source.tree.children[2];
+        assert!(!unopened.entries_loaded && !unopened.children_loaded);
+        assert!(!source.remove_entry(&key, &[]), "removing an absent tag is a no-op");
+        assert_eq!(source.tree.children[1].children[0].entries, vec![0, 1]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// One tag in, one tag out, on an indexed loose folder: the full list stays
     /// in `natural_key` order, a replaced entry keeps its lazy slot (trees hold
     /// positions in that list), and the on-disk index matches a full rewrite.
@@ -1213,7 +1276,7 @@ mod tests {
                 .filter(|e| e.display_path.ends_with("c.model"))
                 .count()
                 == 1;
-        // A removal is allowed to shift the lazy list: it re-reads the tree.
+        // A removal compacts the lazy list and remaps the loaded tree's indices.
         source.remove_entry(&scanned[0].key, &[]);
 
         let after = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
