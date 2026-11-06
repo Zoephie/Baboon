@@ -5,7 +5,7 @@
 
 use blam_tags::TagFile;
 
-use super::super::ce::attachments::object_block;
+use super::super::ce::attachments::{has_flag, object_block};
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 /// `set_depth_biases(DynamicLightShadowBias, DynamicLightShadowSlopeScaledBias)`
@@ -37,16 +37,10 @@ pub(crate) struct H4ShadowCaster {
 
 pub(crate) fn h4_shadow_caster(object: &TagFile) -> Option<H4ShadowCaster> {
     let holder = object_block(object, "lightmap shadow mode")?;
-    let flags = holder.read_flag_names("flags").unwrap_or_default();
-    if flags
-        .iter()
-        .any(|(_, name)| name.starts_with("does not cast shadow"))
-    {
+    if has_flag(holder, "flags", "does not cast shadow") {
         return None;
     }
-    let mode = holder
-        .read_enum_name("lightmap shadow mode")
-        .unwrap_or_default();
+    let mode = holder.read_enum_option("lightmap shadow mode").unwrap_or_default();
     shadow_type(&mode, &object.group().tag.to_be_bytes())
         .filter(|kind| matches!(kind, 2..=4))
         .map(|kind| H4ShadowCaster { hires: kind == 4 })
@@ -54,7 +48,7 @@ pub(crate) fn h4_shadow_caster(object: &TagFile) -> Option<H4ShadowCaster> {
 
 /// The shadow type by `lightmap shadow mode` and object group.
 fn shadow_type(mode: &str, group: &[u8; 4]) -> Option<u8> {
-    match mode.split(['#', '{']).next().unwrap_or_default() {
+    match mode {
         "default" => match group {
             b"bipd" | b"vehi" => Some(2),
             b"weap" | b"bloc" => Some(4),

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::super::ce::attachments::elements;
+use super::super::ce::attachments::{elements, has_flag};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::gen3::shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
 use super::super::materials::decode_h2_image;
@@ -143,8 +143,7 @@ impl ReachShieldSettings {
         let tag = load_referenced_tag_from_source(source, path, "shield_impact", b"shit").ok()?;
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
-        let flags = root.read_flag_names("flags").unwrap_or_default();
-        let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+        let flagged = |wanted: &str| has_flag(root, "flags", wanted);
         let ([outer, inner], [outer_offset, inner_offset]) =
             edge_lines(real("Outer Fade Radius"), real("Center Radius"), real("Inner Fade Radius"));
         let ([plasma_outer, plasma_inner], [plasma_outer_offset, plasma_inner_offset]) = edge_lines(
@@ -293,11 +292,7 @@ pub(crate) fn shield_impact_path(model: &TagFile) -> Option<String> {
     let reference = |holder: TagStruct<'_>, name: &str| holder.read_tag_ref_path(name).filter(|path| !path.is_empty());
     let sections = elements(info, "damage sections");
     let chosen = sections.into_iter().rev().find(|section| {
-        let starts_inactive = section
-            .read_flag_names("flags")
-            .unwrap_or_default()
-            .iter()
-            .any(|(_, name)| name.starts_with("starts inactive"));
+        let starts_inactive = has_flag(*section, "flags", "starts inactive");
         let shield = section.read_string_id("shield material name").is_some_and(|name| !name.is_empty());
         let vitality = section.read_real("vitality percentage").unwrap_or(0.0) > 0.0;
         // An empty `rendering` gains an element in postprocess, and so counts.

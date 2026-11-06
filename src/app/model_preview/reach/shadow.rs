@@ -4,7 +4,7 @@
 
 use blam_tags::TagFile;
 
-use super::super::ce::attachments::object_block;
+use super::super::ce::attachments::{has_flag, object_block};
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 /// `c_rasterizer_states`' shadow generate biases when the model sets none
@@ -30,11 +30,10 @@ pub(crate) struct ReachShadowCaster {
 /// ambient path, which is not built.
 pub(crate) fn reach_shadow_caster(object: &TagFile, model: &TagFile) -> Option<ReachShadowCaster> {
     let holder = object_block(object, "lightmap shadow mode")?;
-    let flags = holder.read_flag_names("flags").unwrap_or_default();
-    if flags.iter().any(|(_, name)| name.starts_with("does not cast shadow")) {
+    if has_flag(holder, "flags", "does not cast shadow") {
         return None;
     }
-    let mode = holder.read_enum_name("lightmap shadow mode").unwrap_or_default();
+    let mode = holder.read_enum_option("lightmap shadow mode").unwrap_or_default();
     let group = object.group().tag.to_be_bytes();
     casts(&mode, &group).then_some(())?;
     // `render_third_person_shadows`: the model's own pair, if it sets a slope.
@@ -48,7 +47,7 @@ pub(crate) fn reach_shadow_caster(object: &TagFile, model: &TagFile) -> Option<R
 }
 
 fn casts(mode: &str, group: &[u8; 4]) -> bool {
-    match mode.split(['#', '{']).next().unwrap_or_default() {
+    match mode {
         "default" => matches!(group, b"bipd" | b"vehi"),
         "always" => !matches!(group, b"eqip" | b"proj" | b"lifi"),
         _ => false,
