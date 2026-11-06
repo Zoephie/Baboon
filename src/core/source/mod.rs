@@ -792,6 +792,15 @@ impl ReverseDependencyIndex {
         self.by_tag.get(tag_key).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// An indexed tag with no references is distinct from a tag not read yet.
+    pub fn contains_tag(&self, tag_key: &str) -> bool {
+        self.by_tag.contains_key(tag_key)
+    }
+
+    pub fn tag_keys(&self) -> impl Iterator<Item = &str> {
+        self.by_tag.keys().map(String::as_str)
+    }
+
     pub fn len(&self) -> usize {
         self.by_tag.len()
     }
