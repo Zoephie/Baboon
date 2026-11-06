@@ -622,10 +622,32 @@ struct OptionRow {
     /// The option is the one after `name`, for one whose own name another
     /// option shares (`... forward/backward` after each kind of loop).
     after: bool,
+    /// What older layouts label the option, tried after `name`.
+    older: &'static [&'static str],
+}
+
+impl OptionRow {
+    /// `name`, then its older labels.
+    fn labels(&self) -> impl Iterator<Item = &'static str> {
+        std::iter::once(self.name).chain(self.older.iter().copied())
+    }
 }
 
 const fn row(kit: &'static str, game: GameId, extension: &'static str, path: &'static str, old: Old, name: &'static str) -> OptionRow {
-    OptionRow { kit, game, extension, path, old, name, control: false, after: false }
+    OptionRow { kit, game, extension, path, old, name, control: false, after: false, older: &[] }
+}
+
+/// A row whose option older layouts label otherwise.
+const fn labelled(
+    kit: &'static str,
+    game: GameId,
+    extension: &'static str,
+    path: &'static str,
+    old: Old,
+    name: &'static str,
+    older: &'static [&'static str],
+) -> OptionRow {
+    OptionRow { older, ..row(kit, game, extension, path, old, name) }
 }
 
 const fn after(kit: &'static str, game: GameId, extension: &'static str, path: &'static str, old: Old, name: &'static str) -> OptionRow {
@@ -1130,6 +1152,22 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(REACH.0, REACH.1, "model_animation_graph", "animations/user flags", Old::Bit(0x8), "disable weapon ik"),
     row(H4.0, H4.1, "model_animation_graph", "skeleton nodes/model flags", Old::Bit(0x20), "left arm member"),
     row(H4.0, H4.1, "model_animation_graph", "animations/user flags", Old::Bit(0x8), "disable weapon ik"),
+    // h3::lights: Halo 3, ODST and Reach
+    labelled(H3.0, H3.1, "light", "flags", Old::Bit(0x1), "allow shadows and gels", &["allow shadows ", "expensive light"]),
+    row(H3.0, H3.1, "light", "flags", Old::Bit(0x4), "render first person only"),
+    row(H3.0, H3.1, "light", "type", Old::Value(1), "frustum"),
+    row(H3.0, H3.1, "lens_flare", "flags", Old::Bit(0x2), "no occlusion test"),
+    row(H3.0, H3.1, "lens_flare", "flags", Old::Bit(0x4), "only render in first person"),
+    labelled(ODST.0, ODST.1, "light", "flags", Old::Bit(0x1), "allow shadows and gels", &["allow shadows ", "expensive light"]),
+    row(ODST.0, ODST.1, "light", "flags", Old::Bit(0x4), "render first person only"),
+    row(ODST.0, ODST.1, "light", "type", Old::Value(1), "frustum"),
+    row(ODST.0, ODST.1, "lens_flare", "flags", Old::Bit(0x2), "no occlusion test"),
+    row(ODST.0, ODST.1, "lens_flare", "flags", Old::Bit(0x4), "only render in first person"),
+    labelled(REACH.0, REACH.1, "light", "flags", Old::Bit(0x1), "allow shadows and gels", &["allow shadows ", "expensive light"]),
+    row(REACH.0, REACH.1, "light", "flags", Old::Bit(0x4), "render first person only"),
+    row(REACH.0, REACH.1, "light", "type", Old::Value(1), "frustum"),
+    row(REACH.0, REACH.1, "lens_flare", "flags", Old::Bit(0x2), "no occlusion test"),
+    row(REACH.0, REACH.1, "lens_flare", "flags", Old::Bit(0x4), "only render in first person"),
     // ce::particle_systems
     row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x1), "type states loop"),
     after(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x2), "type states loop"),
@@ -1240,7 +1278,7 @@ fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out:
             let named: Vec<_> = holder.fields().filter(|field| field.clean_name() == path).collect();
             let field = match nth {
                 Some(n) => named.get(n).copied(),
-                None => named.iter().find(|field| field.flag(row.name).is_some()).or(named.first()).copied(),
+                None => named.iter().find(|field| row.labels().any(|label| field.flag(label).is_some())).or(named.first()).copied(),
             };
             let Some(field) = field else {
                 return;
@@ -1264,7 +1302,8 @@ fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out:
                     None => return,
                 },
             };
-            let found = field.flag(row.name).map(|option| option.bit() + u32::from(row.after));
+            let label = row.labels().find(|label| field.flag(label).is_some());
+            let found = label.and_then(|label| field.flag(label)).map(|option| option.bit() + u32::from(row.after));
             let set = |index: u32| options.get(index as usize).is_some_and(|option| option.is_set);
             let named = match found {
                 None => Named::Missing,
@@ -1276,7 +1315,7 @@ fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out:
                     match (expected, row.old) {
                         (false, _) => Named::Elsewhere(index),
                         (true, Old::Bit(_)) => Named::Read(set(index)),
-                        (true, Old::Value(_)) => Named::Read(field.enum_is(row.name)),
+                        (true, Old::Value(_)) => Named::Read(label.is_some_and(|label| field.enum_is(label))),
                     }
                 }
             };
