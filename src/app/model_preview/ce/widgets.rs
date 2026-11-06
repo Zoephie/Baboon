@@ -107,7 +107,9 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
         brightness,
         source: source_slot,
         count,
-        interpolation: root.read_int_any("flags").unwrap_or(0) & 3,
+        // `rgb_colors_interpolate`'s word, from the tag's two options.
+        interpolation: i128::from(has_flag(root, "flags", "interpolate color in hsv"))
+            | i128::from(has_flag(root, "flags", "...more colors")) << 1,
         frame,
         image,
     })
@@ -312,7 +314,7 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
                 node,
                 position,
                 axes,
-                ends: entry.read_int_any("flags").unwrap_or(0) & 1 != 0,
+                ends: has_flag(*entry, "flags", "not connected to next marker"),
                 octaves: entry.read_int_any("octaves to next marker").unwrap_or(0).clamp(0, 8) as u32,
                 bounds,
                 jitter: entry.read_real("random jitter").unwrap_or(0.0),
@@ -330,7 +332,7 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
     let (blend, nonlinear_tint, sort_bias) = match shader {
         Some(shader) => (
             shader.read_int_any("framebuffer blend function").unwrap_or(0) as i32,
-            shader.read_int_any("shader flags").unwrap_or(0) & 2 != 0,
+            has_flag(shader, "shader flags", "nonlinear tint"),
             has_flag(shader, "shader flags", "sort bias"),
         ),
         // `global_shader_effect_additive`.
@@ -548,11 +550,10 @@ pub(crate) struct CeGlow {
     /// `object_get_marker_by_name` with room for five.
     markers: Vec<GlowMarker>,
     particle_count: usize,
-    /// 0 bounces, 1 wraps.
-    boundary: i128,
-    normal_distribution: i128,
-    trailing_distribution: i128,
-    flags: i128,
+    boundary: Option<Boundary>,
+    normal_distribution: Option<NormalDistribution>,
+    trailing_distribution: Option<TrailingDistribution>,
+    flags: GlowFlags,
     rotation: Driven,
     translation: Driven,
     /// Distance bounds, lerped between by the function's multipliers.
@@ -610,7 +611,7 @@ fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPr
     // `glow_new`: only a bitmap of sprites makes one.
     let bitmap_path = root.read_tag_ref_path("texture").filter(|path| !path.is_empty())?;
     let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
-    if bitmap.root().read_int_any("type").unwrap_or(0) != 3 {
+    if !bitmap.root().field("type").is_some_and(|field| field.enum_is("sprites")) {
         return None;
     }
     let sequence = *elements(bitmap.root(), "sequences").first()?;
@@ -631,10 +632,22 @@ fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPr
         object: owner,
         markers: found,
         particle_count: root.read_int_any("number of particles").unwrap_or(0).max(0) as usize,
-        boundary: root.read_int_any("boundary effect").unwrap_or(0),
-        normal_distribution: root.read_int_any("normal particle distribution").unwrap_or(0),
-        trailing_distribution: root.read_int_any("trailing particle distribution").unwrap_or(0),
-        flags: root.read_int_any("glow flags").unwrap_or(0),
+        boundary: glow_option(root, "boundary effect", &[("bounce", Boundary::Bounce), ("wrap", Boundary::Wrap)]),
+        normal_distribution: glow_option(
+            root,
+            "normal particle distribution",
+            &[("distributed randomly", NormalDistribution::Randomly), ("distributed uniformly", NormalDistribution::Uniformly)],
+        ),
+        trailing_distribution: glow_option(
+            root,
+            "trailing particle distribution",
+            &[
+                ("emit vertically", TrailingDistribution::Vertically),
+                ("emit normal (up)", TrailingDistribution::Normal),
+                ("emit randomly", TrailingDistribution::Randomly),
+            ],
+        ),
+        flags: GlowFlags::read(root),
         // The first `attachment`, of the particles' own rotation, is read by nothing.
         rotation: Driven {
             source: attachment(1),
@@ -683,13 +696,59 @@ pub(in crate::app::model_preview) fn read_ce_glows(source: &TagSource, object: &
         .collect()
 }
 
-/// `glow_flags`.
-const GLOW_MODIFY_COLOR_BY_T: i128 = 1;
-const GLOW_REVERSE: i128 = 2;
-const GLOW_ALTERNATE: i128 = 4;
-const GLOW_TRAILING_FADE: i128 = 8;
-const GLOW_TRAILING_SHRINK: i128 = 0x10;
-const GLOW_TRAILING_SLOW: i128 = 0x20;
+/// A glow's `glow flags`, by name.
+#[derive(Debug, Clone, Copy)]
+struct GlowFlags {
+    modify_color_by_t: bool,
+    reverse: bool,
+    alternate: bool,
+    trailing_fade: bool,
+    trailing_shrink: bool,
+    trailing_slow: bool,
+}
+
+impl GlowFlags {
+    fn read(root: TagStruct<'_>) -> Self {
+        let set = |option: &str| has_flag(root, "glow flags", option);
+        Self {
+            modify_color_by_t: set("modify particle color in range"),
+            reverse: set("particles move backwards"),
+            alternate: set("particles move in both directions"),
+            trailing_fade: set("trailing particles fade over time"),
+            trailing_shrink: set("trailing particles shrink over time"),
+            trailing_slow: set("trailing particles slow over time"),
+        }
+    }
+}
+
+/// `boundary effect`: what a particle does at the end of the object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Boundary {
+    Bounce,
+    Wrap,
+}
+
+/// `normal particle distribution`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NormalDistribution {
+    Randomly,
+    Uniformly,
+}
+
+/// `trailing particle distribution`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrailingDistribution {
+    Vertically,
+    Normal,
+    Randomly,
+}
+
+/// The option `field` holds among `names`; none for a number the list does
+/// not name, which the glow's switches pass over.
+fn glow_option<T: Copy>(root: TagStruct<'_>, field: &str, names: &[(&str, T)]) -> Option<T> {
+    let held = root.read_enum_option(field)?;
+    names.iter().find(|(name, _)| *name == held).map(|(_, value)| *value)
+}
 
 /// A `glow_particle`.
 #[derive(Debug, Clone, Copy, Default)]
@@ -849,10 +908,10 @@ impl RunningGlow {
         let mut forward = true;
         for index in 0..glow.particle_count.min(room) {
             let mut particle = self.normal_particle(glow, index);
-            if glow.flags & GLOW_REVERSE != 0 {
+            if glow.flags.reverse {
                 particle.reverse = true;
             }
-            if glow.flags & GLOW_ALTERNATE != 0 {
+            if glow.flags.alternate {
                 particle.reverse = !forward;
                 forward = !forward;
             }
@@ -872,20 +931,20 @@ impl RunningGlow {
         if glow.size_source.is_none() {
             particle.initial_size = random.range(glow.size[0], glow.size[1]) / glow.dimension;
         }
-        if glow.color_source.is_none() && glow.flags & GLOW_MODIFY_COLOR_BY_T == 0 {
+        if glow.color_source.is_none() && !glow.flags.modify_color_by_t {
             let at = random.range(0.0, 1.0);
             particle.color = std::array::from_fn(|channel| (glow.colors[1][channel] - glow.colors[0][channel]) * at + glow.colors[0][channel]);
         }
         match glow.normal_distribution {
-            0 => {
+            Some(NormalDistribution::Randomly) => {
                 particle.t = random.range(0.0, self.total);
                 particle.initial_angle = random.range(0.0, std::f32::consts::TAU);
             }
-            1 => {
+            Some(NormalDistribution::Uniformly) => {
                 particle.t = index as f32 / glow.particle_count as f32 * self.total;
                 particle.initial_angle = random.range(0.0, std::f32::consts::TAU);
             }
-            _ => {}
+            None => {}
         }
         particle
     }
@@ -901,38 +960,38 @@ impl RunningGlow {
             particle.t -= step;
             if particle.t < 0.0 && total > 0.0 {
                 match glow.boundary {
-                    0 => {
+                    Some(Boundary::Bounce) => {
                         while particle.t < 0.0 {
                             particle.t += total;
                         }
                         particle.reverse = false;
                         particle.t = total - particle.t;
                     }
-                    1 => {
+                    Some(Boundary::Wrap) => {
                         while particle.t < 0.0 {
                             particle.t += total;
                         }
                     }
-                    _ => {}
+                    None => {}
                 }
             }
         } else {
             particle.t += step;
             if particle.t > total && total > 0.0 {
                 match glow.boundary {
-                    0 => {
+                    Some(Boundary::Bounce) => {
                         while particle.t > total {
                             particle.t -= total;
                         }
                         particle.reverse = true;
                         particle.t = total - particle.t;
                     }
-                    1 => {
+                    Some(Boundary::Wrap) => {
                         while particle.t > total {
                             particle.t -= total;
                         }
                     }
-                    _ => {}
+                    None => {}
                 }
             }
         }
@@ -946,7 +1005,7 @@ impl RunningGlow {
         if let Some(slot) = glow.color_source {
             particle.color = std::array::from_fn(|channel| (high[channel] - low[channel]) * outputs[slot] + low[channel]);
         }
-        if glow.flags & GLOW_MODIFY_COLOR_BY_T != 0 {
+        if glow.flags.modify_color_by_t {
             particle.color = std::array::from_fn(|channel| (high[channel] - low[channel]) * glow.color_rate * particle.t + low[channel]);
         }
         let along = particle.t / self.total;
@@ -971,14 +1030,14 @@ impl RunningGlow {
             self.world_position(markers, &mut particle, 0.0);
         }
         particle.initial_velocity = match glow.trailing_distribution {
-            0 => [0.0, 0.0, 1.0],
-            1 => markers[particle.parent].up,
-            2 => {
+            Some(TrailingDistribution::Vertically) => [0.0, 0.0, 1.0],
+            Some(TrailingDistribution::Normal) => markers[particle.parent].up,
+            Some(TrailingDistribution::Randomly) => {
                 let random = &mut self.random;
                 let direction = [random.range(-1.0, 1.0), random.range(-1.0, 1.0), random.range(-1.0, 1.0)];
                 nonzero_unit(direction).unwrap_or(direction)
             }
-            _ => [0.0; 3],
+            None => [0.0; 3],
         };
         let speed = glow.trailing_velocity * (1.0 / 30.0);
         particle.initial_velocity = particle.initial_velocity.map(|axis| axis * speed);
@@ -1057,15 +1116,15 @@ impl CeGlowField {
                 }
                 particle.ticks += ticks;
                 let left = (1.0 - particle.ticks as f32 / particle.lifetime as f32).max(0.0);
-                particle.fade = if glow.flags & GLOW_TRAILING_FADE != 0 {
+                particle.fade = if glow.flags.trailing_fade {
                     (1.0 - particle.ticks as f32 / particle.lifetime as f32).clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
-                if glow.flags & GLOW_TRAILING_SHRINK != 0 {
+                if glow.flags.trailing_shrink {
                     particle.present_size = left * particle.initial_size;
                 }
-                let velocity = if glow.flags & GLOW_TRAILING_SLOW != 0 {
+                let velocity = if glow.flags.trailing_slow {
                     particle.initial_velocity.map(|axis| axis * left)
                 } else {
                     particle.initial_velocity
