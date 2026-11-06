@@ -21,6 +21,7 @@ use super::super::h2::prt::H2PrtLight;
 use super::super::ce::passes::{CeModelAnimation, CeNumeric};
 use super::stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::super::materials::TextureImage;
+use crate::app::model_preview::ce::attachments::has_flag;
 use crate::core::h2_pixel_shader::{
     AlphaCompare, AlphaTest, PixelShaderOptions, SamplerKind, translate,
 };
@@ -694,7 +695,7 @@ fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
                     let rest = object_input(&name);
                     (name, rest)
                 });
-            let kind = match property.read_enum_name("type")?.as_str() {
+            let kind = match property.read_enum_option("type")?.as_str() {
                 "bitmap scale uniform" => H2AnimationKind::ScaleUniform,
                 "bitmap scale x" => H2AnimationKind::ScaleX,
                 "bitmap scale y" => H2AnimationKind::ScaleY,
@@ -876,7 +877,7 @@ fn insert_level(
     };
     into.entry(name).or_insert_with(|| ParameterLevel {
         animations: Vec::new(),
-        kind: parameter.read_enum_name("type").unwrap_or_default(),
+        kind: parameter.read_enum_option("type").unwrap_or_default(),
         bitmap: parameter.read_tag_ref_path(bitmap).unwrap_or_default(),
         value: parameter.read_real(value).unwrap_or(0.0),
         color: rgb(parameter, color),
@@ -928,14 +929,11 @@ fn template_parameters(template: TagStruct<'_>) -> Parameters {
 
 fn read_alpha_test(implementation: TagStruct<'_>) -> Option<AlphaTest> {
     let state = implementation.descend("alpha-test state[0]")?;
-    let enabled = state
-        .read_flag_names("flags")?
-        .iter()
-        .any(|(_, name)| name == "alpha-test enabled");
+    let enabled = has_flag(state, "flags", "alpha-test enabled");
     if !enabled {
         return None;
     }
-    let compare = match state.read_enum_name("alpha compare function")?.as_str() {
+    let compare = match state.read_enum_option("alpha compare function")?.as_str() {
         "greater" | "greater or equal" => AlphaCompare::Greater,
         "less" | "less or equal" => AlphaCompare::Less,
         "not equal" => AlphaCompare::NotEqual,
@@ -996,7 +994,7 @@ fn blend_equation(name: &str) -> Option<H2BlendEquation> {
 }
 
 fn read_blend(implementation: TagStruct<'_>) -> Option<H2Blend> {
-    let mode = implementation.read_enum_name("alpha-blend")?;
+    let mode = implementation.read_enum_option("alpha-blend")?;
     if mode != "custom" {
         let (source, destination) = named_blend(&mode)?;
         return Some(H2Blend {
@@ -1012,9 +1010,9 @@ fn read_blend(implementation: TagStruct<'_>) -> Option<H2Blend> {
         _ => 0,
     };
     Some(H2Blend {
-        equation: blend_equation(&state.read_enum_name("blend function")?)?,
-        source: blend_factor(&state.read_enum_name("blend src factor")?)?,
-        destination: blend_factor(&state.read_enum_name("blend dst factor")?)?,
+        equation: blend_equation(&state.read_enum_option("blend function")?)?,
+        source: blend_factor(&state.read_enum_option("blend src factor")?)?,
+        destination: blend_factor(&state.read_enum_option("blend dst factor")?)?,
         constant: color.to_be_bytes(),
     })
 }
@@ -1037,18 +1035,15 @@ fn compare(name: &str) -> Option<H2Compare> {
 fn read_depth(implementation: TagStruct<'_>) -> H2Depth {
     const OFF: H2Depth = H2Depth { compare: None, write: false };
     let test = |compare, write| H2Depth { compare: Some(compare), write };
-    match implementation.read_enum_name("depth").as_deref() {
+    match implementation.read_enum_option("depth").as_deref() {
         Some("default opaque") => test(H2Compare::Equal, false),
         Some("default opaque write") => test(H2Compare::LessOrEqual, true),
         Some("default transparent") => test(H2Compare::LessOrEqual, false),
         Some("custom") => implementation
             .descend("depth state[0]")
             .and_then(|state| {
-                let function = state.read_enum_name("depth compare function")?;
-                let write = state
-                    .read_flag_names("flags")?
-                    .iter()
-                    .any(|(_, name)| name == "depth write");
+                let function = state.read_enum_option("depth compare function")?;
+                let write = has_flag(state, "flags", "depth write");
                 Some(test(compare(&function)?, write))
             })
             .unwrap_or(OFF),
@@ -1078,7 +1073,7 @@ fn read_pass(
             "default const color",
         );
         if let (Some(name), Some(source)) =
-            (parameter.read_string_id("name"), parameter.read_enum_name("source extern"))
+            (parameter.read_string_id("name"), parameter.read_enum_option("source extern"))
             && source != NO_EXTERN
         {
             externs.insert(name, source);
@@ -1109,7 +1104,7 @@ fn read_pass(
     let textures = elements(implementation, "textures")
         .map(|texture| {
             let parameter = texture.read_string_id("source parameter").unwrap_or_default();
-            let source = texture.read_enum_name("source extern").unwrap_or_default();
+            let source = texture.read_enum_option("source extern").unwrap_or_default();
             let value = if !source.is_empty() && source != NO_EXTERN {
                 H2ParameterValue::Extern(source)
             } else {
@@ -1117,7 +1112,7 @@ fn read_pass(
             };
             H2PassTexture {
                 parameter,
-                mode: texture.read_enum_name("mode").unwrap_or_default(),
+                mode: texture.read_enum_option("mode").unwrap_or_default(),
                 value,
             }
         })
@@ -1129,7 +1124,7 @@ fn read_pass(
         vertex_shader: implementation.read_tag_ref_path("vertex shader").unwrap_or_default(),
         blend: read_blend(implementation),
         depth: read_depth(implementation),
-        channels: implementation.read_enum_name("channels").unwrap_or_default(),
+        channels: implementation.read_enum_option("channels").unwrap_or_default(),
         custom_channels: read_custom_channels(implementation),
         alpha_test: read_alpha_test(implementation),
         textures,
@@ -1138,9 +1133,9 @@ fn read_pass(
         vertex_constants: elements(implementation, "vs constants")
             .map(|constant| H2VertexConstant {
                 parameter: constant.read_string_id("source parameter").unwrap_or_default(),
-                bank: constant.read_enum_name("register bank").unwrap_or_default(),
+                bank: constant.read_enum_option("register bank").unwrap_or_default(),
                 register: constant.read_int_any("register index").unwrap_or(0) as i32,
-                components: constant.read_enum_name("component mask").unwrap_or_default(),
+                components: constant.read_enum_option("component mask").unwrap_or_default(),
             })
             .collect(),
     })
@@ -1647,14 +1642,11 @@ fn channel_mask(channels: &str) -> [bool; 4] {
 
 /// A `custom` pass's own mask. None set, as on `z_prepass`, writes depth alone.
 fn read_custom_channels(implementation: TagStruct<'_>) -> Option<[bool; 4]> {
-    if implementation.read_enum_name("channels").as_deref() != Some("custom") {
+    if implementation.read_enum_option("channels").as_deref() != Some("custom") {
         return None;
     }
-    let flags = implementation
-        .descend("channels state[0]")
-        .and_then(|state| state.read_flag_names("flags"))
-        .unwrap_or_default();
-    Some(["R", "G", "B", "A"].map(|channel| flags.iter().any(|(_, name)| name == channel)))
+    let state = implementation.descend("channels state[0]");
+    Some(["R", "G", "B", "A"].map(|channel| state.is_some_and(|state| has_flag(state, "flags", channel))))
 }
 
 /// Rows of an identity 2D transform: `x` in even registers, `y` in odd ones.
@@ -1946,7 +1938,7 @@ pub(in crate::app) fn resolve_h2_layer_passes(
 
     let mut passes = Vec::new();
     for entry in elements(template_root, "LODs[0]/pass") {
-        if entry.read_enum_name("layer").as_deref() != Some(layer) {
+        if entry.read_enum_option("layer").as_deref() != Some(layer) {
             continue;
         }
         let path = entry.read_tag_ref_path("pass").unwrap_or_default();
