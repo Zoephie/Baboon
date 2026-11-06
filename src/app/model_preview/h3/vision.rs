@@ -21,16 +21,18 @@ const NOTHING_CLASS: usize = 4;
 /// `hud_camera_view`'s table by object type, and `game_team_is_friend` against
 /// the player. A preview has no scenario, so no team but the player's own is
 /// anyone's ally or enemy, and what has no `default team` of its own is on none.
+/// A creature is no unit: ODST's `creature_new` (tag_test 0x140AE8DF0) gives
+/// it the `default team` beside its own `flags`, which `object_get_team` reads.
 fn vision_class(object: &TagFile) -> usize {
-    match &object.header.group_tag.to_be_bytes() {
-        b"bipd" | b"crea" | b"gint" => {
-            let team = object.root().descend("unit").and_then(|unit| unit.field("default team"));
-            usize::from(team.is_some_and(|team| team.enum_is("player")))
-        }
-        b"vehi" | b"weap" | b"eqip" | b"mach" | b"ctrl" => 0,
-        b"argd" | b"term" => 3,
-        _ => NOTHING_CLASS,
-    }
+    let root = object.root();
+    let team = match &object.header.group_tag.to_be_bytes() {
+        b"bipd" | b"gint" => root.descend("unit").and_then(|unit| unit.field("default team")),
+        b"crea" => root.field("default team"),
+        b"vehi" | b"weap" | b"eqip" | b"mach" | b"ctrl" => return 0,
+        b"argd" | b"term" => return 3,
+        _ => return NOTHING_CLASS,
+    };
+    usize::from(team.is_some_and(|team| team.enum_is("player")))
 }
 
 /// `vision_mode`'s values for what the preview draws: `on_foot`, one class.
@@ -192,6 +194,27 @@ mod tests {
         }
     }
 
+    /// A creature's team is its own `default team`, not a unit's: ODST's
+    /// glowbug is on the player's, its lod banshee the covenant's.
+    #[test]
+    fn a_creature_is_classed_by_its_own_default_team() {
+        let Ok(root) = std::env::var("BLAM_TEST_ODSTEK") else {
+            eprintln!("skipping: BLAM_TEST_ODSTEK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::Halo3Odst),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let class = |path: &str| {
+            let tag = load_referenced_tag_from_source(&source, path, "creature", b"crea").expect(path);
+            vision_class(&tag)
+        };
+        assert_eq!(class("objects\\levels\\multi\\guardian\\glowbug\\glowbug"), 1);
+        assert_eq!(class("objects\\characters\\ambient_life\\lod_banshee\\lod_banshee"), 0);
+    }
+
     #[test]
     fn motion_blur_takes_the_shipped_globals_to_fifty_pixels_in_six_steps() {
         let blur = H3MotionBlur::new(0.08, 0.35, [7.0, 7.0]);
@@ -247,3 +270,4 @@ mod tests {
         assert_eq!(inverted(&[0.0; 16]), None);
     }
 }
+
