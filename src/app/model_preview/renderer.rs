@@ -3962,20 +3962,20 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
 
 struct ModelGlRenderer {
     /// As `h2_bloom`.
-    ce_flares: Option<Option<CeFlareGl>>,
+    sprite_gl: Option<Option<CeFlareGl>>,
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
     ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
     /// As `h2_bloom`.
     ce_effect_gl: Option<Option<CeEffectGl>>,
     /// As `h2_bloom`.
-    h3_particle_gl: Option<Option<H3ParticleGl>>,
+    particle_gl: Option<Option<H3ParticleGl>>,
     /// As `h2_bloom`.
     reach_cheap_gl: Option<Option<ReachCheapGl>>,
     /// How far through the frame's sorted sprites the draws have got.
-    h3_sprite_cursor: usize,
+    sprite_cursor: usize,
     /// Particles step once a frame, however many calls draw them.
-    h3_sprites_advanced: bool,
+    sprites_advanced: bool,
     h3_distorted: bool,
     h3_distortion_program: Option<glow::NativeProgram>,
     /// This frame's copy of the H3 scene's depth, for soft particles; set
@@ -3983,23 +3983,24 @@ struct ModelGlRenderer {
     h3_depth_copy: Option<glow::NativeTexture>,
     /// Halo 2's `target_particle_distortion`, copied from the frame.
     h2_distortion_copy: Option<ColorTarget>,
-    /// Whether this context can draw Halo 2 passes; see `H2_GLSL_VERSION`.
-    h2_supported: bool,
+    /// Whether this context's GLSL can draw the games' shaders, which every
+    /// pipeline's scene needs; see `H2_GLSL_VERSION`.
+    shaders_supported: bool,
     /// Whether this context can draw Halo 3's: the translated shaders want GLSL 4.10.
     h3_supported: bool,
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.
     h2_programs: HashMap<(H2VertexStage, String), Option<Rc<Linked>>>,
-    h2_black_cube: Option<glow::NativeTexture>,
+    black_cube: Option<glow::NativeTexture>,
     /// What Halo 3's composite reads with no bloom built.
     h3_no_bloom: Option<glow::NativeTexture>,
-    h2_black_volume: Option<glow::NativeTexture>,
+    black_volume: Option<glow::NativeTexture>,
     /// What an H3 array sampler reads with nothing of its own.
     h3_black_array: Option<glow::NativeTexture>,
-    h2_white_volume: Option<glow::NativeTexture>,
+    white_volume: Option<glow::NativeTexture>,
     h2_normalization_cube: Option<glow::NativeTexture>,
     h2_target: Option<H2Target>,
-    h2_scene: Option<H2Target>,
+    scene: Option<H2Target>,
     h2_frame_copy: Option<H2Target>,
     h3_targets: Option<h3_draw::H3Targets>,
     /// The light drawing now, and its gel.
@@ -4054,7 +4055,7 @@ struct ModelGlRenderer {
     reach_noise: Option<glow::NativeTexture>,
     /// The composites drawn, for the noise's frame-to-frame offset.
     reach_noise_frame: u32,
-    h3_empty_vertices: Option<glow::NativeVertexArray>,
+    empty_vertex_array: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
     /// Made on first use; `Some(None)` once making it failed, so a driver
@@ -4155,28 +4156,28 @@ impl ModelGlRenderer {
             };
             let version = gl.version();
             Ok(Self {
-                ce_flares: None,
+                sprite_gl: None,
                 ce_effect_gl: None,
-                h2_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
+                shaders_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
                 h3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                 h2_programs: HashMap::new(),
-                h2_black_cube: upload_black_cube(gl),
+                black_cube: upload_black_cube(gl),
                 h3_no_bloom: upload_black_flat(gl),
-                h3_particle_gl: None,
+                particle_gl: None,
                 reach_cheap_gl: None,
-                h3_sprite_cursor: 0,
+                sprite_cursor: 0,
                 ce_points_now: None,
-                h3_sprites_advanced: false,
+                sprites_advanced: false,
                 h3_distorted: false,
                 h3_distortion_program: None,
                 h3_depth_copy: None,
                 h2_distortion_copy: None,
-                h2_black_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [0, 0, 0, 255]),
+                black_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [0, 0, 0, 255]),
                 h3_black_array: upload_solid_volume(gl, glow::TEXTURE_2D_ARRAY, [0, 0, 0, 255]),
-                h2_white_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [255; 4]),
+                white_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [255; 4]),
                 h2_normalization_cube: upload_normalization_cube(gl),
                 h2_target: None,
-                h2_scene: None,
+                scene: None,
                 h2_frame_copy: None,
                 h3_targets: None,
                 h3_light: None,
@@ -4209,7 +4210,7 @@ impl ModelGlRenderer {
                 reach_stops: 0.0,
                 reach_noise: None,
                 reach_noise_frame: 0,
-                h3_empty_vertices: None,
+                empty_vertex_array: None,
                 h2_gel: None,
                 h2_bloom: None,
                 h2_shadow_map: None,
@@ -4287,10 +4288,10 @@ impl ModelGlRenderer {
                     self.ce_points_now = Some(frame.ce_point_lights_with(&made));
                 }
             }
-            let scene = self.begin_h2_scene(gl, frame);
+            let scene = self.begin_scene(gl, frame);
             // The game's passes need the scene target's stencil and copies;
             // without one, the frame draws as with them off.
-            if scene.is_none() && frame.game_shaders && self.h2_supported {
+            if scene.is_none() && frame.game_shaders && self.shaders_supported {
                 let plain = ModelGpuFrame { game_shaders: false, ..frame.clone() };
                 self.paint(gl, &plain);
                 return;
@@ -4560,7 +4561,7 @@ impl ModelGlRenderer {
             // restoration and would otherwise turn subsequent UI meshes into wireframes.
             gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
             if let Some(scene) = scene {
-                self.finish_h2_scene(gl, scene);
+                self.finish_scene(gl, scene);
             }
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
@@ -4572,7 +4573,7 @@ impl ModelGlRenderer {
     fn draws_object_sprites(&self, frame: &ModelGpuFrame) -> bool {
         let preview = &frame.preview;
         frame.game_shaders
-            && self.h2_supported
+            && self.shaders_supported
             && !(preview.ce_lights.is_empty()
                 && preview.ce_antennas.is_empty()
                 && preview.ce_effects.is_empty()
@@ -4609,7 +4610,7 @@ impl ModelGlRenderer {
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             let mut groups = Vec::new();
             if self.draws_object_sprites(frame) && ce_has_groups(&frame.preview) {
-                self.ce_flares.get_or_insert_with(|| ce_flare_gl(gl, self.program));
+                self.sprite_gl.get_or_insert_with(|| ce_flare_gl(gl, self.program));
                 let uploaded = &mut self.slots[slot];
                 uploaded.sync_sprite_textures(gl, frame);
                 groups = ce_groups(gl, uploaded, frame, bones, &view);
@@ -4641,7 +4642,7 @@ impl ModelGlRenderer {
                         self.draw_h2_passes(gl, frame, slot, &[index], H2Layer::Transparent, None);
                     }
                     Transparent::Group(group) => {
-                        let Some(flares) = self.ce_flares.as_ref().and_then(Option::as_ref) else {
+                        let Some(flares) = self.sprite_gl.as_ref().and_then(Option::as_ref) else {
                             continue;
                         };
                         let uploaded = &mut self.slots[slot];
@@ -4681,16 +4682,16 @@ impl ModelGlRenderer {
     ) {
         unsafe {
             let h3 = self.h3_draws(frame);
-            let Some(flares) = self.ce_flares.get_or_insert_with(|| ce_flare_gl(gl, self.program)).as_mut() else {
+            let Some(flares) = self.sprite_gl.get_or_insert_with(|| ce_flare_gl(gl, self.program)).as_mut() else {
                 return;
             };
             if !(frame.preview.h3_particles.is_empty()
                 && frame.preview.h3_strips.is_empty()
                 && frame.preview.h3_leaves.is_empty())
             {
-                self.h3_particle_gl.get_or_insert_with(|| h3_particle_gl(gl, self.program));
+                self.particle_gl.get_or_insert_with(|| h3_particle_gl(gl, self.program));
             }
-            let particle_gl = self.h3_particle_gl.as_ref().and_then(Option::as_ref);
+            let particle_gl = self.particle_gl.as_ref().and_then(Option::as_ref);
             let no_map = self.h3_no_bloom;
             // What Reach's area screen effects do to the sprites' exposure.
             let stops = self.reach_stops;
@@ -4863,8 +4864,8 @@ impl ModelGlRenderer {
             }
             gl.color_mask(true, true, true, false);
             // `render_effects`, among the transparents: every profile is its own quad.
-            let cursor = &mut self.h3_sprite_cursor;
-            let cursor_advanced = std::mem::replace(&mut self.h3_sprites_advanced, true);
+            let cursor = &mut self.sprite_cursor;
+            let cursor_advanced = std::mem::replace(&mut self.sprites_advanced, true);
             if !cursor_advanced && !frame.preview.h3_particles.is_empty() {
                 let systems = &frame.preview.h3_particles;
                 let values = |object: u8| frame.h2_values_of_object(object).cloned();
@@ -5218,7 +5219,7 @@ impl ModelGlRenderer {
                 draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
             }
             let first_h3 = frame.preview.ce_lights.len() + frame.preview.h2_flares.len();
-            let viewport = self.h2_scene.as_ref().map_or([1, 1], |scene| scene.size);
+            let viewport = self.scene.as_ref().map_or([1, 1], |scene| scene.size);
             let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
             for (index, at) in frame.preview.h3_flares.iter().enumerate() {
                 if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
@@ -5272,8 +5273,8 @@ impl ModelGlRenderer {
                 };
                 draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
             }
-            self.h3_sprite_cursor = 0;
-            self.h3_sprites_advanced = false;
+            self.sprite_cursor = 0;
+            self.sprites_advanced = false;
             gl.color_mask(true, true, true, true);
             gl.depth_mask(true);
             gl.depth_func(glow::LEQUAL);
@@ -5345,7 +5346,7 @@ impl ModelGlRenderer {
     /// has some, and every one linked.
     fn h2_material_ready(&self, frame: &ModelGpuFrame, material: usize, layer: H2Layer) -> bool {
         let passes = Self::h2_passes(frame, material, layer);
-        self.h2_supported
+        self.shaders_supported
             && !passes.is_empty()
             && (layer != H2Layer::Prt || (frame.prt && frame.preview.h2_prt.is_some()))
             && passes.iter().all(|pass| {
@@ -5356,7 +5357,7 @@ impl ModelGlRenderer {
     }
 
     unsafe fn prepare_h2_programs(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
-        if !self.h2_supported {
+        if !self.shaders_supported {
             return;
         }
         let Some(textures) = frame.textures.as_ref() else {
@@ -5382,25 +5383,25 @@ impl ModelGlRenderer {
     }
 
     /// With game shaders on, send the whole frame to the scene target. What it
-    /// replaces is handed back for `finish_h2_scene`.
-    unsafe fn begin_h2_scene(
+    /// replaces is handed back for `finish_scene`.
+    unsafe fn begin_scene(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
     ) -> Option<PostScope> {
-        if !frame.game_shaders || !self.h2_supported {
+        if !frame.game_shaders || !self.shaders_supported {
             return None;
         }
         unsafe {
             let state = PostScope::capture(gl);
             let size = state.size();
-            if self.h2_scene.as_ref().is_none_or(|scene| scene.size != size) {
-                if let Some(old) = self.h2_scene.take() {
+            if self.scene.as_ref().is_none_or(|scene| scene.size != size) {
+                if let Some(old) = self.scene.take() {
                     old.delete(gl);
                 }
-                self.h2_scene = H2Target::new(gl, size[0], size[1]);
+                self.scene = H2Target::new(gl, size[0], size[1]);
             }
-            let Some(scene) = &self.h2_scene else {
+            let Some(scene) = &self.scene else {
                 state.restore(gl);
                 return None;
             };
@@ -5417,8 +5418,8 @@ impl ModelGlRenderer {
 
     /// Copy the scene target to where the frame belonged, and put everything
     /// back.
-    unsafe fn finish_h2_scene(&self, gl: &glow::Context, state: PostScope) {
-        let Some(scene) = &self.h2_scene else {
+    unsafe fn finish_scene(&self, gl: &glow::Context, state: PostScope) {
+        let Some(scene) = &self.scene else {
             return;
         };
         unsafe {
@@ -5480,7 +5481,7 @@ impl ModelGlRenderer {
                 // The game draws texaccum against the scene's depth: a shader
                 // may lay its depth down here alone, with its later passes
                 // testing for equal.
-                let scene_depth = self.h2_scene.as_ref().map(|scene| scene.depth);
+                let scene_depth = self.scene.as_ref().map(|scene| scene.depth);
                 gl.framebuffer_renderbuffer(
                     glow::FRAMEBUFFER,
                     glow::DEPTH_STENCIL_ATTACHMENT,
@@ -5553,7 +5554,7 @@ impl ModelGlRenderer {
         order: &[usize],
     ) {
         let Some((framebuffer, color, size)) =
-            self.h2_scene.as_ref().map(|scene| (scene.framebuffer, scene.color, scene.size))
+            self.scene.as_ref().map(|scene| (scene.framebuffer, scene.color, scene.size))
         else {
             return;
         };
@@ -5589,7 +5590,7 @@ impl ModelGlRenderer {
                 })
             })
         });
-        let Some(scene) = self.h2_scene.as_ref().filter(|_| needed) else {
+        let Some(scene) = self.scene.as_ref().filter(|_| needed) else {
             return;
         };
         let (framebuffer, [width, height]) = (scene.framebuffer, scene.size);
@@ -5695,14 +5696,14 @@ impl ModelGlRenderer {
                                 if texture.normalization {
                                     self.h2_normalization_cube
                                 } else {
-                                    uploaded.or(self.h2_black_cube)
+                                    uploaded.or(self.black_cube)
                                 },
                             ),
                             SamplerKind::Volume => {
                                 let fallback = if texture.falloff {
-                                    self.h2_white_volume
+                                    self.white_volume
                                 } else {
-                                    self.h2_black_volume
+                                    self.black_volume
                                 };
                                 gl.bind_texture(glow::TEXTURE_3D, uploaded.or(fallback));
                             }

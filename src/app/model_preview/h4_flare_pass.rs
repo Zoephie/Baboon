@@ -76,7 +76,7 @@ impl ModelGlRenderer {
         }
         unsafe {
             let Some(flares) = self
-                .ce_flares
+                .sprite_gl
                 .get_or_insert_with(|| ce_flare_gl(gl, self.program))
                 .take()
             else {
@@ -157,7 +157,7 @@ impl ModelGlRenderer {
                     drawn.push((index, draws));
                 }
             }
-            self.ce_flares = Some(Some(flares));
+            self.sprite_gl = Some(Some(flares));
             gl.color_mask(true, true, true, false);
             gl.disable(glow::DEPTH_TEST);
             if drawn.is_empty() {

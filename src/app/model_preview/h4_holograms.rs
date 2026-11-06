@@ -322,7 +322,7 @@ impl ModelGlRenderer {
             // Its bloom, by the hologram camera fx.
             let vertices = self.h3_empty_array(gl);
             if self.h4_bloom.is_none() {
-                self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom, self.h2_white_volume);
+                self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom, self.white_volume);
             }
             let settings = H4BloomSettings::hologram(screen.bloom_scale);
             let bloom = self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, color, size, None, &settings);

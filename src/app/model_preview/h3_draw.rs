@@ -1046,8 +1046,8 @@ impl ModelGlRenderer {
                     match kind {
                         TextureKind::Line => gl.bind_texture(glow::TEXTURE_1D, texture),
                         TextureKind::Flat => gl.bind_texture(glow::TEXTURE_2D, texture.or(this.placeholder)),
-                        TextureKind::Cube => gl.bind_texture(glow::TEXTURE_CUBE_MAP, texture.or(this.h2_black_cube)),
-                        TextureKind::Volume => gl.bind_texture(glow::TEXTURE_3D, texture.or(this.h2_black_volume)),
+                        TextureKind::Cube => gl.bind_texture(glow::TEXTURE_CUBE_MAP, texture.or(this.black_cube)),
+                        TextureKind::Volume => gl.bind_texture(glow::TEXTURE_3D, texture.or(this.black_volume)),
                         // The kit's arrays (light probes, the dominant light's
                         // intensity, water) are built by the game, never authored.
                         TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, this.h3_black_array),
@@ -1127,7 +1127,7 @@ impl ModelGlRenderer {
     pub(super) unsafe fn draw_h3(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, order: &[usize]) {
         // Direct3D 11 always filters across a cube's faces; OpenGL has to be asked.
         unsafe { gl.enable(glow::TEXTURE_CUBE_MAP_SEAMLESS) };
-        let Some(scene) = self.h2_scene.as_ref() else {
+        let Some(scene) = self.scene.as_ref() else {
             return;
         };
         let (size, depth, framebuffer) = (scene.size, scene.depth, scene.framebuffer);
@@ -1680,7 +1680,7 @@ impl ModelGlRenderer {
             if let Some(frame) = halo4 {
                 let grading = self.h4_grading_texture(gl, frame);
                 if self.h4_bloom.is_none() {
-                    self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom, self.h2_white_volume);
+                    self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom, self.white_volume);
                 }
                 let settings = &super::h4_bloom::VIEW_BLOOM;
                 return self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref(), settings);
@@ -1829,7 +1829,7 @@ impl ModelGlRenderer {
             bind(0, glow::TEXTURE_2D, Some(accumulation), "accumulation");
             bind(1, glow::TEXTURE_2D, bloom.or(self.h3_no_bloom), "bloom");
             bind(2, glow::TEXTURE_2D, depth, "scene_depth");
-            bind(3, glow::TEXTURE_3D, grading.as_ref().map(|grading| grading.texture).or(self.h2_white_volume), "grading");
+            bind(3, glow::TEXTURE_3D, grading.as_ref().map(|grading| grading.texture).or(self.white_volume), "grading");
             gl.active_texture(glow::TEXTURE0);
             let (scale, offset) = grading.as_ref().map_or(([1.0; 3], [0.0; 3]), |grading| (grading.scale, grading.offset));
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_scale").as_ref(), &scale);
@@ -2215,7 +2215,7 @@ impl ModelGlRenderer {
 
     pub(super) unsafe fn h3_empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
         unsafe {
-            *self.h3_empty_vertices.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
+            *self.empty_vertex_array.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
         }
     }
 }
