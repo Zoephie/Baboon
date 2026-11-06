@@ -1086,21 +1086,8 @@ fn resolve_ce_shader(
     caches: &mut ResolveCaches,
 ) -> MaterialTextures {
     let root = shader.root();
-    // The root carries several `flags` fields, one per section, whose option
-    // names don't repeat, so every set flag is read off all of them.
-    let flags: Vec<String> = root
-        .fields()
-        .filter(|field| field.clean_name() == "flags")
-        .filter_map(|field| match field.value()? {
-            TagFieldData::ByteFlags { names, .. }
-            | TagFieldData::WordFlags { names, .. }
-            | TagFieldData::LongFlags { names, .. } => Some(names),
-            _ => None,
-        })
-        .flatten()
-        .map(|(_, name)| name)
-        .collect();
-    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let flags = super::ce::passes::ShaderFlags::of(root);
+    let has = |flag: &str| flags.has(flag);
     // Both scale fields store 0 for "unset"; a 0 at runtime would collapse
     // every texel to one (the cyborg ships `detail map v-scale` 0), so it can
     // only mean 1.
@@ -1183,7 +1170,7 @@ fn resolve_ce_shader(
     if matches!(&group, b"soso" | b"senv") {
         let settings = caches.ce_camo.get_or_insert_with(|| read_ce_camo_settings(source));
         if let Some(settings) = settings {
-            let two_sided = flags.iter().any(|name| name == "two-sided");
+            let two_sided = flags.has("two-sided");
             textures.h2_layers[H2Layer::ActiveCamo as usize] =
                 vec![ce_camo_pass(settings, two_sided, &mut bitmap)];
         }

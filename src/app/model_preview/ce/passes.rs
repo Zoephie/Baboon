@@ -14,6 +14,7 @@ use super::super::dx9::passes::{
     H2Blend, H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2Depth, H2DrawPass, H2DrawTexture,
     H2Image, H2_GLSL_VERSION,
 };
+use super::attachments::has_flag;
 use super::super::dx9::stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::super::load_referenced_tag_from_source;
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
@@ -977,8 +978,7 @@ fn read_transparent_maps(
             .read_tag_ref_path("map")
             .filter(|path| !path.is_empty())
             .and_then(|path| bitmap(&path, kind));
-        let names = element.read_flag_names("flags").unwrap_or_default();
-        let has = |flag: &str| names.iter().any(|(_, name)| name == flag);
+        let has = |flag: &str| has_flag(element, "flags", flag);
         let image = match image.as_deref() {
             Some(H2Image::Flat(flat)) if has("u-clamped") || has("v-clamped") => {
                 let mut clamped = flat.clone();
@@ -1026,9 +1026,7 @@ fn first_map_digits(root: TagStruct<'_>) -> Option<CeNumeric> {
         limit: root.read_int_any("numeric counter limit").unwrap_or(0) as i32,
         digit: 0,
         place: 0,
-        timer: root.read_flag_names("extra flags").is_some_and(|flags| {
-            flags.iter().any(|(_, name)| name.starts_with("numeric countdown timer"))
-        }),
+        timer: has_flag(root, "extra flags", "numeric countdown timer"),
     })
 }
 
@@ -1042,13 +1040,13 @@ const TRANSPARENT_DECAL_DEPTH_BIAS: f32 = -5e-6;
 fn transparent_pass(
     root: TagStruct<'_>,
     first_map: i32,
-    flags: &[String],
+    flags: &ShaderFlags<'_>,
     fragment: String,
     textures: Vec<H2DrawTexture>,
     constants: Vec<(u32, [f32; 4])>,
     animation: CeModelAnimation,
 ) -> H2DrawPass {
-    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let has = |flag: &str| flags.has(flag);
     let depth = H2Depth { compare: Some(H2Compare::LessOrEqual), write: false };
     let stage = transparent_stage(first_map, has("first map is in screenspace"));
     let mut pass = H2DrawPass::new(stage, fragment, depth);
@@ -1057,7 +1055,7 @@ fn transparent_pass(
         Some(framebuffer_blend(option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS)));
     pass.cull = if has("two-sided") { H2Cull::None } else { H2Cull::Back };
     pass.hidden_by_camo = !has("don't fade active-camouflage");
-    pass.depth_bias = decal_bias(flags);
+    pass.depth_bias = decal_bias(flags.has("decal"));
     pass.numeric = has("numeric").then(|| first_map_digits(root)).flatten();
     pass.textures = textures;
     pass.constants = constants;
@@ -1092,7 +1090,7 @@ fn shader_directory(source: &TagSource) -> Option<std::path::PathBuf> {
 fn generic_pass(
     directory: &std::path::Path,
     root: TagStruct<'_>,
-    flags: &[String],
+    flags: &ShaderFlags<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Result<H2DrawPass, String> {
     let first_map = option_index(root, "first map type", &GENERIC_FIRST_MAP_TYPES);
@@ -1117,8 +1115,7 @@ fn generic_pass(
         let enums = enum_values(stage, "color0 animation function");
         let values: [i32; 26] =
             enums.try_into().map_err(|_| "A stage has the wrong number of options.".to_owned())?;
-        let names = stage.read_flag_names("flags").unwrap_or_default();
-        let has = |flag: &str| names.iter().any(|(_, name)| name == flag);
+        let has = |flag: &str| has_flag(stage, "flags", flag);
         macros.push((
             format!("S{index}_CONFIGURATION"),
             generic_stage_macro(index, has("color mux"), has("alpha mux"), &values, false),
@@ -1155,7 +1152,7 @@ fn generic_pass(
     }
     let read = |name: &str| read_shader_source(directory, name);
     let shader = translate_fx(GENERIC_FILE, H2_GLSL_VERSION, &defines, read)?;
-    let reference = flags.iter().any(|name| name == "alpha-tested").then_some(ALPHA_REFERENCE);
+    let reference = flags.has("alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
     let animation = CeModelAnimation { maps, colors, ..Default::default() };
     Ok(transparent_pass(root, first_map, flags, fragment, textures, constants, animation))
@@ -1164,7 +1161,7 @@ fn generic_pass(
 fn chicago_pass(
     directory: &std::path::Path,
     root: TagStruct<'_>,
-    flags: &[String],
+    flags: &ShaderFlags<'_>,
     field: &str,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Result<H2DrawPass, String> {
@@ -1183,8 +1180,7 @@ fn chicago_pass(
             map.read_int_any("color function").unwrap_or(0) as i32,
             map.read_int_any("alpha function").unwrap_or(0) as i32,
         );
-        let names = map.read_flag_names("flags").unwrap_or_default();
-        replicate[index] = f32::from(u8::from(names.iter().any(|(_, name)| name == "alpha replicate")));
+        replicate[index] = f32::from(u8::from(has_flag(map, "flags", "alpha replicate")));
     }
     let blend = match option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS) {
         0 => 0,
@@ -1194,7 +1190,7 @@ fn chicago_pass(
         _ => 3,
     };
     let fade = option_index(root, "framebuffer fade mode", &FADE_MODES);
-    let custom = flags.iter().any(|name| name == "custom edition blending");
+    let custom = flags.has("custom edition blending");
     let truth = |on: bool| f32::from(u8::from(on));
 
     let mut constants = vec![(0, [0.0; 4])];
@@ -1217,24 +1213,30 @@ fn chicago_pass(
     let cube = if first_map != 0 { "1" } else { "0" };
     let read = |name: &str| read_shader_source(directory, name);
     let shader = translate_fx(CHICAGO_FILE, H2_GLSL_VERSION, &[("USE_CUBE", cube)], read)?;
-    let reference = flags.iter().any(|name| name == "alpha-tested").then_some(ALPHA_REFERENCE);
+    let reference = flags.has("alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
     let animation = CeModelAnimation { maps: animations, ..Default::default() };
     Ok(transparent_pass(root, first_map, flags, fragment, textures, constants, animation))
 }
 
-fn every_flag(root: TagStruct<'_>) -> Vec<String> {
-    root.fields()
-        .filter(|field| field.clean_name() == "flags" || field.clean_name() == "extra flags")
-        .filter_map(|field| match field.value()? {
-            TagFieldData::ByteFlags { names, .. }
-            | TagFieldData::WordFlags { names, .. }
-            | TagFieldData::LongFlags { names, .. } => Some(names),
-            _ => None,
-        })
-        .flatten()
-        .map(|(_, name)| name)
-        .collect()
+/// A Halo CE shader's flags by name. Its root holds a `flags` field per
+/// section (the shader's own and its kind's) and sometimes `extra flags`,
+/// whose options don't repeat, so a name is asked of each.
+#[derive(Clone, Copy)]
+pub(in crate::app::model_preview) struct ShaderFlags<'a>(TagStruct<'a>);
+
+impl<'a> ShaderFlags<'a> {
+    pub(in crate::app::model_preview) fn of(root: TagStruct<'a>) -> Self {
+        Self(root)
+    }
+
+    /// Whether the option `name` is set in any of the root's flags.
+    pub(in crate::app::model_preview) fn has(&self, name: &str) -> bool {
+        self.0
+            .fields()
+            .filter(|field| matches!(field.clean_name().as_ref(), "flags" | "extra flags"))
+            .any(|field| field.flag(name).is_some_and(|flag| flag.is_set()))
+    }
 }
 
 /// A transparent shader's passes: its extra layers, then itself. Empty for
@@ -1249,15 +1251,15 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
         return Vec::new();
     };
     let single = match group {
-        b"sgla" => Some(glass_passes(&directory, root, &every_flag(root), bitmap)),
+        b"sgla" => Some(glass_passes(&directory, root, &ShaderFlags::of(root), bitmap)),
         b"smet" => {
-            let flags = every_flag(root);
+            let flags = ShaderFlags::of(root);
             Some(meter_pass(&directory, root, &flags, bitmap).map(|mut pass| {
-                pass.depth_bias = decal_bias(&flags);
+                pass.depth_bias = decal_bias(flags.has("decal"));
                 vec![pass]
             }))
         }
-        b"swat" => Some(water_passes(&directory, root, &every_flag(root), bitmap)),
+        b"swat" => Some(water_passes(&directory, root, &ShaderFlags::of(root), bitmap)),
         b"spla" => Some(plasma_pass(&directory, root, bitmap).map(|pass| vec![pass])),
         _ => None,
     };
@@ -1288,7 +1290,7 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
             }
         }
     }
-    let flags = every_flag(root);
+    let flags = ShaderFlags::of(root);
     let pass = match group {
         b"sotr" => generic_pass(&directory, root, &flags, bitmap),
         b"schi" => chicago_pass(&directory, root, &flags, "maps", bitmap),
@@ -1377,11 +1379,11 @@ fn flat_normal() -> Arc<H2Image> {
 fn glass_passes(
     directory: &std::path::Path,
     root: TagStruct<'_>,
-    flags: &[String],
+    flags: &ShaderFlags<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Result<Vec<H2DrawPass>, String> {
     let read = |name: &str| read_shader_source(directory, name);
-    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let has = |flag: &str| flags.has(flag);
     let two_sided = has("two-sided");
     let path = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
     let mut map = |name: &str, kind| path(name).and_then(|path| bitmap(&path, kind));
@@ -1487,14 +1489,14 @@ fn glass_passes(
     }
     for pass in &mut passes {
         pass.hidden_by_camo = true;
-        pass.depth_bias = decal_bias(flags);
+        pass.depth_bias = decal_bias(flags.has("decal"));
     }
     Ok(passes)
 }
 
 /// The depth bias of a transparent shader by its `decal` flag.
-fn decal_bias(flags: &[String]) -> f32 {
-    if flags.iter().any(|flag| flag == "decal") { TRANSPARENT_DECAL_DEPTH_BIAS } else { 0.0 }
+fn decal_bias(decal: bool) -> f32 {
+    if decal { TRANSPARENT_DECAL_DEPTH_BIAS } else { 0.0 }
 }
 
 /// The `shader_transparent_meter` case of
@@ -1502,14 +1504,14 @@ fn decal_bias(flags: &[String]) -> f32 {
 fn meter_pass(
     directory: &std::path::Path,
     root: TagStruct<'_>,
-    flags: &[String],
+    flags: &ShaderFlags<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Result<H2DrawPass, String> {
     let rgb = |name: &str| {
         let color = root.read_rgb(name);
         [color.red, color.green, color.blue]
     };
-    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let has = |flag: &str| flags.has(flag);
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let meter = CeMeter {
         sources: [
@@ -1555,11 +1557,11 @@ fn meter_pass(
 fn water_passes(
     directory: &std::path::Path,
     root: TagStruct<'_>,
-    flags: &[String],
+    flags: &ShaderFlags<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Result<Vec<H2DrawPass>, String> {
     let read = |name: &str| read_shader_source(directory, name);
-    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let has = |flag: &str| flags.has(flag);
     let path = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
     let base = path("base map")
         .and_then(|path| bitmap(&path, SamplerKind::Texture2D))
@@ -1646,8 +1648,7 @@ pub(in crate::app::model_preview) fn read_ce_camo_settings(source: &TagSource) -
     let tint = data.read_rgb("tint color");
     let read = |name: &str| read_shader_source(&directory, name);
     let shader = translate_fx(CAMO_FILE, H2_GLSL_VERSION, &[], read).ok()?;
-    let names = data.read_flag_names("flags").unwrap_or_default();
-    let entry = if names.iter().any(|(_, name)| name == "tint edge density") {
+    let entry = if has_flag(data, "flags", "tint edge density") {
         "main_T0_P1(i)"
     } else {
         "main_T0_P0(i)"
@@ -1781,7 +1782,7 @@ pub(in crate::app::model_preview) fn ce_model_passes(
     source: &TagSource,
     root: TagStruct<'_>,
     group: &[u8; 4],
-    flags: &[String],
+    flags: &ShaderFlags<'_>,
     common: &mut Option<Option<CeModelCommon>>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Vec<H2DrawPass> {
@@ -1791,7 +1792,7 @@ pub(in crate::app::model_preview) fn ce_model_passes(
     let Some(common) = common.get_or_insert_with(|| read_common(source)).clone() else {
         return Vec::new();
     };
-    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let has = |flag: &str| flags.has(flag);
     let factor = |value: Option<f32>| value.filter(|v| v.is_finite() && *v != 0.0).unwrap_or(1.0);
     let mut map = |name: &str, kind| {
         root.read_tag_ref_path(name)
@@ -2188,9 +2189,8 @@ mod tests {
 
     #[test]
     fn only_a_decal_shader_takes_the_depth_bias() {
-        let flags = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
-        assert_eq!(decal_bias(&flags(&["two-sided", "decal"])), TRANSPARENT_DECAL_DEPTH_BIAS);
-        assert_eq!(decal_bias(&flags(&["two-sided"])), 0.0);
+        assert_eq!(decal_bias(true), TRANSPARENT_DECAL_DEPTH_BIAS);
+        assert_eq!(decal_bias(false), 0.0);
         // A bias pulls toward the viewer, by what a 24 bit buffer can hold.
         const { assert!(MODEL_DECAL_DEPTH_BIAS < TRANSPARENT_DECAL_DEPTH_BIAS) };
         const { assert!(TRANSPARENT_DECAL_DEPTH_BIAS < 0.0) };
