@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::attachments::{elements, has_flag, object_block};
+use super::attachments::{elements, has_flag, has_flag_after, object_block};
 use super::lights::{CeFlareView, posed_on};
 use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use super::super::*;
@@ -32,22 +32,68 @@ pub(crate) const MOST_SYSTEM_PARTICLES: usize = 512;
 /// `object_get_marker_by_name` finds at most this many.
 const MOST_MARKERS: usize = 8;
 
-/// Particle type `flags`.
-const TYPE_STATES_LOOP: i128 = 0x1;
-const TYPE_STATES_BOUNCE: i128 = 0x2;
-const PARTICLE_STATES_LOOP: i128 = 0x4;
-const PARTICLE_STATES_BOUNCE: i128 = 0x8;
-const DIE_IN_AIR: i128 = 0x20;
-const DIE_ON_GROUND: i128 = 0x40;
-const ROTATIONAL_SIDEWAYS: i128 = 0x80;
-const DISABLED: i128 = 0x100;
-const TINT_BY_EFFECT_COLOR: i128 = 0x200;
-const INITIAL_COUNT_SCALES: i128 = 0x400;
-const MINIMUM_COUNT_SCALES: i128 = 0x800;
-const CREATION_RATE_SCALES: i128 = 0x1000;
-const SCALE_SCALES: i128 = 0x2000;
-const ANIMATION_RATE_SCALES: i128 = 0x4000;
-const ROTATION_RATE_SCALES: i128 = 0x8000;
+/// A particle type's `flags`, by name. Each kind of state's
+/// `... forward/backward` shares its name with the other's, so each is the
+/// option after its loop.
+#[derive(Debug, Clone, Copy)]
+struct ParticleTypeFlags {
+    type_states_loop: bool,
+    type_states_bounce: bool,
+    particle_states_loop: bool,
+    particle_states_bounce: bool,
+    die_in_air: bool,
+    die_on_ground: bool,
+    rotational_sideways: bool,
+    disabled: bool,
+    tint_by_effect_color: bool,
+    initial_count_scales: bool,
+    minimum_count_scales: bool,
+    creation_rate_scales: bool,
+    scale_scales: bool,
+    animation_rate_scales: bool,
+    rotation_rate_scales: bool,
+}
+
+impl ParticleTypeFlags {
+    fn read(entry: TagStruct<'_>) -> Self {
+        let set = |option: &str| has_flag(entry, "flags", option);
+        Self {
+            type_states_loop: set("type states loop"),
+            type_states_bounce: has_flag_after(entry, "flags", "type states loop"),
+            particle_states_loop: set("particle states loop"),
+            particle_states_bounce: has_flag_after(entry, "flags", "particle states loop"),
+            die_in_air: set("particles die in air"),
+            die_on_ground: set("particles die on ground"),
+            rotational_sideways: set("rotational sprites animate sideways"),
+            disabled: set("disabled"),
+            tint_by_effect_color: set("tint by effect color"),
+            initial_count_scales: set("initial count scales with effect"),
+            minimum_count_scales: set("minimum count scales with effect"),
+            creation_rate_scales: set("creation rate scales with effect"),
+            scale_scales: set("scale scales with effect"),
+            animation_rate_scales: set("animation rate scales with effect"),
+            rotation_rate_scales: set("rotation rate scales with effect"),
+        }
+    }
+}
+
+/// `particle creation physics`: where a new particle starts and how fast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CreationPhysics {
+    Default,
+    Explosion,
+    Jet,
+}
+
+impl CreationPhysics {
+    fn read(holder: TagStruct<'_>) -> Self {
+        match holder.read_enum_option("particle creation physics").as_deref() {
+            Some("explosion") => Self::Explosion,
+            Some("jet") => Self::Jet,
+            _ => Self::Default,
+        }
+    }
+}
 
 /// A type state's multipliers, as `particle_system_type_state_interpolated_variables`
 /// keeps them: scale, animation rate, rotation rate, color (alpha, red,
@@ -70,7 +116,7 @@ struct TypeState {
     duration: [f32; 2],
     transition: [f32; 2],
     variables: TypeVariables,
-    creation_physics: i32,
+    creation_physics: CreationPhysics,
 }
 
 #[derive(Debug, Clone)]
@@ -99,12 +145,12 @@ struct ParticleState {
 
 #[derive(Debug, Clone)]
 struct ParticleType {
-    flags: i128,
+    flags: ParticleTypeFlags,
     initial_count: i32,
-    /// `complex sprite render modes`: 0 simple, 1 rotational.
+    /// `complex sprite render modes` is `rotational`, not `simple`.
     rotational: bool,
     radius: f32,
-    initial_physics: i32,
+    initial_physics: CreationPhysics,
     constants: [f32; 3],
     states: Vec<TypeState>,
     particle_states: Vec<ParticleState>,
@@ -212,7 +258,7 @@ pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &st
                         real("minimum particle count"),
                         real("particle creation rate"),
                     ],
-                    creation_physics: state.read_int_any("particle creation physics").unwrap_or(0) as i32,
+                    creation_physics: CreationPhysics::read(*state),
                 }
             })
             .collect();
@@ -248,17 +294,17 @@ pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &st
                 physics: read_physics(source, state),
                 blend: state.read_int_any("framebuffer blend function").unwrap_or(0) as i32,
                 map_flags: state.read_int_any("map flags").unwrap_or(0),
-                nonlinear_tint: state.read_int_any("shader flags").unwrap_or(0) & 2 != 0,
+                nonlinear_tint: has_flag(state, "shader flags", "nonlinear tint"),
                 sort_bias: has_flag(state, "shader flags", "sort bias"),
                 secondary: read_secondary_map(source, state, "bitmap"),
             });
         }
         types.push(ParticleType {
-            flags: int("flags"),
+            flags: ParticleTypeFlags::read(entry),
             initial_count: int("initial particle count") as i32,
-            rotational: int("complex sprite render modes") == 1,
+            rotational: entry.field("complex sprite render modes").is_some_and(|field| field.enum_is("rotational")),
             radius: entry.read_real("radius").unwrap_or(0.0),
-            initial_physics: int("particle creation physics") as i32,
+            initial_physics: CreationPhysics::read(entry),
             constants: constants_of(entry),
             states,
             particle_states,
@@ -537,7 +583,7 @@ fn system_quads(
 ) {
     let lighting = running.lighting;
     for (kind, run) in def.types.iter().zip(&mut running.types) {
-        if run.state.is_none() || kind.flags & DISABLED != 0 {
+        if run.state.is_none() || kind.flags.disabled {
             continue;
         }
         let multipliers = run.variables;
@@ -606,7 +652,7 @@ fn system_quads(
                     group,
                 };
                 if kind.rotational {
-                    shown.rotational(sprite, kind.flags & ROTATIONAL_SIDEWAYS != 0, view, index, quads);
+                    shown.rotational(sprite, kind.flags.rotational_sideways, view, index, quads);
                 } else {
                     shown.simple(sprite, view, index, quads);
                 }
@@ -851,7 +897,7 @@ fn step_types(
     let mut active = false;
     let (velocity, attached) = (running.velocity, running.attached);
     for (kind, run) in def.types.iter().zip(&mut running.types) {
-        if kind.flags & DISABLED != 0 {
+        if kind.flags.disabled {
             continue;
         }
         run.time_left -= dt;
@@ -870,8 +916,8 @@ fn step_types(
                         &mut run.forward,
                         kind.states.len(),
                         // A system on no object never goes round again.
-                        kind.flags & TYPE_STATES_LOOP != 0 && attached,
-                        kind.flags & TYPE_STATES_BOUNCE != 0,
+                        kind.flags.type_states_loop && attached,
+                        kind.flags.type_states_bounce,
                     );
                     if run.transition.is_none() {
                         run.state = None;
@@ -898,14 +944,21 @@ fn step_types(
                 std::array::from_fn(|at| kind.states[state].variables[at] * t + kind.states[next].variables[at] * (1.0 - t))
             }
         };
-        if kind.flags & TINT_BY_EFFECT_COLOR != 0 {
+        if kind.flags.tint_by_effect_color {
             for channel in 0..4 {
                 run.variables[COLOR + channel] *= running.color[channel];
             }
         }
         let scale = running.scale;
-        for (flag, at) in [(MINIMUM_COUNT_SCALES, MINIMUM), (CREATION_RATE_SCALES, RATE), (SCALE_SCALES, SCALE), (ANIMATION_RATE_SCALES, ANIMATION), (ROTATION_RATE_SCALES, ROTATION)] {
-            if kind.flags & flag != 0 {
+        let flags = &kind.flags;
+        for (scales, at) in [
+            (flags.minimum_count_scales, MINIMUM),
+            (flags.creation_rate_scales, RATE),
+            (flags.scale_scales, SCALE),
+            (flags.animation_rate_scales, ANIMATION),
+            (flags.rotation_rate_scales, ROTATION),
+        ] {
+            if scales {
                 run.variables[at] *= scale;
             }
         }
@@ -937,7 +990,7 @@ fn new_particles(
         return;
     };
     let wanted = if first {
-        if kind.flags & INITIAL_COUNT_SCALES != 0 {
+        if kind.flags.initial_count_scales {
             (kind.initial_count as f32 * scale + 0.5) as i32
         } else {
             kind.initial_count
@@ -961,9 +1014,9 @@ fn new_particles(
         let rotation = random.range(0.0, std::f32::consts::TAU);
         let (position, forward) = markers[random.index(markers.len())];
         let (position, mut velocity, axis) = match physics {
-            1 => explosion(kind, position, random),
-            2 => jet(kind, position, forward, random),
-            _ => (position, [0.0; 3], [0.0; 3]),
+            CreationPhysics::Explosion => explosion(kind, position, random),
+            CreationPhysics::Jet => jet(kind, position, forward, random),
+            CreationPhysics::Default => (position, [0.0; 3], [0.0; 3]),
         };
         // Each creation adds the system's own velocity.
         velocity = std::array::from_fn(|axis| velocity[axis] + system_velocity[axis]);
@@ -1049,8 +1102,8 @@ fn update_particles(kind: &ParticleType, run: &mut RunningType, ground: f32, dt:
                         state,
                         &mut particle.forward,
                         states.len(),
-                        kind.flags & PARTICLE_STATES_LOOP != 0,
-                        kind.flags & PARTICLE_STATES_BOUNCE != 0,
+                        kind.flags.particle_states_loop,
+                        kind.flags.particle_states_bounce,
                     );
                     if particle.transition.is_none() {
                         particle.state = None;
@@ -1097,7 +1150,7 @@ fn update_particles(kind: &ParticleType, run: &mut RunningType, ground: f32, dt:
             // Always in air: the preview has no water. Touching the floor is
             // touching structure.
             let grounded = physics.step(&mut particle.position, &mut particle.velocity, radius, ground, dt);
-            if kind.flags & DIE_IN_AIR != 0 || (grounded && kind.flags & DIE_ON_GROUND != 0) {
+            if kind.flags.die_in_air || (grounded && kind.flags.die_on_ground) {
                 particle.valid = false;
             }
         }

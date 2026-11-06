@@ -220,6 +220,21 @@ pub(in crate::app::model_preview) fn has_flag(holder: TagStruct<'_>, name: &str,
     holder.field(name).and_then(|field| field.flag(option)).is_some_and(|flag| flag.is_set())
 }
 
+/// Whether the option after `option` in `holder`'s `name` flags is set: for
+/// an option whose own name another shares, found by the one before it.
+pub(in crate::app::model_preview) fn has_flag_after(holder: TagStruct<'_>, name: &str, option: &str) -> bool {
+    let Some(field) = holder.field(name) else {
+        return false;
+    };
+    let Some(bit) = field.flag(option).map(|flag| flag.bit() as usize + 1) else {
+        return false;
+    };
+    match field.options() {
+        Some(blam_tags::TagOptions::Flags(options)) => options.get(bit).is_some_and(|flag| flag.is_set),
+        _ => false,
+    }
+}
+
 /// What the animations say of a held weapon.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct WeaponHold {
