@@ -36,9 +36,6 @@ pub(crate) mod particles;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod antennas;
-mod reach_ik;
-mod h4_ik;
-mod reach_blend_screens;
 mod renderer;
 #[cfg(test)]
 mod gates;
@@ -153,7 +150,7 @@ pub(crate) struct RenderModelPreview {
     pub reach_shadow_caster: Option<reach::shadow::ReachShadowCaster>,
     /// The markers a Reach unit's IK chains can reach for: its own and its
     /// held weapons', in bind space on the nodes they ride.
-    pub reach_ik_markers: Vec<reach_ik::ReachIkMarker>,
+    pub reach_ik_markers: Vec<animation::reach_ik::ReachIkMarker>,
     pub h3_flares: Vec<h3::lights::H3FlareAt>,
     pub h3_light_volumes: Vec<gen3::light_volumes::H3LightVolumeAt>,
     /// Halo 4's point-to-point tracers.

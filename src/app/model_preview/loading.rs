@@ -468,7 +468,7 @@ fn load_tag_preview(
             preview.h4_shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
             // The unit's markers its IK sets and chains place.
             let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
-            preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);
+            preview.reach_ik_markers = super::animation::reach_ik::reach_ik_markers(preview, super::animation::reach_ik::ReachIkHolder::Unit, own, None);
             let markers = preview.markers.clone();
             let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
             let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
@@ -839,7 +839,7 @@ fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, model: &T
     preview.reach_camo = super::reach::camo::ReachCamo::read(source).map(std::sync::Arc::new);
     preview.reach_shadow_caster = super::reach::shadow::reach_shadow_caster(model_tag, model);
     let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
-    preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);
+    preview.reach_ik_markers = super::animation::reach_ik::reach_ik_markers(preview, super::animation::reach_ik::ReachIkHolder::Unit, own, None);
     let markers = preview.markers.clone();
     let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
     // `object_get_bounding_sphere`'s middle, as the leaves take it.

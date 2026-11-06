@@ -595,9 +595,9 @@ pub(in crate::app::model_preview) fn attach_h2_weapon(
         let place = |frame: &MarkerFrame| {
             (frame.axes.map(|axis| attach_vector(&parent, &child, axis)), attach_point(&parent, &child, frame.position))
         };
-        let holder = super::super::reach_ik::ReachIkHolder::Weapon(owner);
+        let holder = super::super::animation::reach_ik::ReachIkHolder::Weapon(owner);
         let node = Some(parent.node.max(0) as usize);
-        preview.reach_ik_markers.extend(super::super::reach_ik::reach_ik_markers(&attached, holder, place, node));
+        preview.reach_ik_markers.extend(super::super::animation::reach_ik::reach_ik_markers(&attached, holder, place, node));
     }
     if let Some(weapons) = ik {
         let class = string_id_in(&weapon, "weapon class");

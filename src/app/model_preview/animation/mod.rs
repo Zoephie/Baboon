@@ -3,6 +3,14 @@
 //! and sampling the current time into GPU skinning matrices. Geometry,
 //! rendering, and the panel presentation belong elsewhere.
 
+/// Reach's blend screens: the aim, look and other pose overlays laid over an
+/// action.
+pub(super) mod blend_screens;
+/// Halo 4's IK sets.
+pub(super) mod h4_ik;
+/// Reach's IK chains.
+pub(super) mod reach_ik;
+
 use super::*;
 use blam_tags::math::Matrix4;
 use blam_tags::animation::classic::{CeAnimation, CeAnimations};
@@ -60,9 +68,9 @@ pub(crate) struct DecodedAnimationPose {
     /// The animation's `loop frame index`.
     pub loop_frame: usize,
     /// Reach: what its IK chains reach for, frame by frame.
-    pub reach_ik: Vec<super::reach_ik::ReachIkTrack>,
+    pub reach_ik: Vec<super::animation::reach_ik::ReachIkTrack>,
     /// Halo 4: the clip's IK set, solved before the chains.
-    pub h4_ik_set: Vec<super::h4_ik::H4IkPoint>,
+    pub h4_ik_set: Vec<super::animation::h4_ik::H4IkPoint>,
 }
 
 impl DecodedAnimationPose {
@@ -105,9 +113,9 @@ pub(crate) struct PreviewAnimationPose {
     /// The frame looping playback continues from after the last; 0 restarts.
     pub loop_frame: usize,
     /// Reach's IK chain targets, solved after each sampled pose.
-    pub reach_ik: std::sync::Arc<Vec<super::reach_ik::ReachIkTrack>>,
+    pub reach_ik: std::sync::Arc<Vec<super::animation::reach_ik::ReachIkTrack>>,
     /// Halo 4's IK set for the clip, solved before the chains.
-    pub h4_ik_set: std::sync::Arc<Vec<super::h4_ik::H4IkPoint>>,
+    pub h4_ik_set: std::sync::Arc<Vec<super::animation::h4_ik::H4IkPoint>>,
 }
 
 impl PreviewAnimationPose {
@@ -328,8 +336,8 @@ pub(super) fn animation_skinning_rows(
     apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
     // `biped_postprocess_node_matrices` (X360 0x84B1A738): the IK set, then
     // the chains.
-    super::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, &data.preview.reach_ik_markers, nodes, &inverse_binds, &mut matrices);
-    super::reach_ik::apply_reach_ik(
+    super::animation::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, &data.preview.reach_ik_markers, nodes, &inverse_binds, &mut matrices);
+    super::animation::reach_ik::apply_reach_ik(
         &pose.reach_ik,
         &data.preview.reach_ik_markers,
         nodes,
@@ -400,7 +408,7 @@ pub(super) fn pose_for_shot(
     let reach_ik = decoded
         .reach_ik
         .into_iter()
-        .map(|track| super::reach_ik::ReachIkTrack {
+        .map(|track| super::animation::reach_ik::ReachIkTrack {
             effector_frames: track.effector_frames.get(at).copied().into_iter().collect(),
             weights: track.weights.get(at).copied().into_iter().collect(),
             poles: track.poles.map(|poles| poles.get(at).copied().into_iter().collect()),
@@ -508,8 +516,8 @@ pub(super) fn armature_node_positions(
         if let Some(pose) = state.animation.pose.as_ref() {
             let frames = self::sampled_frames(&state.animation, pose.frames.len());
             let markers = &data.preview.reach_ik_markers;
-            super::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, markers, nodes, &inverse_binds, &mut matrices);
-            super::reach_ik::apply_reach_ik(&pose.reach_ik, markers, nodes, &inverse_binds, &mut matrices, frames);
+            super::animation::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, markers, nodes, &inverse_binds, &mut matrices);
+            super::animation::reach_ik::apply_reach_ik(&pose.reach_ik, markers, nodes, &inverse_binds, &mut matrices, frames);
         }
     }
     matrices.iter().map(Matrix4::translation).collect()
@@ -2098,7 +2106,7 @@ fn decode_held_animation(
     // Reach's data-driven board lays the state's blend screens over an
     // action: at rest, aiming and looking ahead.
     if !matches!(kind, JmaKind::Jmo | JmaKind::Jmr) {
-        super::reach_blend_screens::lay_blend_screens(jmad, animation, &skeleton, animation_index, &mut pose);
+        super::animation::blend_screens::lay_blend_screens(jmad, animation, &skeleton, animation_index, &mut pose);
     }
     if !layers.is_empty() {
         let left_arm = super::h2::weapons::left_arm_nodes(jmad);
@@ -2110,8 +2118,8 @@ fn decode_held_animation(
     let loop_frame = usize::try_from(group.loop_frame_index).unwrap_or(0);
     let graphs: Vec<&TagFile> = chain[graph..].iter().collect();
     Ok(DecodedAnimationPose {
-        reach_ik: super::reach_ik::read_reach_ik_tracks(&graphs, group),
-        h4_ik_set: graphs.first().map_or_else(Vec::new, |graph| super::h4_ik::read_h4_ik_set(graph, group.index)),
+        reach_ik: super::animation::reach_ik::read_reach_ik_tracks(&graphs, group),
+        h4_ik_set: graphs.first().map_or_else(Vec::new, |graph| super::animation::h4_ik::read_h4_ik_set(graph, group.index)),
         ..DecodedAnimationPose::new(&skeleton, &pose, loop_frame)
     })
 }

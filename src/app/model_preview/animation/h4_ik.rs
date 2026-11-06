@@ -8,11 +8,11 @@
 use blam_tags::math::Matrix4;
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachment::rigid_inverse;
-use super::ce::attachments::elements;
-use super::h2::weapons::holder_of;
+use super::super::attachment::rigid_inverse;
+use super::super::ce::attachments::elements;
+use super::super::h2::weapons::holder_of;
 use super::reach_ik::{ReachIkHolder, ReachIkMarker, two_bone_ik};
-use super::RenderModelPreviewNode;
+use super::super::RenderModelPreviewNode;
 
 /// `disable ik sets`, of an animation's `user flags`
 /// (`unit_animation_find_user_flag(unit, 10)`).

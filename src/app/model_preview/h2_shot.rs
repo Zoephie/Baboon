@@ -1356,7 +1356,7 @@ fn h4_chief_left_hand_holds_the_assault_rifle() {
     let points = state.animation.pose.as_ref().unwrap().h4_ik_set.clone();
     assert!(!points.is_empty(), "the clip's IK set");
     let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
-    let posed = |marker: &super::reach_ik::ReachIkMarker| {
+    let posed = |marker: &super::animation::reach_ik::ReachIkMarker| {
         let skin = &rows[marker.node * 3..marker.node * 3 + 3];
         let at = [marker.bind.m[0][3], marker.bind.m[1][3], marker.bind.m[2][3]];
         std::array::from_fn::<f32, 3, _>(|row| skin[row][0] * at[0] + skin[row][1] * at[1] + skin[row][2] * at[2] + skin[row][3])
@@ -1366,7 +1366,7 @@ fn h4_chief_left_hand_holds_the_assault_rifle() {
     let mut solved = 0;
     for point in points.iter() {
         let (Some(source), Some(destination)) =
-            (find(super::reach_ik::ReachIkHolder::Unit, &point.source), find(point.holder, &point.destination))
+            (find(super::animation::reach_ik::ReachIkHolder::Unit, &point.source), find(point.holder, &point.destination))
         else {
             continue;
         };
@@ -1383,13 +1383,13 @@ fn h4_chief_left_hand_holds_the_assault_rifle() {
     pose.h4_ik_set = Arc::default();
     state.animation.pose = Some(Arc::new(pose));
     let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
-    let posed = |marker: &super::reach_ik::ReachIkMarker| {
+    let posed = |marker: &super::animation::reach_ik::ReachIkMarker| {
         let skin = &rows[marker.node * 3..marker.node * 3 + 3];
         let at = [marker.bind.m[0][3], marker.bind.m[1][3], marker.bind.m[2][3]];
         std::array::from_fn::<f32, 3, _>(|row| skin[row][0] * at[0] + skin[row][1] * at[1] + skin[row][2] * at[2] + skin[row][3])
     };
     let point = &points[0];
-    let (from, to) = (posed(find(super::reach_ik::ReachIkHolder::Unit, &point.source).unwrap()), posed(find(point.holder, &point.destination).unwrap()));
+    let (from, to) = (posed(find(super::animation::reach_ik::ReachIkHolder::Unit, &point.source).unwrap()), posed(find(point.holder, &point.destination).unwrap()));
     let apart = (0..3).map(|axis| (from[axis] - to[axis]).powi(2)).sum::<f32>().sqrt();
     eprintln!("NOTE IK off: apart {apart}");
     assert!(apart > 1.0 / 3048.0, "the clip alone already reaches the grip ({apart}), so this proves nothing");
@@ -1405,7 +1405,7 @@ fn h4_chief_reload_reads_its_ik_chains() {
     let (data, state) = h4_chief_with_rifle(&root, "combat:rifle:ar:reload_1");
     let pose = state.animation.pose.as_ref().unwrap();
     assert!(!pose.reach_ik.is_empty(), "the reload's chains");
-    assert!(pose.reach_ik.iter().any(|track| track.holder == super::reach_ik::ReachIkHolder::Weapon(1)));
+    assert!(pose.reach_ik.iter().any(|track| track.holder == super::animation::reach_ik::ReachIkHolder::Weapon(1)));
     let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
     assert!(rows.iter().flatten().all(|lane| lane.is_finite()));
 }

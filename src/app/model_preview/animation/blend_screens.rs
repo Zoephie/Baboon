@@ -7,8 +7,8 @@ use blam_tags::animation::{Animation, AnimationGroup};
 use blam_tags::math::{RealPoint3d, RealQuaternion};
 use blam_tags::{NodeTransform, OverlayDelta, Pose, Skeleton, TagFile, TagStruct};
 
-use super::ce::attachments::elements;
-use super::dx9::passes::tag_function_at;
+use super::super::ce::attachments::elements;
+use super::super::dx9::passes::tag_function_at;
 
 /// The weights' `EPS`.
 const EPS: f32 = 0.0001;

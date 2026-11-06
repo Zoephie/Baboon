@@ -7,9 +7,9 @@ use blam_tags::animation::{decode_extended_block, AnimationGroup, ExtendedChanne
 use blam_tags::math::{Matrix4, RealPoint3d, RealQuaternion};
 use blam_tags::{Skeleton, TagFile};
 
-use super::attachment::{added, apart, axis_of, cross, dot, matrix_of, place_of, rigid_inverse, scaled, unit};
-use super::ce::attachments::elements;
-use super::RenderModelPreviewNode;
+use super::super::attachment::{added, apart, axis_of, cross, dot, matrix_of, place_of, rigid_inverse, scaled, unit};
+use super::super::ce::attachments::elements;
+use super::super::RenderModelPreviewNode;
 
 /// `e_animation_ik_chain_event_usage`: whose markers a target names.
 const USAGE_SELF: i128 = 2;
@@ -211,9 +211,9 @@ pub(crate) struct ReachIkMarker {
 /// takes the first, moved by `place` into the unit's bind space onto `node`
 /// (none: the marker's own node).
 pub(crate) fn reach_ik_markers(
-    model: &super::RenderModelPreview,
+    model: &super::super::RenderModelPreview,
     holder: ReachIkHolder,
-    place: impl Fn(&super::attachment::MarkerFrame) -> ([[f32; 3]; 3], [f32; 3]),
+    place: impl Fn(&super::super::attachment::MarkerFrame) -> ([[f32; 3]; 3], [f32; 3]),
     node: Option<usize>,
 ) -> Vec<ReachIkMarker> {
     let mut out: Vec<ReachIkMarker> = Vec::new();
@@ -221,7 +221,7 @@ pub(crate) fn reach_ik_markers(
         if out.iter().any(|known| known.name.eq_ignore_ascii_case(&marker.name)) {
             continue;
         }
-        let frame = super::attachment::MarkerFrame::find(model, &marker.name);
+        let frame = super::super::attachment::MarkerFrame::find(model, &marker.name);
         let (axes, position) = place(&frame);
         out.push(ReachIkMarker {
             holder,
