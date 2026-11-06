@@ -1515,8 +1515,6 @@ pub(super) use super::reach::lighting::{
     REACH_DARK_MULTIPLIER, REACH_SCREEN_NOISE_BITMAP, reach_alt_exposure, reach_exposure, reach_lightmap_tint,
     reach_particle_light,
 };
-#[path = "h4_bloom.rs"]
-mod h4_bloom;
 #[path = "h4_holograms.rs"]
 pub(super) mod h4_holograms;
 #[path = "gen3_shadow.rs"]
@@ -1529,14 +1527,6 @@ mod h4_light_pass;
 mod h4_flare_pass;
 #[path = "h4_shadow_pass.rs"]
 mod h4_shadow_pass;
-#[path = "h4_effect_gl.rs"]
-mod h4_effect_gl;
-#[path = "h4_particle_pass.rs"]
-mod h4_particle_pass;
-#[path = "h4_light_volume_pass.rs"]
-mod h4_light_volume_pass;
-#[path = "h4_tracer_pass.rs"]
-mod h4_tracer_pass;
 
 /// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
 /// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
@@ -2152,7 +2142,7 @@ struct ModelGpuSlot {
     strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     /// Halo 4's particle programs, bitmaps and state buffer.
-    h4_effects: h4_effect_gl::H4EffectGl,
+    h4_effects: h4::effect_gl::H4EffectGl,
 }
 
 impl ModelGpuSlot {
@@ -4135,7 +4125,7 @@ pub(super) struct RenderCore {
     /// How much of its effect the `shader_screen` drawing now is.
     h3_screen_alpha: Option<f32>,
     h3_bloom: Option<h3_bloom::H3Bloom>,
-    h4_bloom: Option<h4_bloom::H4Bloom>,
+    h4_bloom: Option<h4::bloom::H4Bloom>,
     /// Halo 4's hologram surfaces and the screen materials' bitmaps.
     h4_holograms: Option<h4_holograms::H4Holograms>,
     /// The corners Halo 4's flare reflections draw from.
@@ -5114,7 +5104,7 @@ impl RenderCore {
                         };
                         if let Some(draw) = draw {
                             let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
-                            h4_tracer_pass::draw_h4_tracer(
+                            h4::tracer_pass::draw_h4_tracer(
                                 gl,
                                 &mut uploaded.h4_effects,
                                 frame,
@@ -5141,7 +5131,7 @@ impl RenderCore {
                             let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                             if let Some(draw) = at.h4_draw(values, bones, &view, frame.time, onset) {
                                 let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
-                                h4_light_volume_pass::draw_h4_light_volume(
+                                h4::light_volume_pass::draw_h4_light_volume(
                                     gl,
                                     &mut uploaded.h4_effects,
                                     frame,
@@ -5212,7 +5202,7 @@ impl RenderCore {
                             let draws = uploaded.simulations.particles.h4_draws(index, system, values, bones, &view, frame.time, onset);
                             if !draws.is_empty() {
                                 let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
-                                h4_particle_pass::draw_h4_particles(
+                                h4::particle_pass::draw_h4_particles(
                                     gl,
                                     &mut uploaded.h4_effects,
                                     frame,
@@ -6257,7 +6247,7 @@ fn model_draw_range(
     Some((i32::try_from(byte_offset).ok()?, count as i32))
 }
 
-fn slice_bytes<T>(slice: &[T]) -> &[u8] {
+pub(super) fn slice_bytes<T>(slice: &[T]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), std::mem::size_of_val(slice)) }
 }
 

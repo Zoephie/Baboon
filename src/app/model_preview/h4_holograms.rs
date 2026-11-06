@@ -20,7 +20,7 @@ use eframe::glow::{self, HasContext};
 use super::h3_draw::{frame_value, h3_set_cull, set_value, upload_h2_image_linear};
 use super::gl::target::{Made, Sampling, Texels};
 use super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value};
-use super::h4_bloom::H4BloomSettings;
+use super::super::h4::bloom::H4BloomSettings;
 use super::h4::submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
 use super::*;
 
@@ -322,7 +322,7 @@ impl RenderCore {
             // Its bloom, by the hologram camera fx.
             let vertices = self.h3_empty_array(gl);
             if self.h4_bloom.is_none() {
-                self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom, self.white_volume);
+                self.h4_bloom = super::super::h4::bloom::H4Bloom::new(gl, self.h3_no_bloom, self.white_volume);
             }
             let settings = H4BloomSettings::hologram(screen.bloom_scale);
             let bloom = self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, color, size, None, &settings);

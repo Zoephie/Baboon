@@ -4,10 +4,11 @@
 //! `light_volume` pass with `SetMaterialState`'s overall state
 //! (X360 0x82B96320) and a strip of rows in order.
 
-use super::gen3::light_volumes::H4VolumeDraw;
-use super::h4_effect_gl::{H4EffectGl, material_functions};
-use super::materials::H4EffectMaterial;
-use super::*;
+use eframe::glow::{self, HasContext};
+use super::super::gen3::light_volumes::H4VolumeDraw;
+use super::effect_gl::{H4EffectGl, material_functions};
+use super::super::materials::H4EffectMaterial;
+use super::super::renderer::*;
 use crate::core::hlsl::parse::Type;
 
 /// `k_maxRowsPerStrip`.
@@ -52,7 +53,7 @@ fn overall_members(draw: &H4VolumeDraw) -> Vec<(String, Vec<f32>)> {
 /// Draw one volume, through `material`, into the bound light target.
 /// `depth` is a copy of the scene's depth for the fade.
 #[allow(clippy::too_many_arguments)]
-pub(super) unsafe fn draw_h4_light_volume(
+pub(in crate::app::model_preview) unsafe fn draw_h4_light_volume(
     gl: &glow::Context,
     state: &mut H4EffectGl,
     frame: &ModelGpuFrame,

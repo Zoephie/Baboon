@@ -5,10 +5,11 @@
 //! 0x829E14B0) and a strip of rows in order. See
 //! `docs/h4-preview-research/tracers.md` §4.
 
-use super::h4_effect_gl::{H4EffectGl, material_functions};
-use super::h4::tracers::H4TracerDraw;
-use super::materials::H4EffectMaterial;
-use super::*;
+use eframe::glow::{self, HasContext};
+use super::effect_gl::{H4EffectGl, material_functions};
+use super::tracers::H4TracerDraw;
+use super::super::materials::H4EffectMaterial;
+use super::super::renderer::*;
 use crate::core::hlsl::parse::Type;
 
 /// `k_maxRowsPerInstance`.
@@ -59,7 +60,7 @@ fn overall_members(draw: &H4TracerDraw) -> Vec<(String, Vec<f32>)> {
 
 /// Draw one tracer, through `material`, into the bound light target.
 #[allow(clippy::too_many_arguments)]
-pub(super) unsafe fn draw_h4_tracer(
+pub(in crate::app::model_preview) unsafe fn draw_h4_tracer(
     gl: &glow::Context,
     state: &mut H4EffectGl,
     frame: &ModelGpuFrame,

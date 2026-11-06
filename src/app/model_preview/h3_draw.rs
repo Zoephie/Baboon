@@ -548,7 +548,7 @@ pub(super) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
 
 /// What the rasterizer's globals hold for an object here, by uniform name.
 /// `stops` is what Reach's area screen effects come to this frame.
-pub(super) fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
+pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, dialect: H3Dialect, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
     let [width, height] = size.map(|side| side as f32);
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     // Halo 4's engine constants have names of their own.
@@ -668,7 +668,7 @@ fn h4_normal_axis(frame: &ModelGpuFrame) -> [f32; 9] {
 /// The matrices Halo 4's passes read, by name: `mul(position, matrix)` as
 /// Halo 3's `View_Projection`, the camera's axes and eye in
 /// `camera_to_world`'s columns (`vs_view_camera_right` is `._m00_m10_m20`).
-pub(super) fn h4_matrix(frame: &ModelGpuFrame, name: &str) -> Option<Vec<f32>> {
+pub(in crate::app::model_preview) fn h4_matrix(frame: &ModelGpuFrame, name: &str) -> Option<Vec<f32>> {
     match name {
         "vs_view_view_projection_matrix" => Some(view_projection(&frame.camera).to_vec()),
         "vs_view_camera_to_world_matrix" | "ps_camera_to_world_matrix" => Some(camera_to_world(frame).to_vec()),
@@ -1607,9 +1607,9 @@ impl RenderCore {
             if let Some(frame) = halo4 {
                 let grading = self.h4_grading_texture(gl, frame);
                 if self.h4_bloom.is_none() {
-                    self.h4_bloom = super::h4_bloom::H4Bloom::new(gl, self.h3_no_bloom, self.white_volume);
+                    self.h4_bloom = super::super::h4::bloom::H4Bloom::new(gl, self.h3_no_bloom, self.white_volume);
                 }
-                let settings = &super::h4_bloom::VIEW_BLOOM;
+                let settings = &super::super::h4::bloom::VIEW_BLOOM;
                 return self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref(), settings);
             }
             if self.h3_bloom.is_none() {
@@ -1700,7 +1700,7 @@ impl RenderCore {
 
     /// Halo 4's colour grading lookup, uploaded once per preview, and how a
     /// pass reads its texel centres (`SetColorGradingParameters`).
-    unsafe fn h4_grading_texture(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) -> Option<super::h4_bloom::H4BloomGrading> {
+    unsafe fn h4_grading_texture(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) -> Option<super::super::h4::bloom::H4BloomGrading> {
         unsafe {
             let grading = frame.preview.h4_color_grading.as_ref();
             let key = grading.map(|(image, ..)| Arc::as_ptr(image) as usize);
@@ -1718,7 +1718,7 @@ impl RenderCore {
                 _ => return None,
             };
             let (scale, offset) = super::super::h4::lighting::h4_grading_scale_offset(size);
-            self.h4_grading.map(|(_, texture)| super::h4_bloom::H4BloomGrading { texture, scale, offset })
+            self.h4_grading.map(|(_, texture)| super::super::h4::bloom::H4BloomGrading { texture, scale, offset })
         }
     }
 
@@ -2199,7 +2199,7 @@ pub(super) unsafe fn h3_set_blend(gl: &glow::Context, blend: H3Blend) {
 
 /// `d3d11_sampler_state_cache::get`: the border is transparent black, and
 /// anisotropic filters are trilinear with a limit.
-pub(super) unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: H3Sampler) {
+pub(in crate::app::model_preview) unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: H3Sampler) {
     const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
     let address = |mode| match mode {
         BitmapAddressMode::Clamp => glow::CLAMP_TO_EDGE,

@@ -2,14 +2,19 @@
 //! and lights, flares, camo, shield, shadow, particles and tracers. Its passes
 //! are the renderer's.
 
+pub(in crate::app::model_preview) mod bloom;
 pub(super) mod camo;
+pub(in crate::app::model_preview) mod effect_gl;
 pub(super) mod flares;
 pub(super) mod lighting;
 pub(super) mod lights;
+pub(in crate::app::model_preview) mod light_volume_pass;
+pub(in crate::app::model_preview) mod particle_pass;
 pub(super) mod particles;
 pub(in crate::app::model_preview) mod render;
 pub(crate) mod shaders;
 pub(super) mod shadow;
 pub(super) mod shield;
 pub(super) mod submit;
+pub(in crate::app::model_preview) mod tracer_pass;
 pub(super) mod tracers;

@@ -5,11 +5,12 @@
 //! `SetMaterialRenderState`'s constants. See
 //! `docs/h4-preview-research/particles.md`.
 
-use super::particles::H4EmitterDraw;
-use super::gen3::shaders::{H3Pass, H3Value};
-use super::h4_effect_gl::{H4EffectGl, material_functions};
-use super::h4::particles::{H4ParticleRender, custom_vert_registers};
-use super::*;
+use eframe::glow::{self, HasContext};
+use super::super::particles::H4EmitterDraw;
+use super::super::gen3::shaders::{H3Pass, H3Value};
+use super::effect_gl::{H4EffectGl, material_functions};
+use super::particles::{H4ParticleRender, custom_vert_registers};
+use super::super::renderer::*;
 use crate::core::hlsl::parse::Type;
 
 /// `effect_lightprobe_setup_lighting_constants` with the default probe
@@ -28,7 +29,7 @@ const NO_FAR_FADE: [f32; 2] = [1e-4, 10_000.0];
 /// Draw `draws` of one particle system, whose look is `render`, into the
 /// bound light target. `depth` is a copy of the scene's depth for the fade.
 #[allow(clippy::too_many_arguments)]
-pub(super) unsafe fn draw_h4_particles(
+pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
     gl: &glow::Context,
     state: &mut H4EffectGl,
     frame: &ModelGpuFrame,
@@ -132,7 +133,7 @@ pub(super) unsafe fn draw_h4_particles(
                     _ => None,
                 };
                 match value {
-                    Some(value) => h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value),
+                    Some(value) => super::super::renderer::h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value),
                     None => {
                         state.set_shared_uniform(gl, frame, material, &functions, name, ty, size);
                     }

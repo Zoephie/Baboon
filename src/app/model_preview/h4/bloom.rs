@@ -9,15 +9,15 @@
 //! (`floor(side / divisor + 0.5)`, no fixed sizes; O8) and the pixel size a
 //! pass steps by, the source's.
 
-use super::gl::chain::ScreenChain;
-use super::gl::target::{ColorTarget, Made, Sampling, Texels};
+use super::super::gl::chain::ScreenChain;
+use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
-use super::h3_draw::screen_program;
+use super::super::renderer::h3_draw::screen_program;
 
 /// What a chain runs on: a camera fx's bloom fields.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct H4BloomSettings {
+pub(in crate::app::model_preview) struct H4BloomSettings {
     highlight: f32,
     inherent: f32,
     self_illum: f32,
@@ -36,7 +36,7 @@ pub(super) struct H4BloomSettings {
 /// The preview camera fx's bloom (`h4::lighting::H4_PREVIEW_STOPS` says
 /// whose): `bloom_highlight`, `bloom_inherent`, `bloom_self_illum`,
 /// `bloom_intensity` and the three colours of `m80_cam_fx_global`.
-pub(super) const VIEW_BLOOM: H4BloomSettings = H4BloomSettings {
+pub(in crate::app::model_preview) const VIEW_BLOOM: H4BloomSettings = H4BloomSettings {
     highlight: 0.05,
     inherent: 0.0,
     self_illum: 5.0,
@@ -63,7 +63,7 @@ const HOLOGRAM_BLOOM: H4BloomSettings = H4BloomSettings {
 impl H4BloomSettings {
     /// A camera fx tag's bloom fields, to check the constants against.
     #[cfg(test)]
-    pub(super) fn read(root: blam_tags::TagStruct<'_>) -> Self {
+    pub(in crate::app::model_preview) fn read(root: blam_tags::TagStruct<'_>) -> Self {
         let real = |holder: &str, name: &str| root.descend(holder).and_then(|holder| holder.read_real(name)).unwrap_or(0.0);
         let color = |holder: &str, name: &str| {
             let color = root.descend(holder).and_then(|holder| holder.field(name)).and_then(|field| field.value());
@@ -86,7 +86,7 @@ impl H4BloomSettings {
 
     /// The hologram chain, its highlight and inherent bloom scaled by
     /// `GetHologramBloomIntensityScale` (`RenderHolograms`, X360 0x829B63C8).
-    pub(super) fn hologram(distance_scale: f32) -> Self {
+    pub(in crate::app::model_preview) fn hologram(distance_scale: f32) -> Self {
         Self {
             highlight: HOLOGRAM_BLOOM.highlight * distance_scale,
             inherent: HOLOGRAM_BLOOM.inherent * distance_scale,
@@ -232,7 +232,7 @@ impl Surfaces {
     }
 }
 
-pub(super) struct H4Bloom {
+pub(in crate::app::model_preview) struct H4Bloom {
     chain: ScreenChain,
     surfaces: Option<Surfaces>,
     /// Bound for the grading lookup when there is none: an empty 3D unit is
@@ -242,14 +242,14 @@ pub(super) struct H4Bloom {
 }
 
 /// The colour grading lookup shader 159 reads its intensity from, and how.
-pub(super) struct H4BloomGrading {
-    pub(super) texture: glow::NativeTexture,
-    pub(super) scale: [f32; 3],
-    pub(super) offset: [f32; 3],
+pub(in crate::app::model_preview) struct H4BloomGrading {
+    pub(in crate::app::model_preview) texture: glow::NativeTexture,
+    pub(in crate::app::model_preview) scale: [f32; 3],
+    pub(in crate::app::model_preview) offset: [f32; 3],
 }
 
 impl H4Bloom {
-    pub(super) unsafe fn new(
+    pub(in crate::app::model_preview) unsafe fn new(
         gl: &glow::Context,
         nothing: Option<glow::NativeTexture>,
         no_volume: Option<glow::NativeTexture>,
@@ -289,7 +289,7 @@ impl H4Bloom {
     /// `settings`. Leaves `scene` bound, and the viewport and scissor as they
     /// were. A hologram's chain reads no grading.
     #[allow(clippy::too_many_arguments)]
-    pub(super) unsafe fn build(
+    pub(in crate::app::model_preview) unsafe fn build(
         &mut self,
         gl: &glow::Context,
         vertex_array: glow::NativeVertexArray,

@@ -5,19 +5,22 @@
 //! light volumes (`h4_light_volume_pass`) set their own constants over
 //! these.
 
+use eframe::glow::{self, HasContext};
 use std::collections::HashMap;
 
-use super::gen3::shaders::{H3Pass, H3Value, H3Values};
-use super::materials::H4EffectMaterial;
-use super::*;
-use super::gl::program::Linked;
+use super::super::gen3::shaders::{H3Pass, H3Value, H3Values};
+use super::super::materials::H4EffectMaterial;
+use super::super::renderer::*;
+use super::super::*;
+use super::super::gl::program::Linked;
+use super::super::dx9::passes::H2Image;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
 
 /// The GL a slot keeps for its Halo 4 effects: programs by pass, textures
 /// by material and sampler, and the buffer the states go through.
 #[derive(Default)]
-pub(super) struct H4EffectGl {
+pub(in crate::app::model_preview) struct H4EffectGl {
     programs: HashMap<usize, Option<Linked>>,
     textures: HashMap<(usize, String), Option<glow::NativeTexture>>,
     buffer: Option<(glow::NativeBuffer, glow::NativeTexture)>,
@@ -27,7 +30,7 @@ pub(super) struct H4EffectGl {
 }
 
 impl H4EffectGl {
-    pub(super) unsafe fn clear(&mut self, gl: &glow::Context) {
+    pub(in crate::app::model_preview) unsafe fn clear(&mut self, gl: &glow::Context) {
         unsafe {
             for linked in self.programs.drain().filter_map(|(_, known)| known) {
                 gl.delete_program(linked.program);
@@ -44,7 +47,7 @@ impl H4EffectGl {
             return known.as_ref().map(|linked| linked.program);
         }
         let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
-        let linked = unsafe { super::gl::link::link(gl, &stages, &[]) }
+        let linked = unsafe { super::super::gl::link::link(gl, &stages, &[]) }
             .map_err(|error| eprintln!("h4 effect program: {error}"))
             .ok();
         self.programs.insert(key, linked.map(Linked::new));
@@ -53,7 +56,7 @@ impl H4EffectGl {
 
     /// Set the float uniform, or struct member, `name` to `value`: one to
     /// four components.
-    pub(super) unsafe fn set_floats(
+    pub(in crate::app::model_preview) unsafe fn set_floats(
         &mut self,
         gl: &glow::Context,
         pass: &H3Pass,
@@ -71,7 +74,7 @@ impl H4EffectGl {
         }
     }
 
-    pub(super) unsafe fn location(
+    pub(in crate::app::model_preview) unsafe fn location(
         &mut self,
         gl: &glow::Context,
         pass: &H3Pass,
@@ -110,7 +113,7 @@ impl H4EffectGl {
                 };
                 upload_array(gl, &layers, texture.texels, texture.sampler)
             } else {
-                h3_draw::upload_h2_image_linear(
+                super::super::renderer::h3_draw::upload_h2_image_linear(
                     gl,
                     &texture.image,
                     texture.texels,
@@ -149,7 +152,7 @@ impl H4EffectGl {
     /// Ready `material`'s pass to draw into the bound light target: its
     /// program, its blend, the depth test without writes, no culling and
     /// colour only. None when the pass does not link.
-    pub(super) unsafe fn begin(
+    pub(in crate::app::model_preview) unsafe fn begin(
         &mut self,
         gl: &glow::Context,
         material: &H4EffectMaterial,
@@ -178,7 +181,7 @@ impl H4EffectGl {
     /// as `buffer`, a particle model's strip as `mesh_vertices`, the scene's
     /// `depth` copy, and the material's maps.
     #[allow(clippy::too_many_arguments)]
-    pub(super) unsafe fn bind_textures<const WORDS: usize>(
+    pub(in crate::app::model_preview) unsafe fn bind_textures<const WORDS: usize>(
         &mut self,
         gl: &glow::Context,
         material: &H4EffectMaterial,
@@ -225,7 +228,7 @@ impl H4EffectGl {
     /// material's `functions` and baked values. False when none of them
     /// knows it.
     #[allow(clippy::too_many_arguments)]
-    pub(super) unsafe fn set_shared_uniform(
+    pub(in crate::app::model_preview) unsafe fn set_shared_uniform(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -238,7 +241,7 @@ impl H4EffectGl {
         let pass = &*material.pass;
         unsafe {
             let location = self.location(gl, pass, name);
-            if let Some(matrix) = h3_draw::h4_matrix(frame, name) {
+            if let Some(matrix) = super::super::renderer::h3_draw::h4_matrix(frame, name) {
                 match matrix.len() {
                     9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
                     _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
@@ -253,14 +256,14 @@ impl H4EffectGl {
                 (ty, &value),
                 (Type::Vector(Scalar::Uint, _), H3Value::Floats(_))
             ) {
-                h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                super::super::renderer::h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
             }
             true
         }
     }
 
     /// Put the texture units back as the other stages expect them.
-    pub(super) unsafe fn end(&self, gl: &glow::Context) {
+    pub(in crate::app::model_preview) unsafe fn end(&self, gl: &glow::Context) {
         unsafe {
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_BUFFER, None);
@@ -271,12 +274,12 @@ impl H4EffectGl {
 }
 
 /// The material's per-draw function values for `object`'s draw.
-pub(super) fn material_functions(
+pub(in crate::app::model_preview) fn material_functions(
     frame: &ModelGpuFrame,
     material: &H4EffectMaterial,
     object: u8,
 ) -> H3Values {
-    let drawn = super::h4::submit::DrawnObject {
+    let drawn = super::submit::DrawnObject {
         values: frame.function_values_of_object(object),
         time: frame.time,
         owner: object,
@@ -288,7 +291,7 @@ pub(super) fn material_functions(
     ];
     material
         .submit
-        .draw_values(super::h4::submit::H4Draw::Lit, &drawn, identity)
+        .draw_values(super::submit::H4Draw::Lit, &drawn, identity)
 }
 
 /// What every effect's constant `name` is, before the material's own.
@@ -313,22 +316,22 @@ fn shared_value(
         "s_atmosphere_fog_enable" | "s_atmosphere_fog_light_enable" => Some(H3Value::Integer(0)),
         name if name.starts_with("s_atmosphere_constant_") => floats([0.0; 4]),
         "vs_material_blend_constant" => floats(blend_constant(mode)),
-        "vs_bungie_exposure" => super::h4::lighting::h4_frame_value("ps_view_exposure"),
+        "vs_bungie_exposure" => super::lighting::h4_frame_value("ps_view_exposure"),
         "vs_bungie_additive_scale_and_exposure" => {
-            super::h4::lighting::h4_frame_value("ps_view_self_illum_exposure")
+            super::lighting::h4_frame_value("ps_view_self_illum_exposure")
         }
         "vs_alpha_blend_mode" | "ps_alpha_blend_mode" => floats([f32::from(mode), 0.0, 0.0, 0.0]),
         "ps_tiling_vpos_offset" => floats([0.0; 4]),
         // `ComputeDepthFade(fragpos · z)`: whole pixels.
         "psDepthConstants" => floats([0.0, 0.0, 1.0, 0.0]),
-        super::h4::shield::DEPTH_DECODE => floats([
+        super::shield::DEPTH_DECODE => floats([
             camera.depth_scale * camera.depth_map[0],
             camera.depth_map[1],
             camera.perspective,
             eye,
         ]),
-        super::h4::shield::WORLD_SCALE => floats([camera.scale; 4]),
-        other => h3_draw::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
+        super::shield::WORLD_SCALE => floats([camera.scale; 4]),
+        other => super::super::renderer::h3_draw::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
             .or_else(|| functions.get(other).cloned())
             .or_else(|| material.values.get(other).cloned()),
     }
@@ -395,7 +398,7 @@ unsafe fn upload_array(
             glow::LINEAR as i32,
         );
         if let Some(sampler) = sampler {
-            h3_draw::h3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
+            super::super::renderer::h3_draw::h3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
         }
         gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
         Some(texture)
