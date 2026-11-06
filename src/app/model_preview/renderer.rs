@@ -108,70 +108,12 @@ pub(super) fn draw_model_viewport(
         state.scale = new_scale;
     }
 
-    let camera = PreviewCamera::new(data, state, rect);
-    let preview = Arc::clone(&data.preview);
-    let mut visible_batches = visible_batch_indices(&preview, state);
-    let shield_batches = visible_batches.clone();
-    without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
-    let skinning_rows = animation_skinning_rows(data, state);
     let time = preview_clock(ui);
-    let h2_values = h2_function_values_for(data, &state.h2_function_inputs, time);
-    let frame = ModelGpuFrame {
-        preview,
-        geometry_id: data.geometry_id,
-        mesh_id: data.mesh_id,
-        textures_id: data.textures_id,
-        visible_batches,
-        shield_batches,
-        camera: camera.gpu_uniforms(),
-        render_mode: state.render_mode,
-        background: preview_background(ui.visuals()),
-        show_backfaces: state.show_backfaces,
-        show_grid: state.show_grid,
-        textures: state
-            .render_mode
-            .uses_textures()
-            .then(|| data.textures.clone())
-            .flatten(),
-        bones: skinning_rows.clone().map(Arc::new),
-        game_shaders: state.h2_game_shaders,
-        default_lights: state.h2_default_lights,
-        active_camo: state.h2_active_camo,
-        // Halo CE's renderer has no bloom: only the remaster's does.
-        bloom: state.h2_bloom && data.preview.game != Some(GameId::HaloCe),
-        self_shadow: state.h2_self_shadow,
-        prt: state.h2_prt,
-        light_follows_camera: state.h2_light_follows_camera,
-        time,
-        h2_prt_clusters: None,
-        object_states: object_states(data, &state.ce_function_inputs, &state.ce_shots, time),
-        object_moves: object_moves(data, &state.h2_function_inputs, time, h2_values.as_ref()),
-        h2_values,
-        h2_attached_values: h2_attached_values(data, time),
-        h2_attached_colors: h2_attached_colors(data),
-        h3_flares_shown: h3_flares_shown(&data.preview, state),
-        h3_lights_shown: h3_lights_shown(&data.preview, state),
-        reach_lights_shown: reach_lights_shown(&data.preview, state),
-        h3_volumes_shown: h3_volumes_shown(&data.preview, state),
-        h4_tracers_shown: h4_tracers_shown(&data.preview, state),
-        h3_systems_shown: h3_systems_shown(&data.preview, state),
-        h3_strips_shown: h3_strips_shown(&data.preview, state),
-        reach_cheap_shown: reach_cheap_shown(&data.preview, state),
-        h2_flares_shown: h2_flares_shown(&data.preview, state),
-        h2_shown: H2Shown::of(&data.preview, state),
-        ce_points: Vec::new(),
-        ce_plays: ce_event_plays(data, &state.ce_event_counts, state.ce_event_scales),
-        change_colors: h2_change_colors_for(
-            &data.h2_change_colors,
-            state
-                .selected_variant
-                .and_then(|index| data.variants.get(index))
-                .map_or("", |variant| variant.name.as_str()),
-        ),
-    };
-    let mut frame = frame;
-    frame.h2_prt_clusters = frame.h2_object_prt_clusters();
-    frame.ce_points = frame.ce_point_lights();
+    let frame = build_frame(data, state, rect, time, preview_background(ui.visuals()), &[]);
+    // The overlays below draw over the same view and pose.
+    let camera = PreviewCamera::new(data, state, rect);
+    let bones = frame.bones.clone();
+    let skinning_rows = bones.as_deref().map(Vec::as_slice);
     let firing = ce::firing::shots_moving(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, time);
     if frame.h2_moves() || ce_events_running(data.geometry_id) || firing {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
@@ -202,7 +144,7 @@ pub(super) fn draw_model_viewport(
             &camera,
             &data.preview.errors,
             state,
-            skinning_rows.as_deref(),
+            skinning_rows,
         );
     }
 
@@ -264,7 +206,7 @@ pub(super) fn draw_model_viewport(
             {
                 continue;
             }
-            let (position, axes) = animated_marker_transform(marker, skinning_rows.as_deref());
+            let (position, axes) = animated_marker_transform(marker, skinning_rows);
             let projected = camera.project(position);
             if !projected.in_front {
                 continue;
@@ -309,6 +251,89 @@ pub(super) fn without_shield_parts(visible: &mut Vec<usize>, preview: &RenderMod
 /// permutations `monitor`/`lightning-100` while the collision model's only
 /// one is `__base` — the selected name matches no overlay batch, and the
 /// overlay draws its region's first permutation instead of vanishing.
+/// The frame `state` shows of `data` in `rect` at `time` over `background`,
+/// with `forced` exports set over what the functions make. The app and the
+/// headless harness both build their frames here.
+fn build_frame(
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+    rect: egui::Rect,
+    time: f32,
+    background: [f32; 3],
+    forced: &[(String, f32)],
+) -> ModelGpuFrame {
+    let camera = PreviewCamera::new(data, state, rect);
+    let preview = Arc::clone(&data.preview);
+    let mut visible_batches = visible_batch_indices(&preview, state);
+    let shield_batches = visible_batches.clone();
+    without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
+    let skinning_rows = animation_skinning_rows(data, state);
+    let mut h2_values = h2_function_values_for(data, &state.h2_function_inputs, time);
+    // What a function exports, which its inputs cannot reach: a scripted
+    // value, say. Only the harness forces any.
+    if let Some(values) = h2_values.as_mut() {
+        for (name, value) in forced {
+            values.insert(name.clone(), *value);
+        }
+    }
+    let mut frame = ModelGpuFrame {
+        preview,
+        geometry_id: data.geometry_id,
+        mesh_id: data.mesh_id,
+        textures_id: data.textures_id,
+        visible_batches,
+        shield_batches,
+        camera: camera.gpu_uniforms(),
+        render_mode: state.render_mode,
+        background,
+        show_backfaces: state.show_backfaces,
+        show_grid: state.show_grid,
+        textures: state
+            .render_mode
+            .uses_textures()
+            .then(|| data.textures.clone())
+            .flatten(),
+        bones: skinning_rows.clone().map(Arc::new),
+        game_shaders: state.h2_game_shaders,
+        default_lights: state.h2_default_lights,
+        active_camo: state.h2_active_camo,
+        // Halo CE's renderer has no bloom: only the remaster's does.
+        bloom: state.h2_bloom && data.preview.game != Some(GameId::HaloCe),
+        self_shadow: state.h2_self_shadow,
+        prt: state.h2_prt,
+        light_follows_camera: state.h2_light_follows_camera,
+        time,
+        h2_prt_clusters: None,
+        object_states: object_states(data, &state.ce_function_inputs, &state.ce_shots, time),
+        object_moves: object_moves(data, &state.h2_function_inputs, time, h2_values.as_ref()),
+        h2_values,
+        h2_attached_values: h2_attached_values(data, time),
+        h2_attached_colors: h2_attached_colors(data),
+        h3_flares_shown: h3_flares_shown(&data.preview, state),
+        h3_lights_shown: h3_lights_shown(&data.preview, state),
+        reach_lights_shown: reach_lights_shown(&data.preview, state),
+        h3_volumes_shown: h3_volumes_shown(&data.preview, state),
+        h4_tracers_shown: h4_tracers_shown(&data.preview, state),
+        h3_systems_shown: h3_systems_shown(&data.preview, state),
+        h3_strips_shown: h3_strips_shown(&data.preview, state),
+        reach_cheap_shown: reach_cheap_shown(&data.preview, state),
+        h2_flares_shown: h2_flares_shown(&data.preview, state),
+        h2_shown: H2Shown::of(&data.preview, state),
+        ce_points: Vec::new(),
+        ce_plays: ce_event_plays(data, &state.ce_event_counts, state.ce_event_scales),
+        change_colors: h2_change_colors_for(
+            &data.h2_change_colors,
+            state
+                .selected_variant
+                .and_then(|index| data.variants.get(index))
+                .map_or("", |variant| variant.name.as_str()),
+        ),
+    };
+    frame.h2_prt_clusters = frame.h2_object_prt_clusters();
+    frame.ce_points = frame.ce_point_lights();
+    frame
+}
+
 pub(super) fn visible_batch_indices(
     preview: &RenderModelPreview,
     state: &ModelPreviewState,
