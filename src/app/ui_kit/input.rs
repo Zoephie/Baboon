@@ -171,7 +171,7 @@ impl<'a> SinglelineTextEdit<'a> {
             output.response.rect,
             style.corners,
             style.stroke,
-            egui::StrokeKind::Middle,
+            egui::StrokeKind::Inside,
         );
         output
     }

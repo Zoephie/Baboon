@@ -432,7 +432,7 @@ fn foundation_value_text_filled_with_placeholder(
     let response = ui.put(rect, edit);
     if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
     let appearance = input_appearance(ui, state, read_only, response.has_focus());
-    ui.painter().rect_stroke(rect, corners, appearance.stroke, egui::StrokeKind::Middle);
+    ui.painter().rect_stroke(rect, corners, appearance.stroke, egui::StrokeKind::Inside);
     if let Some(status) = status {
         ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
             egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
@@ -1180,6 +1180,7 @@ mod tests {
                     for rect in [standard_rect, tag_rect] {
                         assert_eq!(border(rect).corner_radius, egui::CornerRadius::same(2));
                         assert_eq!(border(rect).stroke, expected_stroke, "validation border survives focus");
+                        assert_eq!(border(rect).stroke_kind, egui::StrokeKind::Inside, "every input state keeps its border within the field");
                     }
                     let fill = |rect| output.shapes.iter().find_map(|shape| match &shape.shape {
                         egui::Shape::Rect(shape) if shape.rect == rect && shape.fill != Color32::TRANSPARENT => Some(shape.fill),

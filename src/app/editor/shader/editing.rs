@@ -2741,7 +2741,7 @@ fn draw_shader_reference_cell(
                 text_rect,
                 2.0,
                 Stroke::new(1.5_f32, color),
-                egui::StrokeKind::Middle,
+                egui::StrokeKind::Inside,
             );
         }
         if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>()
@@ -2929,7 +2929,7 @@ pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, co
         rect,
         0.0,
         Stroke::new(1.0_f32, material_input_edge()),
-        egui::StrokeKind::Middle,
+        egui::StrokeKind::Inside,
     );
     let inner = shader_color_swatch_rect(rect);
     ui.painter().rect_filled(inner, 0.0, display_color);

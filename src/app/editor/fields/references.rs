@@ -858,7 +858,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
         flags_rect,
         INPUT_CORNER_RADIUS,
         Stroke::new(1.0_f32, foundation_input_edge()),
-        egui::StrokeKind::Middle,
+        egui::StrokeKind::Inside,
     );
 
     if display_flags.is_empty() {
