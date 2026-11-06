@@ -1481,6 +1481,24 @@ mod tests {
     }
 
     #[test]
+    fn entry_replacement_preserves_links_and_whole_block_replacement_clears_them() {
+        for whole_block in [false, true] {
+            let mut tag = test_tag();
+            add_basic_elements(&mut tag, 3);
+            set_test_indices(&mut tag, 0, 1, 2);
+            let copied = tag.root().field_path("basic block").unwrap().as_block().unwrap()
+                .element_snapshot(0).unwrap();
+            let kind = if whole_block {
+                BlockOpKind::ReplaceBlock { elements: vec![copied] }
+            } else {
+                BlockOpKind::ReplaceElement { at: 1, elements: vec![copied] }
+            };
+            apply_one_block_op(&mut tag, &BlockOp { path: "basic block".to_owned(), kind }).unwrap();
+            assert_eq!(test_indices(&tag), if whole_block { [-1, -1, -1] } else { [0, 1, 2] });
+        }
+    }
+
+    #[test]
     fn insert_and_delete_preserve_declared_block_index_targets() {
         let mut tag = test_tag();
         add_basic_elements(&mut tag, 3);
