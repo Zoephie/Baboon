@@ -152,7 +152,7 @@ mod tests {
 
     /// `warthog_antenna_steel.point_physics`: steel, a little air friction.
     fn steel() -> CePointPhysics {
-        CePointPhysics::new(7.7, 0, 0.05, 0.0, 0.0)
+        CePointPhysics::new(7.7, false, false, 0.05, 0.0, 0.0)
     }
 
     fn warthog(physics: Option<CePointPhysics>) -> ReachAntennaSpring {
