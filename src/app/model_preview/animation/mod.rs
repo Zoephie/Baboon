@@ -370,7 +370,7 @@ fn h2_held_layers(
     weapons.pose_layers(&names, &clip.name, primary, secondary)
 }
 
-/// Hold a preview at `H2_SHOT_FRAME` of the clip named `clip`, for `h2_shot`.
+/// Hold a preview at `H2_SHOT_FRAME` of the clip named `clip`, for the headless shot.
 #[cfg(test)]
 pub(super) fn pose_for_shot(
     source: &TagSource,

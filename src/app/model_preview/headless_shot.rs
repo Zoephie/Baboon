@@ -66,7 +66,7 @@ fn shot_game() -> GameId {
     }
 }
 
-/// How a shot is taken beyond its model and angle: what [`h2_shot`] reads
+/// How a shot is taken beyond its model and angle: what [`shot`] reads
 /// from its `H2_SHOT_*` variables, and what the gates set themselves.
 #[derive(Debug, Clone)]
 pub(in crate::app::model_preview) struct ShotOptions {
@@ -656,7 +656,7 @@ pub(in crate::app::model_preview) fn shoot(source: &TagSource, shots: &[(Shot, S
 pub(in crate::app::model_preview) const SHOT_SIZE: [u32; 2] = [1000, 760];
 
 #[test]
-fn h2_shot() {
+fn shot() {
     let (Ok(shots), Ok(root)) = (std::env::var("H2_SHOT"), std::env::var("BLAM_TEST_H2EK")) else {
         return;
     };

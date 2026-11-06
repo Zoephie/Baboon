@@ -1472,8 +1472,8 @@ fn paint_model_gl(
 }
 
 #[cfg(all(test, target_os = "macos"))]
-#[path = "h2_shot.rs"]
-pub(super) mod h2_shot;
+#[path = "headless_shot.rs"]
+pub(super) mod headless_shot;
 #[path = "h3_bloom.rs"]
 mod h3_bloom;
 pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
