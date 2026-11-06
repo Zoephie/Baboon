@@ -2131,7 +2131,7 @@ pub(in crate::app) fn draw_foundation_block_control(
         // actions are gated behind `allow_structural`.
         let name_label = name_label.on_hover_text(format!("{block_title}\nRight-click for block options"));
         context_menu(&name_label, |ui| {
-            draw_block_header_menu(ui, count, allow_structural, editable, paste_gate, &mut actions);
+            draw_block_header_menu(ui, count, max_count, allow_structural, editable, paste_gate, &mut actions);
         });
         if show_search_jump
             && icon_button(
@@ -2263,7 +2263,7 @@ pub(in crate::app) fn draw_foundation_block_control(
                 ui.separator();
             }
             draw_block_header_menu(
-                ui, count, allow_structural, editable, paste_gate, &mut actions,
+                ui, count, max_count, allow_structural, editable, paste_gate, &mut actions,
             );
         });
         };
@@ -2386,11 +2386,18 @@ fn draw_block_compact_actions(
 fn draw_block_header_menu(
     ui: &mut Ui,
     count: usize,
+    max_count: Option<u32>,
     allow_structural: bool,
     editable: bool,
     paste_gate: PasteGate,
     actions: &mut BlockHeaderActions,
 ) {
+    let capacity = max_count.filter(|&limit| limit != 0).map(|limit| limit as usize);
+    let fits = |new_count: usize| capacity.is_none_or(|limit| new_count <= limit);
+    let copied_count = match paste_gate {
+        PasteGate::Ready { count, .. } => Some(count),
+        _ => None,
+    };
     if allow_structural {
         if icon_text_button(ui, ButtonIcon::TableView, "Reorganize Entries", editable).clicked() {
             actions.reorganize = true;
@@ -2412,14 +2419,22 @@ fn draw_block_header_menu(
         ui.separator();
         if allow_structural {
             let response = icon_text_button(ui, ButtonIcon::Paste, "Paste",
-                editable && matches!(paste_gate, PasteGate::Ready { .. }));
+                editable && capacity != Some(1)
+                    && copied_count.is_some_and(|n| fits(count.saturating_add(n))));
             if response.clicked() {
                 actions.paste = true;
                 close_menu(ui);
             }
             match paste_gate {
                 PasteGate::Ready { count: n, .. } => {
-                    response.on_hover_text(format!("Insert {n} clipboard entries"));
+                    let hint = if capacity == Some(1) {
+                        "This block allows one entry. Use Paste to Replace instead.".to_owned()
+                    } else if !fits(count.saturating_add(n)) {
+                        format!("Pasting {n} entries would exceed this block's maximum of {}.", capacity.unwrap())
+                    } else {
+                        format!("Insert {n} clipboard entries")
+                    };
+                    response.on_hover_text(&hint).on_disabled_hover_text(&hint);
                 }
                 PasteGate::VersionMismatch => {
                     response.on_disabled_hover_text(
@@ -2433,11 +2448,16 @@ fn draw_block_header_menu(
             }
         }
         let replacement = match paste_gate {
-            PasteGate::Ready { whole_block: true, .. } if allow_structural => Some(true),
-            PasteGate::Ready { whole_block: false, .. } if count > 0 => Some(false),
+            PasteGate::Ready { count: n, whole_block: true } if allow_structural && fits(n) => Some(true),
+            PasteGate::Ready { count: 1, whole_block: false }
+                if (count > 0 && fits(count)) || (allow_structural && count == 0 && capacity == Some(1)) => Some(false),
             _ => None,
         };
         let hint = match paste_gate {
+            PasteGate::Ready { count: n, .. } if !fits(n) =>
+                "The copied entries exceed this block's maximum entry count",
+            PasteGate::Ready { whole_block: false, .. } if count == 0 && capacity == Some(1) =>
+                "Fill this single-entry block with the copied entry",
             PasteGate::Ready { whole_block: true, .. } if !allow_structural =>
                 "A whole block cannot replace an entry in a fixed-size array",
             PasteGate::Ready { whole_block: true, .. } =>
@@ -2454,6 +2474,9 @@ fn draw_block_header_menu(
         {
             if replacement == Some(true) {
                 actions.replace_block = true;
+            } else if count == 0 {
+                // A single-entry block can be filled through replacement when empty.
+                actions.paste = true;
             } else {
                 actions.replace_element = true;
             }
@@ -3460,6 +3483,92 @@ mod tests {
     }
 
     #[test]
+    fn block_paste_actions_respect_schema_capacity() {
+        for (label, max_count, count, copied_count, whole_block, expected) in [
+            ("Paste", Some(1), 0, 1, false, "none"),
+            ("Paste", Some(1), 1, 1, false, "none"),
+            ("Paste to Replace Entry", Some(1), 0, 1, false, "paste"),
+            ("Paste to Replace Entry", Some(1), 1, 1, false, "entry"),
+            ("Paste to Replace Block", Some(1), 1, 1, true, "block"),
+            ("Paste to Replace Block", Some(1), 1, 2, true, "none"),
+            ("Paste to Replace Entry", Some(1), 1, 2, false, "none"),
+            ("Paste", Some(4), 3, 2, true, "none"),
+            ("Paste", Some(4), 3, 1, false, "paste"),
+            ("Paste to Replace Block", Some(4), 4, 4, true, "block"),
+            ("Paste to Replace Block", Some(4), 4, 5, true, "none"),
+            ("Paste", Some(0), 10, 2, true, "paste"),
+            ("Paste", None, 10, 2, true, "paste"),
+        ] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut actions = BlockHeaderActions::default();
+            let mut frame = |events| crate::app::run_ui_test(&ctx,
+                egui::RawInput { events, ..Default::default() }, |ui| {
+                    ui.vertical(|ui| draw_block_header_menu(ui, count, max_count, true, true,
+                        PasteGate::Ready { count: copied_count, whole_block }, &mut actions));
+                });
+            let output = frame(vec![]);
+            let pos = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label =>
+                    Some(text.pos + text.galley.rect.center().to_vec2()),
+                _ => None,
+            }).expect(label);
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton {
+                    pos, pressed, button: egui::PointerButton::Primary, modifiers: Default::default(),
+                }]);
+            }
+            assert_eq!(actions.paste, expected == "paste", "{label}, cap={max_count:?}, count={count}, copied={copied_count}");
+            assert_eq!(actions.replace_element, expected == "entry");
+            assert_eq!(actions.replace_block, expected == "block");
+        }
+    }
+
+    #[test]
+    fn single_entry_block_options_disable_insertion_paste() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let mut last_actions = BlockHeaderActions::default();
+        let mut frame = |events| {
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(760.0, 600.0))),
+                events, ..Default::default()
+            }, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    last_actions = draw_foundation_block_control(ui, "Limited", "0. entry", 0, 1,
+                        Some(1), true, true, "paste_limit", "test", "effect", 0, true, None, false,
+                        PasteGate::Ready { count: 1, whole_block: false }, None,
+                        |_| "0. entry".to_owned(), |_| {});
+                });
+            });
+            (output, last_actions.paste)
+        };
+        frame(vec![]);
+        let (output, _) = frame(vec![]);
+        let title = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Limited" => Some(text.pos + text.galley.rect.center().to_vec2()),
+            _ => None,
+        }).unwrap();
+        for pressed in [true, false] {
+            frame(vec![egui::Event::PointerMoved(title), egui::Event::PointerButton {
+                pos: title, pressed, button: egui::PointerButton::Secondary, modifiers: Default::default(),
+            }]);
+        }
+        let (output, _) = frame(vec![]);
+        let paste = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Paste" => Some(text.pos + text.galley.rect.center().to_vec2()),
+            _ => None,
+        }).expect("block context menu has Paste");
+        let mut inserted = false;
+        for pressed in [true, false] {
+            inserted |= frame(vec![egui::Event::PointerMoved(paste), egui::Event::PointerButton {
+                pos: paste, pressed, button: egui::PointerButton::Primary, modifiers: Default::default(),
+            }]).1;
+        }
+        assert!(!inserted, "Paste must not insert a second entry into a single-entry block");
+    }
+
+    #[test]
     fn paste_to_replace_uses_copy_mode_including_single_entry_blocks() {
         for (whole_block, copied_count, structural, editable, target_count, expected) in [
             (false, 1, true, true, 3, Some(false)),
@@ -3476,7 +3585,7 @@ mod tests {
             let mut actions = BlockHeaderActions::default();
             let mut frame = |events| crate::app::run_ui_test(&ctx,
                 egui::RawInput { events, ..Default::default() }, |ui| {
-                    ui.vertical(|ui| draw_block_header_menu(ui, target_count, structural, editable,
+                    ui.vertical(|ui| draw_block_header_menu(ui, target_count, None, structural, editable,
                         PasteGate::Ready { count: copied_count, whole_block }, &mut actions));
                 });
             let output = frame(vec![]);
@@ -3518,7 +3627,7 @@ mod tests {
             let mut actions = BlockHeaderActions::default();
             let mut frame = |events| crate::app::run_ui_test(&ctx,
                 egui::RawInput { events, ..Default::default() }, |ui| {
-                    ui.vertical(|ui| draw_block_header_menu(ui, count, structural, editable, paste_gate, &mut actions));
+                    ui.vertical(|ui| draw_block_header_menu(ui, count, None, structural, editable, paste_gate, &mut actions));
                 });
             let output = frame(vec![]);
             let pos = output.shapes.iter().find_map(|shape| match &shape.shape {
@@ -3538,7 +3647,7 @@ mod tests {
         let ctx = egui::Context::default();
         Baboon::configure_context(&ctx);
         let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
-            draw_block_header_menu(ui, 3, false, true, PasteGate::Ready { count: 1, whole_block: false }, &mut BlockHeaderActions::default());
+            draw_block_header_menu(ui, 3, None, false, true, PasteGate::Ready { count: 1, whole_block: false }, &mut BlockHeaderActions::default());
         });
         for shape in output.shapes {
             if let egui::Shape::Text(text) = shape.shape {
