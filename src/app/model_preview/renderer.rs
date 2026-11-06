@@ -3045,7 +3045,6 @@ fn ce_groups(
     let camera = &frame.camera;
     let effects = &frame.preview.ce_effects;
     let states = &frame.object_states;
-    advance_ce_effects(uploaded, frame, bones);
     let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
     let ground = lowest.fold(0.0, f32::min);
     let mut viewport = [0; 4];
@@ -4276,7 +4275,9 @@ impl ModelGlRenderer {
             }
             self.ce_points_now = None;
             self.h3_depth_copy = None;
-            if frame.preview.ce_effects.iter().any(|effect| !effect.def.lights.is_empty()) {
+            // Halo CE's effects advance once a frame, here, before anything
+            // draws or lights by them.
+            if !frame.preview.ce_effects.is_empty() {
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let uploaded = &mut self.slots[slot];
                 advance_ce_effects(uploaded, frame, bones);
