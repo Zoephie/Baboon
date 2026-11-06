@@ -1,4 +1,5 @@
-//! Halo 2's object functions: what its shaders and attachments read by name.
+//! Object functions from Halo 2 on: what shaders, attachments and effects
+//! read by name. Halo 2 and the gen3 games differ only in [`FunctionRules`].
 //!
 //! An object's `functions` block turns the values its type exports into named
 //! outputs. In a preview nothing runs, so the panel sets those inputs, and
@@ -13,14 +14,14 @@ use eframe::egui::{self, Ui};
 
 use crate::app::ui_kit::ThemedCheckbox;
 
-use super::super::common::fields::{elements, has_flag, object_block};
-use super::super::dx9::passes::{object_input, tag_function_at};
+use super::common::fields::{elements, has_flag, object_block};
+use super::dx9::passes::{object_input, tag_function_at};
 use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
 
 /// What the panel has set, by object geometry and input name.
-pub(crate) type H2FunctionInputs = HashMap<(u64, String), f32>;
+pub(crate) type FunctionInputs = HashMap<(u64, String), f32>;
 /// Every name an object answers to this frame.
-pub(crate) type H2FunctionValues = HashMap<String, f32>;
+pub(crate) type FunctionValues = HashMap<String, f32>;
 
 /// A function's `flags`, by option name.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -117,9 +118,9 @@ impl FunctionSwitch {
     /// none, the export is 0 and off.
     fn evaluate(
         &self,
-        owner: &H2ObjectFunctions,
-        inputs: &H2FunctionValues,
-        scripted: &H2FunctionValues,
+        owner: &ObjectFunctions,
+        inputs: &FunctionValues,
+        scripted: &FunctionValues,
         clock: Clock,
         depth: usize,
     ) -> (f32, bool) {
@@ -134,7 +135,7 @@ impl FunctionSwitch {
 
 /// An object's `functions` block, and what its type exports to it.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct H2ObjectFunctions {
+pub(crate) struct ObjectFunctions {
     functions: Vec<H2ObjectFunction>,
     /// Halo 4's `function switches`; empty for every earlier game.
     switches: Vec<FunctionSwitch>,
@@ -378,9 +379,9 @@ impl H2ObjectFunction {
     /// `sub_86ECD0`: the value and whether it is active.
     fn evaluate(
         &self,
-        owner: &H2ObjectFunctions,
-        inputs: &H2FunctionValues,
-        scripted: &H2FunctionValues,
+        owner: &ObjectFunctions,
+        inputs: &FunctionValues,
+        scripted: &FunctionValues,
         clock: Clock,
         depth: usize,
     ) -> (f32, bool) {
@@ -433,7 +434,7 @@ impl H2ObjectFunction {
     }
 }
 
-impl H2ObjectFunctions {
+impl ObjectFunctions {
     /// What an idle object gives `name`: its type's exporter's value, or,
     /// where those are not known, [`object_input`]'s.
     fn idle(&self, name: &str) -> f32 {
@@ -451,7 +452,7 @@ impl H2ObjectFunctions {
 
     /// What `object_type_export_function_values` leaves for `name`: the
     /// panel's value, else the idle one, and whether that is on.
-    fn exported(&self, name: &str, inputs: &H2FunctionValues) -> (f32, bool) {
+    fn exported(&self, name: &str, inputs: &FunctionValues) -> (f32, bool) {
         let value = inputs.get(name).copied().unwrap_or_else(|| self.idle(name));
         (value, value > 0.0)
     }
@@ -489,8 +490,8 @@ impl H2ObjectFunctions {
     fn value(
         &self,
         name: &str,
-        inputs: &H2FunctionValues,
-        scripted: &H2FunctionValues,
+        inputs: &FunctionValues,
+        scripted: &FunctionValues,
         clock: Clock,
         depth: usize,
     ) -> (f32, bool) {
@@ -550,7 +551,7 @@ impl H2ObjectFunctions {
     }
 
     /// Whether anything here moves with no one touching it.
-    pub(crate) fn move_at_rest(&self, inputs: &H2FunctionValues) -> bool {
+    pub(crate) fn move_at_rest(&self, inputs: &FunctionValues) -> bool {
         self.functions.iter().any(|function| {
             function.is_periodic() && self.exported(&function.import, inputs).0 > 0.0
         })
@@ -560,21 +561,21 @@ impl H2ObjectFunctions {
     /// `owner` is 0 for the opened object, else the attached one's number.
     pub(crate) fn values(
         &self,
-        inputs: &H2FunctionInputs,
+        inputs: &FunctionInputs,
         geometry_id: u64,
         extra: &[String],
         time: f32,
         owner: u8,
-    ) -> H2FunctionValues {
+    ) -> FunctionValues {
         let clock = Clock::of(time, owner);
-        let mut set = H2FunctionValues::new();
+        let mut set = FunctionValues::new();
         let names = self.imports().into_iter().map(str::to_owned).chain(extra.iter().cloned());
         for name in names {
             let value = inputs.get(&(geometry_id, name.clone())).copied().unwrap_or_else(|| self.idle(&name));
             set.insert(name, value);
         }
         // What the panel sets of a name a function makes is a script's value.
-        let scripted: H2FunctionValues = self
+        let scripted: FunctionValues = self
             .exports_named()
             .filter_map(|export| {
                 let value = inputs.get(&(geometry_id, export.to_owned()))?;
@@ -593,7 +594,7 @@ impl H2ObjectFunctions {
 /// An object's functions, or none on a tag with no such block. An empty block
 /// still counts: its shaders can read what the object's type exports. `model`
 /// is the object's, whose damage info and variants some exports report.
-pub(crate) fn read_h2_object_functions(object: &TagFile, model: Option<&TagFile>) -> Option<H2ObjectFunctions> {
+pub(crate) fn read_object_functions(object: &TagFile, model: Option<&TagFile>) -> Option<ObjectFunctions> {
     let block = object_block(object, "functions")?;
     let name = |entry: TagStruct<'_>, field: &str| entry.read_string_id(field).unwrap_or_default();
     let functions: Vec<_> = elements(block, "functions")
@@ -619,7 +620,7 @@ pub(crate) fn read_h2_object_functions(object: &TagFile, model: Option<&TagFile>
     let switches = object_block(object, "function switches")
         .map(|block| read_function_switches(block, &name))
         .unwrap_or_default();
-    Some(H2ObjectFunctions { functions, switches, rules, exports: TypeExports::of(object, model) })
+    Some(ObjectFunctions { functions, switches, rules, exports: TypeExports::of(object, model) })
 }
 
 /// Halo 4's `function switches`. A case that picks its own switch's export is
@@ -648,7 +649,7 @@ fn read_function_switches(block: TagStruct<'_>, name: &impl Fn(TagStruct<'_>, &s
 
 /// A button for each effect an event would play. An effect starts when its
 /// function comes on, so a press turns it off for a frame and then on.
-fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut H2FunctionInputs) {
+fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut FunctionInputs) {
     const STARTING: f32 = -1.0;
     for name in events {
         if let Some(value) = set.get_mut(&(key, (*name).to_owned()))
@@ -673,12 +674,12 @@ fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut H2Functi
 }
 
 /// Sliders for what an object imports, and what its functions come to.
-pub(in crate::app::model_preview) fn draw_h2_function_controls(
+pub(in crate::app::model_preview) fn draw_function_controls(
     ui: &mut Ui,
-    functions: &H2ObjectFunctions,
+    functions: &ObjectFunctions,
     key: u64,
-    set: &mut H2FunctionInputs,
-    values: &H2FunctionValues,
+    set: &mut FunctionInputs,
+    values: &FunctionValues,
     shader_inputs: &[String],
 ) {
     let mut names = functions.imports();
@@ -688,7 +689,7 @@ pub(in crate::app::model_preview) fn draw_h2_function_controls(
         }
     }
     let (events, names): (Vec<&str>, Vec<&str>) =
-        names.into_iter().partition(|name| super::super::gen3::effects::is_event_function(name));
+        names.into_iter().partition(|name| super::gen3::effects::is_event_function(name));
     draw_event_effects(ui, &events, key, set);
     if names.is_empty() {
         return;
@@ -765,7 +766,7 @@ mod tests {
 
     #[test]
     fn an_events_function_goes_by_its_field_and_a_region_name_does_not() {
-        use super::super::super::gen3::effects::is_event_function;
+        use super::super::gen3::effects::is_event_function;
         assert!(is_event_function("firing effect: firing"));
         assert!(is_event_function("transition effect (generic): human_explosion_large"));
         assert!(!is_event_function("headlights"));
@@ -779,7 +780,7 @@ mod tests {
         let mut down = function("shield_depleted", "shield_down");
         down.turn_off_with = "body_vitality".to_owned();
         let chained = function("shield_hit", "glow");
-        let functions = H2ObjectFunctions { functions: vec![shield, down, chained], ..Default::default() };
+        let functions = ObjectFunctions { functions: vec![shield, down, chained], ..Default::default() };
         let reached = functions.reaching(&["glow".to_owned()]);
         for name in ["glow", "shield_hit", "current_shield_damage", "scale"] {
             assert!(reached.iter().any(|known| known == name), "{name}");
@@ -804,19 +805,19 @@ mod tests {
 
     fn value(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> f32 {
         let inputs = inputs.iter().map(|(name, value)| ((*name).to_owned(), *value)).collect();
-        let functions = H2ObjectFunctions { functions, ..Default::default() };
-        functions.value(name, &inputs, &H2FunctionValues::new(), Clock::default(), 0).0
+        let functions = ObjectFunctions { functions, ..Default::default() };
+        functions.value(name, &inputs, &FunctionValues::new(), Clock::default(), 0).0
     }
 
     #[test]
     fn a_script_sets_what_a_function_makes_and_what_it_reads() {
         let functions = vec![function("", "invincibility"), function("zero", "effects")];
-        let functions = H2ObjectFunctions { functions, ..Default::default() };
-        let none = H2FunctionValues::new();
-        let scripted: H2FunctionValues = [("invincibility".to_owned(), 1.0)].into_iter().collect();
+        let functions = ObjectFunctions { functions, ..Default::default() };
+        let none = FunctionValues::new();
+        let scripted: FunctionValues = [("invincibility".to_owned(), 1.0)].into_iter().collect();
         assert_eq!(functions.value("invincibility", &none, &none, Clock::default(), 0).0, 0.0, "an empty import reads nothing");
         assert_eq!(functions.value("invincibility", &none, &scripted, Clock::default(), 0).0, 1.0);
-        let by_import: H2FunctionValues = [("zero".to_owned(), 0.75)].into_iter().collect();
+        let by_import: FunctionValues = [("zero".to_owned(), 0.75)].into_iter().collect();
         assert_eq!(functions.value("effects", &none, &by_import, Clock::default(), 0).0, 0.75, "the import's script value, unmapped");
     }
 
@@ -825,9 +826,9 @@ mod tests {
         FunctionSwitch { switch: switch.to_owned(), export: export.to_owned(), cases }
     }
 
-    fn switched(functions: Vec<H2ObjectFunction>, switches: Vec<FunctionSwitch>, inputs: &[(&str, f32)]) -> H2FunctionValues {
-        let functions = H2ObjectFunctions { functions, switches, rules: FunctionRules::Gen3, exports: None };
-        let inputs: H2FunctionInputs = inputs.iter().map(|(name, value)| ((0, (*name).to_owned()), *value)).collect();
+    fn switched(functions: Vec<H2ObjectFunction>, switches: Vec<FunctionSwitch>, inputs: &[(&str, f32)]) -> FunctionValues {
+        let functions = ObjectFunctions { functions, switches, rules: FunctionRules::Gen3, exports: None };
+        let inputs: FunctionInputs = inputs.iter().map(|(name, value)| ((0, (*name).to_owned()), *value)).collect();
         functions.values(&inputs, 0, &[], 0.0, 0)
     }
 
@@ -863,7 +864,7 @@ mod tests {
     /// The panel offers what a switch reads, and not what it makes.
     #[test]
     fn a_switch_reads_its_switch_function_and_makes_its_export() {
-        let functions = H2ObjectFunctions {
+        let functions = ObjectFunctions {
             functions: vec![function("red", "red_out")],
             switches: vec![switch("pick", "color", &[([0.0, 1.0], "red_out")])],
             ..Default::default()
@@ -885,14 +886,14 @@ mod tests {
         };
         let path = std::path::Path::new(&root).join("objects/characters/storm_cortana/storm_cortana.biped");
         let tag = TagFile::read(&path).unwrap();
-        let functions = read_h2_object_functions(&tag, None).unwrap();
+        let functions = read_object_functions(&tag, None).unwrap();
         assert!(!functions.switches.is_empty());
         for switch in &functions.switches {
             assert!(!switch.export.is_empty() && !switch.switch.is_empty(), "{switch:?}");
             assert!(switch.cases.iter().all(|(_, function)| !function.is_empty()), "{switch:?}");
             assert!(functions.makes(&switch.export), "{}", switch.export);
         }
-        let values = functions.values(&H2FunctionInputs::new(), 0, &[], 0.0, 0);
+        let values = functions.values(&FunctionInputs::new(), 0, &[], 0.0, 0);
         assert!(functions.switches.iter().all(|switch| values.contains_key(&switch.export)));
     }
 
@@ -917,10 +918,10 @@ mod tests {
         assert_eq!(value(vec![scaled], "glow", &[("speed", 0.5), ("power", 0.5)]), 0.25);
     }
 
-    fn device(functions: Vec<H2ObjectFunction>) -> H2ObjectFunctions {
+    fn device(functions: Vec<H2ObjectFunction>) -> ObjectFunctions {
         let tables = &[OBJECT_EXPORTS, DEVICE_EXPORTS];
         let exports = TypeExports { tables, has_body: true, has_shield: false, variants: 4 };
-        H2ObjectFunctions { functions, exports: Some(exports), ..Default::default() }
+        ObjectFunctions { functions, exports: Some(exports), ..Default::default() }
     }
 
     #[test]
@@ -928,10 +929,10 @@ mod tests {
         // A control with its own `position` function, as several kit
         // switches have: the device's exporter wins, idle at 0.
         let functions = device(vec![function("one", "position")]);
-        let none = H2FunctionValues::new();
+        let none = FunctionValues::new();
         assert_eq!(functions.value("position", &none, &none, Clock::default(), 0), (0.0, false));
         assert!(!functions.makes("position"), "it is an input, the panel's to set");
-        let set = H2FunctionValues::from([("position".to_owned(), 0.5)]);
+        let set = FunctionValues::from([("position".to_owned(), 0.5)]);
         assert_eq!(functions.value("position", &set, &none, Clock::default(), 0).0, 0.5);
     }
 
@@ -950,8 +951,8 @@ mod tests {
     #[test]
     fn without_known_exporters_the_functions_answer_first() {
         // Halo 3 and ODST, whose exporters this does not have.
-        let functions = H2ObjectFunctions { functions: vec![function("one", "position")], ..Default::default() };
-        let none = H2FunctionValues::new();
+        let functions = ObjectFunctions { functions: vec![function("one", "position")], ..Default::default() };
+        let none = FunctionValues::new();
         assert_eq!(functions.value("position", &none, &none, Clock::default(), 0), (1.0, true));
     }
 
@@ -971,8 +972,8 @@ mod tests {
 
     fn gen3(functions: Vec<H2ObjectFunction>, name: &str, inputs: &[(&str, f32)]) -> (f32, bool) {
         let inputs = inputs.iter().map(|(name, value)| ((*name).to_owned(), *value)).collect();
-        let functions = H2ObjectFunctions { functions, rules: FunctionRules::Gen3, ..Default::default() };
-        functions.value(name, &inputs, &H2FunctionValues::new(), Clock::default(), 0)
+        let functions = ObjectFunctions { functions, rules: FunctionRules::Gen3, ..Default::default() };
+        functions.value(name, &inputs, &FunctionValues::new(), Clock::default(), 0)
     }
 
     #[test]

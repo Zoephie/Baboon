@@ -12,7 +12,7 @@ use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{has_flag, has_flag_labelled};
 use super::super::ce::lights::posed_on;
 use super::super::h3::lights::SHADOWS_AND_GELS;
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::part_markers;
 use super::super::*;
@@ -47,7 +47,7 @@ pub(crate) enum ReachLightMethod {
 
 /// `object_get_function_value_simple`: no name reads full, and a name the
 /// object does not answer, nothing.
-pub(in crate::app::model_preview) fn object_value(values: Option<&H2FunctionValues>, name: &str) -> f32 {
+pub(in crate::app::model_preview) fn object_value(values: Option<&FunctionValues>, name: &str) -> f32 {
     if name.is_empty() || name == "one" {
         return 1.0;
     }
@@ -244,7 +244,7 @@ impl ReachLight {
     /// it does not exist or gives no light. `age` is seconds since it came on.
     pub(crate) fn lit(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         age: f32,
@@ -327,7 +327,7 @@ impl ReachCheapLight {
     /// `render_object_attachments`' cheap light this frame. Its functions run
     /// on render time, not the object's; the attachment's scale only decides
     /// whether it draws.
-    pub(crate) fn lit(&self, values: Option<&H2FunctionValues>, change_colors: &[[f32; 3]; 4], bones: Option<&[[f32; 4]]>, time: f32) -> Option<ReachLitLight> {
+    pub(crate) fn lit(&self, values: Option<&FunctionValues>, change_colors: &[[f32; 3]; 4], bones: Option<&[[f32; 4]]>, time: f32) -> Option<ReachLitLight> {
         let scale = object_value(values, &self.scale_by) * object_value(values, &self.secondary_by);
         if scale <= 0.0 {
             return None;

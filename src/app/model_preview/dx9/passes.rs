@@ -15,7 +15,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 use blam_tags::tag_function::FunctionType;
 
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 
 use super::super::h2::prt::H2PrtLight;
 use super::super::ce::passes::{CeModelAnimation, CeNumeric};
@@ -547,7 +547,7 @@ impl PartialEq for H2Animation {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct H2Clock<'a> {
     pub(crate) time: f32,
-    pub(crate) values: Option<&'a H2FunctionValues>,
+    pub(crate) values: Option<&'a FunctionValues>,
 }
 
 impl From<f32> for H2Clock<'_> {
@@ -667,7 +667,7 @@ fn h2_laid_out_function(mapping: TagStruct<'_>) -> Option<TagFunction> {
 /// condition, and otherwise the zero the game falls back on when nothing
 /// exports the name, which leaves boosts, hits and open doors off. A guess,
 /// for what has no object to ask: a Halo 2 object's functions answer from its
-/// type's exporters (`h2::functions`), which Halo 3 and ODST's are not yet.
+/// type's exporters (`functions`), which Halo 3 and ODST's are not yet.
 pub(in crate::app::model_preview) fn object_input(name: &str) -> f32 {
     match name {
         "alive" | "body_vitality" | "device_power" | "electrical_power" | "health" | "one"
@@ -2037,7 +2037,7 @@ mod tests {
         assert_eq!(held.input(3.0.into()), 1.0);
         assert!(!held.moves());
         // An object's functions take over from the resting value.
-        let values = H2FunctionValues::from([("boost".to_owned(), 0.25)]);
+        let values = FunctionValues::from([("boost".to_owned(), 0.25)]);
         assert_eq!(held.input(H2Clock { time: 3.0, values: Some(&values) }), 0.25);
     }
 

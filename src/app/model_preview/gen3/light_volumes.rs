@@ -11,7 +11,7 @@ use blam_tags::{TagFunction, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::effects::{
     H3EffectTimes, for_each_attached_part, part_frame, read_part_placement,
@@ -785,7 +785,7 @@ impl H3LightVolumeAt {
     }
 
     /// The states this frame, or none while its event is not running.
-    fn state(&self, values: Option<&H2FunctionValues>, time: f32, onset: f32) -> Option<H3VolumeState> {
+    fn state(&self, values: Option<&FunctionValues>, time: f32, onset: f32) -> Option<H3VolumeState> {
         let read = |name: &str, none: f32| {
             if name.is_empty() {
                 return none;
@@ -812,7 +812,7 @@ impl H3LightVolumeAt {
     /// while it draws nothing.
     fn layout(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
@@ -853,7 +853,7 @@ impl H3LightVolumeAt {
     /// for each profile, the state `light_volume_update.fx` writes, packed.
     pub(crate) fn h4_draw(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
@@ -867,7 +867,7 @@ impl H3LightVolumeAt {
     fn h4_frame(
         &self,
         appearance: u32,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
@@ -923,7 +923,7 @@ impl H3LightVolumeAt {
     /// screen effects' exposure `stops`.
     pub(crate) fn quads(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,

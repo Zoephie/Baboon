@@ -10,7 +10,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::light_volumes::{read_glow, read_h2_bitmap};
 use super::lights::attachment_value;
 use super::super::dx9::passes::{H2Image, tag_function_at};
@@ -281,7 +281,7 @@ impl H2LiquidAt {
     pub(crate) fn quads(
         &self,
         arc: &LiquidArc,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,

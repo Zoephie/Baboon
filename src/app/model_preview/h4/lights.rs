@@ -14,7 +14,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::ce::lights::posed_on;
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::part_markers;
 use super::super::gen3::shaders::H3Pass;
@@ -258,7 +258,7 @@ impl H4Light {
     /// none while it does not exist or gives no light.
     pub(crate) fn lit(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         time: f32,
@@ -372,7 +372,7 @@ impl H4CheapLight {
     /// is its functions' input and its gate, never its brightness.
     pub(crate) fn lit(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         time: f32,
@@ -819,7 +819,7 @@ mod tests {
             light.lit(None, &[[1.0; 3]; 4], None, 0.0).is_none(),
             "a scale no one answers reads 0"
         );
-        let mut values = H2FunctionValues::default();
+        let mut values = FunctionValues::default();
         values.insert("alive".to_owned(), 1.0);
         let lit = light
             .lit(Some(&values), &[[1.0; 3]; 4], None, 0.0)

@@ -16,7 +16,7 @@ use blam_tags::TagStruct;
 use blam_tags::tag_function::FunctionType;
 
 use super::super::common::fields::{elements, has_flag, has_flag_labelled};
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::H2Image;
 use super::super::*;
 use crate::core::hlsl::emit::{Stage, Translated, translate};
@@ -952,7 +952,7 @@ impl H3Clock {
 impl H3Animation {
     /// `evaluate_function`: an object's named values, or else time around a
     /// period, which only a periodic function runs past 1.
-    fn sample(&self, time: f32, owner: u8, values: Option<&H2FunctionValues>) -> (f32, f32) {
+    fn sample(&self, time: f32, owner: u8, values: Option<&FunctionValues>) -> (f32, f32) {
         // `object_get_function_value`: no name at all reads full, so a parameter
         // with an input and no range runs on its function's upper curve.
         let named = |name: &str| {
@@ -974,7 +974,7 @@ impl H3Animation {
     }
 
     /// Write this into `value`, the constant as it stands.
-    pub(crate) fn apply(&self, value: &mut [f32; 4], time: f32, owner: u8, values: Option<&H2FunctionValues>) {
+    pub(crate) fn apply(&self, value: &mut [f32; 4], time: f32, owner: u8, values: Option<&FunctionValues>) {
         let (input, range) = self.sample(time, owner, values);
         if self.writes == H3Animated::Color {
             let color = self.function.evaluate_color(input, range);
@@ -992,7 +992,7 @@ impl H3Animation {
     }
 
     /// `render_method_submit_volatile_per_node`'s choice among `count` images.
-    pub(crate) fn frame(&self, count: usize, time: f32, owner: u8, values: Option<&H2FunctionValues>) -> usize {
+    pub(crate) fn frame(&self, count: usize, time: f32, owner: u8, values: Option<&FunctionValues>) -> usize {
         let (input, range) = self.sample(time, owner, values);
         let frame = (self.function.evaluate(input, range) % count as f32).floor() as isize;
         frame.clamp(0, count as isize - 1) as usize
@@ -1022,7 +1022,7 @@ mod texel_tests {
 
     #[test]
     fn an_empty_name_beside_a_named_one_reads_full() {
-        let values = H2FunctionValues::from([("power".to_owned(), 0.25), ("heat".to_owned(), 0.5)]);
+        let values = FunctionValues::from([("power".to_owned(), 0.25), ("heat".to_owned(), 0.5)]);
         let values = Some(&values);
         assert_eq!(animation("power", "").sample(0.0, 0, values), (0.25, 1.0));
         assert_eq!(animation("", "heat").sample(0.0, 0, values), (1.0, 0.5));
@@ -1032,7 +1032,7 @@ mod texel_tests {
 
     #[test]
     fn render_time_is_the_clock_only_in_odst_screen_shaders() {
-        let values = H2FunctionValues::new();
+        let values = FunctionValues::new();
         let mut timed = animation("render_time", "");
         assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.0, 1.0), "an object function, and none is set");
         timed.clock = H3Clock::Odst;

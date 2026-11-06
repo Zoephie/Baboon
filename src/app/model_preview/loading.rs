@@ -442,7 +442,7 @@ fn load_tag_preview(
         let mut notes = std::mem::take(&mut data.notes);
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::h2::functions::read_h2_object_functions(model_tag, Some(model));
+            let functions = || super::functions::read_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its lights and effects", preview, |preview| {
@@ -453,7 +453,7 @@ fn load_tag_preview(
         // on their own readers; what the object's shaders read does not.
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::HaloReach), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::h2::functions::read_h2_object_functions(model_tag, Some(model));
+            let functions = || super::functions::read_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its flares and lights", preview, |preview| {
@@ -464,7 +464,7 @@ fn load_tag_preview(
         // attachments, lights and effects wait on their own readers.
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo4), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::h2::functions::read_h2_object_functions(model_tag, Some(model));
+            let functions = || super::functions::read_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             preview.h4_bounding_sphere = read_h4_bounding_sphere(model_tag);
@@ -484,7 +484,7 @@ fn load_tag_preview(
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::h2::functions::read_h2_object_functions(model_tag, Some(model));
+            let functions = || super::functions::read_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its lights and effects", preview, |preview| {

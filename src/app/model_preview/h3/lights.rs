@@ -12,7 +12,7 @@ use super::super::ce::lights::{CeFlareView, CeSprite, posed_on};
 use super::super::gen3::effects::{
     H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
 };
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use blam_tags::tag_function::transition_function_evaluate;
 
 use super::super::dx9::passes::{H2Image, tag_function_at};
@@ -51,7 +51,7 @@ impl H3Channel {
     }
 
     /// `light_update`: seconds alive, unless an object function is named.
-    fn sample(&self, values: Option<&H2FunctionValues>, time: f32) -> (f32, f32) {
+    fn sample(&self, values: Option<&FunctionValues>, time: f32) -> (f32, f32) {
         let named = |name: &str| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
         let input = if self.input.is_empty() { time } else { named(&self.input) };
         let range = if self.range.is_empty() { DEFAULT_RANGE } else { named(&self.range) };
@@ -157,7 +157,7 @@ impl H3Light {
     /// or none while the light is out.
     pub(crate) fn state(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         time: f32,
         onset: f32,
@@ -190,7 +190,7 @@ impl H3Light {
     /// The light this frame, or none while it is out.
     pub(crate) fn lit(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         time: f32,
@@ -470,7 +470,7 @@ impl H3FlareColor {
         })
     }
 
-    fn at(&self, input: f32, values: Option<&H2FunctionValues>) -> [f32; 3] {
+    fn at(&self, input: f32, values: Option<&FunctionValues>) -> [f32; 3] {
         let driven = values.filter(|_| !self.input.is_empty()).and_then(|values| values.get(&self.input)).copied();
         let input = driven.unwrap_or_else(|| self.function.evaluate(input, 0.0));
         let color = self.function.evaluate_color(input, 1.0);
@@ -755,7 +755,7 @@ impl H3FlareAt {
     fn scale_and_tint(
         &self,
         light: Option<([f32; 3], f32)>,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         time: f32,
     ) -> (f32, [f32; 3]) {
         let Some((color, scale)) = light else {
@@ -784,7 +784,7 @@ impl H3FlareAt {
     }
 
     /// The object's `primary scale`, which also runs the flare's bounds.
-    fn scale(&self, values: Option<&H2FunctionValues>, time: f32) -> f32 {
+    fn scale(&self, values: Option<&FunctionValues>, time: f32) -> f32 {
         // `effect_generate_lens_flares`: out with its event, fading as it ages.
         let aged = match &self.event {
             Some((times, event)) => match times.age(*event, time) {
@@ -820,7 +820,7 @@ impl H3FlareAt {
     pub(crate) fn occlusion_patch(
         &self,
         light: Option<([f32; 3], f32)>,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
@@ -860,7 +860,7 @@ impl H3FlareAt {
     pub(crate) fn sprite(
         &self,
         light: Option<([f32; 3], f32)>,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,

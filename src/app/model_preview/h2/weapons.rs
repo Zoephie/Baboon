@@ -677,7 +677,7 @@ fn fold_attached(
         }
     }
     merge_attached(preview, attached, parent, child, owner, name);
-    let functions = super::functions::read_h2_object_functions(object, Some(model))?;
+    let functions = super::super::functions::read_object_functions(object, Some(model))?;
     // `object_set_initial_change_colors`: each object its own, from its own tag.
     let change_colors = h2_change_colors_for(&read_h2_change_colors(object), variant);
     Some(H2AttachedObject { owner, functions, change_colors })
@@ -974,7 +974,7 @@ pub(in crate::app::model_preview) fn attach_variant_objects(
 pub(crate) struct H2AttachedObject {
     /// What its materials carry as `object`.
     pub(crate) owner: u8,
-    pub(crate) functions: super::functions::H2ObjectFunctions,
+    pub(crate) functions: super::super::functions::ObjectFunctions,
     pub(crate) change_colors: [[f32; 3]; 4],
 }
 

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, has_flag};
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
 use super::super::materials::decode_h2_image;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -104,7 +104,7 @@ pub(crate) struct ShieldState<'a> {
     /// `state[3]`.
     intensity: f32,
     time: f32,
-    values: Option<&'a H2FunctionValues>,
+    values: Option<&'a FunctionValues>,
 }
 
 /// A `shield_impact` as `s_shield_parameters::postprocess` leaves it.
@@ -210,7 +210,7 @@ impl ReachShieldSettings {
 
     /// The state `render_object_internal` decompresses, at the moment of an
     /// impact of `damage`: recent and current alike.
-    pub(crate) fn state<'a>(&self, damage: f32, time: f32, values: Option<&'a H2FunctionValues>) -> ShieldState<'a> {
+    pub(crate) fn state<'a>(&self, damage: f32, time: f32, values: Option<&'a FunctionValues>) -> ShieldState<'a> {
         let intensity = self.recent_intensity * damage + self.current_intensity * damage;
         ShieldState { recent: damage, current: damage, intensity, time, values }
     }

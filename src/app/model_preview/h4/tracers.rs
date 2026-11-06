@@ -15,7 +15,7 @@ use blam_tags::{TagFunction, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::ce::lights::posed_on;
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::{
     H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame,
@@ -759,7 +759,7 @@ impl H4TracerAt {
     /// `TracerStates::UpdateStates` (X 0x82991E10) at `time`, from `at`.
     fn frame(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         at: [f32; 3],
         eye: [f32; 3],
         time: f32,
@@ -850,7 +850,7 @@ impl H4TracerAt {
     /// not running, its effect is off or it can make no profiles.
     pub(crate) fn draw(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
         time: f32,
@@ -1180,7 +1180,7 @@ impl H4TracerField {
     pub(crate) fn advance(
         &mut self,
         tracers: &[H4TracerAt],
-        values: impl Fn(u8) -> Option<H2FunctionValues>,
+        values: impl Fn(u8) -> Option<FunctionValues>,
         onsets: &mut H3EffectOnsets,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
@@ -1235,7 +1235,7 @@ impl H4TracerField {
         &self,
         index: usize,
         tracer: &H4TracerAt,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
         time: f32,

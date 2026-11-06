@@ -14,7 +14,7 @@ use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::h3::lights::{OcclusionOffset, rotation_function};
 use super::super::ce::lights::posed_on;
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::{H2Image, tag_function_at};
 use super::super::gen3::effects::part_markers;
 use super::super::materials::{H3Bitmap, read_h3_bitmap};
@@ -413,7 +413,7 @@ impl H4FlareAt {
     /// scale. None while the scale is off.
     fn created(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
     ) -> Option<(f32, [f32; 3])> {
         let mut scale =
@@ -450,7 +450,7 @@ impl H4FlareAt {
         forward: [f32; 3],
         center: [f32; 2],
         opacity: f32,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         view: &H4FlareView<'_>,
         time: f32,
     ) -> Option<H4FlareParameters> {
@@ -584,7 +584,7 @@ impl H4FlareAt {
     /// shows nothing to test.
     pub(crate) fn occlusion_patch(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         view: &H4FlareView<'_>,
@@ -675,7 +675,7 @@ impl H4FlareAt {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draws(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         view: &H4FlareView<'_>,
@@ -911,7 +911,7 @@ mod tests {
         }
     }
 
-    fn alive() -> H2FunctionValues {
+    fn alive() -> FunctionValues {
         [("alive".to_owned(), 1.0)].into_iter().collect()
     }
 

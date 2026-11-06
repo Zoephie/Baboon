@@ -14,7 +14,7 @@ use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 use super::attachment::MarkerFrame;
 use super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::ce::lights::CeFlareView;
-use super::h2::functions::H2FunctionValues;
+use super::functions::FunctionValues;
 use super::dx9::passes::tag_function_at;
 use super::gen3::effects::H3EffectOnsets;
 use super::gen3::effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_runs_by};
@@ -2961,7 +2961,7 @@ fn step_location(
 /// The states of a system this step, or none while it should not emit.
 fn system_state(
     system: &H3ParticleSystem,
-    values: Option<&H2FunctionValues>,
+    values: Option<&FunctionValues>,
     time: f32,
     since: f32,
 ) -> Option<H3ParticleState> {
@@ -2999,7 +2999,7 @@ fn with_lod(
 /// ticks, and its one-tick events are many.
 fn system_state_stepped(
     system: &H3ParticleSystem,
-    values: Option<&H2FunctionValues>,
+    values: Option<&FunctionValues>,
     time: f32,
     dt: f32,
     onset: f32,
@@ -3449,7 +3449,7 @@ impl H3ParticleField {
     pub(crate) fn advance(
         &mut self,
         systems: &[Arc<H3ParticleSystem>],
-        values: impl Fn(u8) -> Option<H2FunctionValues>,
+        values: impl Fn(u8) -> Option<FunctionValues>,
         onsets: &mut H3EffectOnsets,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
@@ -3598,7 +3598,7 @@ impl H3ParticleField {
         &self,
         index: usize,
         system: &H3ParticleSystem,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         lighting: &[[f32; 4]; 10],
@@ -3655,7 +3655,7 @@ impl H3ParticleSystem {
         &self,
         running: &[RunningEmitter],
         (origin, axes, onset): ([f32; 3], [[f32; 3]; 3], f32),
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         view: &CeFlareView,
         lighting: &[[f32; 4]; 10],
         time: f32,
@@ -4846,7 +4846,7 @@ impl H3ParticleField {
         &self,
         index: usize,
         system: &H3ParticleSystem,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
@@ -4878,7 +4878,7 @@ impl H3ParticleSystem {
         &self,
         running: &[RunningEmitter],
         (origin, axes, onset): ([f32; 3], [[f32; 3]; 3], f32),
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         view: &CeFlareView,
         time: f32,
         draws: &mut Vec<H4EmitterDraw>,

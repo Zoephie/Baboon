@@ -951,9 +951,9 @@ struct ModelGpuFrame {
     /// Whether those change by themselves.
     object_moves: bool,
     /// Halo 2: what its shaders can read of the object's functions.
-    h2_values: Option<h2::functions::H2FunctionValues>,
+    h2_values: Option<functions::FunctionValues>,
     /// What a held weapon's own functions read, by owner.
-    h2_attached_values: Vec<(u8, h2::functions::H2FunctionValues)>,
+    h2_attached_values: Vec<(u8, functions::FunctionValues)>,
     /// Each attached Halo 2 or Halo 3 object's own change colors, by owner.
     h2_attached_colors: Vec<(u8, [[f32; 3]; 4])>,
     h3_flares_shown: Vec<bool>,
@@ -1083,9 +1083,9 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
 /// Every name an opened Halo 2 object answers to.
 pub(super) fn h2_function_values(
     data: &ModelPreviewData,
-    set: &h2::functions::H2FunctionInputs,
+    set: &functions::FunctionInputs,
     time: f32,
-) -> h2::functions::H2FunctionValues {
+) -> functions::FunctionValues {
     let inputs = h2_shader_inputs(data, 0);
     data.h2_object_functions.as_ref().map_or_else(Default::default, |functions| {
         functions.values(set, data.geometry_id, &inputs, time, 0)
@@ -1094,11 +1094,11 @@ pub(super) fn h2_function_values(
 
 /// Weapons in hand run on their own functions, at rest: the sliders are the
 /// opened object's.
-pub(super) fn h2_attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, h2::functions::H2FunctionValues)> {
+pub(super) fn h2_attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, functions::FunctionValues)> {
     if data.h2_attached.is_empty() {
         return Vec::new();
     }
-    let rest = h2::functions::H2FunctionInputs::default();
+    let rest = functions::FunctionInputs::default();
     let values = data.h2_attached.iter().map(|attached| {
         let inputs = h2_shader_inputs(data, attached.owner);
         (attached.owner, attached.functions.values(&rest, data.geometry_id, &inputs, time, attached.owner))
@@ -1112,9 +1112,9 @@ fn h2_attached_colors(data: &ModelPreviewData) -> Vec<(u8, [[f32; 3]; 4])> {
 
 fn h2_function_values_for(
     data: &ModelPreviewData,
-    set: &h2::functions::H2FunctionInputs,
+    set: &functions::FunctionInputs,
     time: f32,
-) -> Option<h2::functions::H2FunctionValues> {
+) -> Option<functions::FunctionValues> {
     let flares = data.preview.h2_flares.iter().any(|at| !at.scale_name().is_empty())
         || data.preview.h2_point_lights.iter().any(|light| !light.scale_name().is_empty())
         || data.preview.h2_gel_lights.iter().any(|light| !light.scale_name().is_empty());
@@ -1125,9 +1125,9 @@ fn h2_function_values_for(
 /// Whether anything on the object changes with time alone.
 pub(super) fn object_moves(
     data: &ModelPreviewData,
-    set: &h2::functions::H2FunctionInputs,
+    set: &functions::FunctionInputs,
     time: f32,
-    h2_values: Option<&h2::functions::H2FunctionValues>,
+    h2_values: Option<&functions::FunctionValues>,
 ) -> bool {
     object_functions(data).any(|functions| functions.move_at_rest())
         || h2_functions_move(data, set, time)
@@ -1208,7 +1208,7 @@ pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
 
 fn h2_functions_move(
     data: &ModelPreviewData,
-    set: &h2::functions::H2FunctionInputs,
+    set: &functions::FunctionInputs,
     time: f32,
 ) -> bool {
     let held = h2_attached_values(data, time);
@@ -1260,12 +1260,12 @@ impl ModelGpuFrame {
     }
 
     /// The function values of the Halo 2 object that owns `material`.
-    fn h2_values_of(&self, material: usize) -> Option<&h2::functions::H2FunctionValues> {
+    fn h2_values_of(&self, material: usize) -> Option<&functions::FunctionValues> {
         let object = self.preview.materials.get(material).map_or(0, |material| material.object);
         self.h2_values_of_object(object)
     }
 
-    fn h2_values_of_object(&self, object: u8) -> Option<&h2::functions::H2FunctionValues> {
+    fn h2_values_of_object(&self, object: u8) -> Option<&functions::FunctionValues> {
         if object == 0 {
             return self.h2_values.as_ref();
         }

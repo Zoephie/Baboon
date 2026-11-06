@@ -12,7 +12,7 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use super::super::common::fields::elements;
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::{H3Pass, H3Texture};
 use super::super::reach::shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 use crate::app::export::geometry::load_referenced_tag_from_source;
@@ -42,7 +42,7 @@ impl H4Shield {
         &self,
         damage: f32,
         time: f32,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         center: [f32; 3],
     ) -> HashMap<&'static str, [f32; 4]> {
         let mut object = values.cloned().unwrap_or_default();

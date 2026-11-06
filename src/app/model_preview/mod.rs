@@ -28,6 +28,7 @@ mod ce;
 pub(in crate::app) mod dx9;
 pub(in crate::app) mod h2;
 pub(crate) mod cloth;
+pub(in crate::app) mod functions;
 pub(crate) mod gen3;
 pub(crate) mod h3;
 pub(crate) mod h4;
@@ -1272,7 +1273,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
     if let Some(functions) = &data.h2_object_functions {
         let time = ui.input(|input| input.time) as f32;
         let values = renderer::h2_function_values(data, &state.h2_function_inputs, time);
-        h2::functions::draw_h2_function_controls(
+        functions::draw_function_controls(
             ui,
             functions,
             data.geometry_id,

@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::super::ce::lights::{CeFlareView, posed_on};
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part};
 use super::super::*;
@@ -347,7 +347,7 @@ impl H3ScreenDefinition {
     }
 
     /// `evaluate_falloff`.
-    fn falloff(&self, distance: f32, angle: f32, time: f32, values: Option<&H2FunctionValues>) -> f32 {
+    fn falloff(&self, distance: f32, angle: f32, time: f32, values: Option<&FunctionValues>) -> f32 {
         if !self.outside_radius && !self.no_camera_falloffs && distance > self.radius {
             return 0.0;
         }
@@ -596,7 +596,7 @@ pub(in crate::app::model_preview) fn add_screen_shader_materials(preview: &mut R
 /// `screen_effect_sample`: what every running effect comes to from this camera.
 pub(crate) fn h3_screen_settings<'a>(
     effects: &[H3ScreenEffectAt],
-    values: impl Fn(u8) -> Option<&'a H2FunctionValues>,
+    values: impl Fn(u8) -> Option<&'a FunctionValues>,
     onsets: &mut H3EffectOnsets,
     bones: Option<&[[f32; 4]]>,
     view: &CeFlareView,

@@ -7,7 +7,7 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::{MarkerFrame, perpendicular};
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
@@ -245,7 +245,7 @@ impl H3EffectTimes {
 pub(crate) struct H3EffectOnsets(std::collections::BTreeMap<(u8, String), (bool, f32)>);
 
 impl H3EffectOnsets {
-    pub(crate) fn of(&mut self, object: u8, name: &str, values: Option<&H2FunctionValues>, time: f32) -> f32 {
+    pub(crate) fn of(&mut self, object: u8, name: &str, values: Option<&FunctionValues>, time: f32) -> f32 {
         if name.is_empty() {
             return 0.0;
         }
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn an_effect_restarts_each_time_its_function_comes_on() {
         let mut onsets = H3EffectOnsets::default();
-        let values = |value: f32| H2FunctionValues::from([("on".to_owned(), value)]);
+        let values = |value: f32| FunctionValues::from([("on".to_owned(), value)]);
         let of = |onsets: &mut H3EffectOnsets, value, time| onsets.of(0, "on", Some(&values(value)), time);
         assert_eq!(of(&mut onsets, 1.0, 5.0), 0.0, "on from the start");
         assert_eq!(of(&mut onsets, 0.0, 6.0), 0.0);

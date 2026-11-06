@@ -10,7 +10,7 @@ use blam_tags::{TagFunction, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::ce::lights::{CeFlareView, posed_on};
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, read_part_placement};
 use super::super::particles::{
@@ -895,7 +895,7 @@ impl H3StripAt {
     }
 
     /// The states this frame, or none while its event is not running.
-    fn state(&self, values: Option<&H2FunctionValues>, time: f32, onset: f32) -> Option<StripState> {
+    fn state(&self, values: Option<&FunctionValues>, time: f32, onset: f32) -> Option<StripState> {
         let read = |name: &str, none: f32| {
             if name.is_empty() {
                 return none;
@@ -919,7 +919,7 @@ impl H3StripAt {
     fn beam_vertices(
         &self,
         beam: &BeamDefinition,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
@@ -988,7 +988,7 @@ impl H3StripAt {
         &self,
         contrail: &ContrailDefinition,
         running: &RunningContrail,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         view: &CeFlareView,
         lighting: &[[f32; 4]; 10],
         time: f32,
@@ -1057,7 +1057,7 @@ impl H3StripField {
     pub(crate) fn advance(
         &mut self,
         strips: &[Arc<H3StripAt>],
-        values: impl Fn(u8) -> Option<H2FunctionValues>,
+        values: impl Fn(u8) -> Option<FunctionValues>,
         onsets: &mut H3EffectOnsets,
         tracks: impl Fn(&Arc<H3StripAt>) -> Vec<(u64, [f32; 3])>,
         bones: Option<&[[f32; 4]]>,
@@ -1130,7 +1130,7 @@ impl H3StripField {
         &self,
         index: usize,
         strip: &H3StripAt,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         lighting: &[[f32; 4]; 10],

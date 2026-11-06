@@ -13,7 +13,7 @@ use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::ce::lights::{CeFlareView, posed_on};
-use super::super::h2::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::{
     CHEAP_PARTICLE_EMITTER, H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame,
@@ -575,7 +575,7 @@ fn spawn_transforms(random: &mut Random, correlate: bool) -> [[f32; 4]; 3] {
 /// `s_emitter::spawn`'s input to the spawn rate: the game time, or with an
 /// input variable the object's function of that name, `alpha` (440) the
 /// emitter's scale.
-fn spawn_input(variable: &str, values: Option<&H2FunctionValues>, time: f32, scale: f32) -> f32 {
+fn spawn_input(variable: &str, values: Option<&FunctionValues>, time: f32, scale: f32) -> f32 {
     match variable {
         "" => particle_game_time(true, time),
         ALPHA => scale,
@@ -820,7 +820,7 @@ impl ReachCheapEmitterAt {
     /// `add_emitter` once it has room.
     fn submission(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
         time: f32,
@@ -893,7 +893,7 @@ impl ReachCheapField {
         &mut self,
         emitters: &[ReachCheapEmitterAt],
         shown: &[bool],
-        values: impl Fn(u8) -> Option<H2FunctionValues>,
+        values: impl Fn(u8) -> Option<FunctionValues>,
         onsets: &mut H3EffectOnsets,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
@@ -908,7 +908,7 @@ impl ReachCheapField {
         };
         let library = Arc::clone(first.library());
         let mut now = resume_point(now, time, PRE_ROLL);
-        let scopes: Vec<Option<H2FunctionValues>> = emitters.iter().map(|at| values(at.object)).collect();
+        let scopes: Vec<Option<FunctionValues>> = emitters.iter().map(|at| values(at.object)).collect();
         // By the frame's clock, which the steps trail.
         let onset_of: Vec<f32> = emitters
             .iter()
@@ -974,7 +974,7 @@ impl ReachCheapField {
         &mut self,
         at: &ReachCheapEmitterAt,
         submission: &CheapSubmission,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         time: f32,
         dt: f32,
         index: usize,
@@ -1411,7 +1411,7 @@ mod tests {
     /// another name off the object.
     #[test]
     fn the_spawn_rate_reads_game_time_alpha_or_an_object_function() {
-        let values = H2FunctionValues::from([("power".to_owned(), 0.25)]);
+        let values = FunctionValues::from([("power".to_owned(), 0.25)]);
         assert_eq!(spawn_input("", Some(&values), 12.5, 0.5), 12.5, "Reach's game time, in seconds");
         assert_eq!(spawn_input("", None, 7300.0, 0.5), -7100.0, "which comes round at two hours");
         assert_eq!(spawn_input(ALPHA, Some(&values), 12.5, 0.5), 0.5);
@@ -1531,7 +1531,7 @@ mod tests {
         assert!(make(times(0.0, 0.0)).submission(None, None, eye, 0.0, 0.0).is_none(), "an instant");
         assert!(make(times(0.0, 1.0)).submission(None, None, eye, 0.5, 0.0).is_some());
         assert!(make(times(1.0, 1.0)).submission(None, None, eye, 0.5, 0.0).is_none(), "in its delay");
-        let values = H2FunctionValues::from([("power".to_owned(), 0.5), ("heat".to_owned(), 0.25)]);
+        let values = FunctionValues::from([("power".to_owned(), 0.5), ("heat".to_owned(), 0.25)]);
         let mut scaled = make(times(0.0, 1.0));
         scaled.scale_by = "power".to_owned();
         scaled.secondary_by = "heat".to_owned();
@@ -1541,7 +1541,7 @@ mod tests {
         assert_eq!(scale(&scaled), Some(0.5));
         scaled.b_scaled = true;
         assert_eq!(scale(&scaled), Some(0.125));
-        let off = H2FunctionValues::from([("power".to_owned(), 0.0)]);
+        let off = FunctionValues::from([("power".to_owned(), 0.0)]);
         assert!(scaled.submission(Some(&off), None, eye, 0.5, 0.0).is_none(), "its effect is off");
         let far = make(times(0.0, 1.0)).submission(None, None, [100.0, 50.0, 0.0], 0.5, 0.0);
         assert!(far.is_none(), "150 away by Manhattan distance, past the fade");

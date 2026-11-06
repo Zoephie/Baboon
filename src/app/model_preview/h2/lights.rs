@@ -13,7 +13,7 @@ use super::super::ce::lights::{
     ANTENNA_TRIM, AntennaSprite, CeAntennaQuad, CeFlareView, CeSprite, REACH_ANTENNA_TRIM, antenna_sprite, posed_on,
 };
 use super::super::ce::passes::argb;
-use super::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::super::gen3::effects::{H3EffectTimes, for_each_attached_part, part_markers};
 use blam_tags::tag_function::h2::transition_evaluate;
 use super::super::dx9::passes::{
@@ -204,7 +204,7 @@ impl H2EffectPart {
     pub(crate) fn light(
         &self,
         primary: &str,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         time: f32,
         onset: f32,
     ) -> Option<H2PartLight> {
@@ -756,7 +756,7 @@ fn light_value(
     light: &H2Light,
     effect: Option<&H2EffectLight>,
     scale_by: &str,
-    values: Option<&H2FunctionValues>,
+    values: Option<&FunctionValues>,
     time: f32,
     onset: f32,
 ) -> Option<f32> {
@@ -769,7 +769,7 @@ fn light_value(
 
 /// What an attachment's `scale by` reads: full with none named, and the
 /// idle object's input for a name nothing gave a value.
-pub(in crate::app::model_preview) fn attachment_value(name: &str, values: Option<&H2FunctionValues>) -> f32 {
+pub(in crate::app::model_preview) fn attachment_value(name: &str, values: Option<&FunctionValues>) -> f32 {
     if name.is_empty() {
         return 1.0;
     }
@@ -1254,7 +1254,7 @@ impl H2PointLight {
     /// `onset` is when its function last came on, for an effect's light.
     pub(crate) fn lit(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         time: f32,
         onset: f32,
@@ -1328,7 +1328,7 @@ impl H2GelLight {
     /// The light for a gel pass, and its frustum there. None while it's out.
     pub(crate) fn lit(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         time: f32,
         onset: f32,
@@ -1404,7 +1404,7 @@ impl H2FlareAt {
         if by_marker { self.marker_scale } else { 1.0 }
     }
 
-    fn value(&self, values: Option<&H2FunctionValues>, time: f32, onset: f32) -> Option<f32> {
+    fn value(&self, values: Option<&FunctionValues>, time: f32, onset: f32) -> Option<f32> {
         match (&self.effect, &self.light) {
             (Some(H2FlareEffect::Light(effect)), Some(light)) => {
                 effect.value(light, attachment_value(&self.scale_by, values), time, onset)
@@ -1458,7 +1458,7 @@ impl H2FlareAt {
     /// with the chained test, and of the outer test alone.
     pub(crate) fn sprites(
         &self,
-        values: Option<&H2FunctionValues>,
+        values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
@@ -1590,7 +1590,7 @@ mod tests {
     /// name, the object's value, and with none an idle object's input.
     #[test]
     fn an_attachment_scale_reads_the_object_then_its_idle_input() {
-        let values = H2FunctionValues::from([("throttle".to_owned(), 0.25)]);
+        let values = FunctionValues::from([("throttle".to_owned(), 0.25)]);
         assert_eq!(attachment_value("", None), 1.0);
         assert_eq!(attachment_value("throttle", Some(&values)), 0.25);
         assert_eq!(attachment_value("alive", None), 1.0, "nothing to ask: the idle object is alive");
@@ -1660,8 +1660,8 @@ mod tests {
         }
     }
 
-    fn values(power: f32) -> H2FunctionValues {
-        H2FunctionValues::from([("power".to_owned(), power)])
+    fn values(power: f32) -> FunctionValues {
+        FunctionValues::from([("power".to_owned(), power)])
     }
 
     #[test]
@@ -2049,12 +2049,12 @@ mod tests {
             scaled,
             secondary_by: "power".to_owned(),
         };
-        let values: H2FunctionValues = [("power".to_owned(), 0.5), ("on".to_owned(), 0.8)].into_iter().collect();
+        let values: FunctionValues = [("power".to_owned(), 0.5), ("on".to_owned(), 0.8)].into_iter().collect();
         let lit = |scaled, time| part(scaled).light("on", Some(&values), time, 0.0);
         assert_eq!(lit([false; 2], 0.0), Some(H2PartLight { brightness: 1.0, fade: 1.0, lasts: true }));
         assert_eq!(lit([true, false], 50.0).map(|lit| (lit.brightness, lit.fade)), Some((0.8, 0.5)));
         assert_eq!(lit([true, true], 0.0).map(|lit| lit.brightness), Some(0.4));
-        let off: H2FunctionValues = [("on".to_owned(), 0.0)].into_iter().collect();
+        let off: FunctionValues = [("on".to_owned(), 0.0)].into_iter().collect();
         assert_eq!(part([false; 2]).light("on", Some(&off), 0.0, 0.0), None, "its effect is off");
     }
 }

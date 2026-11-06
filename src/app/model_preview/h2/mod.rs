@@ -4,7 +4,6 @@
 
 pub(super) mod bloom;
 pub(super) mod contrails;
-pub(in crate::app) mod functions;
 pub(super) mod light_volumes;
 pub(super) mod liquid;
 pub(super) mod lights;

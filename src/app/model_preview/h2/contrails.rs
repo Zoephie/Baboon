@@ -9,7 +9,7 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::functions::H2FunctionValues;
+use super::super::functions::FunctionValues;
 use super::lights::attachment_value;
 use super::super::dx9::passes::H2Image;
 use super::super::gen3::effects::marker_name;
@@ -323,7 +323,7 @@ impl H2ContrailField {
     pub(crate) fn advance(
         &mut self,
         contrails: &[H2ContrailAt],
-        values: impl Fn(u8) -> Option<H2FunctionValues>,
+        values: impl Fn(u8) -> Option<FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         time: f32,
     ) {

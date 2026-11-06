@@ -428,7 +428,7 @@ fn lighting_constants(probe: &[[f32; 9]; 3]) -> [[f32; 4]; 10] {
 }
 
 /// Whether the shield is showing, whose plasma scrolls with game time.
-pub(super) fn h3_shield_showing(values: Option<&h2::functions::H2FunctionValues>) -> bool {
+pub(super) fn h3_shield_showing(values: Option<&functions::FunctionValues>) -> bool {
     let reading = |name| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
     reading(H3_SHIELD_DAMAGE) > 0.0 || reading(H3_OVERSHIELD) > 0.0
 }
@@ -2586,7 +2586,7 @@ mod tests {
     #[test]
     fn a_shield_shows_once_either_reading_rises() {
         let values = |name: &str, value: f32| {
-            h2::functions::H2FunctionValues::from([(name.to_owned(), value)])
+            functions::FunctionValues::from([(name.to_owned(), value)])
         };
         assert!(h3_shield_showing(Some(&values(H3_SHIELD_DAMAGE, 0.5))));
         assert!(h3_shield_showing(Some(&values(H3_OVERSHIELD, 0.5))));
