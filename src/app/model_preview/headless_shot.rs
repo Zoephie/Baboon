@@ -1409,3 +1409,38 @@ fn link_cleans_up_after_a_failed_stage_and_a_failed_link() {
         assert_eq!(held(&gl), Vec::<u32>::new(), "nothing made on the way is still held");
     }
 }
+
+/// What [`Made`](super::super::gl::target::Made) builds goes when it is
+/// dropped half done, and stays once kept.
+#[test]
+fn made_targets_are_deleted_unless_kept() {
+    use super::super::gl::target::{Made, Sampling, Texels};
+    let gl = headless_gl();
+    // Each kind numbers its own names from 1.
+    let held = |gl: &glow::Context| -> usize {
+        (1..=32u32)
+            .map(|name| unsafe {
+                let name = std::num::NonZeroU32::new(name).unwrap();
+                usize::from(gl.is_texture(glow::NativeTexture(name)))
+                    + usize::from(gl.is_framebuffer(glow::NativeFramebuffer(name)))
+                    + usize::from(gl.is_renderbuffer(glow::NativeRenderbuffer(name)))
+            })
+            .sum()
+    };
+    unsafe {
+        let mut made = Made::new(&gl);
+        made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED).unwrap();
+        made.depth([4, 4], Texels::DEPTH24, Sampling::NEAREST, glow::DEPTH_ATTACHMENT).unwrap();
+        made.renderbuffer([4, 4], glow::DEPTH24_STENCIL8).unwrap();
+        assert_eq!(held(&gl), 5);
+        drop(made);
+        assert_eq!(held(&gl), 0, "a set never kept is gone");
+        let mut made = Made::new(&gl);
+        let target = made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED).unwrap();
+        assert!(made.complete(&[target.framebuffer]));
+        made.keep();
+        assert_eq!(held(&gl), 2, "a kept set stays");
+        target.delete(&gl);
+        assert_eq!(held(&gl), 0);
+    }
+}
