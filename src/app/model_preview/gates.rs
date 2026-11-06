@@ -1691,6 +1691,18 @@ const OPTION_ROWS: &[OptionRow] = &[
     labelled(REACH.0, REACH.1, "area_screen_effect", "screen effects/flags", Old::Prefix(&["disable camera falloffs"]), "disable camera falloffs", &["cinematic"]),
     row(ODST.0, ODST.1, "area_screen_effect", "global flags", Old::Prefix(&["play sequentially"]), "play sequentially - ignore delay settings"),
     row(REACH.0, REACH.1, "area_screen_effect", "global flags", Old::Prefix(&["play sequentially"]), "play sequentially - ignore delay settings"),
+    // cloth, h3::vision and variants
+    row(H2.0, H2.1, "cloth", "flags", Old::Prefix(&["Uses grid attach top"]), "Uses grid attach top"),
+    row(H3.0, H3.1, "cloth", "flags", Old::Prefix(&["Uses grid attach top"]), "Uses grid attach top"),
+    row(ODST.0, ODST.1, "cloth", "flags", Old::Prefix(&["Uses grid attach top"]), "Uses grid attach top"),
+    row(REACH.0, REACH.1, "cloth", "flags", Old::Prefix(&["Uses grid attach top"]), "Uses grid attach top"),
+    row(H4.0, H4.1, "cloth", "flags", Old::Prefix(&["Uses grid attach top"]), "Uses grid attach top"),
+    row(H3.0, H3.1, "biped", "unit/default team", Old::Value(1), "player"),
+    row(ODST.0, ODST.1, "biped", "unit/default team", Old::Value(1), "player"),
+    row(H3.0, H3.1, "model", "instance groups/choice", Old::Value(1), "choose all members"),
+    row(ODST.0, ODST.1, "model", "instance groups/choice", Old::Value(1), "choose all members"),
+    row(REACH.0, REACH.1, "model", "instance groups/choice", Old::Value(1), "choose all members"),
+    row(H4.0, H4.1, "model", "instance groups/choice", Old::Value(1), "choose all members"),
     // ce::particle_systems
     row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x1), "type states loop"),
     after(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x2), "type states loop"),
