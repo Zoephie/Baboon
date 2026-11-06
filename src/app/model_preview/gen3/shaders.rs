@@ -23,17 +23,24 @@ use crate::core::hlsl::emit::{Stage, Translated, translate};
 use crate::core::hlsl::parse::{TextureKind, Type, parse};
 use crate::core::hlsl::pre::Preprocessor;
 use crate::core::source::TagSource;
+use crate::app::model_preview::ce::attachments::{has_flag, has_flag_labelled};
 
 /// Indices into [`VERTEX_TYPES`].
 #[cfg(test)]
 pub(crate) const VERTEX_RIGID: usize = 1;
 pub(crate) const VERTEX_SKINNED: usize = 2;
-/// tool's tables of entry point, vertex type and deform names.
+/// tool's tables of entry point, vertex type and deform names, in the order
+/// of [`VERTEX_TYPE_OPTIONS`].
 const VERTEX_TYPES: [(&str, &str); 3] = [
     ("s_world_vertex", "deform_world"),
     ("s_rigid_vertex", "deform_rigid"),
     ("s_skinned_vertex", "deform_skinned"),
 ];
+/// Reach's `shared pixel shader compilation`, and what its tags' layouts
+/// label it.
+const SHARED_PIXEL: [&str; 2] = ["shared pixel shader compilation", "shared entry point compilation"];
+/// The `vertex type` options [`VERTEX_TYPES`] stand for.
+const VERTEX_TYPE_OPTIONS: [&str; 3] = ["world", "rigid", "skinned"];
 
 #[derive(Debug, Clone)]
 struct H3Option {
@@ -115,21 +122,20 @@ pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Def
         if dialect == H3Dialect::Reach && passes.is_empty() {
             continue;
         }
-        let Some(name) = entry.read_enum_name("entry point") else {
+        let Some(name) = entry.read_enum_option("entry point") else {
             continue;
         };
         let name = entry_name(dialect, &name).to_owned();
         if dialect == H3Dialect::Reach {
             let first = passes[0];
-            let flags = first.read_int_any("flags").unwrap_or(0);
             // `sub_140342850` asserts a stage depends on fewer than two.
             let category = |block: &str| {
                 elements(first, block).first().and_then(|dependency| dependency.read_int_any("category"))
                     .and_then(|category| usize::try_from(category).ok())
             };
             shared.insert(name.clone(), H3SharedStages {
-                shared_pixel: flags & 1 != 0,
-                vertex_two_options: flags & 2 != 0,
+                shared_pixel: has_flag_labelled(first, "flags", &SHARED_PIXEL),
+                vertex_two_options: has_flag(first, "flags", "shared VS only care non-default option of depended category"),
                 vertex_category: category("shared VS category dependencies"),
                 pixel_category: category("category dependencies"),
             });
@@ -145,12 +151,11 @@ pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Def
         Some(_) => format!("templated\\{name}.fx"),
         None => format!("{name}.fx"),
     };
-    let automatic_macros = root.read_int_any("flags").unwrap_or(0) & 1 != 0;
+    let automatic_macros = has_flag(root, "flags", "use automatic macros");
     let pixel_vertex_type = elements(root, "vertex_types")
         .first()
-        .and_then(|first| first.read_int_any("vertex type"))
-        .and_then(|kind| usize::try_from(kind).ok())
-        .filter(|kind| *kind < VERTEX_TYPES.len())
+        .and_then(|first| first.read_enum_option("vertex type"))
+        .and_then(|kind| VERTEX_TYPE_OPTIONS.iter().position(|option| *option == kind))
         .unwrap_or(0);
     Some(H3Definition { name, dialect, source_file, automatic_macros, categories, entry_points, shared, pixel_vertex_type })
 }
