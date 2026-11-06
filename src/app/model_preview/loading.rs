@@ -295,7 +295,13 @@ pub(super) fn load_model_preview(
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
     let mut data = load_tag_preview(model_tag, entry, names, source, settings)?;
-    data.halo_ce = blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1;
+    let game = match blam_tags::game::Game::of(model_tag) {
+        blam_tags::game::Game::Halo1 => Some(GameId::HaloCe),
+        blam_tags::game::Game::Halo2 => Some(GameId::Halo2),
+        blam_tags::game::Game::Halo3 => source.and_then(TagSource::game),
+    };
+    // Just built: no other handle shares it, so this does not copy.
+    Arc::make_mut(&mut data.preview).game = game;
     if let Some(source) = source.filter(|source| source.game() == Some(GameId::Halo4)) {
         // Just built: no other handle shares it, so this does not copy.
         Arc::make_mut(&mut data.preview).h4_color_grading = super::h4::lighting::read_h4_color_grading(source);
@@ -4753,18 +4759,22 @@ pub(super) mod kit_object_tests {
         assert!(!field.runs_played(effects.len()), "a play runs once and is let go");
     }
 
-    /// A preview knows it came from a Halo CE tag, whose renderer has no
-    /// bloom, and one from Halo 2 does not.
+    /// A preview knows the game it came from: a Halo CE tag's, a Halo 2
+    /// tag's, and a gen3 tag's by its kit.
     #[test]
-    fn a_preview_knows_it_is_halo_ce() {
+    fn a_preview_knows_its_game() {
         let (Ok(ce), Ok(h2)) = (std::env::var("BLAM_TEST_HCEEK"), std::env::var("BLAM_TEST_H2EK")) else {
             eprintln!("skipping: BLAM_TEST_HCEEK or BLAM_TEST_H2EK is not set");
             return;
         };
         let cyborg = kit_preview(&ce, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd");
-        assert!(cyborg.halo_ce);
+        assert_eq!(cyborg.preview.game, Some(GameId::HaloCe));
         let blade = kit_preview(&h2, GameId::Halo2, "objects\\weapons\\melee\\energy_blade\\energy_blade", "weapon", b"weap");
-        assert!(!blade.halo_ce);
+        assert_eq!(blade.preview.game, Some(GameId::Halo2));
+        if let Ok(reach) = std::env::var("BLAM_TEST_HREK") {
+            let spartan = kit_preview(&reach, GameId::HaloReach, "objects\\characters\\spartans\\spartans", "biped", b"bipd");
+            assert_eq!(spartan.preview.game, Some(GameId::HaloReach));
+        }
     }
 
     /// With `BLAM_TEST_HCEEK`: firing the held rifle's trigger plays its

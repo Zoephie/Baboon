@@ -490,7 +490,7 @@ pub(super) fn render(
         game_shaders: state.h2_game_shaders,
         default_lights: state.h2_default_lights,
         active_camo: options.camo,
-        bloom: options.bloom && !data.halo_ce,
+        bloom: options.bloom && data.preview.game != Some(GameId::HaloCe),
         self_shadow: options.shadow,
         prt: !options.no_prt,
         light_follows_camera: state.h2_light_follows_camera,

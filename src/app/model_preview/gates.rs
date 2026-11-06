@@ -318,7 +318,6 @@ fn load_snapshot(data: &ModelPreviewData) -> String {
         &format!("{:?}", data.scenario_bsps),
     );
     line(&mut out, "notes", &format!("{:?}", data.notes));
-    line(&mut out, "halo_ce", &format!("{:?}", data.halo_ce));
     out
 }
 
