@@ -75,7 +75,7 @@ fn bitmap_kind(source: &TagSource, path: &str, caches: &mut ResolveCaches) -> Op
         return *known;
     }
     let found = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok().map(|tag| {
-        elements(tag.root(), "bitmaps*").first().and_then(|image| image.read_enum_name("type")).as_deref() == Some("cube map")
+        elements(tag.root(), "bitmaps*").first().and_then(|image| image.field("type")).is_some_and(|kind| kind.enum_is("cube map"))
     });
     caches.h4_bitmap_kinds.insert(path.to_owned(), found);
     found

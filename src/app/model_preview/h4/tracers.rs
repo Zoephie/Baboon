@@ -13,7 +13,7 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::elements;
+use super::super::ce::attachments::{elements, has_flag};
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
@@ -135,11 +135,11 @@ struct TracerProperty {
 impl TracerProperty {
     fn read(holder: TagStruct<'_>, name: &str) -> Option<Self> {
         let property = holder.descend(name)?;
-        let input = |field: &str| state_named(&property.read_enum_name(field).unwrap_or_default());
+        let input = |field: &str| state_named(&property.read_enum_option(field).unwrap_or_default());
         Some(Self {
             input: input("Input Variable"),
             range: input("Range Variable"),
-            adds: match property.read_enum_name("Output Modifier").as_deref() {
+            adds: match property.read_enum_option("Output Modifier").as_deref() {
                 Some("Plus") => Some(true),
                 Some("Times") => Some(false),
                 _ => None,
@@ -337,11 +337,7 @@ fn shape_named(name: &str) -> u32 {
 }
 
 fn read_tracer(source: &TagSource, element: TagStruct<'_>) -> Option<H4TracerDefinition> {
-    let flags = element.read_flag_names("flags").unwrap_or_default();
-    if flags
-        .iter()
-        .any(|(_, name)| name.starts_with("disabled for debugging"))
-    {
+    if has_flag(element, "flags", "disabled for debugging") {
         return None;
     }
     let material =
@@ -399,7 +395,7 @@ fn read_tracer(source: &TagSource, element: TagStruct<'_>) -> Option<H4TracerDef
     let uv_tiling = vector("uv tiling").map(|tiling| if tiling == 0.0 { 1.0 } else { tiling });
     let most_profiles = (length.most() * density.most()) as i32;
     let tracer = TracerDefinition {
-        shape: shape_named(&element.read_enum_name("profile shape").unwrap_or_default()),
+        shape: shape_named(&element.read_enum_option("profile shape").unwrap_or_default()),
         ngon_sides: element
             .read_int_any("number of n-gon sides")
             .unwrap_or(0)
@@ -544,12 +540,7 @@ pub(in crate::app::model_preview) fn read_h4_tracers(
             return;
         };
         let root = tag.root();
-        let system_flags = root
-            .read_flag_names("tracer system flags")
-            .unwrap_or_default();
-        let point_to_point = system_flags
-            .iter()
-            .any(|(_, name)| name.starts_with("point-to-point"));
+        let point_to_point = has_flag(root, "tracer system flags", "point-to-point");
         if point_to_point != part.secondary_marker.is_some() {
             // "… It won't render."
             return;
@@ -1685,23 +1676,12 @@ mod tests {
                 let tag =
                     load_referenced_tag_from_source(&source, &relative, "tracer_system", b"trac")
                         .unwrap();
-                let flags = tag
-                    .root()
-                    .read_flag_names("tracer system flags")
-                    .unwrap_or_default();
-                if !flags
-                    .iter()
-                    .any(|(_, name)| name.starts_with("point-to-point"))
-                {
+                if !has_flag(tag.root(), "tracer system flags", "point-to-point") {
                     continue;
                 }
                 for element in elements(tag.root(), "tracers") {
                     // The postprocess deletes these.
-                    let flags = element.read_flag_names("flags").unwrap_or_default();
-                    if flags
-                        .iter()
-                        .any(|(_, name)| name.starts_with("disabled for debugging"))
-                    {
+                    if has_flag(element, "flags", "disabled for debugging") {
                         disabled += 1;
                         continue;
                     }
