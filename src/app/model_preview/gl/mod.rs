@@ -3,5 +3,6 @@
 
 pub(in crate::app::model_preview) mod chain;
 pub(in crate::app::model_preview) mod link;
+pub(in crate::app::model_preview) mod program;
 pub(in crate::app::model_preview) mod scope;
 pub(in crate::app::model_preview) mod target;
