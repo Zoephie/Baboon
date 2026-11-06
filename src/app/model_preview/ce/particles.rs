@@ -22,7 +22,7 @@ use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,
     unattached_quads, update_unattached,
 };
-use super::passes::{CeMapAnimation, argb, read_effect_map_animation};
+use super::passes::{CeMapAnimation, FramebufferBlend, argb, read_effect_map_animation};
 use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_h2_image;
 use super::super::*;
@@ -481,7 +481,7 @@ pub(crate) struct CeParticleDef {
     sequence_counts: [i32; 3],
     orientation: i32,
     /// `framebuffer blend function`, `framebuffer fade mode`.
-    pub(crate) blend: i32,
+    pub(crate) blend: FramebufferBlend,
     fade_mode: i32,
     pub(crate) nonlinear_tint: bool,
     /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
@@ -599,7 +599,7 @@ fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) 
         first_sequence,
         sequence_counts,
         orientation: short("orientation"),
-        blend: short("framebuffer blend function"),
+        blend: FramebufferBlend::read(root),
         fade_mode: short("framebuffer fade mode"),
         nonlinear_tint: has_flag(root, "shader flags", "nonlinear tint"),
         sort_bias: has_flag(root, "shader flags", "sort bias"),
@@ -1159,7 +1159,7 @@ pub(crate) struct CeParticleQuad {
     /// [`def_key`] of the effect it came from, and which of its particles.
     pub(crate) effect: usize,
     pub(crate) def: usize,
-    pub(crate) blend: i32,
+    pub(crate) blend: FramebufferBlend,
     pub(crate) nonlinear_tint: bool,
     pub(crate) sort_bias: bool,
     pub(crate) secondary: Option<CeSecondaryDraw>,
@@ -1585,7 +1585,7 @@ impl CeParticleField {
             }
             let [alpha, red, green, blue] = particle.color;
             let shown_alpha =
-                if def.blend != 0 && !def.nonlinear_tint { fade } else { alpha * fade };
+                if def.blend != FramebufferBlend::AlphaBlend && !def.nonlinear_tint { fade } else { alpha * fade };
             let size = def.image_widths.get(sprite.image).copied().unwrap_or(1.0) * scale;
             let [left, right, top, bottom] = sprite.rect;
             let center_uv = [left + sprite.registration[0], top + sprite.registration[1]];

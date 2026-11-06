@@ -3037,7 +3037,7 @@ fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones:
 /// A Halo CE sprite through the `effect` shader: its map, framebuffer blend
 /// function and nonlinear tint, each corner's color, its corners, and the
 /// shader's second map.
-type CeSprite = (glow::NativeTexture, i32, bool, [[f32; 4]; 4], [[f32; 5]; 4], Option<ce::particles::CeSecondaryDraw>);
+type CeSprite = (glow::NativeTexture, ce::passes::FramebufferBlend, bool, [[f32; 4]; 4], [[f32; 5]; 4], Option<ce::particles::CeSecondaryDraw>);
 
 /// What one of Halo CE's transparent groups draws.
 enum CeGroupDraw {
@@ -3224,7 +3224,7 @@ fn ce_groups(
     let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
     for (index, quad) in uploaded.ce_glows.quads(glows, view, pixel) {
         if let Some(texture) = uploaded.ce_glow_textures.get(index).copied().flatten() {
-            sprites.push((CE_GLOW, index, 0), false, false, (texture, 3, false, quad.colors, quad.corners, None));
+            sprites.push((CE_GLOW, index, 0), false, false, (texture, ce::passes::FramebufferBlend::Add, false, quad.colors, quad.corners, None));
         }
     }
     for quad in uploaded.ce_contrails.quads(contrails, change_colors, view) {
@@ -3370,10 +3370,10 @@ unsafe fn draw_ce_sprites(
                 None => gl.uniform_1_i32(effect_gl.mode.as_ref(), 0),
             }
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            let blend = ce::passes::framebuffer_blend(function);
+            let blend = function.gl();
             gl.blend_equation(gl_blend_equation(blend.equation));
             gl.blend_func(gl_blend_factor(blend.source), gl_blend_factor(blend.destination));
-            gl.uniform_1_i32(effect_gl.blend.as_ref(), function);
+            gl.uniform_1_i32(effect_gl.blend.as_ref(), function.shader_number());
             gl.uniform_1_i32(effect_gl.nonlinear.as_ref(), i32::from(nonlinear));
             // The zsprite stream's corners, in `build_sprite`'s vertex order
             // (left bottom, right bottom, right top, left top): 00, 01, 11, 10.
@@ -6353,7 +6353,7 @@ mod tests {
     fn ce_sprites_group_by_key_at_their_centroid() {
         let view = looking_along_x();
         let texture = glow::NativeTexture(std::num::NonZeroU32::new(1).unwrap());
-        let at = |x: f32| (texture, 0, false, [[1.0; 4]; 4], [[x, 0.0, 0.0, 0.0, 0.0]; 4], None);
+        let at = |x: f32| (texture, ce::passes::FramebufferBlend::AlphaBlend, false, [[1.0; 4]; 4], [[x, 0.0, 0.0, 0.0, 0.0]; 4], None);
         let mut sprites = CeSpriteGroups::default();
         sprites.push((CE_PARTICLE, 7, 0), false, false, at(2.0));
         sprites.push((CE_LIGHTNING, 0, 0), false, true, at(1.0));

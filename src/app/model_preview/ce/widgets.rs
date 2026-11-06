@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::attachments::{elements, function_slot, function_slot_of, has_flag, object_block};
 use super::lights::{CeAntennaQuad, CeFlareView, posed_on};
-use super::passes::argb;
+use super::passes::{FramebufferBlend, argb};
 use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_h2_image;
 use super::super::*;
@@ -267,7 +267,7 @@ pub(crate) struct CeLightning {
     tint_source: Option<usize>,
     brightness_source: Option<usize>,
     /// Its `shader`'s blend, or `global_shader_effect_additive`'s.
-    pub(crate) blend: i32,
+    pub(crate) blend: FramebufferBlend,
     pub(crate) nonlinear_tint: bool,
     /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
     pub(crate) sort_bias: bool,
@@ -328,12 +328,12 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
     let shader = elements(root, "shader").first().copied();
     let (blend, nonlinear_tint, sort_bias) = match shader {
         Some(shader) => (
-            shader.read_int_any("framebuffer blend function").unwrap_or(0) as i32,
+            FramebufferBlend::read(shader),
             has_flag(shader, "shader flags", "nonlinear tint"),
             has_flag(shader, "shader flags", "sort bias"),
         ),
         // `global_shader_effect_additive`.
-        None => (3, false, false),
+        None => (FramebufferBlend::Add, false, false),
     };
     let source_of = |name: &str| function_slot_of(root, name);
     Some(CeLightning {

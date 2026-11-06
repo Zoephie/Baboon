@@ -833,20 +833,62 @@ fn chicago_alpha_table(function: i32) -> [f32; 10] {
     table
 }
 
-/// `srcblend_table`, `destblend_table` and `blendop_table`.
-pub(in crate::app::model_preview) fn framebuffer_blend(function: i32) -> H2Blend {
-    use H2BlendFactor::{DstColor, One, OneMinusSrcAlpha, SrcAlpha, SrcColor, Zero};
-    let (equation, source, destination) = match function {
-        1 => (H2BlendEquation::Add, DstColor, Zero),
-        2 => (H2BlendEquation::Add, DstColor, SrcColor),
-        3 => (H2BlendEquation::Add, One, One),
-        4 => (H2BlendEquation::ReverseSubtract, One, One),
-        5 => (H2BlendEquation::Min, One, One),
-        6 => (H2BlendEquation::Max, One, One),
-        7 => (H2BlendEquation::Add, One, OneMinusSrcAlpha),
-        _ => (H2BlendEquation::Add, SrcAlpha, OneMinusSrcAlpha),
-    };
-    H2Blend { equation, source, destination, constant: [0; 4] }
+/// A Halo CE `framebuffer blend function`, by name. A number the list does
+/// not name blends as alpha blend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FramebufferBlend {
+    #[default]
+    AlphaBlend,
+    Multiply,
+    DoubleMultiply,
+    Add,
+    Subtract,
+    ComponentMin,
+    ComponentMax,
+    AlphaMultiplyAdd,
+}
+
+impl FramebufferBlend {
+    /// In the list's order, which [`Self::shader_number`] keeps.
+    const ALL: [Self; 8] = [
+        Self::AlphaBlend,
+        Self::Multiply,
+        Self::DoubleMultiply,
+        Self::Add,
+        Self::Subtract,
+        Self::ComponentMin,
+        Self::ComponentMax,
+        Self::AlphaMultiplyAdd,
+    ];
+
+    /// `holder`'s `framebuffer blend function`.
+    pub(in crate::app::model_preview) fn read(holder: TagStruct<'_>) -> Self {
+        let held = holder.read_enum_option("framebuffer blend function");
+        let at = BLEND_FUNCTIONS.iter().position(|name| held.as_deref() == Some(*name));
+        at.map_or(Self::AlphaBlend, |at| Self::ALL[at])
+    }
+
+    /// Its place in the list: what the effect shader's `blend` and the
+    /// shader passes' stage macros switch on.
+    pub(in crate::app::model_preview) fn shader_number(self) -> i32 {
+        Self::ALL.iter().position(|blend| *blend == self).unwrap_or(0) as i32
+    }
+
+    /// `srcblend_table`, `destblend_table` and `blendop_table`.
+    pub(in crate::app::model_preview) fn gl(self) -> H2Blend {
+        use H2BlendFactor::{DstColor, One, OneMinusSrcAlpha, SrcAlpha, SrcColor, Zero};
+        let (equation, source, destination) = match self {
+            Self::Multiply => (H2BlendEquation::Add, DstColor, Zero),
+            Self::DoubleMultiply => (H2BlendEquation::Add, DstColor, SrcColor),
+            Self::Add => (H2BlendEquation::Add, One, One),
+            Self::Subtract => (H2BlendEquation::ReverseSubtract, One, One),
+            Self::ComponentMin => (H2BlendEquation::Min, One, One),
+            Self::ComponentMax => (H2BlendEquation::Max, One, One),
+            Self::AlphaMultiplyAdd => (H2BlendEquation::Add, One, OneMinusSrcAlpha),
+            Self::AlphaBlend => (H2BlendEquation::Add, SrcAlpha, OneMinusSrcAlpha),
+        };
+        H2Blend { equation, source, destination, constant: [0; 4] }
+    }
 }
 
 const BLEND_FUNCTIONS: [&str; 8] = [
@@ -1051,8 +1093,7 @@ fn transparent_pass(
     let stage = transparent_stage(first_map, has("first map is in screenspace"));
     let mut pass = H2DrawPass::new(stage, fragment, depth);
     pass.channels = [true, true, true, false];
-    pass.blend =
-        Some(framebuffer_blend(option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS)));
+    pass.blend = Some(FramebufferBlend::read(root).gl());
     pass.cull = if has("two-sided") { H2Cull::None } else { H2Cull::Back };
     pass.hidden_by_camo = !has("don't fade active-camouflage");
     pass.depth_bias = decal_bias(flags.has("decal"));
@@ -1138,7 +1179,7 @@ fn generic_pass(
             follows_output: has("A-out controls color0 animation"),
         });
     }
-    let blend = option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS);
+    let blend = FramebufferBlend::read(root).shader_number();
     let fade = option_index(root, "framebuffer fade mode", &FADE_MODES);
     let last = count.max(1);
     macros.push((format!("S{last}_CONFIGURATION"), generic_fade_stage(blend, fade, last)));
@@ -1182,12 +1223,12 @@ fn chicago_pass(
         );
         replicate[index] = f32::from(u8::from(has_flag(map, "flags", "alpha replicate")));
     }
-    let blend = match option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS) {
-        0 => 0,
-        1 | 5 => 1,
-        2 => 2,
-        7 => 4,
-        _ => 3,
+    let blend = match FramebufferBlend::read(root) {
+        FramebufferBlend::AlphaBlend => 0,
+        FramebufferBlend::Multiply | FramebufferBlend::ComponentMin => 1,
+        FramebufferBlend::DoubleMultiply => 2,
+        FramebufferBlend::AlphaMultiplyAdd => 4,
+        FramebufferBlend::Add | FramebufferBlend::Subtract | FramebufferBlend::ComponentMax => 3,
     };
     let fade = option_index(root, "framebuffer fade mode", &FADE_MODES);
     let custom = flags.has("custom edition blending");

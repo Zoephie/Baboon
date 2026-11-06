@@ -11,7 +11,7 @@ use blam_tags::{TagFile, TagStruct};
 use super::attachments::{elements, function_slot_of, has_flag, object_block};
 use super::lights::{CeFlareView, posed_on};
 use super::particles::CePointPhysics;
-use super::passes::argb;
+use super::passes::{FramebufferBlend, argb};
 use super::super::dx9::passes::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
@@ -169,7 +169,7 @@ pub(crate) struct CeContrailDef {
     sequences: Vec<[usize; 2]>,
     first_sequence: i32,
     sequence_count: i32,
-    pub(crate) blend: i32,
+    pub(crate) blend: FramebufferBlend,
     fade_mode: FadeMode,
     pub(crate) nonlinear_tint: bool,
     /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
@@ -239,7 +239,7 @@ fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
         sequences,
         first_sequence: short("first sequence index"),
         sequence_count: short("sequence count"),
-        blend: short("framebuffer blend function"),
+        blend: FramebufferBlend::read(root),
         fade_mode: FadeMode::read(root),
         nonlinear_tint: has_flag(root, "shader flags", "nonlinear tint"),
         sort_bias: has_flag(root, "shader flags", "sort bias"),

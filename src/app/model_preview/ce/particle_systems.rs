@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
+use super::passes::FramebufferBlend;
 use super::attachments::{elements, function_slot_of, has_flag, has_flag_after, object_block};
 use super::lights::{CeFlareView, posed_on};
 use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
@@ -134,7 +135,7 @@ struct ParticleState {
     colors: [[f32; 4]; 2],
     radius: f32,
     physics: Option<CePointPhysics>,
-    blend: i32,
+    blend: FramebufferBlend,
     map_flags: i128,
     nonlinear_tint: bool,
     /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
@@ -292,7 +293,7 @@ pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &st
                 // Tool's `sub_49BFE0`.
                 radius: Some(real("radius multiplier")).filter(|radius| *radius > 0.0).unwrap_or(1.0),
                 physics: read_physics(source, state),
-                blend: state.read_int_any("framebuffer blend function").unwrap_or(0) as i32,
+                blend: FramebufferBlend::read(state),
                 map_flags: state.read_int_any("map flags").unwrap_or(0),
                 nonlinear_tint: has_flag(state, "shader flags", "nonlinear tint"),
                 sort_bias: has_flag(state, "shader flags", "sort bias"),
@@ -601,7 +602,7 @@ fn system_quads(
             };
             let mut color: [f32; 4] = std::array::from_fn(|channel| mix(3 + channel) * multipliers[COLOR + channel]);
             // Alpha blend takes the light where the system is.
-            if current.blend == 0 {
+            if current.blend == FramebufferBlend::AlphaBlend {
                 for channel in 0..3 {
                     color[1 + channel] *= lighting[channel];
                 }
@@ -666,7 +667,7 @@ pub(crate) struct CePctlQuad {
     pub(crate) group: usize,
     pub(crate) sheet: usize,
     pub(crate) image: usize,
-    pub(crate) blend: i32,
+    pub(crate) blend: FramebufferBlend,
     pub(crate) nonlinear_tint: bool,
     pub(crate) sort_bias: bool,
     pub(crate) secondary: Option<CeSecondaryDraw>,
@@ -701,7 +702,7 @@ impl Shown<'_> {
             return;
         };
         let [alpha, red, green, blue] = self.color;
-        let alpha = if self.state.blend != 0 && !self.state.nonlinear_tint { fade } else { alpha * fade };
+        let alpha = if self.state.blend != FramebufferBlend::AlphaBlend && !self.state.nonlinear_tint { fade } else { alpha * fade };
         // `particle_system_render` gives the shader the first state's radius
         // multiplier for its second map's radius, for either draw.
         let secondary = self.state.secondary.as_ref().map(|map| map.draw(self.time, self.radius));
