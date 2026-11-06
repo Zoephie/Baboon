@@ -250,14 +250,14 @@ pub(crate) struct CeReflection {
 /// A flare's `occlusion offset direction`: where it tests from, beside its
 /// marker. A number with no name tests from the marker, as `none` does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OcclusionOffset {
+pub(in crate::app::model_preview) enum OcclusionOffset {
     TowardViewer,
     MarkerForward,
     None,
 }
 
 impl OcclusionOffset {
-    fn read(root: TagStruct<'_>) -> Self {
+    pub(in crate::app::model_preview) fn read(root: TagStruct<'_>) -> Self {
         match root.read_enum_option("occlusion offset direction").as_deref() {
             Some("toward viewer") => Self::TowardViewer,
             Some("marker forward") => Self::MarkerForward,

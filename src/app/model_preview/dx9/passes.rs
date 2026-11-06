@@ -159,13 +159,14 @@ impl H2Layer {
         }
     }
 
-    /// The layer drawing a light of this `diffuse contrast`, which
-    /// `rasterizer_get_switch_extern` hands the pass as `light_diffuse_contrast`.
-    pub(crate) fn diffuse_with_contrast(contrast: i128) -> Self {
+    /// The layer drawing a light of this `diffuse contrast`, by its option's
+    /// name, which `rasterizer_get_switch_extern` hands the pass as
+    /// `light_diffuse_contrast`.
+    pub(crate) fn diffuse_with_contrast(contrast: Option<&str>) -> Self {
         match contrast {
-            1 => Self::LightDiffuseHigh,
-            2 => Self::LightDiffuseLow,
-            3 => Self::LightDiffuseVeryLow,
+            Some("high") => Self::LightDiffuseHigh,
+            Some("low") => Self::LightDiffuseLow,
+            Some("very low") => Self::LightDiffuseVeryLow,
             _ => Self::LightDiffuse,
         }
     }

@@ -28,34 +28,28 @@ use crate::app::model_preview::common::math::{cross, dot, lerp};
 use crate::app::model_preview::common::random::lcg_step;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::Attached;
+use crate::app::model_preview::ce::attachments::{function_slot_of, has_flag, has_flag_in_any};
+use crate::app::model_preview::ce::lights::OcclusionOffset;
+use crate::app::model_preview::dx9::passes::ce_color_interpolation;
 
-/// `flags` of a `lens_flare`.
-const NO_OCCLUSION_TEST: i128 = 2;
-const ONLY_FIRST_PERSON: i128 = 4;
-const SCALE_BY_MARKER: i128 = 0x40;
-/// `flags` of a reflection.
-const ALIGN_WITH_SCREEN_CENTER: i128 = 1;
-const RADIUS_NOT_SCALED_BY_DISTANCE: i128 = 2;
-const RADIUS_SCALED_BY_OCCLUSION: i128 = 4;
-const OCCLUDED_BY_SOLID_OBJECTS: i128 = 8;
-const IGNORE_LIGHT_COLOR: i128 = 0x10;
-const NOT_AFFECTED_BY_INNER_OCCLUSION: i128 = 0x20;
+/// A `lens_flare`'s `flags`, by name.
+#[derive(Debug, Clone, Copy, Default)]
+struct FlareFlags {
+    no_occlusion_test: bool,
+    only_first_person: bool,
+    scale_by_marker: bool,
+}
 
-/// `flags` of a `light`.
-const NO_ILLUMINATION: i128 = 1;
-const LIGHT_ONLY_FIRST_PERSON: i128 = 0x20;
-const NO_SPECULAR: i128 = 2;
-/// `ignore parent object` and `ignore all parents`: `sub_6BA660` leaves the
-/// object unlit only with both.
-const IGNORES_PARENTS: i128 = 0x2800;
-/// `type`: the only one that takes the sphere path.
-const SPHERE: i128 = 0;
-/// `type`: orthogonal lights assert in `sub_946960`, so these are the frustums.
-const PROJECTIVE: i128 = 2;
-const PYRAMID: i128 = 3;
-/// `falloff geometry`: `directional`, which tool's postprocess makes of default
-/// on a frustum.
-const DIRECTIONAL_FALLOFF: i128 = 1;
+/// A reflection's `flags`, by name.
+#[derive(Debug, Clone, Copy, Default)]
+struct ReflectionFlags {
+    align_with_screen_center: bool,
+    radius_not_scaled_by_distance: bool,
+    radius_scaled_by_occlusion: bool,
+    occluded_by_solid_objects: bool,
+    ignore_light_color: bool,
+    not_affected_by_inner_occlusion: bool,
+}
 /// `sub_946960`'s divisor for the near plane's edge, `dword_EB9D38`.
 const NEAR_EDGE_DIVISOR: f32 = 40.0;
 /// What `sub_946960` leaves between the apex and the near plane's edge.
@@ -64,8 +58,6 @@ const NEAR_EDGE_BIAS: f32 = 0.0078125;
 const FIELD_OF_VIEW: [f32; 2] = [1.0, 120.0];
 /// What the brightness of `sub_8ED2A0` comes to, at most.
 const BRIGHTEST: f32 = 4.0;
-/// `default lightmap setting`: the game makes no such light.
-const LIGHTMAPS_ONLY: i128 = 2;
 /// Tool's postprocess takes bounds all under this as unset.
 const UNSET: f32 = 0.0001;
 
@@ -75,7 +67,7 @@ const INNER_SCALES: [f32; 7] = [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625
 /// One sprite of a flare, set along the axis through the screen's center.
 #[derive(Debug, Clone)]
 struct H2Reflection {
-    flags: i128,
+    flags: ReflectionFlags,
     /// Which of [`H2Flare::images`] it draws.
     image: usize,
     position: f32,
@@ -89,13 +81,12 @@ struct H2Reflection {
 /// A `lens_flare` tag.
 #[derive(Debug, Clone)]
 pub(crate) struct H2Flare {
-    flags: i128,
+    flags: FlareFlags,
     /// Cosines of its `falloff angle` and `cutoff angle`.
     cones: [f32; 2],
     fade: [f32; 2],
     occlusion_radius: f32,
-    /// Toward the viewer, along the marker, or none.
-    occlusion_offset: i128,
+    occlusion_offset: OcclusionOffset,
     /// The share of the outer patch a second test takes, if there is one.
     inner_scale: Option<f32>,
     corona_scale: [f32; 2],
@@ -123,8 +114,8 @@ struct H2Light {
     brightness: [f32; 2],
     color_animation: Option<Arc<TagFunction>>,
     brightness_animation: Option<Arc<TagFunction>>,
-    /// `diffuse contrast`, which picks the variant of the diffuse pass.
-    contrast: i128,
+    /// The diffuse pass's variant its `diffuse contrast` picks.
+    diffuse_layer: H2Layer,
     radius: f32,
     specular_radius: f32,
     /// `duration`: how long it lasts when an effect makes it, or 0 for ever.
@@ -760,15 +751,6 @@ fn second_field_int(root: TagStruct<'_>, name: &str) -> Option<i128> {
     root.read_int_any(&format!("{name}#{}", field.ordinal()))
 }
 
-/// The set options of the second of two flags fields that share a name.
-fn second_field_flags(root: TagStruct<'_>, name: &str) -> Vec<String> {
-    let Some(field) = root.fields().filter(|field| field.name() == name).nth(1) else {
-        return Vec::new();
-    };
-    let names = root.read_flag_names(&format!("{name}#{}", field.ordinal())).unwrap_or_default();
-    names.into_iter().map(|(_, name)| name).collect()
-}
-
 /// What a light's colors and size interpolate by: its attachment's function,
 /// or for an effect's light, its clock. None while that light does not exist.
 fn light_value(
@@ -820,7 +802,17 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
         let brightness = reflection.read_fraction_bounds("brightness");
         let color = reflection.read_rgb("color");
         reflections.push(H2Reflection {
-            flags: reflection.read_int_any("flags").unwrap_or(0),
+            flags: {
+                let set = |option: &str| has_flag(reflection, "flags", option);
+                ReflectionFlags {
+                    align_with_screen_center: set("align rotation with screen center"),
+                    radius_not_scaled_by_distance: set("radius NOT scaled by distance"),
+                    radius_scaled_by_occlusion: set("radius scaled by occlusion factor"),
+                    occluded_by_solid_objects: set("occluded by solid objects"),
+                    ignore_light_color: set("ignore light color"),
+                    not_affected_by_inner_occlusion: set("not affected by inner occlusion"),
+                }
+            },
             image,
             position: reflection.read_real("position").unwrap_or(0.0),
             rotation: reflection.read_real("rotation offset").unwrap_or(0.0).to_radians(),
@@ -835,14 +827,18 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
     let inner = root.read_int_any("occlusion inner radius scale").unwrap_or(0).clamp(0, 6) as usize;
     let unset_as_one = |scale: f32| if scale == 0.0 { 1.0 } else { scale };
     Some(H2Flare {
-        flags: root.read_int_any("flags").unwrap_or(0),
+        flags: FlareFlags {
+            no_occlusion_test: has_flag(root, "flags", "no occlusion test"),
+            only_first_person: has_flag(root, "flags", "only render in first person"),
+            scale_by_marker: has_flag(root, "flags", "scale by marker"),
+        },
         cones: [angle("falloff angle"), angle("cutoff angle")],
         fade: [
             root.read_real("near fade distance").unwrap_or(0.0),
             root.read_real("far fade distance").unwrap_or(0.0),
         ],
         occlusion_radius: root.read_real("occlusion radius").unwrap_or(0.0),
-        occlusion_offset: root.read_int_any("occlusion offset direction").unwrap_or(0),
+        occlusion_offset: OcclusionOffset::read(root),
         inner_scale: (inner != 0).then_some(INNER_SCALES[inner]),
         corona_scale: [unset_as_one(corona.i), unset_as_one(corona.j)],
         rotation_function: root.read_int_any("rotation function").unwrap_or(0),
@@ -851,7 +847,8 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
         brightness: scale_function(root, "brightness"),
         color: scale_function(root, "color"),
         rotation: scale_function(root, "rotation"),
-        synchronized: second_field_flags(root, "flags").iter().any(|name| name == "synchronized"),
+        // Its second `flags` field holds it.
+        synchronized: has_flag_in_any(root, "flags", "synchronized"),
         falloff: root.read_int_any("falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
         images,
     })
@@ -860,9 +857,11 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
 /// Whether a `light` can ever be on in a third person view: nothing else sets
 /// the bit `sub_8ED2A0` turns a light on through.
 pub(in crate::app::model_preview) fn light_can_shine(root: TagStruct<'_>) -> bool {
-    let flags = root.read_int_any("flags").unwrap_or(0);
-    flags & (NO_ILLUMINATION | LIGHT_ONLY_FIRST_PERSON) == 0
-        && root.read_int_any("default lightmap setting") != Some(LIGHTMAPS_ONLY)
+    let flag = |option: &str| has_flag(root, "flags", option);
+    // `default lightmap setting`'s `lightmaps only`: the game makes no such light.
+    !flag("no illumination")
+        && !flag("only render in first person")
+        && !root.field("default lightmap setting").is_some_and(|field| field.enum_is("lightmaps only"))
 }
 
 /// `sub_8EB720`, and what tool's postprocess gives a tag for the game: the
@@ -874,7 +873,7 @@ fn read_h2_light(
 ) -> Option<(H2Light, bool, Option<H2Frustum>, Option<Arc<H2Flare>>)> {
     let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
     let root = tag.root();
-    let flags = root.read_int_any("flags").unwrap_or(0);
+    let flag = |option: &str| has_flag(root, "flags", option);
     if !light_can_shine(root) {
         return None;
     }
@@ -896,7 +895,7 @@ fn read_h2_light(
         diffuse = [[1.0; 3]; 2];
     }
     let mut specular = [rgb("specular lower bound"), rgb("specular upper bound")];
-    if flags & NO_SPECULAR != 0 {
+    if flag("no specular") {
         specular = [[0.0; 3]; 2];
     } else if unset(&specular) {
         specular = diffuse;
@@ -911,22 +910,28 @@ fn read_h2_light(
     let specular_radius = root.read_real("specular radius").filter(|radius| *radius != 0.0);
     let saturate = |colors: [[f32; 3]; 2]| colors.map(|color| color.map(|c| c.clamp(0.0, 1.0)));
     let light = H2Light {
-        interpolation: root.read_int_any("interpolation flags").unwrap_or(0),
+        interpolation: ce_color_interpolation(
+            has_flag(root, "interpolation flags", "blend in hsv"),
+            has_flag(root, "interpolation flags", "...more colors"),
+        ),
         size,
         specular: saturate(specular),
         diffuse: saturate(diffuse),
         brightness,
         color_animation: scale_function(root, "color animation"),
         brightness_animation: scale_function(root, "brightness animation"),
-        contrast: root.read_int_any("diffuse contrast").unwrap_or(0),
+        diffuse_layer: H2Layer::diffuse_with_contrast(root.read_enum_option("diffuse contrast").as_deref()),
         radius,
         specular_radius: specular_radius.unwrap_or(radius),
         effect_duration: root.read_real("duration").unwrap_or(0.0),
         effect_falloff: second_field_int(root, "falloff function").and_then(|index| u8::try_from(index).ok()).unwrap_or(0),
     };
-    let lit = flags & IGNORES_PARENTS != IGNORES_PARENTS;
+    // `sub_6BA660` leaves the object unlit only with both.
+    let lit = !(flag("ignore parent object") && flag("ignore all parents"));
     // Implementation 1 has no gel to read, so a sphere's own never shows.
-    let lights_model = root.read_int_any("type") == Some(SPHERE) && lit;
+    // A sphere is the only type that takes the sphere path.
+    let kind = |option: &str| root.field("type").is_some_and(|field| field.enum_is(option));
+    let lights_model = kind("sphere") && lit;
     let frustum = lit.then(|| read_h2_frustum(source, root)).flatten();
     Some((light, lights_model, frustum, flare))
 }
@@ -935,9 +940,12 @@ fn read_h2_light(
 /// tool's postprocess applied. A shadow's pass needs a map of the level from
 /// the light, which a preview has none of, so it lights without one.
 fn read_h2_frustum(source: &TagSource, root: TagStruct<'_>) -> Option<H2Frustum> {
-    let kind = root.read_int_any("type")?;
-    let falloff = matches!(root.read_int_any("falloff geometry"), Some(0 | DIRECTIONAL_FALLOFF));
-    if !matches!(kind, PROJECTIVE | PYRAMID) || !falloff {
+    let is = |field: &str, option: &str| root.field(field).is_some_and(|field| field.enum_is(option));
+    // Orthogonal lights assert in `sub_946960`, so these are the frustums;
+    // tool's postprocess makes `directional` of a frustum's default falloff.
+    let (projective, pyramid) = (is("type", "projective"), is("type", "pyramid"));
+    let falloff = is("falloff geometry", "default") || is("falloff geometry", "directional");
+    if !(projective || pyramid) || !falloff {
         return None;
     }
     let gel = root.read_tag_ref_path("gel map").filter(|gel| !gel.is_empty());
@@ -952,7 +960,7 @@ fn read_h2_frustum(source: &TagSource, root: TagStruct<'_>) -> Option<H2Frustum>
     let [narrowest, widest] = FIELD_OF_VIEW;
     let view = root.read_real("field of view").unwrap_or(0.0).clamp(narrowest, widest);
     Some(H2Frustum {
-        near_width: if kind == PYRAMID { 0.0 } else { root.read_real("near width").unwrap_or(0.0) },
+        near_width: if pyramid { 0.0 } else { root.read_real("near width").unwrap_or(0.0) },
         stretch: stretch * aspect,
         half_view: view.to_radians() * 0.5,
         falloff: root.read_real("falloff distance").unwrap_or(0.0),
@@ -1011,7 +1019,7 @@ fn place_h2_light(
         });
     }
     // A preview is a third person view.
-    let Some(flare) = flare.filter(|flare| flare.flags & ONLY_FIRST_PERSON == 0) else {
+    let Some(flare) = flare.filter(|flare| !flare.flags.only_first_person) else {
         return;
     };
     found.0.push(H2FlareAt {
@@ -1055,7 +1063,7 @@ pub(in crate::app::model_preview) fn read_h2_flares(
         }
         let name = attachment.read_string_id("marker").unwrap_or_default();
         let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
-        let change_color = usize::try_from(attachment.read_int_any("change color").unwrap_or(0) - 1).ok();
+        let change_color = function_slot_of(attachment, "change color");
         let mut named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
         if group == light_group {
             let Some(marker) = named.next() else {
@@ -1080,7 +1088,7 @@ pub(in crate::app::model_preview) fn read_h2_flares(
         let Some(flare) = read_h2_flare(source, &path).map(Arc::new) else {
             continue;
         };
-        if flare.flags & ONLY_FIRST_PERSON != 0 {
+        if flare.flags.only_first_person {
             continue;
         }
         for marker in named {
@@ -1102,7 +1110,7 @@ pub(in crate::app::model_preview) fn read_h2_flares(
     }
     for_each_attached_part(source, object, |part| {
         if part.group == lens_group {
-            let third_person = |flare: &H2Flare| flare.flags & ONLY_FIRST_PERSON == 0;
+            let third_person = |flare: &H2Flare| !flare.flags.only_first_person;
             let Some(flare) = read_h2_flare(source, &part.path).filter(third_person) else {
                 return;
             };
@@ -1192,7 +1200,7 @@ impl H2Flare {
     }
 
     fn tests_occlusion(&self) -> bool {
-        self.flags & NO_OCCLUSION_TEST == 0
+        !self.flags.no_occlusion_test
     }
 }
 
@@ -1230,7 +1238,7 @@ impl H2Light {
 impl H2PointLight {
     /// The layer its diffuse draws on.
     pub(crate) fn diffuse_layer(&self) -> H2Layer {
-        H2Layer::diffuse_with_contrast(self.light.contrast)
+        self.light.diffuse_layer
     }
 
     /// The function that scales it, which sliders and frames must answer for.
@@ -1393,7 +1401,7 @@ impl H2FlareAt {
 
     /// A light passes `lens_flare_submit` a scale of 1, whatever its marker's.
     fn marker_scaled(&self) -> f32 {
-        let by_marker = self.flare.flags & SCALE_BY_MARKER != 0 && self.light.is_none();
+        let by_marker = self.flare.flags.scale_by_marker && self.light.is_none();
         if by_marker { self.marker_scale } else { 1.0 }
     }
 
@@ -1428,9 +1436,9 @@ impl H2FlareAt {
         let outer = flare.occlusion_radius * self.marker_scaled();
         let patch = |radius: f32| {
             let offset = match flare.occlusion_offset {
-                0 => view.forward.map(|axis| -axis * radius),
-                1 => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
-                _ => [0.0; 3],
+                OcclusionOffset::TowardViewer => view.forward.map(|axis| -axis * radius),
+                OcclusionOffset::MarkerForward => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
+                OcclusionOffset::None => [0.0; 3],
             };
             CeSprite {
                 center: std::array::from_fn(|axis| position[axis] + offset[axis]),
@@ -1467,7 +1475,7 @@ impl H2FlareAt {
         if flare.fade[0] != flare.fade[1] && flare.fade[1] <= depth {
             return Vec::new();
         }
-        let scaled_by_marker = flare.flags & SCALE_BY_MARKER != 0;
+        let scaled_by_marker = flare.flags.scale_by_marker;
         let Some(value) = self.value(values, time, onset) else {
             return Vec::new();
         };
@@ -1529,7 +1537,7 @@ impl H2FlareAt {
             let scale = lerp(low, high, interpolation).clamp(0.0, 1.0);
             let [small, large] = reflection.radius;
             let mut radius = lerp(small, large, interpolation) * radius_scale;
-            let kept = reflection.flags & NOT_AFFECTED_BY_INNER_OCCLUSION != 0;
+            let kept = reflection.flags.not_affected_by_inner_occlusion;
             let alpha = if kept { not_inner } else { brightness } * scale;
             if alpha <= 0.0 || radius <= 0.0 {
                 continue;
@@ -1540,18 +1548,18 @@ impl H2FlareAt {
                 rotation += corona;
                 stretch = flare.corona_scale;
             }
-            if reflection.flags & ALIGN_WITH_SCREEN_CENTER != 0 {
+            if reflection.flags.align_with_screen_center {
                 rotation += screen_angle;
             }
-            if reflection.flags & RADIUS_SCALED_BY_OCCLUSION != 0 {
+            if reflection.flags.radius_scaled_by_occlusion {
                 radius *= (chained * 0.5 + 0.5).clamp(0.0, 1.0);
             }
-            if reflection.flags & RADIUS_NOT_SCALED_BY_DISTANCE != 0 {
+            if reflection.flags.radius_not_scaled_by_distance {
                 radius *= depth;
             }
             let tint: [f32; 3] = std::array::from_fn(|channel| {
                 let own = color[channel] * reflection.color[channel];
-                if reflection.flags & IGNORE_LIGHT_COLOR == 0 { own * external[channel] } else { own }
+                if !reflection.flags.ignore_light_color { own * external[channel] } else { own }
             });
             sprites.push(CeSprite {
                 center: std::array::from_fn(|axis| {
@@ -1564,7 +1572,7 @@ impl H2FlareAt {
                 image: reflection.image,
                 highlight: Some((1.0 - reflection.modulation).clamp(0.0, 1.0)),
                 tint: None,
-                depth_tested: reflection.flags & OCCLUDED_BY_SOLID_OBJECTS != 0,
+                depth_tested: reflection.flags.occluded_by_solid_objects,
             });
         }
         sprites
@@ -1607,7 +1615,7 @@ mod tests {
         }
     }
 
-    fn reflection(flags: i128) -> H2Reflection {
+    fn reflection(flags: ReflectionFlags) -> H2Reflection {
         H2Reflection {
             flags,
             image: 0,
@@ -1620,7 +1628,7 @@ mod tests {
         }
     }
 
-    fn flare(flags: i128, reflections: Vec<H2Reflection>) -> H2FlareAt {
+    fn flare(flags: FlareFlags, reflections: Vec<H2Reflection>) -> H2FlareAt {
         H2FlareAt {
             object: 0,
             node: 0,
@@ -1637,7 +1645,7 @@ mod tests {
                 cones: [1.0, 1.0],
                 fade: [0.0, 0.0],
                 occlusion_radius: 0.2,
-                occlusion_offset: 2,
+                occlusion_offset: OcclusionOffset::None,
                 inner_scale: Some(0.5),
                 corona_scale: [2.0, 3.0],
                 rotation_function: 0,
@@ -1659,7 +1667,7 @@ mod tests {
 
     #[test]
     fn a_function_runs_a_reflection_between_its_bounds() {
-        let at = flare(0, vec![reflection(0)]);
+        let at = flare(FlareFlags::default(), vec![reflection(ReflectionFlags::default())]);
         let sprites = at.sprites(Some(&values(0.5)), &[[1.0; 3]; 4], None, &view(), 0.0, 0.0, [1.0, 1.0]);
         assert!((sprites[0].alpha - 0.75).abs() < 1e-5);
         assert!((sprites[0].extent[0] - 0.4).abs() < 1e-5, "0.2, then the corona's stretch");
@@ -1668,7 +1676,7 @@ mod tests {
 
     #[test]
     fn scale_by_marker_takes_the_upper_bounds_and_the_markers_scale() {
-        let at = flare(SCALE_BY_MARKER, vec![reflection(0)]);
+        let at = flare(FlareFlags { scale_by_marker: true, ..Default::default() }, vec![reflection(ReflectionFlags::default())]);
         let sprites = at.sprites(Some(&values(0.0)), &[[1.0; 3]; 4], None, &view(), 0.0, 0.0, [1.0, 1.0]);
         assert!((sprites[0].alpha - 1.0).abs() < 1e-5);
         assert!((sprites[0].extent[1] - 2.7).abs() < 1e-5);
@@ -1676,10 +1684,8 @@ mod tests {
 
     #[test]
     fn only_some_reflections_ignore_inner_occlusion() {
-        let mut at = flare(
-            0,
-            vec![reflection(0), reflection(NOT_AFFECTED_BY_INNER_OCCLUSION)],
-        );
+        let kept = ReflectionFlags { not_affected_by_inner_occlusion: true, ..Default::default() };
+        let mut at = flare(FlareFlags::default(), vec![reflection(ReflectionFlags::default()), reflection(kept)]);
         at.scale_by.clear();
         let sprites = at.sprites(None, &[[1.0; 3]; 4], None, &view(), 0.0, 0.0, [0.0, 0.5]);
         assert_eq!(sprites.len(), 0, "with the chained test all hidden nothing draws");
@@ -1690,7 +1696,7 @@ mod tests {
 
     #[test]
     fn a_change_color_tints_unless_a_reflection_ignores_it() {
-        let mut at = flare(0, vec![reflection(0), reflection(IGNORE_LIGHT_COLOR)]);
+        let mut at = flare(FlareFlags::default(), vec![reflection(ReflectionFlags::default()), reflection(ReflectionFlags { ignore_light_color: true, ..Default::default() })]);
         at.scale_by.clear();
         at.change_color = Some(1);
         let colors = [[1.0; 3], [0.5, 0.5, 0.5], [1.0; 3], [1.0; 3]];
@@ -1708,7 +1714,7 @@ mod tests {
             brightness: [1.0, 1.0],
             color_animation: None,
             brightness_animation: None,
-            contrast: 0,
+            diffuse_layer: H2Layer::LightDiffuse,
             radius: 2.0,
             specular_radius: 3.0,
             effect_duration: 0.0,
@@ -1718,7 +1724,7 @@ mod tests {
 
     #[test]
     fn a_name_nothing_answers_to_is_zero_and_no_name_is_one() {
-        let mut at = flare(0, vec![reflection(0)]);
+        let mut at = flare(FlareFlags::default(), vec![reflection(ReflectionFlags::default())]);
         at.scale_by = "no_such_function".to_owned();
         assert_eq!(at.value(None, 0.0, 0.0), Some(0.0));
         assert_eq!(at.value(Some(&values(0.5)), 0.0, 0.0), Some(0.0));
@@ -1728,7 +1734,7 @@ mod tests {
 
     #[test]
     fn a_light_tints_its_flare_by_its_own_color_and_no_change_color() {
-        let mut at = flare(0, vec![reflection(0)]);
+        let mut at = flare(FlareFlags::default(), vec![reflection(ReflectionFlags::default())]);
         at.light = Some(light());
         at.change_color = Some(0);
         let colors = [[0.0; 3]; 4];
@@ -1738,7 +1744,7 @@ mod tests {
 
     #[test]
     fn a_light_with_no_color_or_size_is_out() {
-        let mut at = flare(0, vec![reflection(0)]);
+        let mut at = flare(FlareFlags::default(), vec![reflection(ReflectionFlags::default())]);
         at.light = Some(light());
         let none = [[1.0; 3]; 4];
         assert!(at.sprites(Some(&values(0.0)), &none, None, &view(), 0.0, 0.0, [1.0, 1.0]).is_empty());
@@ -1748,7 +1754,7 @@ mod tests {
 
     #[test]
     fn a_light_ignores_its_markers_scale() {
-        let mut at = flare(SCALE_BY_MARKER, vec![reflection(0)]);
+        let mut at = flare(FlareFlags { scale_by_marker: true, ..Default::default() }, vec![reflection(ReflectionFlags::default())]);
         at.light = Some(light());
         let none = [[1.0; 3]; 4];
         let sprites = at.sprites(Some(&values(0.5)), &none, None, &view(), 0.0, 0.0, [1.0, 1.0]);
@@ -1973,10 +1979,10 @@ mod tests {
 
     #[test]
     fn a_flare_with_no_test_has_no_patches() {
-        let tested = flare(0, vec![reflection(0)]);
+        let tested = flare(FlareFlags::default(), vec![reflection(ReflectionFlags::default())]);
         let (outer, inner) = tested.occlusion_patches(None, &view()).unwrap();
         assert_eq!((outer.extent[0], inner.unwrap().extent[0]), (0.2, 0.1));
-        assert!(flare(NO_OCCLUSION_TEST, Vec::new()).occlusion_patches(None, &view()).is_none());
+        assert!(flare(FlareFlags { no_occlusion_test: true, ..Default::default() }, Vec::new()).occlusion_patches(None, &view()).is_none());
     }
 
     fn gel_frustum() -> H2Frustum {
