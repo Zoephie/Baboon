@@ -1181,7 +1181,7 @@ struct CeRunningLight {
 }
 
 /// Every effect's particles, carried from frame to frame.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct CeParticleField {
     time: Option<f32>,
     effects: Vec<RunningEffect>,

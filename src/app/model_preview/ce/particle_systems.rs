@@ -420,6 +420,7 @@ impl CeRunningSystem {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct Random(u32);
 
 impl Random {
@@ -450,7 +451,7 @@ impl Random {
 }
 
 /// Every particle system of the object, carried from frame to frame.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct CeParticleSystemField {
     time: Option<f32>,
     systems: Vec<CeRunningSystem>,

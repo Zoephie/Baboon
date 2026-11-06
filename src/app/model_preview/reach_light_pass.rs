@@ -91,7 +91,7 @@ impl ModelGlRenderer {
             }
             let values = frame.h2_values_of_object(light.object);
             let colors = frame.change_colors_of_object(light.object);
-            let onset = self.slots[slot].h3_onsets.of(light.object, light.scale_name(), values, frame.time);
+            let onset = self.slots[slot].simulations.h3_onsets.of(light.object, light.scale_name(), values, frame.time);
             lit.extend(light.lit(values, &colors, bones, frame.time - onset));
         }
         lit
