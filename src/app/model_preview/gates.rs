@@ -634,6 +634,10 @@ const fn after(kit: &'static str, game: GameId, extension: &'static str, path: &
 
 const HCE: (&str, GameId) = ("BLAM_TEST_HCEEK", GameId::HaloCe);
 const H2: (&str, GameId) = ("BLAM_TEST_H2EK", GameId::Halo2);
+const H3: (&str, GameId) = ("BLAM_TEST_H3EK", GameId::Halo3);
+const ODST: (&str, GameId) = ("BLAM_TEST_ODSTEK", GameId::Halo3Odst);
+const REACH: (&str, GameId) = ("BLAM_TEST_HREK", GameId::HaloReach);
+const H4: (&str, GameId) = ("BLAM_TEST_H4EK", GameId::Halo4);
 
 /// Every option the refactor reads by name, against the number it replaced.
 const OPTION_ROWS: &[OptionRow] = &[
@@ -1115,6 +1119,17 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(H2.0, H2.1, "sound_scenery", "attachments/change color", Old::Value(2), "secondary"),
     row(H2.0, H2.1, "sound_scenery", "attachments/change color", Old::Value(3), "tertiary"),
     row(H2.0, H2.1, "sound_scenery", "attachments/change color", Old::Value(4), "quaternary"),
+    // h2::weapons: every game's animation graphs
+    row(H2.0, H2.1, "model_animation_graph", "skeleton nodes/model flags", Old::Bit(0x20), "left arm member"),
+    row(H2.0, H2.1, "model_animation_graph", "animations/playback flags", Old::Bit(0x8), "disable weapon ik"),
+    row(H3.0, H3.1, "model_animation_graph", "skeleton nodes/model flags", Old::Bit(0x20), "left arm member"),
+    row(H3.0, H3.1, "model_animation_graph", "animations/playback flags", Old::Bit(0x8), "disable weapon ik"),
+    row(ODST.0, ODST.1, "model_animation_graph", "skeleton nodes/model flags", Old::Bit(0x20), "left arm member"),
+    row(ODST.0, ODST.1, "model_animation_graph", "animations/playback flags", Old::Bit(0x8), "disable weapon ik"),
+    row(REACH.0, REACH.1, "model_animation_graph", "skeleton nodes/model flags", Old::Bit(0x20), "left arm member"),
+    row(REACH.0, REACH.1, "model_animation_graph", "animations/user flags", Old::Bit(0x8), "disable weapon ik"),
+    row(H4.0, H4.1, "model_animation_graph", "skeleton nodes/model flags", Old::Bit(0x20), "left arm member"),
+    row(H4.0, H4.1, "model_animation_graph", "animations/user flags", Old::Bit(0x8), "disable weapon ik"),
     // ce::particle_systems
     row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x1), "type states loop"),
     after(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x2), "type states loop"),
