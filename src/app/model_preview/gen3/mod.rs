@@ -8,4 +8,5 @@ pub(in crate::app::model_preview) mod render;
 pub(in crate::app) mod prt;
 pub(crate) mod screen_effects;
 pub(crate) mod shaders;
+pub(in crate::app::model_preview) mod state;
 pub(crate) mod strips;

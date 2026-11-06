@@ -48,7 +48,7 @@ impl Gen3Game for H3Game {
         unsafe {
             let vertices = cx.core.h3_empty_array(cx.gl);
             if self.bloom.is_none() {
-                self.bloom = H3Bloom::new(cx.gl, cx.core.h3_no_bloom);
+                self.bloom = H3Bloom::new(cx.gl, cx.core.gen3.no_bloom);
             }
             self.bloom.as_mut()?.build(cx.gl, vertices, framebuffer, accumulation, size)
         }

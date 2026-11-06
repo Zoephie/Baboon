@@ -44,13 +44,13 @@ impl ReachGame {
             gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
             gl.uniform_1_i32(gl.get_uniform_location(program, "accumulation").as_ref(), 0);
             gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, bloom.or(core.h3_no_bloom));
+            gl.bind_texture(glow::TEXTURE_2D, bloom.or(core.gen3.no_bloom));
             gl.uniform_1_i32(gl.get_uniform_location(program, "bloom").as_ref(), 1);
             gl.active_texture(glow::TEXTURE2);
             gl.bind_texture(glow::TEXTURE_2D, depth);
             gl.uniform_1_i32(gl.get_uniform_location(program, "scene_depth").as_ref(), 2);
             gl.active_texture(glow::TEXTURE3);
-            gl.bind_texture(glow::TEXTURE_2D, self.noise.or(core.h3_no_bloom));
+            gl.bind_texture(glow::TEXTURE_2D, self.noise.or(core.gen3.no_bloom));
             gl.uniform_1_i32(gl.get_uniform_location(program, "noise").as_ref(), 3);
             gl.active_texture(glow::TEXTURE0);
             let matrix = screen.color_matrix();

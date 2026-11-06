@@ -48,11 +48,11 @@ impl RenderCore {
             gl.polygon_offset(slope, depth * (1 << 24) as f32);
             h3_draw::h3_set_cull(gl, frame);
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-            self.reach_view_projection = Some(view_projection);
+            self.gen3.shadow_view_projection = Some(view_projection);
             for (batch, material, pass) in casters {
                 self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
             }
-            self.reach_view_projection = None;
+            self.gen3.shadow_view_projection = None;
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.color_mask(true, true, true, true);
         }

@@ -668,7 +668,7 @@ pub(in crate::app::model_preview) unsafe fn set_value(gl: &glow::Context, locati
 impl RenderCore {
     /// A material's translated passes, if this context can run them.
     pub(in crate::app::model_preview) fn h3_material<'a>(&self, frame: &'a ModelGpuFrame, material: usize) -> Option<&'a Arc<H3Material>> {
-        if !self.h3_supported {
+        if !self.gen3.supported {
             return None;
         }
         frame.textures.as_ref()?.get(material)?.h3.as_ref()
@@ -676,12 +676,12 @@ impl RenderCore {
 
     /// The normals the albedo pass laid down, for the shadow pass to read.
     pub(super) fn h3_normal_target(&self) -> Option<glow::NativeTexture> {
-        self.h3_targets.as_ref().map(|targets| targets.normal)
+        self.gen3.targets.as_ref().map(|targets| targets.normal)
     }
 
     pub(in crate::app::model_preview) fn h3_draws(&self, frame: &ModelGpuFrame) -> bool {
         frame.game_shaders
-            && self.h3_supported
+            && self.gen3.supported
             && frame.textures.iter().any(|textures| textures.iter().any(|texture| texture.h3.is_some()))
     }
 
@@ -703,7 +703,7 @@ impl RenderCore {
     /// the cache while lent, so a pass drawn inside another's draw finds it.
     unsafe fn h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<Rc<H3Program>> {
         let key = Arc::as_ptr(pass) as usize;
-        match self.h3_programs.get(&key) {
+        match self.gen3.programs.get(&key) {
             Some(Ok(program)) => return Some(Rc::clone(program)),
             Some(Err(_)) => return None,
             None => {}
@@ -720,12 +720,12 @@ impl RenderCore {
             match super::gl::link::link(gl, &stages, &attributes) {
                 Ok(program) => {
                     let program = Rc::new(H3Program { _pass: Arc::clone(pass), linked: Linked::new(program) });
-                    self.h3_programs.insert(key, Ok(Rc::clone(&program)));
+                    self.gen3.programs.insert(key, Ok(Rc::clone(&program)));
                     Some(program)
                 }
                 Err(error) => {
                     eprintln!("h3 program: {error}");
-                    self.h3_programs.insert(key, Err(Arc::clone(pass)));
+                    self.gen3.programs.insert(key, Err(Arc::clone(pass)));
                     None
                 }
             }
@@ -837,7 +837,7 @@ impl RenderCore {
         unsafe {
             self.with_h3_program(gl, pass, |this, program| {
                 gl.use_program(Some(program.program));
-                let size = this.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+                let size = this.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
                 let h4_values = material.h4.as_ref().map(|submit| {
                     let object = batch.material_index as usize;
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
@@ -845,7 +845,7 @@ impl RenderCore {
                         super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
                     let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
                     let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
-                    let draw = match this.h4_draw {
+                    let draw = match this.gen3.submit_draw {
                         Some(draw) => draw,
                         None if albedo => super::h4::submit::H4Draw::Albedo,
                         None if fringe => super::h4::submit::H4Draw::Fringe,
@@ -866,7 +866,7 @@ impl RenderCore {
                     }
                     match name.as_str() {
                         "View_Projection" => {
-                            let matrix = this.reach_view_projection.unwrap_or_else(|| view_projection(&frame.camera));
+                            let matrix = this.gen3.shadow_view_projection.unwrap_or_else(|| view_projection(&frame.camera));
                             gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                             continue;
                         }
@@ -883,16 +883,16 @@ impl RenderCore {
                             continue;
                         }
                         "simple_lights" => {
-                            if let Some((lit, _)) = &this.h3_light {
+                            if let Some((lit, _)) = &this.gen3.light {
                                 gl.uniform_4_f32_slice(location.as_ref(), lit.rows.as_flattened());
-                            } else if material.dialect == H3Dialect::Reach && !this.reach_inline.is_empty() {
-                                let inline = this.reach_inline.as_flattened().as_flattened();
+                            } else if material.dialect == H3Dialect::Reach && !this.gen3.inline_lights.is_empty() {
+                                let inline = this.gen3.inline_lights.as_flattened().as_flattened();
                                 gl.uniform_4_f32_slice(location.as_ref(), inline);
                             }
                             continue;
                         }
                         "Shadow_Projection" => {
-                            if let Some((lit, _)) = &this.h3_light {
+                            if let Some((lit, _)) = &this.gen3.light {
                                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &lit.projection);
                             }
                             continue;
@@ -902,7 +902,7 @@ impl RenderCore {
                     // The shadow's generate draws from the light.
                     if material.dialect == H3Dialect::Halo4
                         && name == "vs_view_view_projection_matrix"
-                        && let Some(matrix) = this.reach_view_projection
+                        && let Some(matrix) = this.gen3.shadow_view_projection
                     {
                         gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                         continue;
@@ -917,7 +917,7 @@ impl RenderCore {
                         continue;
                     }
                     // The dynamic pass borrows this constant for its gel's xform.
-                    if name == "p_lighting_constant_4" && this.h3_light.is_some() {
+                    if name == "p_lighting_constant_4" && this.gen3.light.is_some() {
                         gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 0.0, 0.0);
                         continue;
                     }
@@ -930,11 +930,11 @@ impl RenderCore {
                         (material.dialect == H3Dialect::Reach).then(|| this.reach_simple_light(name)).flatten();
                     let mut value = change_color
                         .or(reach_light)
-                        .or_else(|| frame_value(frame, material.dialect, name, size, this.reach_stops))
+                        .or_else(|| frame_value(frame, material.dialect, name, size, this.gen3.stops))
                         .or_else(|| h4_values.as_ref().and_then(|values| values.get(name)).cloned())
                         .or_else(|| material.values.get(name).cloned());
                     let object = batch.material_index as usize;
-                    let screen_values = this.h3_screen_alpha.map(|alpha| {
+                    let screen_values = this.gen3.screen_alpha.map(|alpha| {
                         let mut values = frame.function_values_of(object).cloned().unwrap_or_default();
                         values.insert("alpha".to_owned(), alpha);
                         values
@@ -952,7 +952,7 @@ impl RenderCore {
                     if let Some(value) = value {
                         set_value(gl, location.as_ref(), ty, &value);
                     }
-                    if let Some(value) = this.reach_pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
+                    if let Some(value) = this.gen3.pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
                         set_value(gl, location.as_ref(), ty, &H3Value::Floats(*value));
                     }
                     let settings = frame.preview.h3_shield.as_ref().or(shield.map(|shield| &shield.settings));
@@ -975,7 +975,7 @@ impl RenderCore {
                         gl.uniform_4_f32(location.as_ref(), center[0], center[1], center[2], radius);
                     }
                 }
-                let targets = this.h3_targets.as_ref();
+                let targets = this.gen3.targets.as_ref();
                 let uploaded = this.slots[slot].h3_textures.materials.get(batch.material_index as usize);
                 for (unit, (name, kind)) in pass.textures.iter().enumerate() {
                     gl.active_texture(glow::TEXTURE0 + unit as u32);
@@ -983,17 +983,17 @@ impl RenderCore {
                         "albedo_texture" | "ps_view_albedo" => targets.map(|targets| targets.albedo),
                         "normal_texture" | "ps_view_normal" => targets.map(|targets| targets.normal),
                         // No level casts shadows into Halo 4's mask: white.
-                        "ps_view_shadow_mask" => this.h4_shadow_mask.or(this.placeholder),
+                        "ps_view_shadow_mask" => this.gen3.shadow_mask.or(this.placeholder),
                         "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
                         // Halo 4's camo: what the object hides.
-                        "sceneTexture_texture" => this.h4_camo_scene.or(targets.map(|targets| targets.behind)),
-                        "depth_buffer" | "psDepthSampler_texture" => this.h3_depth_copy,
-                        "shadow_mask_texture" => this.reach_shadow_mask,
+                        "sceneTexture_texture" => this.gen3.camo_scene.or(targets.map(|targets| targets.behind)),
+                        "depth_buffer" | "psDepthSampler_texture" => this.gen3.depth_copy,
+                        "shadow_mask_texture" => this.gen3.shadow_mask,
                         other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
                             targets.map(|targets| targets.behind)
                         }
                         "UserParameterTexture_dynamic_light_gel_texture" => {
-                            this.h3_light.as_ref().and_then(|(_, gel)| *gel)
+                            this.gen3.light.as_ref().and_then(|(_, gel)| *gel)
                         }
                         other => uploaded.and_then(|map| {
                             map.get(&this.h3_frame_key(frame, batch, material, other)).or_else(|| map.get(other))
@@ -1009,7 +1009,7 @@ impl RenderCore {
                         TextureKind::Volume => gl.bind_texture(glow::TEXTURE_3D, texture.or(this.black_volume)),
                         // The kit's arrays (light probes, the dominant light's
                         // intensity, water) are built by the game, never authored.
-                        TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, this.h3_black_array),
+                        TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, this.gen3.black_array),
                         // Reach's per-vertex light probes, which only level
                         // geometry's `static_per_vertex` reads.
                         TextureKind::Bytes => gl.bind_texture(glow::TEXTURE_BUFFER, None),
@@ -1099,13 +1099,13 @@ impl RenderCore {
         };
         let (size, depth, framebuffer) = (scene.size, scene.depth, scene.framebuffer);
         unsafe {
-            if self.h3_targets.as_ref().is_none_or(|targets| targets.size != size) {
-                if let Some(old) = self.h3_targets.take() {
+            if self.gen3.targets.as_ref().is_none_or(|targets| targets.size != size) {
+                if let Some(old) = self.gen3.targets.take() {
                     old.delete(gl);
                 }
-                self.h3_targets = H3Targets::new(gl, size, depth);
+                self.gen3.targets = H3Targets::new(gl, size, depth);
             }
-            let Some(targets) = self.h3_targets.as_ref() else {
+            let Some(targets) = self.gen3.targets.as_ref() else {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 return;
             };
@@ -1117,7 +1117,7 @@ impl RenderCore {
             if frame.active_camo {
                 // What the object hides, before anything of it lands. The copy
                 // is sRGB so that sampling it reads the linear light it was.
-                let behind = self.h3_targets.as_ref().map(|targets| targets.behind);
+                let behind = self.gen3.targets.as_ref().map(|targets| targets.behind);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 gl.bind_texture(glow::TEXTURE_2D, behind);
                 gl.copy_tex_image_2d(glow::TEXTURE_2D, 0, glow::SRGB8_ALPHA8, 0, 0, size[0], size[1], 0);
@@ -1152,7 +1152,7 @@ impl RenderCore {
                 let effects = &frame.preview.h3_screen_effects;
                 gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
             };
-            self.reach_stops = game.stops(&screen);
+            self.gen3.stops = game.stops(&screen);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear_depth_f32(1.0);
@@ -1218,9 +1218,8 @@ impl RenderCore {
                 let pass = h3_lit_pass(frame, batch, material);
                 self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
             }
-            self.reach_shadow_mask = None;
-            self.h4_shadow_mask = None;
-            self.reach_pass_values = None;
+            self.gen3.shadow_mask = None;
+            self.gen3.pass_values = None;
             if shadowed {
                 self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowApply, None);
                 gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1245,29 +1244,29 @@ impl RenderCore {
                 let Some(lit) = light.lit(values, &colors, bones, frame.time, onset) else {
                     continue;
                 };
-                self.h3_light = Some((lit, self.slots[slot].h3_textures.gels.get(index).copied().flatten()));
+                self.gen3.light = Some((lit, self.slots[slot].h3_textures.gels.get(index).copied().flatten()));
                 for (batch, material) in &batches {
                     if let Some(pass) = material.dynamic_light.as_ref() {
                         self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
                     }
                 }
-                self.h3_light = None;
+                self.gen3.light = None;
             }
             game.screen_lights(&mut FrameCx { gl, frame, core: self, slot }, &reach_lit, accumulation_target);
             // `c_transparency_renderer`: what blends, far to near, sprites among
             // the materials.
             let sprites = self.draws_object_sprites(frame);
             if sprites {
-                if let Some(targets) = self.h3_targets.as_ref() {
+                if let Some(targets) = self.gen3.targets.as_ref() {
                     let [width, height] = targets.size;
                     gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                     gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
                     let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
                     gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
                     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                    self.h3_depth_copy = Some(targets.depth_copy);
+                    self.gen3.depth_copy = Some(targets.depth_copy);
                     // `submit_distortions`.
-                    self.h3_distorted = false;
+                    self.gen3.distorted = false;
                     if frame.preview.h3_particles.iter().any(|system| system.look.shader.distortion.is_some()) {
                         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.distortion_framebuffer));
                         gl.clear_color(0.0, 0.0, 0.0, 0.0);
@@ -1314,7 +1313,7 @@ impl RenderCore {
             game.blended(&mut FrameCx { gl, frame, core: self, slot }, f32::NEG_INFINITY, size);
             if sprites {
                 self.draw_object_sprites(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
-                if self.h3_distorted {
+                if self.gen3.distorted {
                     self.h3_apply_distortions(gl, accumulation_target, size);
                     gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
                 }
@@ -1358,7 +1357,7 @@ impl RenderCore {
                 gl.enable(glow::BLEND);
                 gl.depth_mask(false);
             }
-            self.reach_pass_values = None;
+            self.gen3.pass_values = None;
             // `render_object_context`'s shield impact, over every lit part.
             if h3_shield_showing(frame.function_values.as_ref()) {
                 h3_set_blend(gl, H3Blend::Additive);
@@ -1384,7 +1383,7 @@ impl RenderCore {
                 bloom = game.bloom(&mut FrameCx { gl, frame, core: self, slot }, framebuffer, accumulation, size);
             }
             game.composite(&mut FrameCx { gl, frame, core: self, slot }, framebuffer, accumulation, bloom, screen, size);
-            self.reach_stops = 0.0;
+            self.gen3.stops = 0.0;
             self.h3_finish_picture(gl, frame, slot, framebuffer, size, &screen, &shaders);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
@@ -1394,13 +1393,13 @@ impl RenderCore {
 
     /// The inline lights, as the static pass reads them.
     pub(in crate::app::model_preview) fn set_reach_inline_lights(&mut self, lit: &[ReachLitLight]) {
-        self.reach_inline = inline_rows(lit);
+        self.gen3.inline_lights = inline_rows(lit);
     }
 
     /// `simple_lights` and `simple_light_count` for a Reach static pass.
     pub(super) fn reach_simple_light(&self, name: &str) -> Option<H3Value> {
         match name {
-            "simple_light_count" => Some(H3Value::Integer(self.reach_inline.len() as i32)),
+            "simple_light_count" => Some(H3Value::Integer(self.gen3.inline_lights.len() as i32)),
             _ => None,
         }
     }
@@ -1412,7 +1411,7 @@ impl RenderCore {
         gl: &glow::Context,
         framebuffer: glow::NativeFramebuffer,
     ) -> Option<glow::NativeTexture> {
-        self.h3_targets.as_ref().map(|targets| unsafe {
+        self.gen3.targets.as_ref().map(|targets| unsafe {
             let [width, height] = targets.size;
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
@@ -1463,14 +1462,14 @@ impl RenderCore {
         values.insert(super::reach::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
             // What the pass fades against: everything drawn so far.
-            if let Some(targets) = self.h3_targets.as_ref() {
+            if let Some(targets) = self.gen3.targets.as_ref() {
                 let [width, height] = targets.size;
                 gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                 gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
                 let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
                 gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                self.h3_depth_copy = Some(targets.depth_copy);
+                self.gen3.depth_copy = Some(targets.depth_copy);
             }
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
@@ -1481,11 +1480,11 @@ impl RenderCore {
             gl.blend_equation(glow::FUNC_ADD);
             gl.blend_func(glow::ONE, glow::ONE);
             gl.color_mask(true, true, true, true);
-            self.reach_pass_values = Some(values);
+            self.gen3.pass_values = Some(values);
             for (batch, material) in &parts {
                 self.h3_draw_pass(gl, frame, slot, batch, material, shield.pass(), None);
             }
-            self.reach_pass_values = None;
+            self.gen3.pass_values = None;
             h3_set_cull(gl, frame);
         }
     }
@@ -1500,10 +1499,10 @@ impl RenderCore {
         size: [i32; 2],
     ) {
         unsafe {
-            if self.h3_distortion_program.is_none() {
-                self.h3_distortion_program = screen_program(gl, DISTORTION_FRAGMENT);
+            if self.gen3.distortion_program.is_none() {
+                self.gen3.distortion_program = screen_program(gl, DISTORTION_FRAGMENT);
             }
-            let (Some(program), Some(targets)) = (self.h3_distortion_program, self.h3_targets.as_ref()) else {
+            let (Some(program), Some(targets)) = (self.gen3.distortion_program, self.gen3.targets.as_ref()) else {
                 return;
             };
             let [width, height] = size;
@@ -1555,7 +1554,7 @@ impl RenderCore {
         {
             return;
         }
-        let Some(targets) = self.h3_targets.as_ref() else {
+        let Some(targets) = self.gen3.targets.as_ref() else {
             return;
         };
         let (behind, picture_framebuffer, behind_framebuffer) =
@@ -1612,16 +1611,16 @@ impl RenderCore {
                 };
                 screen_copy(gl, false);
                 h3_set_blend(gl, material.blend);
-                self.h3_screen_alpha = Some(shader.alpha);
+                self.gen3.screen_alpha = Some(shader.alpha);
                 let batch = RenderModelPreviewBatch { material_index: at as u16, ..Default::default() };
                 self.h3_draw_pass(gl, frame, slot, &batch, material, &material.lit, None);
-                self.h3_screen_alpha = None;
+                self.gen3.screen_alpha = None;
             }
             if let Some((spread, cover)) = blur {
-                if self.h3_blur_program.is_none() {
-                    self.h3_blur_program = screen_program(gl, BLUR_FRAGMENT);
+                if self.gen3.blur_program.is_none() {
+                    self.gen3.blur_program = screen_program(gl, BLUR_FRAGMENT);
                 }
-                if let Some(program) = self.h3_blur_program {
+                if let Some(program) = self.gen3.blur_program {
                     screen_copy(gl, true);
                     gl.use_program(Some(program));
                     gl.active_texture(glow::TEXTURE0);
@@ -1665,10 +1664,10 @@ impl RenderCore {
             return;
         };
         unsafe {
-            if self.h3_suck_program.is_none() {
-                self.h3_suck_program = screen_program(gl, SUCK_FRAGMENT);
+            if self.gen3.suck_program.is_none() {
+                self.gen3.suck_program = screen_program(gl, SUCK_FRAGMENT);
             }
-            let Some(program) = self.h3_suck_program else {
+            let Some(program) = self.gen3.suck_program else {
                 return;
             };
             gl.use_program(Some(program));
@@ -1714,16 +1713,16 @@ impl RenderCore {
             return;
         };
         unsafe {
-            if self.h3_vision_program.is_none() {
-                self.h3_vision_program = screen_program(gl, VISION_FRAGMENT);
+            if self.gen3.vision_program.is_none() {
+                self.gen3.vision_program = screen_program(gl, VISION_FRAGMENT);
             }
-            if self.h3_vision_mask.is_none() {
+            if self.gen3.vision_mask.is_none() {
                 let Some((image, texels, mips)) = vision.mask() else {
                     return;
                 };
-                self.h3_vision_mask = upload_h2_image_linear(gl, image, *texels, mips, None);
+                self.gen3.vision_mask = upload_h2_image_linear(gl, image, *texels, mips, None);
             }
-            let (Some(program), Some(mask)) = (self.h3_vision_program, self.h3_vision_mask) else {
+            let (Some(program), Some(mask)) = (self.gen3.vision_program, self.gen3.vision_mask) else {
                 return;
             };
             let view = ce_flare_view(&frame.camera);
@@ -1754,7 +1753,7 @@ impl RenderCore {
 
     pub(in crate::app::model_preview) unsafe fn h3_empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
         unsafe {
-            *self.empty_vertex_array.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
+            *self.gen3.empty_vertex_array.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
         }
     }
 }

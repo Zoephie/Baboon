@@ -4058,6 +4058,9 @@ impl ModelGlRenderer {
 /// targets, and, until each game's drawing moves to its own folder, every
 /// game's own state too.
 pub(super) struct RenderCore {
+    /// The gen3 pipeline's own state, until the sprite pass that reads it
+    /// mid-frame splits by family and `Gen3Render` can own it.
+    pub(in crate::app::model_preview) gen3: gen3::state::Gen3State,
     /// As `h2_bloom`.
     pub(in crate::app::model_preview) sprite_gl: Option<Option<SpriteGl>>,
     /// The frame's CE point lights with those its effects have made, which
@@ -4073,65 +4076,21 @@ pub(super) struct RenderCore {
     sprite_cursor: usize,
     /// Particles step once a frame, however many calls draw them.
     sprites_advanced: bool,
-    h3_distorted: bool,
-    h3_distortion_program: Option<glow::NativeProgram>,
-    /// This frame's copy of the H3 scene's depth, for soft particles; set
-    /// only while an H3 picture draws its sprites.
-    pub(in crate::app::model_preview) h3_depth_copy: Option<glow::NativeTexture>,
     /// Halo 2's `target_particle_distortion`, copied from the frame.
     h2_distortion_copy: Option<ColorTarget>,
     /// Whether this context's GLSL can draw the games' shaders, which every
     /// pipeline's scene needs; see `H2_GLSL_VERSION`.
     shaders_supported: bool,
-    /// Whether this context can draw Halo 3's: the translated shaders want GLSL 4.10.
-    h3_supported: bool,
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.
     h2_programs: HashMap<(H2VertexStage, String), Option<Rc<Linked>>>,
     black_cube: Option<glow::NativeTexture>,
-    /// What Halo 3's composite reads with no bloom built.
-    pub(in crate::app::model_preview) h3_no_bloom: Option<glow::NativeTexture>,
     black_volume: Option<glow::NativeTexture>,
-    /// What an H3 array sampler reads with nothing of its own.
-    h3_black_array: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) white_volume: Option<glow::NativeTexture>,
     h2_normalization_cube: Option<glow::NativeTexture>,
     h2_target: Option<H2Target>,
     scene: Option<H2Target>,
     h2_frame_copy: Option<H2Target>,
-    pub(in crate::app::model_preview) h3_targets: Option<h3_draw::H3Targets>,
-    /// The light drawing now, and its gel.
-    h3_light: Option<(h3::lights::H3LitLight, Option<glow::NativeTexture>)>,
-    /// Linked passes by their address, or the pass that failed to link: each
-    /// holds its pass, so no other pass can come to have its address.
-    h3_programs: HashMap<usize, Result<Rc<h3_draw::H3Program>, Arc<gen3::shaders::H3Pass>>>,
-    h3_blur_program: Option<glow::NativeProgram>,
-    h3_vision_program: Option<glow::NativeProgram>,
-    h3_suck_program: Option<glow::NativeProgram>,
-    h3_vision_mask: Option<glow::NativeTexture>,
-    /// How much of its effect the `shader_screen` drawing now is.
-    h3_screen_alpha: Option<f32>,
-    /// The picture as Halo 4's camo reads it, bytes as they are.
-    pub(in crate::app::model_preview) h4_camo_scene: Option<glow::NativeTexture>,
-    /// Halo 4's self shadow: its map, blurs and mask, the three screen
-    /// programs, and the mask while the static pass reads it.
-    pub(in crate::app::model_preview) h4_shadow_mask: Option<glow::NativeTexture>,
-    /// Which draw of a Halo 4 material is under way, when not its albedo or
-    /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
-    pub(in crate::app::model_preview) h4_draw: Option<h4::submit::H4Draw>,
-    /// Reach's self shadow: its map and mask, and the apply.
-    /// What a Reach pass draws through in place of the camera, and the mask
-    /// its static pass reads, while they are set.
-    reach_view_projection: Option<[f32; 16]>,
-    pub(in crate::app::model_preview) reach_shadow_mask: Option<glow::NativeTexture>,
-    /// Reach's inline lights this frame, `simple_lights` rows.
-    reach_inline: Vec<[[f32; 4]; 5]>,
-    /// Constants a Reach pass of the frame sets over the material's: the shield's and the camo's.
-    pub(in crate::app::model_preview) reach_pass_values: Option<std::collections::HashMap<&'static str, [f32; 4]>>,
-    /// The exposure stops Reach's area screen effects come to this frame,
-    /// set before its scene draws; 0 outside a Reach picture.
-    pub(in crate::app::model_preview) reach_stops: f32,
-    empty_vertex_array: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
     /// Made on first use; `Some(None)` once making it failed, so a driver
@@ -4232,46 +4191,47 @@ impl RenderCore {
             };
             let version = gl.version();
             Ok(Self {
+                gen3: gen3::state::Gen3State {
+                    supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
+                    targets: None,
+                    programs: HashMap::new(),
+                    light: None,
+                    distorted: false,
+                    distortion_program: None,
+                    depth_copy: None,
+                    black_array: upload_solid_volume(gl, glow::TEXTURE_2D_ARRAY, [0, 0, 0, 255]),
+                    no_bloom: upload_black_flat(gl),
+                    blur_program: None,
+                    vision_program: None,
+                    suck_program: None,
+                    vision_mask: None,
+                    screen_alpha: None,
+                    empty_vertex_array: None,
+                    inline_lights: Vec::new(),
+                    pass_values: None,
+                    shadow_mask: None,
+                    stops: 0.0,
+                    shadow_view_projection: None,
+                    camo_scene: None,
+                    submit_draw: None,
+                },
                 sprite_gl: None,
                 ce_effect_gl: None,
                 shaders_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
-                h3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                 h2_programs: HashMap::new(),
                 black_cube: upload_black_cube(gl),
-                h3_no_bloom: upload_black_flat(gl),
                 particle_gl: None,
                 reach_cheap_gl: None,
                 sprite_cursor: 0,
                 ce_points_now: None,
                 sprites_advanced: false,
-                h3_distorted: false,
-                h3_distortion_program: None,
-                h3_depth_copy: None,
                 h2_distortion_copy: None,
                 black_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [0, 0, 0, 255]),
-                h3_black_array: upload_solid_volume(gl, glow::TEXTURE_2D_ARRAY, [0, 0, 0, 255]),
                 white_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [255; 4]),
                 h2_normalization_cube: upload_normalization_cube(gl),
                 h2_target: None,
                 scene: None,
                 h2_frame_copy: None,
-                h3_targets: None,
-                h3_light: None,
-                h3_programs: HashMap::new(),
-                h3_blur_program: None,
-                h3_vision_program: None,
-                h3_suck_program: None,
-                h3_vision_mask: None,
-                h3_screen_alpha: None,
-                h4_camo_scene: None,
-                h4_shadow_mask: None,
-                h4_draw: None,
-                reach_view_projection: None,
-                reach_shadow_mask: None,
-                reach_inline: Vec::new(),
-                reach_pass_values: None,
-                reach_stops: 0.0,
-                empty_vertex_array: None,
                 h2_gel: None,
                 h2_bloom: None,
                 h2_shadow_map: None,
@@ -4330,7 +4290,7 @@ impl RenderCore {
             }
             self.slots[slot].sync_textures(gl, frame);
             self.ce_points_now = None;
-            self.h3_depth_copy = None;
+            self.gen3.depth_copy = None;
             Some(slot)
         }
     }
@@ -4807,9 +4767,9 @@ impl RenderCore {
                 self.particle_gl.get_or_insert_with(|| h3_particle_gl(gl, self.program));
             }
             let particle_gl = self.particle_gl.as_ref().and_then(Option::as_ref);
-            let no_map = self.h3_no_bloom;
+            let no_map = self.gen3.no_bloom;
             // What Reach's area screen effects do to the sprites' exposure.
-            let stops = self.reach_stops;
+            let stops = self.gen3.stops;
             let uploaded = &mut self.slots[slot];
             uploaded.sync_sprite_textures(gl, frame);
             let camera = &frame.camera;
@@ -5079,14 +5039,14 @@ impl RenderCore {
                             at.draw(values, bones, view.eye, frame.time, onset)
                         };
                         if let Some(draw) = draw {
-                            let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+                            let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
                             h4::tracer_pass::draw_h4_tracer(
                                 gl,
                                 &mut uploaded.h4_effects,
                                 frame,
                                 &at.definition.material,
                                 &draw,
-                                self.h3_depth_copy,
+                                self.gen3.depth_copy,
                                 size,
                                 self.placeholder,
                                 at.object,
@@ -5106,14 +5066,14 @@ impl RenderCore {
                             let values = frame.function_values_of_object(at.object);
                             let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                             if let Some(draw) = at.h4_draw(values, bones, &view, frame.time, onset) {
-                                let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+                                let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
                                 h4::light_volume_pass::draw_h4_light_volume(
                                     gl,
                                     &mut uploaded.h4_effects,
                                     frame,
                                     material,
                                     &draw,
-                                    self.h3_depth_copy,
+                                    self.gen3.depth_copy,
                                     size,
                                     self.placeholder,
                                     at.object,
@@ -5138,10 +5098,10 @@ impl RenderCore {
                         let [center, falloff] = circular.unwrap_or([0.0; 2]);
                         gl.uniform_2_f32(flares.circular.as_ref(), center, falloff);
                         // With no depth copy, no fade to read one.
-                        let fade = at.depth_fade().filter(|_| self.h3_depth_copy.is_some());
+                        let fade = at.depth_fade().filter(|_| self.gen3.depth_copy.is_some());
                         if let Some(range) = fade {
                             gl.active_texture(glow::TEXTURE1);
-                            gl.bind_texture(glow::TEXTURE_2D, self.h3_depth_copy);
+                            gl.bind_texture(glow::TEXTURE_2D, self.gen3.depth_copy);
                             gl.active_texture(glow::TEXTURE0);
                             gl.uniform_1_i32(flares.scene_depth.as_ref(), 1);
                             gl.uniform_4_f32_slice(flares.depth.as_ref(), &scene_depth_terms(camera));
@@ -5177,14 +5137,14 @@ impl RenderCore {
                             let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
                             let draws = uploaded.simulations.particles.h4_draws(index, system, values, bones, &view, frame.time, onset);
                             if !draws.is_empty() {
-                                let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
+                                let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
                                 h4::particle_pass::draw_h4_particles(
                                     gl,
                                     &mut uploaded.h4_effects,
                                     frame,
                                     render,
                                     &draws,
-                                    self.h3_depth_copy,
+                                    self.gen3.depth_copy,
                                     size,
                                     self.placeholder,
                                     system.object,
@@ -5213,7 +5173,7 @@ impl RenderCore {
                             // distortion`, the frame as it stands is copied there.
                             textures[2] = copy_frame(gl, &mut self.h2_distortion_copy);
                         }
-                        particles.draw(gl, &system.look.shader, &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting, stops);
+                        particles.draw(gl, &system.look.shader, &vertices, textures, no_map, self.gen3.depth_copy, camera, &lighting, stops);
                     }
                     Sprites::Leaves(index) => {
                         let leaves = &frame.preview.h3_leaves[index];
@@ -5227,7 +5187,7 @@ impl RenderCore {
                         }
                         let vertices = particle_floats(camera, &drawn);
                         let textures = uploaded.leaf_textures.get(index).copied().unwrap_or_default();
-                        particles.draw(gl, leaves.shader(), &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting, stops);
+                        particles.draw(gl, leaves.shader(), &vertices, textures, no_map, self.gen3.depth_copy, camera, &lighting, stops);
                     }
                     Sprites::Strip(index) => {
                         let strip = &frame.preview.h3_strips[index];
@@ -5246,12 +5206,12 @@ impl RenderCore {
                         }
                         let vertices = particle_floats(camera, &drawn);
                         let textures = uploaded.strip_textures.get(index).copied().unwrap_or_default();
-                        particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.h3_depth_copy, camera, &lighting, stops);
+                        particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.gen3.depth_copy, camera, &lighting, stops);
                     }
                 }
             }
             if distorting {
-                self.h3_distorted = distorted > 0;
+                self.gen3.distorted = distorted > 0;
             }
             // `s_cheap_particle_system::render`: after every other
             // transparent, in one batch, in ring-slot order.

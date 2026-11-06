@@ -88,7 +88,7 @@ impl H4Game {
             let camera = &frame.camera;
             let view = ce_flare_view(camera);
             let viewport = core
-                .h3_targets
+                .gen3.targets
                 .as_ref()
                 .map_or([1, 1], |targets| targets.size)
                 .map(|side| side as f32);
@@ -194,7 +194,7 @@ impl H4Game {
                 gl.blend_equation(glow::FUNC_ADD);
                 gl.blend_func(glow::ONE, glow::ONE);
                 let size = this
-                    .h3_targets
+                    .gen3.targets
                     .as_ref()
                     .map_or([1, 1], |targets| targets.size);
                 let textures = this.slots[slot].flare_textures.clone();

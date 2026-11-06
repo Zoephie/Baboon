@@ -182,7 +182,7 @@ impl ReachGame {
         let core: &mut RenderCore = cx.core;
         let caster = frame.preview.reach_shadow_caster?;
         let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) = core
-            .h3_targets
+            .gen3.targets
             .as_ref()
             .map(|targets| (targets.size, targets.albedo_framebuffer, targets.normal, targets.depth_copy, targets.depth_copy_framebuffer))?;
         let camera = Self::shadow_camera(frame, size);

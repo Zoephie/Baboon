@@ -170,7 +170,7 @@ impl H4Game {
         let core: &mut RenderCore = cx.core;
         let caster = frame.preview.h4_shadow_caster?;
         let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) =
-            core.h3_targets.as_ref().map(|targets| {
+            core.gen3.targets.as_ref().map(|targets| {
                 (
                     targets.size,
                     targets.albedo_framebuffer,

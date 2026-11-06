@@ -88,9 +88,9 @@ impl Gen3Game for H4Game {
 
     fn lit_values(&mut self, core: &mut RenderCore) {
         if let Some(mask) = self.mask.take() {
-            core.h4_shadow_mask = Some(mask);
+            core.gen3.shadow_mask = Some(mask);
             let floor = [0.0, super::shadow::DIRECT_FLOOR, 0.0, 0.0];
-            core.reach_pass_values = Some([("ps_bsp_lightmap_scale_constants", floor)].into_iter().collect());
+            core.gen3.pass_values = Some([("ps_bsp_lightmap_scale_constants", floor)].into_iter().collect());
         }
     }
 
@@ -140,7 +140,7 @@ impl Gen3Game for H4Game {
             let vertices = core.h3_empty_array(gl);
             let grading = self.grading_texture(gl, frame);
             if self.bloom.is_none() {
-                self.bloom = super::bloom::H4Bloom::new(gl, core.h3_no_bloom, core.white_volume);
+                self.bloom = super::bloom::H4Bloom::new(gl, core.gen3.no_bloom, core.white_volume);
             }
             let settings = &super::bloom::VIEW_BLOOM;
             self.bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref(), settings)

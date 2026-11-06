@@ -56,7 +56,7 @@ impl H4Game {
     pub(super) unsafe fn draw_lights(&mut self, cx: &mut FrameCx<'_>, accumulation_target: glow::NativeFramebuffer) {
         let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
         let mut lit = Self::frame_lights_of(frame);
-        let Some(targets) = core.h3_targets.as_ref() else {
+        let Some(targets) = core.gen3.targets.as_ref() else {
             return;
         };
         if lit.is_empty() {

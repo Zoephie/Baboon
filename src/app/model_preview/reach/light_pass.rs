@@ -63,7 +63,7 @@ impl ReachGame {
         let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
         let screen: Vec<&ReachLitLight> =
             lit.iter().filter(|light| light.method == ReachLightMethod::Screenspace).collect();
-        let Some(targets) = core.h3_targets.as_ref() else {
+        let Some(targets) = core.gen3.targets.as_ref() else {
             return;
         };
         if screen.is_empty() {
@@ -115,7 +115,7 @@ impl ReachGame {
                             }
                             "material_coeff" => gl.uniform_4_f32(location.as_ref(), CHEAP_ALBEDO_BLEND, 0.0, 0.0, 0.0),
                             other => {
-                                if let Some(value) = reach_frame_value(frame, other, this.reach_stops) {
+                                if let Some(value) = reach_frame_value(frame, other, this.gen3.stops) {
                                     set_uniform_value(gl, location.as_ref(), ty, &value);
                                 }
                             }

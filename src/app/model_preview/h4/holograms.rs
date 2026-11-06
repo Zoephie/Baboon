@@ -301,31 +301,31 @@ impl H4Game {
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
             h3_set_cull(gl, frame);
-            core.h4_draw = Some(H4Draw::HologramOpaque);
+            core.gen3.submit_draw = Some(H4Draw::HologramOpaque);
             for (batch, material) in holograms.iter().filter(|(_, material)| !post_bloom(material)) {
                 core.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
-            core.h4_draw = None;
+            core.gen3.submit_draw = None;
             // Mode 1 (`g_disableHologramOrderIndependentTransparency`, the
             // default) then draws pass 2, "hologram blend": blended holograms
             // alone, tested but not written, through `alpha_blend_max`.
             gl.enable(glow::BLEND);
             set_alpha_blend_max(gl);
             gl.depth_mask(false);
-            core.h4_draw = Some(H4Draw::HologramBlend);
+            core.gen3.submit_draw = Some(H4Draw::HologramBlend);
             for (batch, material) in holograms.iter().filter(|(_, material)| {
                 !post_bloom(material) && material.h4.as_ref().is_some_and(|submit| submit.is_blended_hologram())
             }) {
                 core.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
-            core.h4_draw = None;
+            core.gen3.submit_draw = None;
             gl.blend_equation(glow::FUNC_ADD);
             gl.disable(glow::BLEND);
             gl.disable(glow::SCISSOR_TEST);
             // Its bloom, by the hologram camera fx.
             let vertices = core.h3_empty_array(gl);
             if self.bloom.is_none() {
-                self.bloom = super::bloom::H4Bloom::new(gl, core.h3_no_bloom, core.white_volume);
+                self.bloom = super::bloom::H4Bloom::new(gl, core.gen3.no_bloom, core.white_volume);
             }
             let settings = H4BloomSettings::hologram(screen.bloom_scale);
             let bloom = self.bloom.as_mut()?.build(gl, vertices, framebuffer, color, size, None, &settings);
@@ -360,7 +360,7 @@ impl H4Game {
                 ("ps_material_generic_parameters", H3Value::FloatArray(generic)),
                 ("ps_filmic_tone_curve_params", H3Value::FloatArray(IDENTITY_CURVE.map(|value| [value; 4]).to_vec())),
             ];
-            let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(core.h3_no_bloom))];
+            let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(core.gen3.no_bloom))];
             self.screen_pass(core, gl, frame, &post, &post.combine, owner, &engine, &textures, size);
             gl.disable(glow::SCISSOR_TEST);
             gl.depth_mask(true);

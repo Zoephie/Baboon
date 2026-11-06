@@ -57,8 +57,8 @@ impl Gen3Game for ReachGame {
 
     fn lit_values(&mut self, core: &mut RenderCore) {
         if let Some(mask) = self.mask.take() {
-            core.reach_shadow_mask = Some(mask);
-            core.reach_pass_values = Some([("shadow_mask_enabled", [1.0; 4])].into_iter().collect());
+            core.gen3.shadow_mask = Some(mask);
+            core.gen3.pass_values = Some([("shadow_mask_enabled", [1.0; 4])].into_iter().collect());
         }
     }
 
@@ -78,7 +78,7 @@ impl Gen3Game for ReachGame {
     fn camo(&mut self, core: &mut RenderCore, frame: &ModelGpuFrame) -> Option<bool> {
         let draw = frame.preview.reach_camo.as_ref().map(|camo| camo.draw(1.0))?;
         let values = [("k_vs_active_camo_factor", draw.factor), ("p_lighting_constant_9", draw.factor)];
-        core.reach_pass_values = Some(values.into_iter().collect());
+        core.gen3.pass_values = Some(values.into_iter().collect());
         frame.active_camo.then_some(draw.opaque)
     }
 
@@ -96,7 +96,7 @@ impl Gen3Game for ReachGame {
         unsafe {
             let vertices = cx.core.h3_empty_array(cx.gl);
             if self.bloom.is_none() {
-                self.bloom = super::bloom::ReachBloom::new(cx.gl, cx.core.h3_no_bloom);
+                self.bloom = super::bloom::ReachBloom::new(cx.gl, cx.core.gen3.no_bloom);
             }
             self.bloom.as_mut()?.build(cx.gl, vertices, framebuffer, accumulation, size)
         }

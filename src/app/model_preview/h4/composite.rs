@@ -51,14 +51,14 @@ impl H4Game {
         );
         values.insert(super::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
-            if let Some(targets) = core.h3_targets.as_ref() {
+            if let Some(targets) = core.gen3.targets.as_ref() {
                 let [width, height] = targets.size;
                 gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                 gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
                 let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
                 gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                core.h3_depth_copy = Some(targets.depth_copy);
+                core.gen3.depth_copy = Some(targets.depth_copy);
             }
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
@@ -69,11 +69,11 @@ impl H4Game {
             gl.blend_equation(glow::FUNC_ADD);
             gl.blend_func(glow::ONE, glow::ONE);
             gl.color_mask(true, true, true, true);
-            core.reach_pass_values = Some(values);
+            core.gen3.pass_values = Some(values);
             for (batch, material) in &parts {
                 core.h3_draw_pass(gl, frame, slot, batch, material, &shield.pass, None);
             }
-            core.reach_pass_values = None;
+            core.gen3.pass_values = None;
             h3_set_cull(gl, frame);
         }
     }
@@ -128,7 +128,7 @@ impl H4Game {
                 gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
             };
             bind(0, glow::TEXTURE_2D, Some(accumulation), "accumulation");
-            bind(1, glow::TEXTURE_2D, bloom.or(core.h3_no_bloom), "bloom");
+            bind(1, glow::TEXTURE_2D, bloom.or(core.gen3.no_bloom), "bloom");
             bind(2, glow::TEXTURE_2D, depth, "scene_depth");
             bind(3, glow::TEXTURE_3D, grading.as_ref().map(|grading| grading.texture).or(core.white_volume), "grading");
             gl.active_texture(glow::TEXTURE0);
@@ -170,7 +170,7 @@ impl H4Game {
         /// buffer's units.
         const DEPTH_BIAS: f32 = -2e-5 * 16_777_216.0;
         let [width, height] = size.map(|side| side as f32);
-        core.reach_pass_values = Some(
+        core.gen3.pass_values = Some(
             [
                 ("ps_activeCamoFactor", draw.factor),
                 ("ps_distortionTextureTransform", draw.transform),
@@ -181,10 +181,10 @@ impl H4Game {
             .collect(),
         );
         unsafe {
-            if core.h4_camo_scene.is_none() {
-                core.h4_camo_scene = gl.create_texture().ok();
+            if core.gen3.camo_scene.is_none() {
+                core.gen3.camo_scene = gl.create_texture().ok();
             }
-            gl.bind_texture(glow::TEXTURE_2D, core.h4_camo_scene);
+            gl.bind_texture(glow::TEXTURE_2D, core.gen3.camo_scene);
             gl.copy_tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8, 0, 0, size[0], size[1], 0);
             for (name, value) in [
                 (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
@@ -225,6 +225,6 @@ impl H4Game {
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.depth_mask(true);
         }
-        core.reach_pass_values = None;
+        core.gen3.pass_values = None;
     }
 }
