@@ -115,7 +115,7 @@ pub(super) fn draw_model_viewport(
     let bones = frame.bones.clone();
     let skinning_rows = bones.as_deref().map(Vec::as_slice);
     let firing = ce::firing::shots_moving(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, time);
-    if frame.h2_moves() || ce_events_running(data.geometry_id) || firing {
+    if frame.moves() || ce_events_running(data.geometry_id) || firing {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     }
     painter.add(egui::PaintCallback {
@@ -268,10 +268,10 @@ fn build_frame(
     let shield_batches = visible_batches.clone();
     without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
     let skinning_rows = animation_skinning_rows(data, state);
-    let mut h2_values = h2_function_values_for(data, &state.h2_function_inputs, time);
+    let mut function_values = function_values_for(data, &state.h2_function_inputs, time);
     // What a function exports, which its inputs cannot reach: a scripted
     // value, say. Only the harness forces any.
-    if let Some(values) = h2_values.as_mut() {
+    if let Some(values) = function_values.as_mut() {
         for (name, value) in forced {
             values.insert(name.clone(), *value);
         }
@@ -305,10 +305,10 @@ fn build_frame(
         time,
         h2_prt_clusters: None,
         object_states: object_states(data, &state.ce_function_inputs, &state.ce_shots, time),
-        object_moves: object_moves(data, &state.h2_function_inputs, time, h2_values.as_ref()),
-        h2_values,
-        h2_attached_values: h2_attached_values(data, time),
-        h2_attached_colors: h2_attached_colors(data),
+        object_moves: object_moves(data, &state.h2_function_inputs, time, function_values.as_ref()),
+        function_values,
+        attached_values: attached_values(data, time),
+        attached_colors: attached_colors(data),
         h3_flares_shown: h3_flares_shown(&data.preview, state),
         h3_lights_shown: h3_lights_shown(&data.preview, state),
         reach_lights_shown: reach_lights_shown(&data.preview, state),
@@ -951,11 +951,11 @@ struct ModelGpuFrame {
     /// Whether those change by themselves.
     object_moves: bool,
     /// Halo 2: what its shaders can read of the object's functions.
-    h2_values: Option<functions::FunctionValues>,
+    function_values: Option<functions::FunctionValues>,
     /// What a held weapon's own functions read, by owner.
-    h2_attached_values: Vec<(u8, functions::FunctionValues)>,
+    attached_values: Vec<(u8, functions::FunctionValues)>,
     /// Each attached Halo 2 or Halo 3 object's own change colors, by owner.
-    h2_attached_colors: Vec<(u8, [[f32; 3]; 4])>,
+    attached_colors: Vec<(u8, [[f32; 3]; 4])>,
     h3_flares_shown: Vec<bool>,
     h3_lights_shown: Vec<bool>,
     /// Reach's lights and then its cheap lights, as `h3_lights_shown`.
@@ -1094,7 +1094,7 @@ pub(super) fn h2_function_values(
 
 /// Weapons in hand run on their own functions, at rest: the sliders are the
 /// opened object's.
-pub(super) fn h2_attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, functions::FunctionValues)> {
+pub(super) fn attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, functions::FunctionValues)> {
     if data.h2_attached.is_empty() {
         return Vec::new();
     }
@@ -1106,11 +1106,11 @@ pub(super) fn h2_attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8,
     values.collect()
 }
 
-fn h2_attached_colors(data: &ModelPreviewData) -> Vec<(u8, [[f32; 3]; 4])> {
+fn attached_colors(data: &ModelPreviewData) -> Vec<(u8, [[f32; 3]; 4])> {
     data.h2_attached.iter().map(|attached| (attached.owner, attached.change_colors)).collect()
 }
 
-fn h2_function_values_for(
+fn function_values_for(
     data: &ModelPreviewData,
     set: &functions::FunctionInputs,
     time: f32,
@@ -1127,7 +1127,7 @@ pub(super) fn object_moves(
     data: &ModelPreviewData,
     set: &functions::FunctionInputs,
     time: f32,
-    h2_values: Option<&functions::FunctionValues>,
+    function_values: Option<&functions::FunctionValues>,
 ) -> bool {
     object_functions(data).any(|functions| functions.move_at_rest())
         || h2_functions_move(data, set, time)
@@ -1159,14 +1159,14 @@ pub(super) fn object_moves(
         || !data.preview.ce_flags.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.preview.reach_shield.as_ref().is_some_and(|shield| {
-            let damage = h2_values.and_then(|values| values.get(h3_draw::H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
+            let damage = function_values.and_then(|values| values.get(h3_draw::H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
             shield.settings.showing(damage)
         })
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
                     || material.h4.as_ref().is_some_and(|submit| submit.moves())
-                    || (material.shield.is_some() && h3_draw::h3_shield_showing(h2_values))
+                    || (material.shield.is_some() && h3_draw::h3_shield_showing(function_values))
             })
         })
 }
@@ -1211,7 +1211,7 @@ fn h2_functions_move(
     set: &functions::FunctionInputs,
     time: f32,
 ) -> bool {
-    let held = h2_attached_values(data, time);
+    let held = attached_values(data, time);
     let held_move = data.h2_attached.iter().zip(&held).any(|(attached, (_, values))| {
         attached.functions.move_at_rest(values)
     });
@@ -1259,17 +1259,17 @@ impl ModelGpuFrame {
         self.object_states.get(object as usize).map_or([0.0; 4], |state| state.outputs)
     }
 
-    /// The function values of the Halo 2 object that owns `material`.
-    fn h2_values_of(&self, material: usize) -> Option<&functions::FunctionValues> {
+    /// The function values of the object that owns `material`.
+    fn function_values_of(&self, material: usize) -> Option<&functions::FunctionValues> {
         let object = self.preview.materials.get(material).map_or(0, |material| material.object);
-        self.h2_values_of_object(object)
+        self.function_values_of_object(object)
     }
 
-    fn h2_values_of_object(&self, object: u8) -> Option<&functions::FunctionValues> {
+    fn function_values_of_object(&self, object: u8) -> Option<&functions::FunctionValues> {
         if object == 0 {
-            return self.h2_values.as_ref();
+            return self.function_values.as_ref();
         }
-        self.h2_attached_values.iter().find(|(owner, _)| *owner == object).map(|(_, values)| values)
+        self.attached_values.iter().find(|(owner, _)| *owner == object).map(|(_, values)| values)
     }
 
     /// The change colors of the object that owns `material`.
@@ -1285,7 +1285,7 @@ impl ModelGpuFrame {
         if object == 0 {
             return self.change_colors;
         }
-        if let Some((_, colors)) = self.h2_attached_colors.iter().find(|(owner, _)| *owner == object) {
+        if let Some((_, colors)) = self.attached_colors.iter().find(|(owner, _)| *owner == object) {
             return *colors;
         }
         self.object_states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors)
@@ -1338,7 +1338,9 @@ impl ModelGpuFrame {
             .collect()
     }
 
-    fn h2_moves(&self) -> bool {
+    /// Whether anything in the frame changes over time, so the view keeps
+    /// redrawing: an effect or simulation that runs, or a pass that animates.
+    fn moves(&self) -> bool {
         // What draws, lights or simulates outside the passes runs whatever
         // the passes do.
         if self.object_moves && has_effects(&self.preview) {
@@ -4458,7 +4460,7 @@ impl ModelGlRenderer {
                         if !is_shown(&frame.h2_shown.points, index) {
                             continue;
                         }
-                        let values = frame.h2_values_of_object(point.object);
+                        let values = frame.function_values_of_object(point.object);
                         let onsets = &mut self.slots[slot].simulations.effect_onsets;
                         let onset = onsets.of(point.object, point.scale_name(), values, frame.time);
                         let Some(light) = point.lit(values, bones, frame.time, onset) else {
@@ -4489,7 +4491,7 @@ impl ModelGlRenderer {
                         if !is_shown(&frame.h2_shown.gels, index) {
                             continue;
                         }
-                        let values = frame.h2_values_of_object(gel.object);
+                        let values = frame.function_values_of_object(gel.object);
                         let onsets = &mut self.slots[slot].simulations.effect_onsets;
                         let onset = onsets.of(gel.object, gel.scale_name(), values, frame.time);
                         let Some((light, rows)) = gel.lit(values, bones, frame.time, onset) else {
@@ -4524,7 +4526,7 @@ impl ModelGlRenderer {
                 }
                 // `sub_6C18F0`: `object_overshield_amount` is the vitality past 1.
                 let value = |name: &str| {
-                    frame.h2_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+                    frame.function_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
                 };
                 for (layer, name) in [
                     (H2Layer::ShieldDamaged, "current_shield_damage"),
@@ -4748,7 +4750,7 @@ impl ModelGlRenderer {
                     if !is_shown(&frame.h2_shown.volumes, index) {
                         continue;
                     }
-                    let values = frame.h2_values_of_object(at.object);
+                    let values = frame.function_values_of_object(at.object);
                     let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                     for (volume, texture) in at.volumes().iter().zip(textures) {
                         let Some(texture) = texture else {
@@ -4774,7 +4776,7 @@ impl ModelGlRenderer {
                     if !is_shown(&frame.h2_shown.liquids, index) {
                         continue;
                     }
-                    let values = frame.h2_values_of_object(at.object);
+                    let values = frame.function_values_of_object(at.object);
                     for (arc, texture) in at.arcs().iter().zip(textures) {
                         let Some(texture) = texture else {
                             continue;
@@ -4793,7 +4795,7 @@ impl ModelGlRenderer {
                         }
                     }
                 }
-                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                let values = |object: u8| frame.function_values_of_object(object).cloned();
                 uploaded.simulations.h2_contrails.advance(&frame.preview.h2_contrails, values, bones, frame.time);
                 let contrails = frame.preview.h2_contrails.iter().zip(&uploaded.h2_contrail_textures);
                 for (index, (at, texture)) in contrails.enumerate() {
@@ -4872,7 +4874,7 @@ impl ModelGlRenderer {
             let cursor_advanced = std::mem::replace(&mut self.sprites_advanced, true);
             if !cursor_advanced && !frame.preview.h3_particles.is_empty() {
                 let systems = &frame.preview.h3_particles;
-                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                let values = |object: u8| frame.function_values_of_object(object).cloned();
                 // The grid, or under the object if that hangs below it.
                 let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
                 let ground = lowest.fold(0.0, f32::min);
@@ -4882,12 +4884,12 @@ impl ModelGlRenderer {
                 uploaded.simulations.h3_leaves.advance(&frame.preview.h3_leaves, frame.time);
             }
             if !cursor_advanced && !frame.preview.reach_cheap_emitters.is_empty() {
-                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                let values = |object: u8| frame.function_values_of_object(object).cloned();
                 let (emitters, shown) = (&frame.preview.reach_cheap_emitters, &frame.reach_cheap_shown);
                 uploaded.simulations.reach_cheap.advance(emitters, shown, values, &mut uploaded.simulations.effect_onsets, bones, view.eye, frame.time);
             }
             if !cursor_advanced && !frame.preview.h3_strips.is_empty() {
-                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                let values = |object: u8| frame.function_values_of_object(object).cloned();
                 let (systems, particles) = (&frame.preview.h3_particles, &uploaded.simulations.particles);
                 let tracks = |strip: &Arc<gen3::strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
                     particles.tracks_of(systems, strip).into_iter().map(|track| (track.id, track.place)).collect()
@@ -4895,7 +4897,7 @@ impl ModelGlRenderer {
                 uploaded.simulations.h3_strips.advance(&frame.preview.h3_strips, values, &mut uploaded.simulations.effect_onsets, tracks, bones, frame.time);
             }
             if !cursor_advanced && frame.preview.h4_tracers.iter().any(|tracer| tracer.trails()) {
-                let values = |object: u8| frame.h2_values_of_object(object).cloned();
+                let values = |object: u8| frame.function_values_of_object(object).cloned();
                 let tracers = &frame.preview.h4_tracers;
                 uploaded.simulations.h4_trails.advance(tracers, values, &mut uploaded.simulations.effect_onsets, bones, view.eye, frame.time);
             }
@@ -4960,7 +4962,7 @@ impl ModelGlRenderer {
                         if !frame.h4_tracers_shown.get(index).copied().unwrap_or(true) {
                             continue;
                         }
-                        let values = frame.h2_values_of_object(at.object);
+                        let values = frame.function_values_of_object(at.object);
                         let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                         let draw = if at.trails() {
                             uploaded.simulations.h4_trails.draw(index, at, values, bones, view.eye, frame.time, onset)
@@ -4992,7 +4994,7 @@ impl ModelGlRenderer {
                         }
                         // Halo 4's: through their material, from packed state.
                         if let Some(material) = at.h4_material() {
-                            let values = frame.h2_values_of_object(at.object);
+                            let values = frame.function_values_of_object(at.object);
                             let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                             if let Some(draw) = at.h4_draw(values, bones, &view, frame.time, onset) {
                                 let size = self.h3_targets.as_ref().map_or([1, 1], |targets| targets.size);
@@ -5036,7 +5038,7 @@ impl ModelGlRenderer {
                             gl.uniform_4_f32_slice(flares.depth.as_ref(), &scene_depth_terms(camera));
                             gl.uniform_1_f32(flares.fade.as_ref(), range);
                         }
-                        let values = frame.h2_values_of_object(at.object);
+                        let values = frame.function_values_of_object(at.object);
                         let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                         for quad in at.quads(values, bones, &view, frame.time, onset, stops) {
                             let vertices = quad.corners.map(|[x, y, z, u, v]| {
@@ -5062,7 +5064,7 @@ impl ModelGlRenderer {
                         }
                         // Halo 4's: through their material, from packed state.
                         if let Some(render) = system.look.h4.as_ref() {
-                            let values = frame.h2_values_of_object(system.object);
+                            let values = frame.function_values_of_object(system.object);
                             let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
                             let draws = uploaded.simulations.particles.h4_draws(index, system, values, bones, &view, frame.time, onset);
                             if !draws.is_empty() {
@@ -5087,7 +5089,7 @@ impl ModelGlRenderer {
                         let Some(particles) = particle_gl.as_ref() else {
                             continue;
                         };
-                        let values = frame.h2_values_of_object(system.object);
+                        let values = frame.function_values_of_object(system.object);
                         let lighting = h3_draw::h3_lighting_constants(frame);
                         let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
                         let drawn =
@@ -5126,7 +5128,7 @@ impl ModelGlRenderer {
                         let Some(particles) = particle_gl.as_ref() else {
                             continue;
                         };
-                        let values = frame.h2_values_of_object(strip.object);
+                        let values = frame.function_values_of_object(strip.object);
                         let onset = uploaded.simulations.effect_onsets.of(strip.object, strip.scale_name(), values, frame.time);
                         let lighting = h3_draw::h3_lighting_constants(frame);
                         let drawn = uploaded.simulations.h3_strips.vertices(index, strip, values, bones, &view, &lighting, frame.time, onset, stops);
@@ -5229,7 +5231,7 @@ impl ModelGlRenderer {
                 if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
                     continue;
                 }
-                let values = frame.h2_values_of_object(at.object);
+                let values = frame.function_values_of_object(at.object);
                 let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                 let event_time = at.event_time(frame.time, onset);
                 // A light's own flare goes out with its light.
@@ -5268,7 +5270,7 @@ impl ModelGlRenderer {
                         [outer * inner.unwrap_or(0.0), outer]
                     }
                 };
-                let values = frame.h2_values_of_object(at.object);
+                let values = frame.function_values_of_object(at.object);
                 let colors = frame.change_colors_of_object(at.object);
                 let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                 let sprites = at.sprites(values, &colors, bones, &view, frame.time, onset, occlusion);
@@ -5570,7 +5572,7 @@ impl ModelGlRenderer {
             self.draw_h2_passes(gl, frame, slot, order, H2Layer::Bloom, None);
             // `sub_6C18F0`: the hologram shader draws while its control is up.
             let hologram = frame.preview.h2_hologram_control.as_deref().is_some_and(|name| {
-                frame.h2_values.as_ref().and_then(|values| values.get(name)).is_some_and(|value| *value > 0.0)
+                frame.function_values.as_ref().and_then(|values| values.get(name)).is_some_and(|value| *value > 0.0)
             });
             if hologram {
                 self.draw_h2_passes(gl, frame, slot, order, H2Layer::HologramBloom, None);
@@ -5910,7 +5912,7 @@ impl ModelGlRenderer {
             }
             let location = program.location(gl, "u_texture_rows");
             let (outputs, change_colors) = (frame.outputs_of(material), frame.change_colors_of(material));
-            let clock = H2Clock { time: frame.time, values: frame.h2_values_of(material) };
+            let clock = H2Clock { time: frame.time, values: frame.function_values_of(material) };
             let rows = pass.texture_rows_at(clock, &outputs);
             gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             let (tint_facing, tint_glancing) = pass.tints_at(clock);

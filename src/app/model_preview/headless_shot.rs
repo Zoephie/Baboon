@@ -480,7 +480,7 @@ pub(super) fn render(
         let material = preview.batches[batch].material_index as usize;
         !options.hidden.iter().any(|name| preview.materials[material].shader_path.ends_with(name.as_str()))
     });
-    eprintln!("NOTE moves {}", frame.h2_moves());
+    eprintln!("NOTE moves {}", frame.moves());
     unsafe {
         let color = gl.create_renderbuffer().unwrap();
         gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color));

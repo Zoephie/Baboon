@@ -443,7 +443,7 @@ impl ModelGlRenderer {
             let pass: &Arc<H3Pass> = &material.pass;
             self.with_h3_program(gl, pass, |this, program| {
                 gl.use_program(Some(program.program));
-                let drawn = DrawnObject { values: frame.h2_values_of_object(owner), time: frame.time, owner };
+                let drawn = DrawnObject { values: frame.function_values_of_object(owner), time: frame.time, owner };
                 let node = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
                 let functions = material.submit.draw_values(H4Draw::Lit, &drawn, node);
                 for (name, ty) in &pass.uniforms {

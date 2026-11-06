@@ -277,7 +277,7 @@ pub(super) fn material_functions(
     object: u8,
 ) -> H3Values {
     let drawn = super::h4::submit::DrawnObject {
-        values: frame.h2_values_of_object(object),
+        values: frame.function_values_of_object(object),
         time: frame.time,
         owner: object,
     };

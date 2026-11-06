@@ -81,7 +81,7 @@ impl ModelGlRenderer {
             if !shown(lights + index) {
                 continue;
             }
-            let values = frame.h2_values_of_object(light.object);
+            let values = frame.function_values_of_object(light.object);
             let colors = frame.change_colors_of_object(light.object);
             lit.extend(light.lit(values, &colors, bones, frame.time));
         }
@@ -89,7 +89,7 @@ impl ModelGlRenderer {
             if !shown(index) {
                 continue;
             }
-            let values = frame.h2_values_of_object(light.object);
+            let values = frame.function_values_of_object(light.object);
             let colors = frame.change_colors_of_object(light.object);
             let onset = self.slots[slot].simulations.effect_onsets.of(light.object, light.scale_name(), values, frame.time);
             lit.extend(light.lit(values, &colors, bones, frame.time - onset));

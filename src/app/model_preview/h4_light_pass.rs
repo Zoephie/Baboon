@@ -24,7 +24,7 @@ impl ModelGlRenderer {
             if !shown(index) {
                 continue;
             }
-            let values = frame.h2_values_of_object(light.object);
+            let values = frame.function_values_of_object(light.object);
             let colors = frame.change_colors_of_object(light.object);
             lit.extend(light.lit(values, &colors, bones, frame.time, eye));
         }
@@ -33,7 +33,7 @@ impl ModelGlRenderer {
             if !shown(lights + index) {
                 continue;
             }
-            let values = frame.h2_values_of_object(light.object);
+            let values = frame.function_values_of_object(light.object);
             let colors = frame.change_colors_of_object(light.object);
             lit.extend(light.lit(values, &colors, bones, frame.time));
         }

@@ -122,7 +122,7 @@ impl ModelGlRenderer {
                 if !shown(index) {
                     continue;
                 }
-                let values = frame.h2_values_of_object(at.object);
+                let values = frame.function_values_of_object(at.object);
                 let colors = frame.change_colors_of_object(at.object);
                 let passed = at
                     .occlusion_patch(values, &colors, bones, &flare_view, frame.time)

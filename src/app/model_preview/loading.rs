@@ -4589,7 +4589,7 @@ pub(super) mod kit_object_tests {
         let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\warthog\\warthog", "vehicle", b"vehi");
         let name = "warthog_chaingun_illumination";
         assert!(!super::super::renderer::h2_shader_inputs(&data, 0).iter().any(|read| read == name));
-        let values = super::super::renderer::h2_attached_values(&data, 0.0);
+        let values = super::super::renderer::attached_values(&data, 0.0);
         for attached in &data.h2_attached {
             let (_, own) = values.iter().find(|(owner, _)| *owner == attached.owner).unwrap();
             for read in super::super::renderer::h2_shader_inputs(&data, attached.owner) {

@@ -846,7 +846,7 @@ impl ModelGlRenderer {
         let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
         // Halo 4: the sampler's frame-index function, on the object's values.
         if let Some(submit) = material.h4.as_ref().filter(|_| count > 0) {
-            let drawn = super::h4::submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
+            let drawn = super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
             if let Some(index) = submit.frame(uniform, &drawn) {
                 return frame_key(uniform, index);
             }
@@ -855,7 +855,7 @@ impl ModelGlRenderer {
             animation.writes == H3Animated::Frame && animation.uniform == uniform
         });
         match animation.filter(|_| count > 0) {
-            Some(animation) => frame_key(uniform, animation.frame(count, frame.time, owner, frame.h2_values_of(object))),
+            Some(animation) => frame_key(uniform, animation.frame(count, frame.time, owner, frame.function_values_of(object))),
             None => uniform.to_owned(),
         }
     }
@@ -883,7 +883,7 @@ impl ModelGlRenderer {
                     let object = batch.material_index as usize;
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                     let drawn =
-                        super::h4::submit::DrawnObject { values: frame.h2_values_of(object), time: frame.time, owner };
+                        super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
                     let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
                     let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
                     let draw = match this.h4_draw {
@@ -976,11 +976,11 @@ impl ModelGlRenderer {
                         .or_else(|| material.values.get(name).cloned());
                     let object = batch.material_index as usize;
                     let screen_values = this.h3_screen_alpha.map(|alpha| {
-                        let mut values = frame.h2_values_of(object).cloned().unwrap_or_default();
+                        let mut values = frame.function_values_of(object).cloned().unwrap_or_default();
                         values.insert("alpha".to_owned(), alpha);
                         values
                     });
-                    let values = screen_values.as_ref().or(frame.h2_values_of(object));
+                    let values = screen_values.as_ref().or(frame.function_values_of(object));
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                     for animation in material.animations.iter().filter(|animation| animation.uniform == *name) {
                         let mut slot = match value {
@@ -1002,7 +1002,7 @@ impl ModelGlRenderer {
                     }
                     if name == "shield_dynamic_quantities" {
                         let reading = |name: &str| {
-                            frame.h2_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+                            frame.function_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
                         };
                         // `render_object_context`: the overshield in fifths of a byte.
                         let quantities = [frame.time, reading(H3_SHIELD_DAMAGE), reading(H3_OVERSHIELD), 0.0];
@@ -1199,7 +1199,7 @@ impl ModelGlRenderer {
             // `setup_camera_fx_parameters` before anything draws.
             let (screen, shaders) = {
                 let uploaded = &mut self.slots[slot];
-                let values = |object: u8| frame.h2_values_of_object(object);
+                let values = |object: u8| frame.function_values_of_object(object);
                 let view = ce_flare_view(&frame.camera);
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let effects = &frame.preview.h3_screen_effects;
@@ -1322,7 +1322,7 @@ impl ModelGlRenderer {
                 if !frame.h3_lights_shown.get(index).copied().unwrap_or(true) {
                     continue;
                 }
-                let values = frame.h2_values_of_object(light.object);
+                let values = frame.function_values_of_object(light.object);
                 let colors = frame.change_colors_of_object(light.object);
                 let onset = self.slots[slot].simulations.effect_onsets.of(light.object, light.scale_name(), values, frame.time);
                 let Some(lit) = light.lit(values, &colors, bones, frame.time, onset) else {
@@ -1476,7 +1476,7 @@ impl ModelGlRenderer {
             }
             self.reach_pass_values = None;
             // `render_object_context`'s shield impact, over every lit part.
-            if h3_shield_showing(frame.h2_values.as_ref()) {
+            if h3_shield_showing(frame.function_values.as_ref()) {
                 h3_set_blend(gl, H3Blend::Additive);
                 for (batch, material) in &batches {
                     if let Some(shield) = material.shield.as_ref() {
@@ -1543,7 +1543,7 @@ impl ModelGlRenderer {
         let Some(shield) = frame.preview.h4_shield.clone() else {
             return;
         };
-        let damage = frame.h2_values.as_ref().and_then(|values| values.get(H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
+        let damage = frame.function_values.as_ref().and_then(|values| values.get(H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
         if !shield.settings.showing(damage) {
             return;
         }
@@ -1564,7 +1564,7 @@ impl ModelGlRenderer {
         }
         let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
         let center = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
-        let mut values = shield.values(damage, frame.time, frame.h2_values.as_ref(), center);
+        let mut values = shield.values(damage, frame.time, frame.function_values.as_ref(), center);
         let camera = &frame.camera;
         let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
         values.insert(
@@ -1607,7 +1607,7 @@ impl ModelGlRenderer {
         let Some(shield) = frame.preview.reach_shield.clone() else {
             return;
         };
-        let damage = frame.h2_values.as_ref().and_then(|values| values.get(H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
+        let damage = frame.function_values.as_ref().and_then(|values| values.get(H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
         if !shield.settings.showing(damage) {
             return;
         }
@@ -1628,7 +1628,7 @@ impl ModelGlRenderer {
         }
         let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
         let center = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
-        let state = shield.settings.state(damage, frame.time, frame.h2_values.as_ref());
+        let state = shield.settings.state(damage, frame.time, frame.function_values.as_ref());
         let mut values = shield.settings.values(&state, center);
         let camera = &frame.camera;
         let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
