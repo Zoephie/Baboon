@@ -180,11 +180,7 @@ impl ModelGlRenderer {
             .as_ref()
             .map(|targets| (targets.size, targets.albedo_framebuffer, targets.normal, targets.depth_copy, targets.depth_copy_framebuffer))?;
         let camera = Self::reach_shadow_camera(frame, size);
-        let casters: Vec<_> = batches
-            .iter()
-            .filter(|(_, material)| material.blend == gen3::shaders::H3Blend::Opaque && !material.decal)
-            .filter_map(|(batch, material)| Some((batch, material, Arc::clone(material.shadow_generate.as_ref()?))))
-            .collect();
+        let casters = gen3_shadow::shadow_casters(batches);
         if casters.is_empty() {
             return None;
         }
@@ -201,54 +197,17 @@ impl ModelGlRenderer {
             }
             let (map, map_framebuffer, mask, mask_framebuffer) =
                 self.reach_shadow.as_ref().map(|targets| (targets.map, targets.map_framebuffer, targets.mask, targets.mask_framebuffer))?;
-            // `render_shadow_generate`: depth only, biased, culled as ever.
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(map_framebuffer));
-            gl.viewport(0, 0, camera.pixels, camera.pixels);
-            gl.disable(glow::BLEND);
-            gl.enable(glow::DEPTH_TEST);
-            gl.depth_func(glow::LEQUAL);
-            gl.depth_mask(true);
-            gl.color_mask(false, false, false, false);
-            gl.clear_depth_f32(1.0);
-            gl.clear(glow::DEPTH_BUFFER_BIT);
-            gl.enable(glow::POLYGON_OFFSET_FILL);
-            gl.polygon_offset(caster.slope_bias, caster.depth_bias * (1 << 24) as f32);
-            h3_draw::h3_set_cull(gl, frame);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-            self.reach_view_projection = Some(camera.view_projection);
-            for (batch, material, pass) in &casters {
-                self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
-            }
-            self.reach_view_projection = None;
-            gl.disable(glow::POLYGON_OFFSET_FILL);
-            gl.color_mask(true, true, true, true);
-            gl.viewport(0, 0, size[0], size[1]);
-            // The scene's depth, to find each pixel's place in the world.
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(albedo_framebuffer));
-            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(depth_copy_framebuffer));
-            let bits = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-            gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], bits, glow::NEAREST);
-            // `setup_targets_shadow_mask`'s clear, then the apply, kept to the
-            // red and alpha it writes and the least of each.
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(mask_framebuffer));
-            gl.clear_color(1.0, 0.5, 0.5, 1.0);
-            gl.clear(glow::COLOR_BUFFER_BIT);
+            let bias = [caster.slope_bias, caster.depth_bias];
+            let view_projection = camera.view_projection;
+            self.generate_shadow_depth(gl, frame, slot, &casters, map_framebuffer, camera.pixels, view_projection, bias);
+            Self::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
             if self.reach_shadow_program.is_none() {
                 self.reach_shadow_program = h3_draw::screen_program(gl, APPLY_FRAGMENT);
             }
             let program = self.reach_shadow_program?;
-            gl.use_program(Some(program));
+            let textures = [("scene_depth", depth_copy), ("normals", normal), ("shadow_map", map)];
+            Self::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0, 0.5, 0.5, 1.0], program, textures, &view_projection)?;
             let at = |name: &str| gl.get_uniform_location(program, name);
-            for (unit, (name, texture)) in [("scene_depth", depth_copy), ("normals", normal), ("shadow_map", map)].into_iter().enumerate() {
-                gl.active_texture(glow::TEXTURE0 + unit as u32);
-                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                gl.uniform_1_i32(at(name).as_ref(), unit as i32);
-            }
-            gl.active_texture(glow::TEXTURE0);
-            let screen_to_world =
-                reach_light_pass::screen_to_relative_world(&h3_draw::view_projection(&frame.camera), size, [0.0; 3])?;
-            gl.uniform_matrix_4_f32_slice(at("screen_to_world").as_ref(), true, screen_to_world.as_flattened());
-            gl.uniform_matrix_4_f32_slice(at("shadow_view_projection").as_ref(), false, &camera.view_projection);
             let texel = 1.0 / camera.pixels as f32;
             gl.uniform_2_f32(at("texel_offset").as_ref(), -texel, texel);
             gl.uniform_3_f32_slice(at("hull_center").as_ref(), &camera.center);
@@ -266,19 +225,8 @@ impl ModelGlRenderer {
             // `compute_lod_and_alpha`'s fade: full short of the shadow's fade
             // distance, which a preview's framing stays inside.
             gl.uniform_1_f32(at("shadow_alpha").as_ref(), 1.0);
-            gl.disable(glow::DEPTH_TEST);
-            gl.disable(glow::CULL_FACE);
-            gl.enable(glow::BLEND);
-            gl.blend_equation(glow::MIN);
-            gl.blend_func(glow::ONE, glow::ONE);
-            gl.color_mask(true, false, false, true);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
-            gl.draw_arrays(glow::TRIANGLES, 0, 3);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.color_mask(true, true, true, true);
-            gl.disable(glow::BLEND);
-            gl.enable(glow::DEPTH_TEST);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            // The red and alpha the apply writes.
+            self.draw_shadow_apply(gl, slot, [true, false, false, true]);
             Some(mask)
         }
     }
