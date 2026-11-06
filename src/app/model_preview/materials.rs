@@ -28,6 +28,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;
 use std::sync::Arc;
 use std::collections::HashMap;
+use crate::app::model_preview::ce::attachments::has_flag;
 
 mod h4;
 pub(super) use h4::{H4EffectMaterial, h4_screen_vertex, resolve_h4_effect_material};
@@ -1006,10 +1007,8 @@ pub(super) fn read_h3_shield_settings(source: &TagSource, path: &str) -> Option<
         values.insert(name.to_owned(), value);
     };
     set("extrusion_distance", H3Value::Floats([real("Extrusion Distance"); 4]));
-    let flags = root.read_flag_names("flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
     // `render_object_shield_impact`: z is ODST's, for the second noise.
-    let secondary = real(if flagged("use secondary") { "Secondary texture scale" } else { "Texture Scale" });
+    let secondary = real(if has_flag(root, "flags", "use secondary (non-uniform) texture scale") { "Secondary texture scale" } else { "Texture Scale" });
     set("texture_quantities", H3Value::Floats([real("Texture Scale"), real("Scroll Speed"), secondary, 0.0]));
     set("shield_impact_edge_fade", H3Value::Floats([real("Edge Fade"); 4]));
     for (uniform, sharpness, scale, threshold) in [
@@ -1040,7 +1039,7 @@ pub(super) fn read_h3_shield_settings(source: &TagSource, path: &str) -> Option<
             frames: Vec::new(),
         });
     }
-    Some(Arc::new(H3ShieldSettings { procedural: flagged("use procedural uv"), values, textures }))
+    Some(Arc::new(H3ShieldSettings { procedural: has_flag(root, "flags", "use procedural uv generation"), values, textures }))
 }
 
 /// The pass, on the global settings a model that names none of its own uses.
@@ -1124,10 +1123,10 @@ fn resolve_ce_shader(
                 [map[0] * detail, map[1] * detail * detail_v],
             );
             textures.detail = DetailComposition {
-                function: detail_function(root.read_enum_name("detail function")),
+                function: detail_function(root.read_enum_option("detail function")),
                 mask: CE_DETAIL_MASKS
                     .iter()
-                    .position(|name| root.read_enum_name("detail mask").as_deref() == Some(*name))
+                    .position(|name| root.read_enum_option("detail mask").as_deref() == Some(*name))
                     .unwrap_or(0) as u8,
                 xbox_channel_order: has("multipurpose map uses OG Xbox channel order"),
             };
@@ -1143,7 +1142,7 @@ fn resolve_ce_shader(
                 [factor(root.read_real("primary detail map scale")); 2],
             );
             textures.detail = DetailComposition {
-                function: detail_function(root.read_enum_name("detail map function")),
+                function: detail_function(root.read_enum_option("detail map function")),
                 ..Default::default()
             };
             if has("alpha-tested") {
@@ -1325,7 +1324,7 @@ fn resolve_h2_shader(
     // lost is the defaults, the same as a render method without its definition.
     textures.used_shader_parameters_only = template.is_none();
     // The game skips the specular pass for a shader with no specular type.
-    let has_specular = root.read_int_any("specular type").unwrap_or(0) != 0;
+    let has_specular = !root.field("specular type").is_some_and(|field| field.enum_is("none"));
     for layer in H2Layer::ALL {
         if (layer == H2Layer::LightSpecular && !has_specular) || layer.tag_name().is_empty() {
             continue;
@@ -1344,10 +1343,7 @@ fn resolve_h2_shader(
             None,
         );
     }
-    let opted_out = root
-        .read_flag_names("flags")
-        .is_some_and(|flags| flags.iter().any(|(_, name)| name == "no active camo"));
-    if !opted_out {
+    if !has_flag(root, "flags", "no active camo") {
         const BUMP: &str = "active_camo_bump_map";
         let bump = parameters
             .get(BUMP)
@@ -1623,7 +1619,7 @@ fn h2_scale_animation(parameter: &TagStruct<'_>) -> Option<[Option<f32>; 2]> {
     let value_of = |kind: &str| {
         (0..block.len())
             .filter_map(|index| block.element(index))
-            .find(|property| property.read_enum_name("type").as_deref() == Some(kind))
+            .find(|property| property.read_enum_option("type").as_deref() == Some(kind))
             .and_then(|property| Some(animation_function(&property)?.evaluate(0.0, 0.0)))
             .filter(|value| value.is_finite())
     };
