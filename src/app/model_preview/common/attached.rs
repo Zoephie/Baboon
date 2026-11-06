@@ -43,7 +43,7 @@ pub(in crate::app::model_preview) fn object_attachments(
     object: &blam_tags::TagFile,
     groups: &[u32],
 ) -> Vec<ObjectAttachment> {
-    use crate::app::model_preview::ce::attachments::{elements, object_block};
+    use crate::app::model_preview::ce::attachments::{elements, function_slot_of, has_flag, object_block};
     use crate::app::model_preview::gen3::effects::marker_name;
     let Some(block) = object_block(object, "attachments") else {
         return Vec::new();
@@ -62,12 +62,8 @@ pub(in crate::app::model_preview) fn object_attachments(
                 marker: if marker.is_empty() { "root".to_owned() } else { marker },
                 scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
                 secondary_by: attachment.read_string_id("secondary scale").unwrap_or_default(),
-                change_color: attachment.read_int_any("change color").and_then(|color| usize::try_from(color - 1).ok()),
-                force_on: attachment
-                    .read_flag_names("flags")
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|(_, flag)| flag.starts_with("force always on")),
+                change_color: function_slot_of(attachment, "change color"),
+                force_on: has_flag(attachment, "flags", "force always on"),
             })
         })
         .collect()
