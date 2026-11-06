@@ -3,6 +3,7 @@
 //! blurred and added to the one above. The final composite adds the top level
 //! ahead of its tone curve.
 
+use super::gl::scope::PostScope;
 use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
@@ -163,9 +164,7 @@ impl H3Bloom {
                 self.levels = Levels::new(gl, frame);
             }
             let levels = self.levels.as_ref()?;
-            let scissored = gl.is_enabled(glow::SCISSOR_TEST);
-            let mut viewport = [0; 4];
-            gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+            let scope = PostScope::capture(gl);
             gl.disable(glow::SCISSOR_TEST);
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::BLEND);
@@ -209,11 +208,9 @@ impl H3Bloom {
                 gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
             }
             gl.bind_texture(glow::TEXTURE_2D, None);
+            scope.restore(gl);
+            // Back to the scene: making the surfaces may have left theirs bound.
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
-            gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-            if scissored {
-                gl.enable(glow::SCISSOR_TEST);
-            }
             Some(small_sum.texture)
         }
     }

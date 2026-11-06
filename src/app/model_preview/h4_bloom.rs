@@ -9,6 +9,7 @@
 //! (`floor(side / divisor + 0.5)`, no fixed sizes; O8) and the pixel size a
 //! pass steps by, the source's.
 
+use super::gl::scope::PostScope;
 use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
@@ -314,9 +315,7 @@ impl H4Bloom {
                 self.surfaces = Surfaces::new(gl, frame);
             }
             let surfaces = self.surfaces.as_ref()?;
-            let scissored = gl.is_enabled(glow::SCISSOR_TEST);
-            let mut viewport = [0; 4];
-            gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+            let scope = PostScope::capture(gl);
             gl.disable(glow::SCISSOR_TEST);
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::BLEND);
@@ -372,11 +371,9 @@ impl H4Bloom {
                 gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
             }
             gl.bind_texture(glow::TEXTURE_2D, None);
+            scope.restore(gl);
+            // Back to the scene: making the surfaces may have left theirs bound.
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
-            gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-            if scissored {
-                gl.enable(glow::SCISSOR_TEST);
-            }
             // `small` holds `blur_11_horizontal` of the result.
             Some(if settings.hologram { small.texture } else { small2.texture })
         }
