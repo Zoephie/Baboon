@@ -27,7 +27,7 @@ use crate::app::model_preview::common::named_function::NamedFunction;
 use crate::app::model_preview::ce::attachments::{has_flag, has_flag_labelled};
 
 /// `allow shadows and gels`, and what older layouts label it.
-const SHADOWS_AND_GELS: [&str; 3] = ["allow shadows and gels", "allow shadows ", "expensive light"];
+const SHADOWS_AND_GELS: [&str; 3] = ["allow shadows and gels", "allow shadows", "expensive light"];
 /// What `add_simple_light_to_draw_list` falls back on.
 const FALLBACK_DISTANCE: f32 = 5.0;
 const FALLBACK_CONE: f32 = 0.5;
