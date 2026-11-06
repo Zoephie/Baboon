@@ -758,7 +758,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     preview.reach_cheap_lights.extend(named!(cheap, name));
     let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.h3_light_volumes.extend(named!(volumes, name));
-    let cheap = super::super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
+    let cheap = super::super::particles::cheap::read_reach_cheap_emitters(source, object, owner, markers, frame);
     preview.reach_cheap_emitters.extend(named!(cheap, name));
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
     let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
@@ -810,7 +810,7 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderMode
     preview.h3_light_volumes.extend(named!(volumes, name));
     let tracers = super::super::h4::tracers::read_h4_tracers(source, object, owner, markers, frame);
     preview.h4_tracers.extend(named!(tracers, name));
-    let cheap = super::super::reach_cheap_particles::read_reach_cheap_emitters(source, object, owner, markers, frame);
+    let cheap = super::super::particles::cheap::read_reach_cheap_emitters(source, object, owner, markers, frame);
     preview.reach_cheap_emitters.extend(named!(cheap, name));
     let flares = super::super::h4::flares::read_h4_flares(source, object, owner, markers, frame);
     preview.h4_flares.extend(named!(flares, name));

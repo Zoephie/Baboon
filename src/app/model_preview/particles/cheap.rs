@@ -10,18 +10,18 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::elements;
-use super::ce::lights::{CeFlareView, posed_on};
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::tag_function_at;
-use super::gen3::effects::{
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::elements;
+use super::super::ce::lights::{CeFlareView, posed_on};
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::tag_function_at;
+use super::super::gen3::effects::{
     CHEAP_PARTICLE_EMITTER, H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
     read_part_placement,
 };
-use super::particles::{PRE_ROLL, Random, particle_game_time};
-use super::reach::lights::object_value;
-use super::*;
+use super::super::particles::{PRE_ROLL, Random, particle_game_time};
+use super::super::reach::lights::object_value;
+use super::super::*;
 use crate::core::source::TagSource;
 
 /// `s_cheap_particle_system::k_max_particles`: the ring every emitter writes.
@@ -160,7 +160,7 @@ impl CheapRenderTexture {
                 let (across, down) = ((width >> level).max(1), (height >> level).max(1));
                 let mut rgba = Vec::new();
                 for layer in 0..layers {
-                    let bytes = super::materials::array_layer_bytes(&image, layer, level)?;
+                    let bytes = super::super::materials::array_layer_bytes(&image, layer, level)?;
                     let decoded = blam_tags::bitmap::decode::decode_to_rgba8(format, across, down, bytes, bitmap.p8_palette());
                     rgba.extend(decoded.ok()?);
                 }
@@ -769,7 +769,7 @@ pub(crate) struct ReachCheapEmitterAt {
 
 /// The cheap particle emitters an object's attached effects run, one at each
 /// marker of a part's location.
-pub(super) fn read_reach_cheap_emitters(
+pub(in crate::app::model_preview) fn read_reach_cheap_emitters(
     source: &TagSource,
     object: &TagFile,
     owner: u8,
@@ -1122,7 +1122,7 @@ fn update_particle(particle: &mut CheapParticle, index: usize, library: &CheapLi
 
 /// The cheap particle program: the quads as built, the render texture's
 /// layer sampled a half level sharp, by the vertex colour, at `g_exposure.x`.
-pub(super) const CHEAP_PARTICLE_VERTEX: &str = "#version 330 core
+pub(in crate::app::model_preview) const CHEAP_PARTICLE_VERTEX: &str = "#version 330 core
 layout(location = 0) in vec4 a_clip;
 layout(location = 1) in vec3 a_texcoord;
 layout(location = 2) in vec4 a_color;
@@ -1139,7 +1139,7 @@ void main() {
 /// alpha goes out whole, where the game's is a 32nd: the target's bias is
 /// taken to undo that, as the tool's \"alpha of zero gives you additive\"
 /// needs [inferred: not traced to the target's exponent bias].
-pub(super) const CHEAP_PARTICLE_FRAGMENT: &str = "#version 330 core
+pub(in crate::app::model_preview) const CHEAP_PARTICLE_FRAGMENT: &str = "#version 330 core
 uniform sampler2DArray u_render;
 uniform float u_exposure;
 // Halo 4 runs from its exposure to its self-illumination one by alpha;
@@ -1704,7 +1704,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_H4EK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::Halo4);
+        let source = super::super::super::particles::loose_kit(&root, GameId::Halo4);
         let library = CheapLibrary::read(&source, "fx\\cheap_particles\\global").expect("the library");
         assert!(library.halo4());
         assert_eq!((library.types.len(), library.turbulence.len()), (152, 4));
@@ -1735,7 +1735,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
         let library = CheapLibrary::read(&source, "globals\\global").expect("the library");
         assert_eq!(library.types.len(), 60);
         let tag = load_referenced_tag_from_source(&source, "globals\\global_type_texture", "bitmap", b"bitm").unwrap();
@@ -1767,7 +1767,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
         let path = "levels\\solo\\m52\\fx\\city_damage_fx\\building_electrical_fire";
         let object = load_referenced_tag_from_source(&source, path, "effect_scenery", b"efsc").unwrap();
         let marker = RenderModelPreviewMarker {
@@ -1811,7 +1811,7 @@ mod tests {
             eprintln!("skipping: BLAM_TEST_HREK is not set");
             return;
         };
-        let source = super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
         let path = "levels\\solo\\m45\\fx\\space_junk_huge";
         let object = load_referenced_tag_from_source(&source, path, "effect_scenery", b"efsc").unwrap();
         let marker = RenderModelPreviewMarker {

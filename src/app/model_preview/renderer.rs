@@ -2073,7 +2073,7 @@ struct ModelGpuSlot {
     h2_contrails: h2::contrails::H2ContrailField,
     h3_particles: particles::H3ParticleField,
     /// Reach's cheap particles, and their library's render texture array.
-    reach_cheap: reach_cheap_particles::ReachCheapField,
+    reach_cheap: particles::cheap::ReachCheapField,
     reach_cheap_texture: Option<glow::NativeTexture>,
     /// Halo CE effect particles, and their images by effect, particle and image.
     ce_particles: ce::particles::CeParticleField,
@@ -3965,7 +3965,7 @@ impl ReachCheapGl {
 }
 
 unsafe fn reach_cheap_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<ReachCheapGl> {
-    use reach_cheap_particles::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
+    use particles::cheap::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
     unsafe {
         let program = link_h2_program(gl, main, CHEAP_PARTICLE_VERTEX, CHEAP_PARTICLE_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))
@@ -3993,7 +3993,7 @@ unsafe fn reach_cheap_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
 /// within a layer and between levels, and GL never filters across layers.
 unsafe fn upload_cheap_render_texture(
     gl: &glow::Context,
-    render: &reach_cheap_particles::CheapRenderTexture,
+    render: &particles::cheap::CheapRenderTexture,
 ) -> Option<glow::NativeTexture> {
     unsafe {
         let texture = gl.create_texture().ok()?;
@@ -6777,7 +6777,7 @@ mod tests {
     /// program is checked.
     #[test]
     fn the_cheap_particle_program_compiles_under_glslang() {
-        use super::reach_cheap_particles::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
+        use super::particles::cheap::{CHEAP_PARTICLE_FRAGMENT, CHEAP_PARTICLE_VERTEX};
         assert_compiles_under_glslang("cheap_particle", &[("vert", CHEAP_PARTICLE_VERTEX), ("frag", CHEAP_PARTICLE_FRAGMENT)]);
     }
 

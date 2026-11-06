@@ -3,6 +3,9 @@
 //! update needs it, so they run here, a fixed step at a time, with their
 //! movement controllers, and draw as sprites, particle models or distortion.
 
+/// Reach's cheap particles, which Halo 4 runs too.
+pub(super) mod cheap;
+
 use std::sync::Arc;
 
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, ParameterSource, ResolvedRenderMethod, ResolvedValue};
