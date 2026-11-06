@@ -7,7 +7,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::elements;
+use super::super::ce::attachments::{elements, has_flag, has_flag_labelled};
 use super::super::ce::lights::{CeFlareView, posed_on};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
@@ -372,19 +372,28 @@ impl H3ScreenDefinition {
     }
 }
 
-/// Whether an effect shows to a third person viewing what it hangs on: ODST's
-/// options say `first person` and `unattached` and carry the old name behind,
-/// and any of the three narrows it to those it names.
-fn shows_in_third_person(flagged: impl Fn(&str) -> bool) -> bool {
-    !(flagged("unattached") || flagged("first person") || flagged("third person")) || flagged("third person")
+/// `flags`' `unattached`, which Halo 3 lacks.
+const UNATTACHED: [&str; 1] = ["unattached"];
+/// `flags`' `first person`, Halo 3's `first person only`.
+const FIRST_PERSON: [&str; 2] = ["first person", "first person only"];
+/// `flags`' `third person`, Halo 3's `third person only`.
+const THIRD_PERSON: [&str; 2] = ["third person", "third person only"];
+/// `flags`' `disable camera falloffs`, which older layouts call `cinematic`.
+const NO_CAMERA_FALLOFFS: [&str; 2] = ["disable camera falloffs", "cinematic"];
+
+/// Whether an effect shows to a third person viewing what it hangs on: any
+/// of the three narrows it to those it names. `flagged` answers for an
+/// option under any of its labels.
+fn shows_in_third_person(flagged: impl Fn(&[&str]) -> bool) -> bool {
+    !(flagged(&UNATTACHED) || flagged(&FIRST_PERSON) || flagged(&THIRD_PERSON)) || flagged(&THIRD_PERSON)
 }
 
 /// Reach's `is_visible` (the 360's 0x83033AB0) for a viewer who is nobody's
 /// unit: `render_object_is_third_person` (0x82752FC0) and its first person
 /// twin hold only for the viewer's own unit, so an effect naming a person
 /// shows only if it also names `unattached`.
-fn shows_to_no_unit(flagged: impl Fn(&str) -> bool) -> bool {
-    !(flagged("unattached") || flagged("first person") || flagged("third person")) || flagged("unattached")
+fn shows_to_no_unit(flagged: impl Fn(&[&str]) -> bool) -> bool {
+    !(flagged(&UNATTACHED) || flagged(&FIRST_PERSON) || flagged(&THIRD_PERSON)) || flagged(&UNATTACHED)
 }
 
 fn read_screen_shader(source: &TagSource, element: TagStruct<'_>) -> Option<(String, ScreenLayer, i32)> {
@@ -397,12 +406,11 @@ fn read_screen_shader(source: &TagSource, element: TagStruct<'_>) -> Option<(Str
 }
 
 fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinition> {
-    let flags = element.read_flag_names("flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let flagged = |labels: &[&str]| has_flag_labelled(element, "flags", labels);
     let reach = source.game() == Some(GameId::HaloReach);
     // The preview's camera is a third person's, on nothing.
     let shows = if reach { shows_to_no_unit(flagged) } else { shows_in_third_person(flagged) };
-    if flagged("debug disable") || !shows {
+    if has_flag(element, "flags", "debug disable") || !shows {
         return None;
     }
     let real = |name: &str| element.read_real(name).unwrap_or(0.0);
@@ -444,8 +452,8 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
         delay,
         strict_delay: reach,
         lifetime: real("lifetime"),
-        outside_radius: flagged("allow effect outside radius"),
-        no_camera_falloffs: flagged("disable camera falloffs"),
+        outside_radius: has_flag(element, "flags", "allow effect outside radius"),
+        no_camera_falloffs: flagged(&NO_CAMERA_FALLOFFS),
         distance_falloff: falloff("distance falloff"),
         time_falloff: falloff("time falloff"),
         angle_falloff: falloff("angle falloff"),
@@ -458,8 +466,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
 /// `s_area_screen_effect_definition::postprocess`: played in turn, each starts
 /// as the last ends, whatever its own `delay` says.
 fn read_definitions(source: &TagSource, root: TagStruct<'_>) -> Vec<H3ScreenDefinition> {
-    let flags = root.read_flag_names("global flags").unwrap_or_default();
-    let in_turn = flags.iter().any(|(_, name)| name.starts_with("play sequentially"));
+    let in_turn = has_flag(root, "global flags", "play sequentially - ignore delay settings");
     let mut start = 0.0;
     let mut definitions = Vec::new();
     for element in elements(root, "screen effects") {
@@ -734,9 +741,15 @@ mod tests {
         assert_eq!(definition.falloff(2.0, 0.0, 0.0, None), 1.0);
     }
 
+    /// Whether any of `names`, as a layout stores them, reads as any of the
+    /// labels asked for.
+    fn stored(names: &'static [&'static str]) -> impl Fn(&[&str]) -> bool {
+        move |labels| names.iter().any(|name| labels.contains(&blam_tags::option_display_name(name).as_ref()))
+    }
+
     #[test]
     fn a_third_person_sees_what_names_no_person_or_names_them() {
-        let with = |names: &'static [&'static str]| shows_in_third_person(move |wanted| names.iter().any(|name| name.starts_with(wanted)));
+        let with = |names: &'static [&'static str]| shows_in_third_person(stored(names));
         assert!(with(&[]));
         assert!(with(&["allow effect outside radius"]));
         assert!(with(&["third person only"]));
@@ -752,7 +765,7 @@ mod tests {
     /// ODST's rule keeps it.
     #[test]
     fn a_reach_effect_naming_a_person_shows_to_no_unit_only_unattached() {
-        let names = |names: &'static [&'static str]| move |wanted: &str| names.iter().any(|name| name.starts_with(wanted));
+        let names = stored;
         let body_damage: &[&str] = &[
             "first person{first person only}",
             "third person{third person only}",
