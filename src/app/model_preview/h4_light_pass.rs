@@ -87,7 +87,7 @@ impl RenderCore {
                 else {
                     continue;
                 };
-                let Some(matrix) = reach_light_pass::screen_to_relative_world(
+                let Some(matrix) = gen3_screen_lights::screen_to_relative_world(
                     &view_projection,
                     size,
                     light.position,

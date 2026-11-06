@@ -103,7 +103,7 @@ impl RenderCore {
             }
             gl.active_texture(glow::TEXTURE0);
             let screen_to_world =
-                reach_light_pass::screen_to_relative_world(&h3_draw::view_projection(&frame.camera), size, [0.0; 3])?;
+                gen3_screen_lights::screen_to_relative_world(&h3_draw::view_projection(&frame.camera), size, [0.0; 3])?;
             gl.uniform_matrix_4_f32_slice(at("screen_to_world").as_ref(), true, screen_to_world.as_flattened());
             gl.uniform_matrix_4_f32_slice(at("shadow_view_projection").as_ref(), false, view_projection);
             Some(())

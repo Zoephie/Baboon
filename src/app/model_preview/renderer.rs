@@ -1254,18 +1254,18 @@ fn object_states(
 
 impl ModelGpuFrame {
     /// The outputs of the object that owns `material`.
-    fn outputs_of(&self, material: usize) -> [f32; 4] {
+    pub(super) fn outputs_of(&self, material: usize) -> [f32; 4] {
         let object = self.preview.materials.get(material).map_or(0, |material| material.object);
         self.object_states.get(object as usize).map_or([0.0; 4], |state| state.outputs)
     }
 
     /// The function values of the object that owns `material`.
-    fn function_values_of(&self, material: usize) -> Option<&functions::FunctionValues> {
+    pub(super) fn function_values_of(&self, material: usize) -> Option<&functions::FunctionValues> {
         let object = self.preview.materials.get(material).map_or(0, |material| material.object);
         self.function_values_of_object(object)
     }
 
-    fn function_values_of_object(&self, object: u8) -> Option<&functions::FunctionValues> {
+    pub(super) fn function_values_of_object(&self, object: u8) -> Option<&functions::FunctionValues> {
         if object == 0 {
             return self.function_values.as_ref();
         }
@@ -1273,7 +1273,7 @@ impl ModelGpuFrame {
     }
 
     /// The change colors of the object that owns `material`.
-    fn change_colors_of(&self, material: usize) -> [[f32; 3]; 4] {
+    pub(super) fn change_colors_of(&self, material: usize) -> [[f32; 3]; 4] {
         let object = self.preview.materials.get(material).map_or(0, |material| material.object);
         self.change_colors_of_object(object)
     }
@@ -1281,7 +1281,7 @@ impl ModelGpuFrame {
     /// The opened object's change colors by the selected variant; each
     /// attached object has its own, as `object_set_initial_change_colors`
     /// gives every object.
-    fn change_colors_of_object(&self, object: u8) -> [[f32; 3]; 4] {
+    pub(super) fn change_colors_of_object(&self, object: u8) -> [[f32; 3]; 4] {
         if object == 0 {
             return self.change_colors;
         }
@@ -1292,7 +1292,7 @@ impl ModelGpuFrame {
     }
 
     /// Transparent passes draw whether or not game shaders are on.
-    fn h2_draws(&self, layer: H2Layer) -> bool {
+    pub(super) fn h2_draws(&self, layer: H2Layer) -> bool {
         match layer {
             H2Layer::Transparent => true,
             H2Layer::ActiveCamo => self.active_camo,
@@ -1300,7 +1300,7 @@ impl ModelGpuFrame {
         }
     }
 
-    fn h2_object_prt_clusters(&self) -> Option<[Vec<[f32; 4]>; 2]> {
+    pub(super) fn h2_object_prt_clusters(&self) -> Option<[Vec<[f32; 4]>; 2]> {
         let prt = self.preview.h2_prt.as_ref().filter(|_| self.prt && self.game_shaders && !self.default_lights)?;
         let (lights, ambient) = h2_prt_object_lights(self.h2_object_light());
         Some([prt.clusters_lit_by(&lights, ambient), prt.clusters_lit_by(&lights[..1], ambient)])
@@ -1308,12 +1308,12 @@ impl ModelGpuFrame {
 
     /// `lights_prepare_for_object_dynamic`, for the opened object and what it
     /// holds, as one sphere around the model.
-    fn ce_point_lights(&self) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
+    pub(super) fn ce_point_lights(&self) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
         self.ce_point_lights_with(&[])
     }
 
     /// The same, with lights the object's effects have made besides.
-    fn ce_point_lights_with(&self, made: &[ce::lights::CeLight]) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
+    pub(super) fn ce_point_lights_with(&self, made: &[ce::lights::CeLight]) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
         if self.preview.ce_lights.is_empty() && made.is_empty() {
             return Vec::new();
         }
@@ -1340,7 +1340,7 @@ impl ModelGpuFrame {
 
     /// Whether anything in the frame changes over time, so the view keeps
     /// redrawing: an effect or simulation that runs, or a pass that animates.
-    fn moves(&self) -> bool {
+    pub(super) fn moves(&self) -> bool {
         // What draws, lights or simulates outside the passes runs whatever
         // the passes do.
         if self.object_moves && has_effects(&self.preview) {
@@ -1374,12 +1374,12 @@ impl ModelGpuFrame {
         })
     }
 
-    fn h2_lightmap_layer(&self) -> H2Layer {
+    pub(super) fn h2_lightmap_layer(&self) -> H2Layer {
         if self.default_lights { H2Layer::Lightmap } else { H2Layer::ObjectLightmap }
     }
 
     /// Which way the object path's direct light lies from a surface.
-    fn h2_object_light(&self) -> [f32; 3] {
+    pub(super) fn h2_object_light(&self) -> [f32; 3] {
         if self.light_follows_camera {
             h2_camera_light(self.camera.yaw, self.camera.pitch)
         } else {
@@ -1522,9 +1522,7 @@ pub(super) mod h4_holograms;
 #[path = "gen3_shadow.rs"]
 pub(super) mod gen3_shadow;
 #[path = "gen3_screen_lights.rs"]
-mod gen3_screen_lights;
-#[path = "reach_light_pass.rs"]
-mod reach_light_pass;
+pub(super) mod gen3_screen_lights;
 #[path = "h4_light_pass.rs"]
 mod h4_light_pass;
 #[path = "h4_flare_pass.rs"]
@@ -2811,7 +2809,7 @@ fn h2_context_supported(major: u32, minor: u32, embedded: bool) -> bool {
 
 /// The eye in model space, which the pass stages measure Fresnel from. An
 /// orthographic view has no eye, so one far away along the view axis stands in.
-fn h2_eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
+pub(super) fn h2_eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
     let distance = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
     let eye = unrotate_view_vector(camera.yaw, camera.pitch, [0.0, -distance, 0.0]);
     std::array::from_fn(|axis| camera.center[axis] + eye[axis] / camera.scale.max(1e-6))
@@ -4163,7 +4161,7 @@ pub(super) struct RenderCore {
     pub(in crate::app::model_preview) reach_pass_values: Option<std::collections::HashMap<&'static str, [f32; 4]>>,
     /// The exposure stops Reach's area screen effects come to this frame,
     /// set before its scene draws; 0 outside a Reach picture.
-    reach_stops: f32,
+    pub(in crate::app::model_preview) reach_stops: f32,
     empty_vertex_array: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -4650,6 +4648,11 @@ impl RenderCore {
             }
             None
         }
+    }
+
+    /// The slot's effect onsets: when each effect's scale came on.
+    pub(in crate::app::model_preview) fn effect_onsets(&mut self, slot: usize) -> &mut gen3::effects::H3EffectOnsets {
+        &mut self.slots[slot].simulations.effect_onsets
     }
 
     /// Bind the slot's model vertex array again.

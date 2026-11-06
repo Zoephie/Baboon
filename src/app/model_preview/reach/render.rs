@@ -52,7 +52,7 @@ impl Gen3Game for ReachGame {
 
     /// `build_simple_light_draw_list`, before the static pass reads it.
     fn frame_lights(&mut self, cx: &mut FrameCx<'_>) -> Vec<ReachLitLight> {
-        cx.core.reach_frame_lights(cx.frame, cx.slot)
+        Self::frame_lights_of(cx)
     }
 
     fn lit_values(&mut self, core: &mut RenderCore) {
@@ -65,7 +65,7 @@ impl Gen3Game for ReachGame {
     /// `c_lights_view::render`: after the static lighting, before what blends.
     unsafe fn screen_lights(&mut self, cx: &mut FrameCx<'_>, lit: &[ReachLitLight], accumulation: glow::NativeFramebuffer) {
         unsafe {
-            cx.core.draw_reach_screen_lights(cx.gl, cx.frame, lit, accumulation);
+            self.draw_screen_lights(cx, lit, accumulation);
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
             h3_set_cull(cx.gl, cx.frame);
             cx.gl.depth_func(glow::LEQUAL);

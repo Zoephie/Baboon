@@ -13,6 +13,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::gen3::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
 use super::super::reach::lighting::reach_frame_value;
+use super::super::reach::lights::{ReachLitLight, inline_rows};
 use super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
@@ -354,7 +355,7 @@ impl H3Targets {
 }
 
 /// A linked pass and where its uniforms landed.
-pub(super) struct H3Program {
+pub(in crate::app::model_preview) struct H3Program {
     /// Held so its address, the program's key, stays its own.
     _pass: Arc<H3Pass>,
     linked: Linked,
@@ -381,7 +382,7 @@ pub(super) struct H3SlotTextures {
 
 /// `clip_position` as the matrix `mul(position, View_Projection)` wants: GLSL's
 /// columns are HLSL's rows here, so this is a plain column matrix.
-pub(super) fn view_projection(camera: &ModelGpuCamera) -> [f32; 16] {
+pub(in crate::app::model_preview) fn view_projection(camera: &ModelGpuCamera) -> [f32; 16] {
     let scale = camera.scale;
     let clip = |vector: [f32; 3], offset: [f32; 3]| {
         let view = rotate_view_vector(camera.yaw, camera.pitch, vector);
@@ -677,7 +678,7 @@ pub(super) fn h4_matrix(frame: &ModelGpuFrame, name: &str) -> Option<Vec<f32>> {
 }
 
 /// A translated uniform's value, by its type.
-pub(super) unsafe fn set_uniform_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
+pub(in crate::app::model_preview) unsafe fn set_uniform_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
     unsafe { set_value(gl, location, ty, value) }
 }
 
@@ -728,7 +729,7 @@ impl RenderCore {
     /// it for the next frame whatever `draw` returns. `None` when the pass
     /// does not link. The program leaves the cache while `draw` runs, so
     /// `draw` can use the renderer too.
-    pub(super) unsafe fn with_h3_program<R>(
+    pub(in crate::app::model_preview) unsafe fn with_h3_program<R>(
         &mut self,
         gl: &glow::Context,
         pass: &Arc<H3Pass>,
@@ -1428,6 +1429,19 @@ impl RenderCore {
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+        }
+    }
+
+    /// The inline lights, as the static pass reads them.
+    pub(in crate::app::model_preview) fn set_reach_inline_lights(&mut self, lit: &[ReachLitLight]) {
+        self.reach_inline = inline_rows(lit);
+    }
+
+    /// `simple_lights` and `simple_light_count` for a Reach static pass.
+    pub(super) fn reach_simple_light(&self, name: &str) -> Option<H3Value> {
+        match name {
+            "simple_light_count" => Some(H3Value::Integer(self.reach_inline.len() as i32)),
+            _ => None,
         }
     }
 
