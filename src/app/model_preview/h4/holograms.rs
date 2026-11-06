@@ -12,17 +12,19 @@
 //! `(x, H - top, width, -height)`, and the shader's aligned texcoord and
 //! distortion come out as the game's.
 
+use super::render::H4Game;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use eframe::glow::{self, HasContext};
 
-use super::h3_draw::{frame_value, h3_set_cull, set_value, upload_h2_image_linear};
-use super::gl::target::{Made, Sampling, Texels};
-use super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value};
-use super::super::h4::bloom::H4BloomSettings;
-use super::h4::submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
-use super::*;
+use super::super::renderer::h3_draw::{frame_value, h3_set_cull, set_value, upload_h2_image_linear};
+use super::super::gl::target::{Made, Sampling, Texels};
+use super::super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value};
+use super::bloom::H4BloomSettings;
+use super::submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
+use super::super::renderer::*;
+use super::super::*;
 
 /// `g_hologramBoundsScale` and `g_hologramBoundsExpand`'s defaults.
 const BOUNDS_SCALE: f32 = 1.0;
@@ -35,7 +37,7 @@ const IDENTITY_CURVE: [f32; 5] = [0.0, 1.0, 0.0, 0.0, 1.0];
 
 /// The surfaces: `_surface_hologram_bias` (62) with its depth (63), and
 /// `_surface_hologram_temp` (61), all RGBA8 at the picture's size.
-pub(super) struct H4Holograms {
+pub(in crate::app::model_preview) struct H4Holograms {
     size: [i32; 2],
     color: glow::NativeTexture,
     depth: glow::NativeTexture,
@@ -78,7 +80,7 @@ impl H4Holograms {
 
 /// Where the holograms land on the picture, in GL's pixels (y up).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct HologramScreen {
+pub(in crate::app::model_preview) struct HologramScreen {
     /// `ps_material_generic_parameters[0]`, mirrored (see the module).
     coverage: [f32; 4],
     /// The scissor, `[x0, y0, x1, y1]`.
@@ -95,7 +97,7 @@ pub(super) struct HologramScreen {
 /// point to GL pixels and its view depth, or none behind the eye; `right` and
 /// `up` are the camera's; `vertical_fov` is in radians and `size` the
 /// picture's. None when nothing of it is on the picture.
-pub(super) fn hologram_screen(
+pub(in crate::app::model_preview) fn hologram_screen(
     center: [f32; 3],
     radius: f32,
     window: impl Fn([f32; 3]) -> Option<([f32; 2], f32)>,
@@ -181,7 +183,7 @@ fn scaled_sphere(
     root_skinning: Option<[[f32; 4]; 3]>,
     scaled_skinning: Option<[[f32; 4]; 3]>,
 ) -> ([f32; 3], f32) {
-    use super::attachment::{IDENTITY, place_of, rigid_inverse};
+    use super::super::attachment::{IDENTITY, place_of, rigid_inverse};
     use blam_tags::math::Matrix4;
     let rows = |rows: [[f32; 4]; 3]| Matrix4 { m: [rows[0], rows[1], rows[2], [0.0, 0.0, 0.0, 1.0]] };
     // Node 0's world matrix is its skinning matrix times its bind pose.
@@ -221,13 +223,14 @@ unsafe fn set_alpha_blend_max(gl: &glow::Context) {
     }
 }
 
-impl RenderCore {
+impl H4Game {
     /// `RenderHolograms`' generate pass, after the albedo (`c_player_view::render`
     /// X360 0x82A3B5F4): the holograms into their own surface, then its bloom
     /// and `final_combine_hologram`. `scene` holds the depth to test against.
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::app::model_preview) unsafe fn h4_generate_holograms(
+    pub(in crate::app::model_preview) unsafe fn generate_holograms(
         &mut self,
+        core: &mut RenderCore,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -262,14 +265,14 @@ impl RenderCore {
         let inside = (0..3).all(|axis| (view.eye[axis] - center[axis]).abs() <= radius);
         let screen = hologram_screen(center, radius, window, view.right, view.up, inside, vertical_fov, size)?;
         unsafe {
-            if self.h4_holograms.as_ref().is_none_or(|holograms| holograms.size != size) {
-                if let Some(old) = self.h4_holograms.take() {
+            if self.surfaces.as_ref().is_none_or(|holograms| holograms.size != size) {
+                if let Some(old) = self.surfaces.take() {
                     old.delete(gl);
                 }
-                self.h4_holograms = H4Holograms::new(gl, size);
+                self.surfaces = H4Holograms::new(gl, size);
             }
             let (color, framebuffer, combined_framebuffer) = {
-                let holograms = self.h4_holograms.as_ref()?;
+                let holograms = self.surfaces.as_ref()?;
                 (holograms.color, holograms.framebuffer, holograms.combined_framebuffer)
             };
             // MCC: the scene's depth copied in (`copy_depth`), the colour
@@ -287,7 +290,7 @@ impl RenderCore {
             let [x0, y0, x1, y1] = screen.crop;
             gl.enable(glow::SCISSOR_TEST);
             gl.scissor(x0, y0, x1 - x0, y1 - y0);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             // `handle_object_part`: what sorts after the bloom (layer 3)
             // waits for it.
             let post_bloom = |material: &H3Material| material.sort_layer == 3;
@@ -298,49 +301,49 @@ impl RenderCore {
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
             h3_set_cull(gl, frame);
-            self.h4_draw = Some(H4Draw::HologramOpaque);
+            core.h4_draw = Some(H4Draw::HologramOpaque);
             for (batch, material) in holograms.iter().filter(|(_, material)| !post_bloom(material)) {
-                self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                core.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
-            self.h4_draw = None;
+            core.h4_draw = None;
             // Mode 1 (`g_disableHologramOrderIndependentTransparency`, the
             // default) then draws pass 2, "hologram blend": blended holograms
             // alone, tested but not written, through `alpha_blend_max`.
             gl.enable(glow::BLEND);
             set_alpha_blend_max(gl);
             gl.depth_mask(false);
-            self.h4_draw = Some(H4Draw::HologramBlend);
+            core.h4_draw = Some(H4Draw::HologramBlend);
             for (batch, material) in holograms.iter().filter(|(_, material)| {
                 !post_bloom(material) && material.h4.as_ref().is_some_and(|submit| submit.is_blended_hologram())
             }) {
-                self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                core.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
-            self.h4_draw = None;
+            core.h4_draw = None;
             gl.blend_equation(glow::FUNC_ADD);
             gl.disable(glow::BLEND);
             gl.disable(glow::SCISSOR_TEST);
             // Its bloom, by the hologram camera fx.
-            let vertices = self.h3_empty_array(gl);
-            if self.h4_bloom.is_none() {
-                self.h4_bloom = super::super::h4::bloom::H4Bloom::new(gl, self.h3_no_bloom, self.white_volume);
+            let vertices = core.h3_empty_array(gl);
+            if self.bloom.is_none() {
+                self.bloom = super::bloom::H4Bloom::new(gl, core.h3_no_bloom, core.white_volume);
             }
             let settings = H4BloomSettings::hologram(screen.bloom_scale);
-            let bloom = self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, color, size, None, &settings);
+            let bloom = self.bloom.as_mut()?.build(gl, vertices, framebuffer, color, size, None, &settings);
             // Pass 3, "hologram postbloom": layer 3, by its own blend.
             gl.enable(glow::SCISSOR_TEST);
             gl.scissor(x0, y0, x1 - x0, y1 - y0);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             for (batch, material) in holograms.iter().filter(|(_, material)| post_bloom(material)) {
-                let blends = material.blend != super::gen3::shaders::H3Blend::Opaque;
+                let blends = material.blend != super::super::gen3::shaders::H3Blend::Opaque;
                 if blends {
                     gl.enable(glow::BLEND);
-                    super::h3_draw::h3_set_blend(gl, material.blend);
+                    super::super::renderer::h3_draw::h3_set_blend(gl, material.blend);
                 } else {
                     gl.disable(glow::BLEND);
                 }
                 gl.depth_mask(!blends);
-                self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                core.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
             }
             gl.disable(glow::BLEND);
             gl.color_mask(true, true, true, true);
@@ -357,13 +360,13 @@ impl RenderCore {
                 ("ps_material_generic_parameters", H3Value::FloatArray(generic)),
                 ("ps_filmic_tone_curve_params", H3Value::FloatArray(IDENTITY_CURVE.map(|value| [value; 4]).to_vec())),
             ];
-            let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(self.h3_no_bloom))];
-            self.h4_screen_pass(gl, frame, &post, &post.combine, owner, &engine, &textures, size);
+            let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(core.h3_no_bloom))];
+            self.screen_pass(core, gl, frame, &post, &post.combine, owner, &engine, &textures, size);
             gl.disable(glow::SCISSOR_TEST);
             gl.depth_mask(true);
             gl.enable(glow::DEPTH_TEST);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             Some(HologramPicture { screen, post, owner, distance: depth })
         }
     }
@@ -371,19 +374,20 @@ impl RenderCore {
     /// `hologram_apply_callback` (X360 0x83AF4CF0): `hologram_composite` over
     /// the crop into the scene's light, premultiplied (blend mode 5), with no
     /// depth. Leaves the blend as it found it off.
-    pub(in crate::app::model_preview) unsafe fn h4_composite_holograms(
+    pub(in crate::app::model_preview) unsafe fn composite_holograms(
         &mut self,
+        core: &mut RenderCore,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
         picture: &HologramPicture,
         size: [i32; 2],
     ) {
-        let Some(combined) = self.h4_holograms.as_ref().map(|holograms| holograms.combined) else {
+        let Some(combined) = self.surfaces.as_ref().map(|holograms| holograms.combined) else {
             return;
         };
         unsafe {
-            use super::super::h4::lighting::{H4_FILMIC_CURVE, h4_filmic_params};
+            use super::lighting::{H4_FILMIC_CURVE, h4_filmic_params};
             let view_inverse = h4_filmic_params(H4_FILMIC_CURVE, true);
             let [x0, y0, x1, y1] = picture.screen.crop;
             gl.enable(glow::SCISSOR_TEST);
@@ -400,10 +404,10 @@ impl RenderCore {
             ];
             let textures = [("source_samplerTexture", Some(combined))];
             let post = Arc::clone(&picture.post);
-            self.h4_screen_pass(gl, frame, &post, &post.composite, picture.owner, &engine, &textures, size);
+            self.screen_pass(core, gl, frame, &post, &post.composite, picture.owner, &engine, &textures, size);
             gl.disable(glow::SCISSOR_TEST);
             gl.enable(glow::DEPTH_TEST);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
         }
     }
 
@@ -411,8 +415,9 @@ impl RenderCore {
     /// first, then the frame's, then the material's functions on `owner`'s
     /// values, then its bake.
     #[allow(clippy::too_many_arguments)]
-    unsafe fn h4_screen_pass(
+    pub(in crate::app::model_preview) unsafe fn screen_pass(
         &mut self,
+        core: &mut RenderCore,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         post: &Arc<H4HologramPost>,
@@ -424,7 +429,7 @@ impl RenderCore {
     ) {
         unsafe {
             let key = Arc::as_ptr(post) as usize;
-            let holograms = self.h4_holograms.as_mut().expect("the hologram surfaces");
+            let holograms = self.surfaces.as_mut().expect("the hologram surfaces");
             if holograms.uploaded.as_ref().is_none_or(|(known, _)| *known != key) {
                 for texture in holograms.uploaded.take().into_iter().flat_map(|(_, map)| map.into_values()) {
                     gl.delete_texture(texture);
@@ -441,7 +446,7 @@ impl RenderCore {
             }
             let uploaded = holograms.uploaded.as_ref().map(|(_, map)| map.clone()).unwrap_or_default();
             let pass: &Arc<H3Pass> = &material.pass;
-            self.with_h3_program(gl, pass, |this, program| {
+            core.with_h3_program(gl, pass, |this, program| {
                 gl.use_program(Some(program.program));
                 let drawn = DrawnObject { values: frame.function_values_of_object(owner), time: frame.time, owner };
                 let node = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];

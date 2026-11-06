@@ -4,11 +4,13 @@
 //! reflections added through explicit shader 46. See
 //! `docs/h4-preview-research/lights.md` §4.
 
+use eframe::glow::{self, HasContext};
+use super::render::H4Game;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::gen3::shaders::{H3Sampler, H3Value};
-use super::h4::flares::{H4FlareDraw, H4FlareView};
-use super::*;
+use super::super::gen3::shaders::{H3Sampler, H3Value};
+use super::flares::{H4FlareDraw, H4FlareView};
+use super::super::renderer::*;
 
 /// The camera as the flares read it: a point's normalized device position,
 /// and the projection's scale there that `LensFlareProjectBillboard` hands
@@ -32,7 +34,7 @@ fn project(
 }
 
 /// Each flare's images, after Halo 3's and Reach's in the slot's.
-pub(super) unsafe fn h4_flare_images(
+pub(in crate::app::model_preview) unsafe fn h4_flare_images(
     gl: &glow::Context,
     frame: &ModelGpuFrame,
 ) -> Vec<Vec<Option<glow::NativeTexture>>> {
@@ -50,20 +52,21 @@ pub(super) unsafe fn h4_flare_images(
                 .images
                 .iter()
                 .map(|(image, texels, mips)| unsafe {
-                    h3_draw::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
+                    super::super::renderer::h3_draw::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
                 })
                 .collect()
         })
         .collect()
 }
 
-impl RenderCore {
+impl H4Game {
     /// `lens_flares_submit_occlusions` and `lens_flares_render` for the
     /// object's flares, into the bound light target, which holds the
     /// object's depth. A pane paints on demand, so each patch's count is
     /// waited for rather than read a frame late.
-    pub(in crate::app::model_preview) unsafe fn draw_h4_flares(
+    pub(in crate::app::model_preview) unsafe fn draw_flares(
         &mut self,
+        core: &mut RenderCore,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -75,16 +78,16 @@ impl RenderCore {
             return;
         }
         unsafe {
-            let Some(flares) = self
+            let Some(flares) = core
                 .sprite_gl
-                .get_or_insert_with(|| link_sprite_gl(gl, self.program))
+                .get_or_insert_with(|| link_sprite_gl(gl, core.program))
                 .take()
             else {
                 return;
             };
             let camera = &frame.camera;
             let view = ce_flare_view(camera);
-            let viewport = self
+            let viewport = core
                 .h3_targets
                 .as_ref()
                 .map_or([1, 1], |targets| targets.size)
@@ -111,7 +114,7 @@ impl RenderCore {
             gl.bind_vertex_array(Some(flares.vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
             gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, self.placeholder);
+            gl.bind_texture(glow::TEXTURE_2D, core.placeholder);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(false);
@@ -157,15 +160,15 @@ impl RenderCore {
                     drawn.push((index, draws));
                 }
             }
-            self.sprite_gl = Some(Some(flares));
+            core.sprite_gl = Some(Some(flares));
             gl.color_mask(true, true, true, false);
             gl.disable(glow::DEPTH_TEST);
             if drawn.is_empty() {
                 return;
             }
-            let linked = self.with_h3_program(gl, &pass, |this, program| {
+            let linked = core.with_h3_program(gl, &pass, |this, program| {
                 // `draw_textured_screen_quad`'s corners and texture coordinates.
-                let (vertex_array, buffer) = match this.h4_flare_geometry {
+                let (vertex_array, buffer) = match self.flare_geometry {
                     Some(geometry) => geometry,
                     None => {
                         let (Ok(vertex_array), Ok(buffer)) =
@@ -173,7 +176,7 @@ impl RenderCore {
                         else {
                             return;
                         };
-                        this.h4_flare_geometry = Some((vertex_array, buffer));
+                        self.flare_geometry = Some((vertex_array, buffer));
                         (vertex_array, buffer)
                     }
                 };
@@ -241,16 +244,16 @@ impl RenderCore {
                                 "tintColor" => floats(draw.tint),
                                 // `c_surface::get_alpha_multiplier`: 1 here.
                                 "ps_scale" => floats([1.0; 4]),
-                                other => h3_draw::frame_value(
+                                other => super::super::renderer::h3_draw::frame_value(
                                     frame,
-                                    gen3::shaders::H3Dialect::Halo4,
+                                    super::super::gen3::shaders::H3Dialect::Halo4,
                                     other,
                                     size,
                                     0.0,
                                 ),
                             };
                             if let Some(value) = value {
-                                h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                                super::super::renderer::h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
                             }
                         }
                         for (unit, (name, _)) in pass.textures.iter().enumerate() {
@@ -272,8 +275,8 @@ impl RenderCore {
                 return;
             }
             gl.active_texture(glow::TEXTURE0);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
+            gl.use_program(Some(core.program));
         }
     }
 }

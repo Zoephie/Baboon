@@ -7,7 +7,7 @@ use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore};
 use super::super::renderer::h3_draw::{h3_layered_distance, h3_set_cull};
-use super::super::renderer::h4_holograms::{HologramPicture, draws_as_hologram};
+use super::holograms::{HologramPicture, draws_as_hologram};
 use super::camo::H4CamoDraw;
 
 /// Halo 4's hooks, and what it carries through a frame: the holograms and
@@ -18,6 +18,17 @@ pub(in crate::app::model_preview) struct H4Game {
     /// horizontal, vertical and apply programs.
     pub(super) shadow: Option<super::shadow_pass::H4ShadowTargets>,
     pub(super) shadow_programs: Option<[Option<glow::NativeProgram>; 3]>,
+    /// The hologram surfaces and the screen materials' bitmaps.
+    pub(super) surfaces: Option<super::holograms::H4Holograms>,
+    /// The bloom chain, the view's and the holograms'.
+    pub(super) bloom: Option<super::bloom::H4Bloom>,
+    /// The colour grading lookup, uploaded for the preview whose image it is
+    /// (by that image's address).
+    pub(super) grading: Option<(usize, glow::NativeTexture)>,
+    /// The final composite's program.
+    pub(super) composite_program: Option<glow::NativeProgram>,
+    /// The corners the flare reflections draw from.
+    pub(super) flare_geometry: Option<(glow::NativeVertexArray, glow::NativeBuffer)>,
     holograms: Vec<Gen3Batch>,
     hologram: Option<HologramPicture>,
     camo: Option<H4CamoDraw>,
@@ -49,7 +60,12 @@ impl Gen3Game for H4Game {
         self.hologram = if self.holograms.is_empty() {
             None
         } else {
-            unsafe { cx.core.h4_generate_holograms(cx.gl, cx.frame, cx.slot, &self.holograms, albedo, size) }
+            unsafe {
+                let holograms = std::mem::take(&mut self.holograms);
+                let picture = self.generate_holograms(cx.core, cx.gl, cx.frame, cx.slot, &holograms, albedo, size);
+                self.holograms = holograms;
+                picture
+            }
         };
     }
 
@@ -95,7 +111,7 @@ impl Gen3Game for H4Game {
     /// transparent, at their sphere.
     unsafe fn blended(&mut self, cx: &mut FrameCx<'_>, nearer_than: f32, size: [i32; 2]) {
         if let Some(picture) = self.hologram.take_if(|picture| h3_layered_distance(2, picture.distance) > nearer_than) {
-            unsafe { cx.core.h4_composite_holograms(cx.gl, cx.frame, cx.slot, &picture, size) }
+            unsafe { self.composite_holograms(cx.core, cx.gl, cx.frame, cx.slot, &picture, size) }
         }
     }
 
@@ -105,11 +121,11 @@ impl Gen3Game for H4Game {
     }
 
     unsafe fn shield(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe { cx.core.draw_h4_shield(cx.gl, cx.frame, cx.slot) }
+        unsafe { self.draw_shield(cx.core, cx.gl, cx.frame, cx.slot) }
     }
 
     unsafe fn late_sprites(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe { cx.core.draw_h4_flares(cx.gl, cx.frame, cx.slot) }
+        unsafe { self.draw_flares(cx.core, cx.gl, cx.frame, cx.slot) }
     }
 
     unsafe fn bloom(
@@ -119,7 +135,16 @@ impl Gen3Game for H4Game {
         accumulation: glow::NativeTexture,
         size: [i32; 2],
     ) -> Option<glow::NativeTexture> {
-        unsafe { cx.core.h3_built_bloom(cx.gl, framebuffer, accumulation, size, Some(cx.frame)) }
+        unsafe {
+            let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
+            let vertices = core.h3_empty_array(gl);
+            let grading = self.grading_texture(gl, frame);
+            if self.bloom.is_none() {
+                self.bloom = super::bloom::H4Bloom::new(gl, core.h3_no_bloom, core.white_volume);
+            }
+            let settings = &super::bloom::VIEW_BLOOM;
+            self.bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref(), settings)
+        }
     }
 
     unsafe fn composite(
@@ -133,9 +158,11 @@ impl Gen3Game for H4Game {
     ) {
         unsafe {
             let depth = cx.core.object_depth(cx.gl, framebuffer);
-            cx.core.h4_composite(cx.gl, cx.frame, accumulation, bloom, depth, screen);
+            self.draw_composite(cx, accumulation, bloom, depth, screen);
             if let Some(draw) = self.camo {
-                cx.core.draw_h4_camo(cx.gl, cx.frame, cx.slot, &self.camo_batches, draw, size);
+                let batches = std::mem::take(&mut self.camo_batches);
+                self.draw_camo(cx, &batches, draw, size);
+                self.camo_batches = batches;
             }
         }
     }

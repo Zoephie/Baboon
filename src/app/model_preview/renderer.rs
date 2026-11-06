@@ -1515,14 +1515,10 @@ pub(super) use super::reach::lighting::{
     REACH_DARK_MULTIPLIER, REACH_SCREEN_NOISE_BITMAP, reach_alt_exposure, reach_exposure, reach_lightmap_tint,
     reach_particle_light,
 };
-#[path = "h4_holograms.rs"]
-pub(super) mod h4_holograms;
 #[path = "gen3_shadow.rs"]
 pub(super) mod gen3_shadow;
 #[path = "gen3_screen_lights.rs"]
 pub(super) mod gen3_screen_lights;
-#[path = "h4_flare_pass.rs"]
-mod h4_flare_pass;
 
 /// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
 /// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
@@ -2078,10 +2074,10 @@ impl SlotSimulations {
 }
 
 /// One model's buffers, ground grid and textures on the GPU.
-struct ModelGpuSlot {
+pub(super) struct ModelGpuSlot {
     /// What runs from frame to frame, restarted together.
     simulations: SlotSimulations,
-    vertex_array: glow::NativeVertexArray,
+    pub(in crate::app::model_preview) vertex_array: glow::NativeVertexArray,
     vertex_buffer: glow::NativeBuffer,
     /// Halo 2 per-vertex PRT, unused by every other model.
     prt_buffer: glow::NativeBuffer,
@@ -2105,7 +2101,7 @@ struct ModelGpuSlot {
     /// the wrong textures.
     uploaded_textures: Option<u64>,
     /// Halo CE's lens flares: per light, then per image, of `flare_geometry`.
-    flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
+    pub(in crate::app::model_preview) flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     /// The flares of lights CE effects make: by effect, light, then image.
     ce_effect_flare_textures: HashMap<usize, Vec<Vec<Option<glow::NativeTexture>>>>,
     /// Each of `h2_gel_lights`' gels, of `gel_geometry`.
@@ -2369,7 +2365,7 @@ impl ModelGpuSlot {
                     let (image, texels, mips) = at.bitmap();
                     vec![h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)]
                 }))
-                .chain(h4_flare_pass::h4_flare_images(gl, frame))
+                .chain(h4::flare_pass::h4_flare_images(gl, frame))
                 .collect();
             for texture in self.ce_effect_flare_textures.drain().flat_map(|(_, lights)| lights).flatten().flatten() {
                 gl.delete_texture(texture);
@@ -2877,21 +2873,21 @@ out vec4 out_color;
 
 /// What every game's camera-facing quads draw with (flares, antennas, effect
 /// sprites), made on first use.
-struct SpriteGl {
-    program: glow::NativeProgram,
-    vertex_array: glow::NativeVertexArray,
-    buffer: glow::NativeBuffer,
-    color: Option<glow::NativeUniformLocation>,
-    highlight: Option<glow::NativeUniformLocation>,
-    tint: Option<glow::NativeUniformLocation>,
-    map: Option<glow::NativeUniformLocation>,
+pub(super) struct SpriteGl {
+    pub(in crate::app::model_preview) program: glow::NativeProgram,
+    pub(in crate::app::model_preview) vertex_array: glow::NativeVertexArray,
+    pub(in crate::app::model_preview) buffer: glow::NativeBuffer,
+    pub(in crate::app::model_preview) color: Option<glow::NativeUniformLocation>,
+    pub(in crate::app::model_preview) highlight: Option<glow::NativeUniformLocation>,
+    pub(in crate::app::model_preview) tint: Option<glow::NativeUniformLocation>,
+    pub(in crate::app::model_preview) map: Option<glow::NativeUniformLocation>,
     /// Reach's light volumes': the `circular` albedo and the depth fade.
-    circular: Option<glow::NativeUniformLocation>,
-    fade: Option<glow::NativeUniformLocation>,
-    depth: Option<glow::NativeUniformLocation>,
-    scene_depth: Option<glow::NativeUniformLocation>,
+    pub(in crate::app::model_preview) circular: Option<glow::NativeUniformLocation>,
+    pub(in crate::app::model_preview) fade: Option<glow::NativeUniformLocation>,
+    pub(in crate::app::model_preview) depth: Option<glow::NativeUniformLocation>,
+    pub(in crate::app::model_preview) scene_depth: Option<glow::NativeUniformLocation>,
     /// A patch's samples past the depth buffer, and in all.
-    queries: [glow::NativeQuery; 2],
+    pub(in crate::app::model_preview) queries: [glow::NativeQuery; 2],
 }
 
 /// `effect_update` for Halo CE's attached effects, up to the frame's time.
@@ -4063,7 +4059,7 @@ impl ModelGlRenderer {
 /// game's own state too.
 pub(super) struct RenderCore {
     /// As `h2_bloom`.
-    sprite_gl: Option<Option<SpriteGl>>,
+    pub(in crate::app::model_preview) sprite_gl: Option<Option<SpriteGl>>,
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
     ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
@@ -4081,7 +4077,7 @@ pub(super) struct RenderCore {
     h3_distortion_program: Option<glow::NativeProgram>,
     /// This frame's copy of the H3 scene's depth, for soft particles; set
     /// only while an H3 picture draws its sprites.
-    h3_depth_copy: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) h3_depth_copy: Option<glow::NativeTexture>,
     /// Halo 2's `target_particle_distortion`, copied from the frame.
     h2_distortion_copy: Option<ColorTarget>,
     /// Whether this context's GLSL can draw the games' shaders, which every
@@ -4098,7 +4094,7 @@ pub(super) struct RenderCore {
     black_volume: Option<glow::NativeTexture>,
     /// What an H3 array sampler reads with nothing of its own.
     h3_black_array: Option<glow::NativeTexture>,
-    white_volume: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) white_volume: Option<glow::NativeTexture>,
     h2_normalization_cube: Option<glow::NativeTexture>,
     h2_target: Option<H2Target>,
     scene: Option<H2Target>,
@@ -4110,10 +4106,6 @@ pub(super) struct RenderCore {
     /// holds its pass, so no other pass can come to have its address.
     h3_programs: HashMap<usize, Result<Rc<h3_draw::H3Program>, Arc<gen3::shaders::H3Pass>>>,
     h3_composite_program: Option<glow::NativeProgram>,
-    h4_composite_program: Option<glow::NativeProgram>,
-    /// Halo 4's colour grading lookup, uploaded for the preview whose image
-    /// it is (by that image's address).
-    h4_grading: Option<(usize, glow::NativeTexture)>,
     h3_blur_program: Option<glow::NativeProgram>,
     h3_vision_program: Option<glow::NativeProgram>,
     h3_suck_program: Option<glow::NativeProgram>,
@@ -4121,19 +4113,14 @@ pub(super) struct RenderCore {
     /// How much of its effect the `shader_screen` drawing now is.
     h3_screen_alpha: Option<f32>,
     h3_bloom: Option<h3_bloom::H3Bloom>,
-    h4_bloom: Option<h4::bloom::H4Bloom>,
-    /// Halo 4's hologram surfaces and the screen materials' bitmaps.
-    h4_holograms: Option<h4_holograms::H4Holograms>,
-    /// The corners Halo 4's flare reflections draw from.
-    h4_flare_geometry: Option<(glow::NativeVertexArray, glow::NativeBuffer)>,
     /// The picture as Halo 4's camo reads it, bytes as they are.
-    h4_camo_scene: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) h4_camo_scene: Option<glow::NativeTexture>,
     /// Halo 4's self shadow: its map, blurs and mask, the three screen
     /// programs, and the mask while the static pass reads it.
     pub(in crate::app::model_preview) h4_shadow_mask: Option<glow::NativeTexture>,
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
-    h4_draw: Option<h4::submit::H4Draw>,
+    pub(in crate::app::model_preview) h4_draw: Option<h4::submit::H4Draw>,
     /// Reach's self shadow: its map and mask, and the apply.
     /// What a Reach pass draws through in place of the camera, and the mask
     /// its static pass reads, while they are set.
@@ -4154,8 +4141,8 @@ pub(super) struct RenderCore {
     h2_bloom: Option<Option<H2Bloom>>,
     /// As `h2_bloom`.
     h2_shadow_map: Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
-    program: glow::NativeProgram,
-    slots: Vec<ModelGpuSlot>,
+    pub(in crate::app::model_preview) program: glow::NativeProgram,
+    pub(in crate::app::model_preview) slots: Vec<ModelGpuSlot>,
     lru: ModelSlotLru,
     center: glow::NativeUniformLocation,
     scale: glow::NativeUniformLocation,
@@ -4274,17 +4261,12 @@ impl RenderCore {
                 h3_light: None,
                 h3_programs: HashMap::new(),
                 h3_composite_program: None,
-                h4_composite_program: None,
-                h4_grading: None,
                 h3_blur_program: None,
                 h3_vision_program: None,
                 h3_suck_program: None,
                 h3_vision_mask: None,
                 h3_screen_alpha: None,
                 h3_bloom: None,
-                h4_bloom: None,
-                h4_holograms: None,
-                h4_flare_geometry: None,
                 h4_camo_scene: None,
                 h4_shadow_mask: None,
                 h4_draw: None,
@@ -7828,7 +7810,7 @@ fn ce_sorts_transparents(frame: &ModelGpuFrame) -> bool {
     frame.render_mode.draws_shading() && frame.preview.batches.iter().any(|batch| batch.sort_position.is_some())
 }
 
-fn ce_flare_view(camera: &ModelGpuCamera) -> common::view::ViewFrame {
+pub(super) fn ce_flare_view(camera: &ModelGpuCamera) -> common::view::ViewFrame {
     let along = |vector| unrotate_view_vector(camera.yaw, camera.pitch, vector);
     common::view::ViewFrame {
         eye: h2_eye_position(camera),
@@ -7839,7 +7821,7 @@ fn ce_flare_view(camera: &ModelGpuCamera) -> common::view::ViewFrame {
 }
 
 /// The vertex shader's `clip_position`.
-fn ce_flare_clip(camera: &ModelGpuCamera, point: [f32; 3]) -> [f32; 4] {
+pub(super) fn ce_flare_clip(camera: &ModelGpuCamera, point: [f32; 3]) -> [f32; 4] {
     let scaled = std::array::from_fn(|axis| (point[axis] - camera.center[axis]) * camera.scale);
     let view = rotate_view_vector(camera.yaw, camera.pitch, scaled);
     [
@@ -7955,7 +7937,7 @@ unsafe fn draw_flare_sprites(
     }
 }
 
-unsafe fn link_sprite_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<SpriteGl> {
+pub(super) unsafe fn link_sprite_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<SpriteGl> {
     unsafe {
         let program = link_h2_program(gl, main, CE_FLARE_VERTEX, CE_FLARE_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))
