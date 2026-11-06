@@ -11,6 +11,8 @@
 
 use eframe::glow::{self, HasContext};
 
+use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
+
 /// The blur amount `rasterizer_postprocess_scene` passes, in downsampled texels.
 const BLUR_RADIUS: f32 = 3.992;
 /// `rasterizer_bloom_default_threshold`.
@@ -62,62 +64,10 @@ void main() {
 }
 ";
 
-/// A color texture to draw into.
-struct Surface {
-    framebuffer: glow::NativeFramebuffer,
-    color: glow::NativeTexture,
-}
-
-impl Surface {
-    unsafe fn new(gl: &glow::Context, width: i32, height: i32) -> Option<Self> {
-        unsafe {
-            let color = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(color));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA8 as i32,
-                width,
-                height,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(None),
-            );
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
-                (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
-            let framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(
-                glow::FRAMEBUFFER,
-                glow::COLOR_ATTACHMENT0,
-                glow::TEXTURE_2D,
-                Some(color),
-                0,
-            );
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            Some(Self { framebuffer, color })
-        }
-    }
-
-    unsafe fn delete(&self, gl: &glow::Context) {
-        unsafe {
-            gl.delete_framebuffer(self.framebuffer);
-            gl.delete_texture(self.color);
-        }
-    }
-}
-
 pub(in crate::app::model_preview) struct H2Bloom {
     program: glow::NativeProgram,
     vertex_array: glow::NativeVertexArray,
-    surfaces: Option<([Surface; 2], [i32; 2])>,
+    surfaces: Option<([ColorTarget; 2], [i32; 2])>,
 }
 
 impl H2Bloom {
@@ -149,13 +99,14 @@ impl H2Bloom {
                 if let Some((old, _)) = self.surfaces.take() {
                     old.iter().for_each(|surface| surface.delete(gl));
                 }
-                let (Some(first), Some(second)) = (
-                    Surface::new(gl, small[0], small[1]),
-                    Surface::new(gl, small[0], small[1]),
-                ) else {
+                let mut made = Made::new(gl);
+                let both = [(); 2].map(|_| made.color(small, Texels::RGBA8, Sampling::LINEAR_CLAMPED));
+                let [Some(first), Some(second)] = both else {
+                    drop(made);
                     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene_framebuffer));
                     return;
                 };
+                made.keep();
                 self.surfaces = Some(([first, second], small));
             }
             let Some(([first, second], _)) = &self.surfaces else {
@@ -187,9 +138,9 @@ impl H2Bloom {
             let reach = BLUR_RADIUS / 4.0;
             for _ in 0..BLUR_PASSES {
                 gl.uniform_2_f32(uniform("u_step").as_ref(), reach / small[0] as f32, 0.0);
-                draw(second.framebuffer, first.color, 1);
+                draw(second.framebuffer, first.texture, 1);
                 gl.uniform_2_f32(uniform("u_step").as_ref(), 0.0, reach / small[1] as f32);
-                draw(first.framebuffer, second.color, 1);
+                draw(first.framebuffer, second.texture, 1);
             }
 
             gl.viewport(0, 0, size[0], size[1]);
@@ -198,7 +149,7 @@ impl H2Bloom {
             // `sub_9206D0(19, 10)`, `(20, 2)`: inverse destination color, one.
             gl.blend_func(glow::ONE_MINUS_DST_COLOR, glow::ONE);
             gl.color_mask(true, true, true, false);
-            draw(scene_framebuffer, first.color, 2);
+            draw(scene_framebuffer, first.texture, 2);
             gl.disable(glow::BLEND);
             gl.color_mask(true, true, true, true);
             gl.depth_mask(true);

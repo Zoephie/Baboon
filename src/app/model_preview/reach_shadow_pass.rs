@@ -3,6 +3,7 @@
 //! then `shadow_apply` into the mask the static pass reads. See
 //! `docs/reach-preview-research/shadow.md`.
 
+use super::gl::target::{Made, Sampling, Texels};
 use super::reach::shadow::{ReachShadowCamera, ReachShadowFilter, hull_planes};
 use super::*;
 use gen3::shaders::H3Material;
@@ -117,64 +118,23 @@ pub(super) struct ReachShadowTargets {
 
 impl ReachShadowTargets {
     unsafe fn new(gl: &glow::Context, map_size: i32, mask_size: [i32; 2]) -> Option<Self> {
+        let mut made = Made::new(gl);
         unsafe {
-            let map = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(map));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::DEPTH_COMPONENT24 as i32,
-                map_size,
-                map_size,
-                0,
-                glow::DEPTH_COMPONENT,
-                glow::UNSIGNED_INT,
-                glow::PixelUnpackData::Slice(None),
-            );
             // `sub_140847650`: clamped, point.
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
-                (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
-            let map_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(map_framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, Some(map), 0);
-            gl.draw_buffers(&[glow::NONE]);
-            gl.read_buffer(glow::NONE);
-            let mask = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(mask));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA8 as i32,
-                mask_size[0],
-                mask_size[1],
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(None),
-            );
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            let mask_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(mask_framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(mask), 0);
-            let complete = [map_framebuffer, mask_framebuffer].iter().all(|framebuffer| {
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(*framebuffer));
-                gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE
-            });
-            let targets = Self { map, map_framebuffer, map_size, mask, mask_framebuffer, mask_size };
-            if !complete {
-                targets.delete(gl);
+            let map = made.depth([map_size; 2], Texels::DEPTH24, Sampling::NEAREST_CLAMPED, glow::DEPTH_ATTACHMENT)?;
+            let mask = made.color(mask_size, Texels::RGBA8, Sampling::NEAREST)?;
+            if !made.complete(&[map.framebuffer, mask.framebuffer]) {
                 return None;
             }
-            Some(targets)
+            made.keep();
+            Some(Self {
+                map: map.texture,
+                map_framebuffer: map.framebuffer,
+                map_size,
+                mask: mask.texture,
+                mask_framebuffer: mask.framebuffer,
+                mask_size,
+            })
         }
     }
 

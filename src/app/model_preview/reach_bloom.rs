@@ -5,6 +5,7 @@
 //! clamps where the game's shaders do. The final composite adds the top level
 //! at eight times. See `docs/reach-preview-research/bloom.md`.
 
+use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
 use super::h3_draw::screen_program;
@@ -95,52 +96,6 @@ void main() {
 }
 ";
 
-struct Surface {
-    framebuffer: glow::NativeFramebuffer,
-    color: glow::NativeTexture,
-    size: [i32; 2],
-}
-
-impl Surface {
-    unsafe fn new(gl: &glow::Context, size: [i32; 2]) -> Option<Self> {
-        unsafe {
-            let color = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(color));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA16F as i32,
-                size[0],
-                size[1],
-                0,
-                glow::RGBA,
-                glow::FLOAT,
-                glow::PixelUnpackData::Slice(None),
-            );
-            // Filter 2 and address 1 on every pass: bilinear, clamped.
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
-                (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
-            let framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color), 0);
-            Some(Self { framebuffer, color, size })
-        }
-    }
-
-    unsafe fn delete(&self, gl: &glow::Context) {
-        unsafe {
-            gl.delete_framebuffer(self.framebuffer);
-            gl.delete_texture(self.color);
-        }
-    }
-}
-
 /// `sub_1407C4D90 || sub_1407C4E10`: a frame large enough that the small
 /// surfaces take fixed sizes.
 fn high_resolution([width, height]: [i32; 2]) -> bool {
@@ -163,27 +118,29 @@ fn surface_sizes(frame: [i32; 2]) -> [[i32; 2]; 5] {
 
 /// The surfaces of the chain, numbered as the game's.
 struct Surfaces {
-    temp: Surface,
-    bloom_temp: Surface,
-    small: [Surface; 2],
-    tiny: [Surface; 2],
-    mini: [Surface; 2],
+    temp: ColorTarget,
+    bloom_temp: ColorTarget,
+    small: [ColorTarget; 2],
+    tiny: [ColorTarget; 2],
+    mini: [ColorTarget; 2],
     frame: [i32; 2],
 }
 
 impl Surfaces {
     unsafe fn new(gl: &glow::Context, frame: [i32; 2]) -> Option<Self> {
         let [temp, bloom_temp, small, tiny, mini] = surface_sizes(frame);
-        unsafe {
-            Some(Self {
-                temp: Surface::new(gl, temp)?,
-                bloom_temp: Surface::new(gl, bloom_temp)?,
-                small: [Surface::new(gl, small)?, Surface::new(gl, small)?],
-                tiny: [Surface::new(gl, tiny)?, Surface::new(gl, tiny)?],
-                mini: [Surface::new(gl, mini)?, Surface::new(gl, mini)?],
-                frame,
-            })
-        }
+        let mut made = Made::new(gl);
+        let mut surface = |size| unsafe { made.color(size, Texels::RGBA16F, Sampling::LINEAR_CLAMPED) };
+        let surfaces = Self {
+            temp: surface(temp)?,
+            bloom_temp: surface(bloom_temp)?,
+            small: [surface(small)?, surface(small)?],
+            tiny: [surface(tiny)?, surface(tiny)?],
+            mini: [surface(mini)?, surface(mini)?],
+            frame,
+        };
+        made.keep();
+        Some(surfaces)
     }
 
     unsafe fn delete(&self, gl: &glow::Context) {
@@ -216,7 +173,7 @@ impl ReachBloom {
     unsafe fn step(
         &self,
         gl: &glow::Context,
-        target: &Surface,
+        target: &ColorTarget,
         pass: Pass,
         source: (glow::NativeTexture, [i32; 2]),
         added: Option<glow::NativeTexture>,
@@ -241,10 +198,10 @@ impl ReachBloom {
 
     /// `gaussian_blur_fixed`: `surface` blurred across into `scratch` and
     /// back down, scaled.
-    unsafe fn blur(&self, gl: &glow::Context, surface: &Surface, scratch: &Surface, scale: [f32; 4]) {
+    unsafe fn blur(&self, gl: &glow::Context, surface: &ColorTarget, scratch: &ColorTarget, scale: [f32; 4]) {
         unsafe {
-            self.step(gl, scratch, Pass::BlurHorizontal, (surface.color, surface.size), None, [1.0; 4]);
-            self.step(gl, surface, Pass::Kernel5, (scratch.color, scratch.size), None, scale);
+            self.step(gl, scratch, Pass::BlurHorizontal, (surface.texture, surface.size), None, [1.0; 4]);
+            self.step(gl, surface, Pass::Kernel5, (scratch.texture, scratch.size), None, scale);
         }
     }
 
@@ -291,20 +248,20 @@ impl ReachBloom {
             let [tiny, tiny2] = &surfaces.tiny;
             let [mini, mini2] = &surfaces.mini;
             self.step(gl, &surfaces.temp, Pass::Downsample2x2, (accumulation, frame), None, [1.0, 1.0, 0.0, 0.0]);
-            let temp = (surfaces.temp.color, surfaces.temp.size);
+            let temp = (surfaces.temp.texture, surfaces.temp.size);
             if high_resolution(frame) {
                 self.step(gl, &surfaces.bloom_temp, Pass::BloomCurve, temp, None, curve);
-                let bloom_temp = (surfaces.bloom_temp.color, surfaces.bloom_temp.size);
+                let bloom_temp = (surfaces.bloom_temp.texture, surfaces.bloom_temp.size);
                 self.step(gl, small, Pass::Copy, bloom_temp, None, ones);
             } else {
                 self.step(gl, small, Pass::BloomCurve, temp, None, curve);
             }
-            self.step(gl, tiny, Pass::Gaussian4x4, (small.color, small.size), None, ones);
-            self.step(gl, mini, Pass::Gaussian4x4, (tiny.color, tiny.size), None, ones);
+            self.step(gl, tiny, Pass::Gaussian4x4, (small.texture, small.size), None, ones);
+            self.step(gl, mini, Pass::Gaussian4x4, (tiny.texture, tiny.size), None, ones);
             self.blur(gl, mini, mini2, scaled(LARGE_COLOR));
-            self.step(gl, tiny2, Pass::AddAlpha1, (tiny.color, tiny.size), Some(mini.color), scaled(MEDIUM_COLOR));
+            self.step(gl, tiny2, Pass::AddAlpha1, (tiny.texture, tiny.size), Some(mini.texture), scaled(MEDIUM_COLOR));
             self.blur(gl, tiny2, tiny, ones);
-            self.step(gl, small2, Pass::Add, (small.color, small.size), Some(tiny2.color), scaled(SMALL_COLOR));
+            self.step(gl, small2, Pass::Add, (small.texture, small.size), Some(tiny2.texture), scaled(SMALL_COLOR));
             self.blur(gl, small2, small, ones);
 
             gl.active_texture(glow::TEXTURE1);
@@ -320,7 +277,7 @@ impl ReachBloom {
             if scissored {
                 gl.enable(glow::SCISSOR_TEST);
             }
-            Some(small2.color)
+            Some(small2.texture)
         }
     }
 }

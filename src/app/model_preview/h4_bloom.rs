@@ -9,6 +9,7 @@
 //! (`floor(side / divisor + 0.5)`, no fixed sizes; O8) and the pixel size a
 //! pass steps by, the source's.
 
+use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
 use super::h3_draw::screen_program;
@@ -178,52 +179,6 @@ void main() {
 }
 ";
 
-struct Surface {
-    framebuffer: glow::NativeFramebuffer,
-    color: glow::NativeTexture,
-    size: [i32; 2],
-}
-
-impl Surface {
-    /// DXGI 10, RGBA16F, as the aux surfaces (MCC table 0x1424A6000).
-    unsafe fn new(gl: &glow::Context, size: [i32; 2]) -> Option<Self> {
-        unsafe {
-            let color = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(color));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA16F as i32,
-                size[0],
-                size[1],
-                0,
-                glow::RGBA,
-                glow::FLOAT,
-                glow::PixelUnpackData::Slice(None),
-            );
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
-                (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
-            let framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color), 0);
-            Some(Self { framebuffer, color, size })
-        }
-    }
-
-    unsafe fn delete(&self, gl: &glow::Context) {
-        unsafe {
-            gl.delete_framebuffer(self.framebuffer);
-            gl.delete_texture(self.color);
-        }
-    }
-}
-
 fn divided(frame: [i32; 2], divisor: f32) -> [i32; 2] {
     frame.map(|side| ((side as f32 / divisor + 0.5).floor() as i32).max(1))
 }
@@ -245,28 +200,27 @@ fn scaled(color: [f32; 3], intensity: f32, frame: [i32; 2]) -> [f32; 4] {
 /// `accum_LDR_temp` (/2), then `aux_small`, `aux_tiny`, `aux_mini` (/4, /16,
 /// /64) and their seconds.
 struct Surfaces {
-    temp: Surface,
-    small: [Surface; 2],
-    tiny: [Surface; 2],
-    mini: [Surface; 2],
+    temp: ColorTarget,
+    small: [ColorTarget; 2],
+    tiny: [ColorTarget; 2],
+    mini: [ColorTarget; 2],
     frame: [i32; 2],
 }
 
 impl Surfaces {
     unsafe fn new(gl: &glow::Context, frame: [i32; 2]) -> Option<Self> {
-        let pair = |divisor| unsafe {
-            let size = divided(frame, divisor);
-            Some([Surface::new(gl, size)?, Surface::new(gl, size)?])
+        // DXGI 10, RGBA16F, as the aux surfaces (MCC table 0x1424A6000).
+        let mut made = Made::new(gl);
+        let mut surface = |divisor| unsafe { made.color(divided(frame, divisor), Texels::RGBA16F, Sampling::LINEAR_CLAMPED) };
+        let surfaces = Self {
+            temp: surface(2.0)?,
+            small: [surface(4.0)?, surface(4.0)?],
+            tiny: [surface(16.0)?, surface(16.0)?],
+            mini: [surface(64.0)?, surface(64.0)?],
+            frame,
         };
-        unsafe {
-            Some(Self {
-                temp: Surface::new(gl, divided(frame, 2.0))?,
-                small: pair(4.0)?,
-                tiny: pair(16.0)?,
-                mini: pair(64.0)?,
-                frame,
-            })
-        }
+        made.keep();
+        Some(surfaces)
     }
 
     unsafe fn delete(&self, gl: &glow::Context) {
@@ -306,7 +260,7 @@ impl H4Bloom {
     unsafe fn step(
         &self,
         gl: &glow::Context,
-        target: &Surface,
+        target: &ColorTarget,
         pass: Pass,
         source: (glow::NativeTexture, [i32; 2]),
         added: Option<glow::NativeTexture>,
@@ -330,10 +284,10 @@ impl H4Bloom {
     }
 
     /// `gaussian_blur_fixed`: across into `scratch`, then back down scaled.
-    unsafe fn blur(&self, gl: &glow::Context, surface: &Surface, scratch: &Surface, scale: [f32; 4]) {
+    unsafe fn blur(&self, gl: &glow::Context, surface: &ColorTarget, scratch: &ColorTarget, scale: [f32; 4]) {
         unsafe {
-            self.step(gl, scratch, Pass::BlurHorizontal, (surface.color, surface.size), None, [1.0; 4]);
-            self.step(gl, surface, Pass::Kernel5, (scratch.color, scratch.size), None, scale);
+            self.step(gl, scratch, Pass::BlurHorizontal, (surface.texture, surface.size), None, [1.0; 4]);
+            self.step(gl, surface, Pass::Kernel5, (scratch.texture, scratch.size), None, scale);
         }
     }
 
@@ -394,18 +348,18 @@ impl H4Bloom {
             let [tiny, tiny2] = &surfaces.tiny;
             let [mini, mini2] = &surfaces.mini;
             self.step(gl, &surfaces.temp, Pass::Downsample2x2, (accumulation, frame), None, [1.0, 1.0, 0.0, 0.0]);
-            let temp = (surfaces.temp.color, surfaces.temp.size);
+            let temp = (surfaces.temp.texture, surfaces.temp.size);
             let curve = [settings.highlight, settings.inherent, settings.self_illum, 1.0];
             self.step(gl, small, Pass::BloomCurve, temp, None, curve);
-            self.step(gl, tiny, Pass::Gaussian4x4, (small.color, small.size), None, ones);
-            self.step(gl, mini, Pass::Gaussian4x4, (tiny.color, tiny.size), None, ones);
+            self.step(gl, tiny, Pass::Gaussian4x4, (small.texture, small.size), None, ones);
+            self.step(gl, mini, Pass::Gaussian4x4, (tiny.texture, tiny.size), None, ones);
             let intensity = settings.intensity;
             self.blur(gl, mini, mini2, scaled(settings.large, intensity, frame));
             let medium = scaled(settings.medium, intensity, frame);
-            self.step(gl, tiny2, Pass::AddAlpha1, (tiny.color, tiny.size), Some(mini.color), medium);
+            self.step(gl, tiny2, Pass::AddAlpha1, (tiny.texture, tiny.size), Some(mini.texture), medium);
             self.blur(gl, tiny2, tiny, ones);
             let small_color = scaled(settings.small, intensity, frame);
-            self.step(gl, small2, Pass::Add, (small.color, small.size), Some(tiny2.color), small_color);
+            self.step(gl, small2, Pass::Add, (small.texture, small.size), Some(tiny2.texture), small_color);
             self.blur(gl, small2, small, ones);
 
             gl.active_texture(glow::TEXTURE2);
@@ -424,7 +378,7 @@ impl H4Bloom {
                 gl.enable(glow::SCISSOR_TEST);
             }
             // `small` holds `blur_11_horizontal` of the result.
-            Some(if settings.hologram { small.color } else { small2.color })
+            Some(if settings.hologram { small.texture } else { small2.texture })
         }
     }
 }

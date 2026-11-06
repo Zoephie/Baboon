@@ -2,6 +2,7 @@
 //! albedo and normal into targets, a lit pass reading them back into an HDR
 //! accumulation target, and the final composite's tone curve onto the scene.
 
+use super::gl::target::{Made, Sampling, Texels};
 use super::h3_bloom::H3Bloom;
 use super::gen3::prt::{H3PrtKind, second_order_rotation};
 use std::borrow::Cow;
@@ -284,108 +285,29 @@ pub(super) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Optio
     }
 }
 
-pub(super) unsafe fn target_texture(gl: &glow::Context, size: [i32; 2], format: u32) -> Option<glow::NativeTexture> {
-    unsafe {
-        let texture = gl.create_texture().ok()?;
-        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-        gl.tex_image_2d(
-            glow::TEXTURE_2D,
-            0,
-            format as i32,
-            size[0],
-            size[1],
-            0,
-            glow::RGBA,
-            glow::FLOAT,
-            glow::PixelUnpackData::Slice(None),
-        );
-        for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-            gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
-        }
-        gl.bind_texture(glow::TEXTURE_2D, None);
-        Some(texture)
-    }
-}
-
 impl H3Targets {
     unsafe fn new(gl: &glow::Context, size: [i32; 2], depth: glow::NativeRenderbuffer) -> Option<Self> {
+        let mut made = Made::new(gl);
         unsafe {
-            let albedo = target_texture(gl, size, glow::RGBA16F)?;
-            let normal = target_texture(gl, size, glow::RGBA16F)?;
-            let accumulation = target_texture(gl, size, glow::RGBA16F)?;
-            let behind = target_texture(gl, size, glow::SRGB8_ALPHA8)?;
-            let picture = target_texture(gl, size, glow::SRGB8_ALPHA8)?;
-            let picture_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(picture_framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(picture), 0);
-            let behind_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(behind_framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(behind), 0);
-            let albedo_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_framebuffer));
-            for (attachment, texture) in
-                [(glow::COLOR_ATTACHMENT0, albedo), (glow::COLOR_ATTACHMENT1, normal)]
-            {
-                gl.framebuffer_texture_2d(glow::FRAMEBUFFER, attachment, glow::TEXTURE_2D, Some(texture), 0);
-            }
+            let mut target = |internal| made.texture(size, Texels::float(internal), Sampling::NEAREST);
+            let albedo = target(glow::RGBA16F)?;
+            let normal = target(glow::RGBA16F)?;
+            let accumulation = target(glow::RGBA16F)?;
+            let behind = target(glow::SRGB8_ALPHA8)?;
+            let picture = target(glow::SRGB8_ALPHA8)?;
+            let picture_framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, picture)])?;
+            let behind_framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, behind)])?;
+            let albedo_framebuffer =
+                made.framebuffer(&[(glow::COLOR_ATTACHMENT0, albedo), (glow::COLOR_ATTACHMENT1, normal)])?;
             gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
-            gl.framebuffer_renderbuffer(
-                glow::FRAMEBUFFER,
-                glow::DEPTH_STENCIL_ATTACHMENT,
-                glow::RENDERBUFFER,
-                Some(depth),
-            );
-            let accumulation_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_framebuffer));
-            gl.framebuffer_texture_2d(
-                glow::FRAMEBUFFER,
-                glow::COLOR_ATTACHMENT0,
-                glow::TEXTURE_2D,
-                Some(accumulation),
-                0,
-            );
-            gl.framebuffer_renderbuffer(
-                glow::FRAMEBUFFER,
-                glow::DEPTH_STENCIL_ATTACHMENT,
-                glow::RENDERBUFFER,
-                Some(depth),
-            );
-            let depth_copy = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(depth_copy));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::DEPTH24_STENCIL8 as i32,
-                size[0],
-                size[1],
-                0,
-                glow::DEPTH_STENCIL,
-                glow::UNSIGNED_INT_24_8,
-                glow::PixelUnpackData::Slice(None),
-            );
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            let depth_copy_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(depth_copy_framebuffer));
-            gl.framebuffer_texture_2d(
-                glow::FRAMEBUFFER,
-                glow::DEPTH_STENCIL_ATTACHMENT,
-                glow::TEXTURE_2D,
-                Some(depth_copy),
-                0,
-            );
-            gl.draw_buffers(&[glow::NONE]);
-            gl.read_buffer(glow::NONE);
-            let distortion = target_texture(gl, size, glow::RG16F)?;
-            let distortion_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(distortion_framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(distortion), 0);
-            let scene_copy = target_texture(gl, size, glow::RGBA16F)?;
-            let scene_copy_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene_copy_framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(scene_copy), 0);
+            gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
+            let accumulation_framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, accumulation)])?;
+            gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
+            let depth_copy =
+                made.depth(size, Texels::DEPTH24_STENCIL8, Sampling::NEAREST, glow::DEPTH_STENCIL_ATTACHMENT)?;
+            let distortion = made.color(size, Texels::float(glow::RG16F), Sampling::NEAREST)?;
+            let scene_copy = made.color(size, Texels::RGBA16F, Sampling::NEAREST)?;
+            made.keep();
             Some(Self {
                 size,
                 albedo_framebuffer,
@@ -397,12 +319,12 @@ impl H3Targets {
                 picture,
                 picture_framebuffer,
                 behind_framebuffer,
-                depth_copy,
-                depth_copy_framebuffer,
-                distortion,
-                distortion_framebuffer,
-                scene_copy,
-                scene_copy_framebuffer,
+                depth_copy: depth_copy.texture,
+                depth_copy_framebuffer: depth_copy.framebuffer,
+                distortion: distortion.texture,
+                distortion_framebuffer: distortion.framebuffer,
+                scene_copy: scene_copy.texture,
+                scene_copy_framebuffer: scene_copy.framebuffer,
             })
         }
     }

@@ -2,6 +2,7 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::gl::link::link;
+use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use super::*;
 use super::dx9::passes::{
     H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
@@ -1897,53 +1898,17 @@ const H3_SHADOW_DEPTH_BIAS: f32 = 0.003;
 /// A depth texture and the framebuffer to fill it through.
 unsafe fn h2_shadow_map(gl: &glow::Context) -> Option<(glow::NativeFramebuffer, glow::NativeTexture)> {
     unsafe {
-        let texture = gl.create_texture().ok()?;
-        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-        gl.tex_image_2d(
-            glow::TEXTURE_2D,
-            0,
-            glow::DEPTH_COMPONENT24 as i32,
-            H2_SHADOW_MAP_SIZE,
-            H2_SHADOW_MAP_SIZE,
-            0,
-            glow::DEPTH_COMPONENT,
-            glow::UNSIGNED_INT,
-            glow::PixelUnpackData::Slice(None),
-        );
-        for (name, value) in [
-            (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
-            (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
-            (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-            (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-        ] {
-            gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-        }
-        gl.bind_texture(glow::TEXTURE_2D, None);
-        let Ok(framebuffer) = gl.create_framebuffer() else {
-            gl.delete_texture(texture);
-            return None;
-        };
         let draw = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
         let read = gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING);
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-        gl.framebuffer_texture_2d(
-            glow::FRAMEBUFFER,
-            glow::DEPTH_ATTACHMENT,
-            glow::TEXTURE_2D,
-            Some(texture),
-            0,
-        );
-        gl.draw_buffer(glow::NONE);
-        gl.read_buffer(glow::NONE);
-        let complete = gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
+        let mut made = Made::new(gl);
+        let size = [H2_SHADOW_MAP_SIZE; 2];
+        let map = made.depth(size, Texels::DEPTH24, Sampling::NEAREST_CLAMPED, glow::DEPTH_ATTACHMENT);
+        let complete = map.as_ref().is_some_and(|map| made.complete(&[map.framebuffer]));
         gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, draw);
         gl.bind_framebuffer(glow::READ_FRAMEBUFFER, read);
-        if !complete {
-            gl.delete_framebuffer(framebuffer);
-            gl.delete_texture(texture);
-            return None;
-        }
-        Some((framebuffer, texture))
+        let map = map.filter(|_| complete)?;
+        made.keep();
+        Some((map.framebuffer, map.texture))
     }
 }
 
@@ -2620,56 +2585,20 @@ struct H2Target {
 
 impl H2Target {
     unsafe fn new(gl: &glow::Context, width: i32, height: i32) -> Option<Self> {
+        let size = [width, height];
+        let mut made = Made::new(gl);
         unsafe {
-            let framebuffer = gl.create_framebuffer().ok()?;
-            let color = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(color));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA8 as i32,
-                width,
-                height,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(None),
-            );
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
-                (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            let depth = gl.create_renderbuffer().ok()?;
-            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
-            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, width, height);
-            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
-            let target = Self { framebuffer, color, depth, size: [width, height] };
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(
-                glow::FRAMEBUFFER,
-                glow::COLOR_ATTACHMENT0,
-                glow::TEXTURE_2D,
-                Some(color),
-                0,
-            );
-            gl.framebuffer_renderbuffer(
-                glow::FRAMEBUFFER,
-                glow::DEPTH_STENCIL_ATTACHMENT,
-                glow::RENDERBUFFER,
-                Some(depth),
-            );
+            let color = made.texture(size, Texels::RGBA8, Sampling::NEAREST_CLAMPED)?;
+            let depth = made.renderbuffer(size, glow::DEPTH24_STENCIL8)?;
+            let framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, color)])?;
+            gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
             let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
             if status != glow::FRAMEBUFFER_COMPLETE {
                 eprintln!("model preview: render target incomplete: {status:#x}");
-                target.delete(gl);
                 return None;
             }
-            Some(target)
+            made.keep();
+            Some(Self { framebuffer, color, depth, size })
         }
     }
 
@@ -3863,16 +3792,9 @@ impl H3ParticleGl {
     }
 }
 
-/// A copy of the viewport as drawn so far, and its size.
-struct FrameCopy {
-    texture: glow::NativeTexture,
-    framebuffer: glow::NativeFramebuffer,
-    size: [i32; 2],
-}
-
 /// The viewport of the framebuffer being drawn, copied into a texture of its
 /// size. A blit, as what is drawn to may be multisampled.
-unsafe fn copy_frame(gl: &glow::Context, copy: &mut Option<FrameCopy>) -> Option<glow::NativeTexture> {
+unsafe fn copy_frame(gl: &glow::Context, copy: &mut Option<ColorTarget>) -> Option<glow::NativeTexture> {
     unsafe {
         let mut viewport = [0; 4];
         gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
@@ -3883,23 +3805,11 @@ unsafe fn copy_frame(gl: &glow::Context, copy: &mut Option<FrameCopy>) -> Option
         if copy.as_ref().is_some_and(|copy| copy.size != [width, height])
             && let Some(old) = copy.take()
         {
-            gl.delete_texture(old.texture);
-            gl.delete_framebuffer(old.framebuffer);
+            old.delete(gl);
         }
         let drawn_to = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
         if copy.is_none() {
-            let texture = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            let empty = glow::PixelUnpackData::Slice(None);
-            gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, width, height, 0, glow::RGBA, glow::UNSIGNED_BYTE, empty);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-            let framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
-            *copy = Some(FrameCopy { texture, framebuffer, size: [width, height] });
+            *copy = Some(ColorTarget::new(gl, [width, height], Texels::RGBA8, Sampling::LINEAR_CLAMPED)?);
         }
         let made = copy.as_ref()?;
         gl.bind_framebuffer(glow::READ_FRAMEBUFFER, drawn_to);
@@ -4085,7 +3995,7 @@ struct ModelGlRenderer {
     /// only while an H3 picture draws its sprites.
     h3_depth_copy: Option<glow::NativeTexture>,
     /// Halo 2's `target_particle_distortion`, copied from the frame.
-    h2_distortion_copy: Option<FrameCopy>,
+    h2_distortion_copy: Option<ColorTarget>,
     /// Whether this context can draw Halo 2 passes; see `H2_GLSL_VERSION`.
     h2_supported: bool,
     /// Whether this context can draw Halo 3's: the translated shaders want GLSL 4.10.

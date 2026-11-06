@@ -3,6 +3,7 @@
 //! blurred and added to the one above. The final composite adds the top level
 //! ahead of its tone curve.
 
+use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
 use super::h3_draw::screen_program;
@@ -66,76 +67,27 @@ void main() {
 }
 ";
 
-struct Level {
-    framebuffer: glow::NativeFramebuffer,
-    color: glow::NativeTexture,
-    size: [i32; 2],
-}
-
-impl Level {
-    unsafe fn new(gl: &glow::Context, size: [i32; 2]) -> Option<Self> {
-        unsafe {
-            let color = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(color));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA16F as i32,
-                size[0],
-                size[1],
-                0,
-                glow::RGBA,
-                glow::FLOAT,
-                glow::PixelUnpackData::Slice(None),
-            );
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
-                (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
-            let framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(
-                glow::FRAMEBUFFER,
-                glow::COLOR_ATTACHMENT0,
-                glow::TEXTURE_2D,
-                Some(color),
-                0,
-            );
-            Some(Self { framebuffer, color, size })
-        }
-    }
-
-    unsafe fn delete(&self, gl: &glow::Context) {
-        unsafe {
-            gl.delete_framebuffer(self.framebuffer);
-            gl.delete_texture(self.color);
-        }
-    }
-}
-
 /// `aux_small`, `aux_tiny` and `aux_mini`, and the second of each.
 struct Levels {
-    small: [Level; 2],
-    tiny: [Level; 2],
-    mini: [Level; 2],
+    small: [ColorTarget; 2],
+    tiny: [ColorTarget; 2],
+    mini: [ColorTarget; 2],
     frame: [i32; 2],
 }
 
 impl Levels {
     unsafe fn new(gl: &glow::Context, frame: [i32; 2]) -> Option<Self> {
         let of = |level: i32| frame.map(|side| (side / DOWNSAMPLE.pow(level as u32)).max(1));
-        unsafe {
-            Some(Self {
-                small: [Level::new(gl, of(1))?, Level::new(gl, of(1))?],
-                tiny: [Level::new(gl, of(2))?, Level::new(gl, of(2))?],
-                mini: [Level::new(gl, of(3))?, Level::new(gl, of(3))?],
-                frame,
-            })
-        }
+        let mut made = Made::new(gl);
+        let mut level = |size| unsafe { made.color(size, Texels::RGBA16F, Sampling::LINEAR_CLAMPED) };
+        let levels = Self {
+            small: [level(of(1))?, level(of(1))?],
+            tiny: [level(of(2))?, level(of(2))?],
+            mini: [level(of(3))?, level(of(3))?],
+            frame,
+        };
+        made.keep();
+        Some(levels)
     }
 
     unsafe fn delete(&self, gl: &glow::Context) {
@@ -161,7 +113,7 @@ impl H3Bloom {
     unsafe fn step(
         &self,
         gl: &glow::Context,
-        target: &Level,
+        target: &ColorTarget,
         mode: i32,
         source: (glow::NativeTexture, [i32; 2]),
         added: Option<glow::NativeTexture>,
@@ -186,10 +138,10 @@ impl H3Bloom {
     }
 
     /// `gaussian_blur_fixed`, `pair[1]` being its scratch.
-    unsafe fn blur(&self, gl: &glow::Context, pair: &[Level; 2], scale: f32) {
+    unsafe fn blur(&self, gl: &glow::Context, pair: &[ColorTarget; 2], scale: f32) {
         unsafe {
-            self.step(gl, &pair[1], 2, (pair[0].color, pair[0].size), None, 1.0);
-            self.step(gl, &pair[0], 3, (pair[1].color, pair[1].size), None, scale);
+            self.step(gl, &pair[1], 2, (pair[0].texture, pair[0].size), None, 1.0);
+            self.step(gl, &pair[0], 3, (pair[1].texture, pair[1].size), None, scale);
         }
     }
 
@@ -236,18 +188,18 @@ impl H3Bloom {
             let [small, _] = &levels.small;
             let ([tiny, _], [mini, _]) = (&levels.tiny, &levels.mini);
             self.step(gl, small, 0, (accumulation, frame), None, 1.0);
-            self.step(gl, tiny, 1, (small.color, small.size), None, 1.0);
-            self.step(gl, mini, 1, (tiny.color, tiny.size), None, 1.0);
+            self.step(gl, tiny, 1, (small.texture, small.size), None, 1.0);
+            self.step(gl, mini, 1, (tiny.texture, tiny.size), None, 1.0);
             self.blur(gl, &levels.mini, BLOOM_INTENSITY);
             // Into the scratch of each: the level below still reads its own.
             let tiny_sum = &levels.tiny[1];
-            self.step(gl, tiny_sum, 4, (tiny.color, tiny.size), Some(mini.color), BLOOM_INTENSITY);
-            self.step(gl, tiny, 2, (tiny_sum.color, tiny_sum.size), None, 1.0);
-            self.step(gl, tiny_sum, 3, (tiny.color, tiny.size), None, 1.0);
+            self.step(gl, tiny_sum, 4, (tiny.texture, tiny.size), Some(mini.texture), BLOOM_INTENSITY);
+            self.step(gl, tiny, 2, (tiny_sum.texture, tiny_sum.size), None, 1.0);
+            self.step(gl, tiny_sum, 3, (tiny.texture, tiny.size), None, 1.0);
             let small_sum = &levels.small[1];
-            self.step(gl, small_sum, 4, (small.color, small.size), Some(tiny_sum.color), BLOOM_INTENSITY);
-            self.step(gl, small, 2, (small_sum.color, small_sum.size), None, 1.0);
-            self.step(gl, small_sum, 3, (small.color, small.size), None, 1.0);
+            self.step(gl, small_sum, 4, (small.texture, small.size), Some(tiny_sum.texture), BLOOM_INTENSITY);
+            self.step(gl, small, 2, (small_sum.texture, small_sum.size), None, 1.0);
+            self.step(gl, small_sum, 3, (small.texture, small.size), None, 1.0);
 
             gl.active_texture(glow::TEXTURE1);
             gl.bind_texture(glow::TEXTURE_2D, None);
@@ -262,7 +214,7 @@ impl H3Bloom {
             if scissored {
                 gl.enable(glow::SCISSOR_TEST);
             }
-            Some(small_sum.color)
+            Some(small_sum.texture)
         }
     }
 }

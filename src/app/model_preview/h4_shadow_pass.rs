@@ -5,6 +5,7 @@
 //! 87 without its normal test) into the mask the static pass reads. See
 //! `docs/h4-preview-research/shadow-camo-shields.md` §1.
 
+use super::gl::target::{Made, Sampling, Texels};
 use super::h4::shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};
 use super::*;
 use gen3::shaders::H3Material;
@@ -115,119 +116,30 @@ pub(super) struct H4ShadowTargets {
     mask_framebuffer: glow::NativeFramebuffer,
 }
 
-unsafe fn colour_target(
-    gl: &glow::Context,
-    size: [i32; 2],
-    format: u32,
-    filter: u32,
-) -> Option<(glow::NativeTexture, glow::NativeFramebuffer)> {
-    unsafe {
-        let texture = gl.create_texture().ok()?;
-        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-        let (layout, kind) = if format == glow::RGBA8 {
-            (glow::RGBA, glow::UNSIGNED_BYTE)
-        } else {
-            (glow::RG, glow::FLOAT)
-        };
-        gl.tex_image_2d(
-            glow::TEXTURE_2D,
-            0,
-            format as i32,
-            size[0],
-            size[1],
-            0,
-            layout,
-            kind,
-            glow::PixelUnpackData::Slice(None),
-        );
-        for (name, value) in [
-            (glow::TEXTURE_MIN_FILTER, filter),
-            (glow::TEXTURE_MAG_FILTER, filter),
-            (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-            (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-        ] {
-            gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-        }
-        let framebuffer = gl.create_framebuffer().ok()?;
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-        gl.framebuffer_texture_2d(
-            glow::FRAMEBUFFER,
-            glow::COLOR_ATTACHMENT0,
-            glow::TEXTURE_2D,
-            Some(texture),
-            0,
-        );
-        Some((texture, framebuffer))
-    }
-}
-
 impl H4ShadowTargets {
     unsafe fn new(gl: &glow::Context, map_size: i32, mask_size: [i32; 2]) -> Option<Self> {
+        let mut made = Made::new(gl);
         unsafe {
-            let depth = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(depth));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::DEPTH_COMPONENT24 as i32,
-                map_size,
-                map_size,
-                0,
-                glow::DEPTH_COMPONENT,
-                glow::UNSIGNED_INT,
-                glow::PixelUnpackData::Slice(None),
-            );
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
-            }
-            let depth_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(depth_framebuffer));
-            gl.framebuffer_texture_2d(
-                glow::FRAMEBUFFER,
-                glow::DEPTH_ATTACHMENT,
-                glow::TEXTURE_2D,
-                Some(depth),
-                0,
-            );
-            gl.draw_buffers(&[glow::NONE]);
-            gl.read_buffer(glow::NONE);
             let square = [map_size, map_size];
-            let first = colour_target(gl, square, glow::RG32F, glow::NEAREST)?;
-            // The vertical blur reads filtered, as does the apply.
-            let second = colour_target(gl, square, glow::RG32F, glow::LINEAR)?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(first.0));
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MIN_FILTER,
-                glow::LINEAR as i32,
-            );
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MAG_FILTER,
-                glow::LINEAR as i32,
-            );
-            let (mask, mask_framebuffer) =
-                colour_target(gl, mask_size, glow::RGBA8, glow::NEAREST)?;
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            let framebuffers = [depth_framebuffer, first.1, second.1, mask_framebuffer];
-            let complete = framebuffers.iter().all(|framebuffer| {
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(*framebuffer));
-                gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE
-            });
-            let targets = Self {
-                map_size,
-                depth,
-                depth_framebuffer,
-                blurs: [first, second],
-                mask_size,
-                mask,
-                mask_framebuffer,
-            };
-            if !complete {
-                targets.delete(gl);
+            let depth = made.depth(square, Texels::DEPTH24, Sampling::NEAREST, glow::DEPTH_ATTACHMENT)?;
+            // Both blurs read filtered: the vertical one, and the apply.
+            let mut blur = || made.color(square, Texels::RG32F, Sampling::LINEAR_CLAMPED);
+            let [first, second] = [blur()?, blur()?];
+            let mask = made.color(mask_size, Texels::RGBA8, Sampling::NEAREST_CLAMPED)?;
+            let framebuffers = [depth.framebuffer, first.framebuffer, second.framebuffer, mask.framebuffer];
+            if !made.complete(&framebuffers) {
                 return None;
             }
-            Some(targets)
+            made.keep();
+            Some(Self {
+                map_size,
+                depth: depth.texture,
+                depth_framebuffer: depth.framebuffer,
+                blurs: [(first.texture, first.framebuffer), (second.texture, second.framebuffer)],
+                mask_size,
+                mask: mask.texture,
+                mask_framebuffer: mask.framebuffer,
+            })
         }
     }
 

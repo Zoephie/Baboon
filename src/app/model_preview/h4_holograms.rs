@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use eframe::glow::{self, HasContext};
 
-use super::h3_draw::{frame_value, h3_set_cull, set_value, target_texture, upload_h2_image_linear};
+use super::h3_draw::{frame_value, h3_set_cull, set_value, upload_h2_image_linear};
+use super::gl::target::{Made, Sampling, Texels};
 use super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value};
 use super::h4_bloom::H4BloomSettings;
 use super::h4::submit::{DrawnObject, H4Draw, H4HologramPost, H4ScreenMaterial};
@@ -47,42 +48,16 @@ pub(super) struct H4Holograms {
 
 impl H4Holograms {
     unsafe fn new(gl: &glow::Context, size: [i32; 2]) -> Option<Self> {
+        let mut made = Made::new(gl);
         unsafe {
-            let color = target_texture(gl, size, glow::RGBA8)?;
-            let combined = target_texture(gl, size, glow::RGBA8)?;
-            let depth = gl.create_texture().ok()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(depth));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::DEPTH24_STENCIL8 as i32,
-                size[0],
-                size[1],
-                0,
-                glow::DEPTH_STENCIL,
-                glow::UNSIGNED_INT_24_8,
-                glow::PixelUnpackData::Slice(None),
-            );
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            let framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color), 0);
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::TEXTURE_2D, Some(depth), 0);
-            let combined_framebuffer = gl.create_framebuffer().ok()?;
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(combined_framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(combined), 0);
-            for texture in [color, combined] {
-                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                for (name, value) in [
-                    (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
-                    (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-                    (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                    (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-                ] {
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-                }
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
+            let color = made.texture(size, Texels::float(glow::RGBA8), Sampling::LINEAR_CLAMPED)?;
+            let combined = made.texture(size, Texels::float(glow::RGBA8), Sampling::LINEAR_CLAMPED)?;
+            // Only drawn into, never sampled.
+            let depth = made.texture(size, Texels::DEPTH24_STENCIL8, Sampling::NEAREST)?;
+            let framebuffer =
+                made.framebuffer(&[(glow::COLOR_ATTACHMENT0, color), (glow::DEPTH_STENCIL_ATTACHMENT, depth)])?;
+            let combined_framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, combined)])?;
+            made.keep();
             Some(Self { size, color, depth, framebuffer, combined, combined_framebuffer, uploaded: None })
         }
     }
