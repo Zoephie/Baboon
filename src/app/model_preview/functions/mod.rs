@@ -15,7 +15,7 @@ use eframe::egui::{self, Ui};
 use crate::app::ui_kit::ThemedCheckbox;
 
 use super::common::fields::{elements, has_flag, object_block};
-use super::dx9::passes::{object_input, tag_function_at};
+use super::common::named_function::tag_function_at;
 use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
 
 /// What the panel has set, by object geometry and input name.
@@ -750,6 +750,19 @@ pub(in crate::app::model_preview) fn draw_function_controls(
         })
         .response
         .on_disabled_hover_text(UNREAD);
+    }
+}
+
+/// What a whole, idle object reads for an input: full for what measures its
+/// condition, and otherwise the zero the game falls back on when nothing
+/// exports the name, which leaves boosts, hits and open doors off. A guess,
+/// for what has no object to ask: a Halo 2 object's functions answer from its
+/// type's exporters (`functions`), which Halo 3 and ODST's are not yet.
+pub(in crate::app::model_preview) fn object_input(name: &str) -> f32 {
+    match name {
+        "alive" | "body_vitality" | "device_power" | "electrical_power" | "health" | "one"
+        | "power" | "shield" | "shield_strength" | "shield_vitality" => 1.0,
+        _ => 0.0,
     }
 }
 

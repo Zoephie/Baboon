@@ -8,7 +8,7 @@ use blam_tags::math::{RealPoint3d, RealQuaternion};
 use blam_tags::{NodeTransform, OverlayDelta, Pose, Skeleton, TagFile, TagStruct};
 
 use super::super::common::fields::elements;
-use super::super::dx9::passes::tag_function_at;
+use super::super::common::named_function::tag_function_at;
 
 /// The weights' `EPS`.
 const EPS: f32 = 0.0001;

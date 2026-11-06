@@ -6,7 +6,7 @@
 use blam_tags::TagStruct;
 
 use super::super::common::fields::elements;
-use super::super::dx9::passes::tag_function_at;
+use super::super::common::named_function::tag_function_at;
 use super::super::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::source::TagSource;

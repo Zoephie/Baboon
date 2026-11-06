@@ -15,9 +15,9 @@ use super::super::ce::passes::argb;
 use super::super::functions::FunctionValues;
 use super::super::gen3::effects::{H3EffectTimes, for_each_attached_part, part_markers};
 use blam_tags::tag_function::h2::transition_evaluate;
-use super::super::dx9::passes::{
-    H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
-};
+use super::super::dx9::passes::{H2DefaultLight, H2Image, H2Layer, ce_color_interpolate};
+use super::super::functions::object_input;
+use super::super::common::named_function::tag_function_at;
 use super::super::materials::{H3Bitmap, decode_h2_image, read_h3_bitmap};
 use super::super::antennas::spring::{ReachAntennaSpring, posed_marker};
 use super::super::*;

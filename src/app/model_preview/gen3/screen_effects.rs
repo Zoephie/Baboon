@@ -10,7 +10,7 @@ use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
-use super::super::dx9::passes::tag_function_at;
+use super::super::common::named_function::tag_function_at;
 use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part};
 use super::super::*;
 use super::super::renderer::REACH_SCREEN_NOISE_BITMAP;

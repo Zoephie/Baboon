@@ -15,7 +15,7 @@ use super::attachment::MarkerFrame;
 use super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::common::view::ViewFrame;
 use super::functions::FunctionValues;
-use super::dx9::passes::tag_function_at;
+use super::common::named_function::tag_function_at;
 use super::gen3::effects::H3EffectOnsets;
 use super::gen3::effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_runs_by};
 use super::gen3::strips::{H3StripAt, read_carried_strips};

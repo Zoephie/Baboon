@@ -13,13 +13,12 @@ use super::super::common::fields::{has_flag, has_flag_labelled};
 use super::super::common::view::posed_on;
 use super::super::h3::lights::SHADOWS_AND_GELS;
 use super::super::functions::FunctionValues;
-use super::super::dx9::passes::tag_function_at;
+use super::super::common::named_function::{NamedFunction, tag_function_at};
 use super::super::gen3::effects::part_markers;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::cross;
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::common::named_function::NamedFunction;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 
 /// `light_update_state`'s range when no function names one.

@@ -16,7 +16,8 @@ use super::super::gen3::effects::{
 use super::super::functions::FunctionValues;
 use blam_tags::tag_function::transition_function_evaluate;
 
-use super::super::dx9::passes::{H2Image, tag_function_at};
+use super::super::dx9::passes::H2Image;
+use super::super::common::named_function::{NamedFunction, tag_function_at};
 use super::super::renderer::H3_EXPOSURE as EXPOSURE;
 use super::super::materials::{H3Bitmap, read_h3_bitmap};
 use super::super::*;
@@ -24,7 +25,6 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::common::named_function::NamedFunction;
 
 /// `allow shadows and gels`, and what older layouts label it.
 pub(in crate::app::model_preview) const SHADOWS_AND_GELS: [&str; 3] = ["allow shadows and gels", "allow shadows", "expensive light"];

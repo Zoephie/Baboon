@@ -13,7 +13,7 @@ use super::super::common::fields::{elements, has_flag};
 use super::super::ce::lights::CeAntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
-use super::super::dx9::passes::tag_function_at;
+use super::super::common::named_function::tag_function_at;
 use super::effects::{
     H3EffectTimes, for_each_attached_part, part_frame, read_part_placement,
 };

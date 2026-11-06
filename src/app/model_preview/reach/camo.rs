@@ -6,7 +6,7 @@
 
 use blam_tags::TagFunction;
 
-use super::super::dx9::passes::tag_function_at;
+use super::super::common::named_function::tag_function_at;
 use super::super::gen3::shaders::H3Pass;
 use super::super::renderer::REACH_DARK_MULTIPLIER;
 use crate::app::export::geometry::load_referenced_tag_from_source;

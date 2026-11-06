@@ -9,6 +9,8 @@
 //! 0 and lightmap passes with `H2_OBJECT_LIGHTMAP_IMPLEMENTATION`, as the game
 //! chooses them for something with no lightmap of its own.
 
+use super::super::common::named_function::tag_function_at;
+use super::super::functions::object_input;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -630,50 +632,6 @@ fn animated_vector(animations: &[H2Animation], clock: H2Clock<'_>) -> Option<[f3
 /// The bytes of a `mapping_function`, as the engine's H2 function.
 pub(in crate::app::model_preview) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction> {
     tag_function_at(property, "function")
-}
-
-/// The same for a `mapping_function` of another name.
-pub(in crate::app::model_preview) fn tag_function_at(holder: &TagStruct<'_>, name: &str) -> Option<TagFunction> {
-    let Some(field) = holder.field_path(&format!("{name}/data")) else {
-        return h2_laid_out_function(holder.descend(name)?);
-    };
-    // Later engines keep the bytes as one blob, in their own encoding.
-    if let Some(data) = field.as_data() {
-        return TagFunction::parse(data).ok();
-    }
-    let data = field.as_block()?;
-    let bytes: Vec<u8> = (0..data.len())
-        .filter_map(|index| data.element(index))
-        .filter_map(|byte| byte.read_int_any("Value").map(|value| value as i8 as u8))
-        .collect();
-    crate::app::editor::function_editor::h2_tag_function(&bytes)
-}
-
-/// Some of Halo 2's functions lay the engine's block out as fields: the header,
-/// its four colors and the graphs' reals. Put back together it is what `data` is.
-fn h2_laid_out_function(mapping: TagStruct<'_>) -> Option<TagFunction> {
-    // Raw, for what a ranged function keeps in its colors is its clamps, as
-    // reals, and read as colors they would lose their top bytes. Older tags
-    // stop short of the last two slots.
-    let mut bytes = mapping.raw().to_vec();
-    bytes.resize(blam_tags::tag_function::h2::HEADER_SIZE, 0);
-    for value in elements(mapping, "Values") {
-        bytes.extend(value.read_real("Value")?.to_le_bytes());
-    }
-    crate::app::editor::function_editor::h2_tag_function(&bytes)
-}
-
-/// What a whole, idle object reads for an input: full for what measures its
-/// condition, and otherwise the zero the game falls back on when nothing
-/// exports the name, which leaves boosts, hits and open doors off. A guess,
-/// for what has no object to ask: a Halo 2 object's functions answer from its
-/// type's exporters (`functions`), which Halo 3 and ODST's are not yet.
-pub(in crate::app::model_preview) fn object_input(name: &str) -> f32 {
-    match name {
-        "alive" | "body_vitality" | "device_power" | "electrical_power" | "health" | "one"
-        | "power" | "shield" | "shield_strength" | "shield_vitality" => 1.0,
-        _ => 0.0,
-    }
 }
 
 /// The animations of a parameter. The game reads these and never the

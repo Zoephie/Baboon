@@ -122,7 +122,7 @@ impl FunctionContext for DrawnObject<'_> {
     /// do not know reads as an idle object's.
     fn object_function(&self, name: &str) -> f32 {
         let known = self.values.and_then(|values| values.get(name)).copied();
-        known.unwrap_or_else(|| super::super::dx9::passes::object_input(name))
+        known.unwrap_or_else(|| super::super::functions::object_input(name))
     }
 
     fn time(&self) -> f32 {

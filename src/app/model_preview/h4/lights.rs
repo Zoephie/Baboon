@@ -15,7 +15,7 @@ use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::common::view::posed_on;
 use super::super::functions::FunctionValues;
-use super::super::dx9::passes::tag_function_at;
+use super::super::common::named_function::{NamedFunction, tag_function_at};
 use super::super::gen3::effects::part_markers;
 use super::super::gen3::shaders::H3Pass;
 use super::super::reach::lights::object_value;
@@ -24,7 +24,6 @@ use crate::core::hlsl::emit::Stage;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::common::named_function::NamedFunction;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 
 const SMALLEST: f32 = 1e-4;
