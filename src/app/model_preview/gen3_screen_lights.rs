@@ -6,7 +6,7 @@ use super::*;
 use gen3::shaders::H3Pass;
 use h3_draw::H3Program;
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// Ready the screen lights over `accumulation`, `size` of it: its depth
     /// copied for the passes to read, then no depth test or culling, adding
     /// one to one into its colour alone, through the empty vertex array.

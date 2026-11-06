@@ -228,7 +228,7 @@ pub(crate) struct RenderModelInstances {
 
 /// One vertex as the GL program consumes it. `#[repr(C)]` because the whole
 /// buffer is uploaded as raw bytes; the attribute offsets in
-/// `ModelGlRenderer::new` are hand-written to match this order and
+/// `RenderCore::new` are hand-written to match this order and
 /// a test pins them.
 ///
 /// `tangent` and `binormal` are carried rather than reconstructed: a normal map

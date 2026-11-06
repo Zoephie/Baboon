@@ -57,7 +57,7 @@ pub(super) unsafe fn h4_flare_images(
         .collect()
 }
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// `lens_flares_submit_occlusions` and `lens_flares_render` for the
     /// object's flares, into the bound light target, which holds the
     /// object's depth. A pane paints on demand, so each patch's count is

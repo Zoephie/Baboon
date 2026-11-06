@@ -17,7 +17,7 @@ pub(super) fn shadow_casters(batches: &[(RenderModelPreviewBatch, Arc<H3Material
         .collect()
 }
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// `render_shadow_generate`: `casters`' depth alone into `framebuffer`, a
     /// square of `pixels`, seen through `view_projection`, biased by `slope`
     /// and by `depth` in depth units, culled as ever. Leaves depth testing on

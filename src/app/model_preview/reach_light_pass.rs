@@ -69,7 +69,7 @@ fn near_fade(light: &ReachLitLight, eye: [f32; 3]) -> f32 {
     (distance / light.near_fading - 1.0).clamp(0.0, 1.0)
 }
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// Every Reach light of the frame, lit: its attached lights by age since
     /// their scale came on, and its cheap lights by render time.
     pub(super) fn reach_frame_lights(&mut self, frame: &ModelGpuFrame, slot: usize) -> Vec<ReachLitLight> {

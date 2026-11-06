@@ -221,7 +221,7 @@ unsafe fn set_alpha_blend_max(gl: &glow::Context) {
     }
 }
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// `RenderHolograms`' generate pass, after the albedo (`c_player_view::render`
     /// X360 0x82A3B5F4): the holograms into their own surface, then its bloom
     /// and `final_combine_hologram`. `scene` holds the depth to test against.

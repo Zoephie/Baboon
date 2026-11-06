@@ -706,7 +706,7 @@ pub(super) unsafe fn set_value(gl: &glow::Context, location: Option<&glow::Nativ
     }
 }
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// A material's translated passes, if this context can run them.
     pub(super) fn h3_material<'a>(&self, frame: &'a ModelGpuFrame, material: usize) -> Option<&'a Arc<H3Material>> {
         if !self.h3_supported {

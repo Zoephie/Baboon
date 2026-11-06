@@ -6,7 +6,7 @@ use super::h4::lights::{H4LightBlend, H4LitLight};
 use super::*;
 use gen3::shaders::H3Dialect;
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// Every Halo 4 light of the frame, on the preview's clock as game time.
     pub(super) fn h4_frame_lights(&self, frame: &ModelGpuFrame) -> Vec<H4LitLight> {
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());

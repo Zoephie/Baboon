@@ -1566,7 +1566,7 @@ pub(super) fn model_vertex_prelude(version_declaration: &str) -> String {
 
 /// Build the two GLSL sources.
 ///
-/// Split out of `ModelGlRenderer::new` so the shaders can be checked
+/// Split out of `RenderCore::new` so the shaders can be checked
 /// without a GL context: a compile failure here disables the whole preview
 /// and the only signal is a line on stderr, which no test would see.
 fn model_shader_sources(
@@ -3967,7 +3967,30 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
     }
 }
 
+/// The preview's renderer: what every game draws with ([`RenderCore`]).
 struct ModelGlRenderer {
+    core: RenderCore,
+}
+
+impl ModelGlRenderer {
+    fn new(gl: &glow::Context) -> Result<Self, String> {
+        Ok(Self { core: RenderCore::new(gl)? })
+    }
+
+    unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        unsafe { self.core.paint(gl, frame) }
+    }
+
+    #[cfg(test)]
+    pub(super) fn for_each_simulation(&self, geometry_id: u64, visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
+        self.core.for_each_simulation(geometry_id, visit);
+    }
+}
+
+/// The GL state the preview draws with: the shared program, slots and
+/// targets, and, until each game's drawing moves to its own folder, every
+/// game's own state too.
+struct RenderCore {
     /// As `h2_bloom`.
     sprite_gl: Option<Option<SpriteGl>>,
     /// The frame's CE point lights with those its effects have made, which
@@ -4119,7 +4142,7 @@ impl Default for MaterialGlTextures {
     }
 }
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// Each simulation `geometry_id`'s slot keeps between frames, by name,
     /// for the refactor's G-sim gate.
     #[cfg(test)]
@@ -6543,7 +6566,7 @@ mod tests {
         assert_eq!(model_draw_range(20, 3, 14), None);
     }
 
-    /// The attribute offsets in `ModelGlRenderer::new` are hand-written against
+    /// The attribute offsets in `RenderCore::new` are hand-written against
     /// this layout, and nothing else checks them — a reordered or resized field
     /// would silently feed the shader the wrong bytes and show as a model that
     /// renders but looks wrong.

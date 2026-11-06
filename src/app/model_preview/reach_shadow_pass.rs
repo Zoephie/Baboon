@@ -148,7 +148,7 @@ impl ReachShadowTargets {
     }
 }
 
-impl ModelGlRenderer {
+impl RenderCore {
     /// The camera the object's shadow is drawn from this frame.
     fn reach_shadow_camera(frame: &ModelGpuFrame, viewport: [i32; 2]) -> ReachShadowCamera {
         let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
