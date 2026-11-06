@@ -8,7 +8,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_labelled, object_block};
-use super::super::ce::lights::CeSprite;
+use super::super::ce::lights::FlareSprite;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::gen3::effects::{
     H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
@@ -826,7 +826,7 @@ impl H3FlareAt {
         view: &ViewFrame,
         time: f32,
         pixels: &dyn Fn([f32; 3], [f32; 2]) -> f32,
-    ) -> Option<CeSprite> {
+    ) -> Option<FlareSprite> {
         let flare = &*self.flare;
         let (scale, _) = self.scale_and_tint(light, values, time);
         if !flare.tests_occlusion || scale <= 0.0 {
@@ -841,7 +841,7 @@ impl H3FlareAt {
         let radius = self.radius(scale);
         let across = pixels(position, [radius * flare.aspect[0], radius * flare.aspect[1]]);
         let radius = radius * flare.inner.share(across);
-        Some(CeSprite {
+        Some(FlareSprite {
             center: std::array::from_fn(|axis| position[axis] + offset[axis] * flare.occlusion_offset),
             extent: [radius; 2],
             rotation: 0.0,
@@ -867,7 +867,7 @@ impl H3FlareAt {
         time: f32,
         occlusion: f32,
         image: usize,
-    ) -> Option<CeSprite> {
+    ) -> Option<FlareSprite> {
         let flare = &*self.flare;
         let (scale, tint) = self.scale_and_tint(light, values, time);
         if scale <= 0.0 || occlusion <= 0.0 {
@@ -943,7 +943,7 @@ impl H3FlareAt {
                 (0..3).for_each(|channel| color[channel] *= tint[channel]);
             }
         }
-        Some(CeSprite {
+        Some(FlareSprite {
             center: position,
             extent: [radius * flare.aspect[0], radius * flare.aspect[1]],
             rotation,

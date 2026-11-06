@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
-use super::super::ce::lights::{ANTENNA_TRIM, AntennaSprite, CeAntennaQuad, CeSprite, REACH_ANTENNA_TRIM, antenna_sprite};
+use super::super::ce::lights::{ANTENNA_TRIM, AntennaSprite, CeAntennaQuad, FlareSprite, REACH_ANTENNA_TRIM, antenna_sprite};
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::ce::passes::argb;
 use super::super::functions::FunctionValues;
@@ -1425,7 +1425,7 @@ impl H2FlareAt {
         &self,
         bones: Option<&[[f32; 4]]>,
         view: &ViewFrame,
-    ) -> Option<(CeSprite, Option<CeSprite>)> {
+    ) -> Option<(FlareSprite, Option<FlareSprite>)> {
         let flare = &*self.flare;
         if !flare.tests_occlusion() {
             return None;
@@ -1438,7 +1438,7 @@ impl H2FlareAt {
                 OcclusionOffset::MarkerForward => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
                 OcclusionOffset::None => [0.0; 3],
             };
-            CeSprite {
+            FlareSprite {
                 center: std::array::from_fn(|axis| position[axis] + offset[axis]),
                 extent: [radius; 2],
                 rotation: 0.0,
@@ -1464,7 +1464,7 @@ impl H2FlareAt {
         time: f32,
         onset: f32,
         occlusion: [f32; 2],
-    ) -> Vec<CeSprite> {
+    ) -> Vec<FlareSprite> {
         let flare = &*self.flare;
         let (position, forward) = self.posed(bones);
         let to_light = from_view(view, position);
@@ -1559,7 +1559,7 @@ impl H2FlareAt {
                 let own = color[channel] * reflection.color[channel];
                 if !reflection.flags.ignore_light_color { own * external[channel] } else { own }
             });
-            sprites.push(CeSprite {
+            sprites.push(FlareSprite {
                 center: std::array::from_fn(|axis| {
                     position[axis] + mirror[axis] * reflection.position
                 }),

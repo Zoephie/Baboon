@@ -77,7 +77,7 @@ impl ModelGlRenderer {
         unsafe {
             let Some(flares) = self
                 .sprite_gl
-                .get_or_insert_with(|| ce_flare_gl(gl, self.program))
+                .get_or_insert_with(|| link_sprite_gl(gl, self.program))
                 .take()
             else {
                 return;

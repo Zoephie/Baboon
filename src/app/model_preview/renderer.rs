@@ -2897,8 +2897,9 @@ out vec4 out_color;
 }
 ");
 
-/// What Halo CE's lens flares draw with, made on first use.
-struct CeFlareGl {
+/// What every game's camera-facing quads draw with (flares, antennas, effect
+/// sprites), made on first use.
+struct SpriteGl {
     program: glow::NativeProgram,
     vertex_array: glow::NativeVertexArray,
     buffer: glow::NativeBuffer,
@@ -3190,7 +3191,7 @@ unsafe fn draw_ce_group(
     gl: &glow::Context,
     effect_gl: &mut Option<Option<CeEffectGl>>,
     main: glow::NativeProgram,
-    flares: &CeFlareGl,
+    flares: &SpriteGl,
     uploaded: &mut ModelGpuSlot,
     camera: &ModelGpuCamera,
     group: CeGroup,
@@ -3968,7 +3969,7 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
 
 struct ModelGlRenderer {
     /// As `h2_bloom`.
-    sprite_gl: Option<Option<CeFlareGl>>,
+    sprite_gl: Option<Option<SpriteGl>>,
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
     ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
@@ -4554,8 +4555,8 @@ impl ModelGlRenderer {
                 self.draw_batches(gl, frame, true, Self::bound_materials(frame, &self.slots[slot].materials));
             }
             if !self.h3_draws(frame) && self.draws_object_sprites(frame) {
-                self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
-                self.draw_ce_flares(gl, frame, slot, SpriteStage::Rest);
+                self.draw_object_sprites(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                self.draw_object_sprites(gl, frame, slot, SpriteStage::Rest);
             }
             if let Some(order) = bloom_order {
                 gl.use_program(Some(self.program));
@@ -4616,7 +4617,7 @@ impl ModelGlRenderer {
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             let mut groups = Vec::new();
             if self.draws_object_sprites(frame) && ce_has_groups(&frame.preview) {
-                self.sprite_gl.get_or_insert_with(|| ce_flare_gl(gl, self.program));
+                self.sprite_gl.get_or_insert_with(|| link_sprite_gl(gl, self.program));
                 let uploaded = &mut self.slots[slot];
                 uploaded.sync_sprite_textures(gl, frame);
                 groups = ce_groups(gl, uploaded, frame, bones, &view);
@@ -4674,12 +4675,14 @@ impl ModelGlRenderer {
         }
     }
 
-    /// `rasterizer_lens_flares_draw`: added to the frame by their alpha, on
-    /// color alone, over everything. What hides one is its occlusion test, a
+    /// Every game's object sprites that `stage` covers: particles, strips,
+    /// trails, antennas, effect parts and flares, advancing their simulations
+    /// on the frame's first call. Flares follow `rasterizer_lens_flares_draw`:
+    /// added to the frame by their alpha, on color alone, over everything. What hides one is its occlusion test, a
     /// patch whose share of pixels past the depth buffer scales the flare. The
     /// game reads that a frame late and eases it; a pane paints on demand, so
     /// this waits for the answer.
-    pub(super) unsafe fn draw_ce_flares(
+    pub(super) unsafe fn draw_object_sprites(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -4688,7 +4691,7 @@ impl ModelGlRenderer {
     ) {
         unsafe {
             let h3 = self.h3_draws(frame);
-            let Some(flares) = self.sprite_gl.get_or_insert_with(|| ce_flare_gl(gl, self.program)).as_mut() else {
+            let Some(flares) = self.sprite_gl.get_or_insert_with(|| link_sprite_gl(gl, self.program)).as_mut() else {
                 return;
             };
             if !(frame.preview.h3_particles.is_empty()
@@ -7740,7 +7743,7 @@ fn ce_flare_pixels(camera: &ModelGpuCamera, viewport: [i32; 2], center: [f32; 3]
 fn ce_flare_quad(
     camera: &ModelGpuCamera,
     view: &common::view::ViewFrame,
-    sprite: &ce::lights::CeSprite,
+    sprite: &ce::lights::FlareSprite,
 ) -> [[f32; 6]; 4] {
     let (sine, cosine) = sprite.rotation.sin_cos();
     let center = sprite.center;
@@ -7763,10 +7766,10 @@ fn ce_flare_quad(
 /// How much of `patch` the model leaves showing, if any of it is on screen.
 unsafe fn ce_flare_occlusion(
     gl: &glow::Context,
-    flares: &CeFlareGl,
+    flares: &SpriteGl,
     camera: &ModelGpuCamera,
     view: &common::view::ViewFrame,
-    patch: &ce::lights::CeSprite,
+    patch: &ce::lights::FlareSprite,
 ) -> Option<f32> {
     unsafe {
         let vertices = ce_flare_quad(camera, view, patch);
@@ -7799,10 +7802,10 @@ unsafe fn ce_flare_occlusion(
 
 unsafe fn draw_flare_sprites(
     gl: &glow::Context,
-    flares: &CeFlareGl,
+    flares: &SpriteGl,
     camera: &ModelGpuCamera,
     view: &common::view::ViewFrame,
-    sprites: &[ce::lights::CeSprite],
+    sprites: &[ce::lights::FlareSprite],
     textures: &[Option<glow::NativeTexture>],
 ) {
     unsafe {
@@ -7828,7 +7831,7 @@ unsafe fn draw_flare_sprites(
     }
 }
 
-unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<CeFlareGl> {
+unsafe fn link_sprite_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<SpriteGl> {
     unsafe {
         let program = link_h2_program(gl, main, CE_FLARE_VERTEX, CE_FLARE_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))
@@ -7841,7 +7844,7 @@ unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<C
         gl.vertex_attrib_pointer_f32(0, 4, glow::FLOAT, false, CE_FLARE_STRIDE, 0);
         gl.enable_vertex_attrib_array(1);
         gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, CE_FLARE_STRIDE, 16);
-        Some(CeFlareGl {
+        Some(SpriteGl {
             program,
             vertex_array,
             buffer,

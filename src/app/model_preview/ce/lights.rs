@@ -304,7 +304,7 @@ pub(crate) struct CeLight {
 
 /// One quad, ready to place.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct CeSprite {
+pub(crate) struct FlareSprite {
     pub(crate) center: [f32; 3],
     /// Half its width and height, in world units.
     pub(crate) extent: [f32; 2],
@@ -365,7 +365,7 @@ impl CeLight {
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
         view: &ViewFrame,
-    ) -> Option<CeSprite> {
+    ) -> Option<FlareSprite> {
         let flare = self.flare.as_deref()?;
         if self.color(self.value(outputs), change_colors) == [0.0; 3] {
             return None;
@@ -377,7 +377,7 @@ impl CeLight {
             OcclusionOffset::MarkerForward => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
             OcclusionOffset::None => [0.0; 3],
         };
-        Some(CeSprite {
+        Some(FlareSprite {
             center: std::array::from_fn(|axis| position[axis] + offset[axis]),
             extent: [radius; 2],
             rotation: 0.0,
@@ -434,7 +434,7 @@ impl CeLight {
         view: &ViewFrame,
         time: f32,
         occlusion: f32,
-    ) -> Vec<CeSprite> {
+    ) -> Vec<FlareSprite> {
         let Some(flare) = self.flare.as_deref() else {
             return Vec::new();
         };
@@ -494,7 +494,7 @@ impl CeLight {
                 rotation += screen_angle;
             }
             let stretch = if index == 0 { flare.corona_scale } else { [1.0; 2] };
-            sprites.push(CeSprite {
+            sprites.push(FlareSprite {
                 center: std::array::from_fn(|axis| position[axis] + mirror[axis] * reflection.position),
                 extent: [radius * stretch[0], radius * stretch[1]],
                 rotation,
@@ -898,7 +898,7 @@ mod tests {
         }
     }
 
-    fn sprites(light: &CeLight, value: f32) -> Vec<CeSprite> {
+    fn sprites(light: &CeLight, value: f32) -> Vec<FlareSprite> {
         light.sprites(&[value, 0.0, 0.0, 0.0], &[[1.0; 3]; 4], None, &VIEW, 0.0, 1.0)
     }
 

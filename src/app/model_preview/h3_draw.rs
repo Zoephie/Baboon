@@ -1373,7 +1373,7 @@ impl ModelGlRenderer {
                         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.distortion_framebuffer));
                         gl.clear_color(0.0, 0.0, 0.0, 0.0);
                         gl.clear(glow::COLOR_BUFFER_BIT);
-                        self.draw_ce_flares(gl, frame, slot, SpriteStage::Distortions);
+                        self.draw_object_sprites(gl, frame, slot, SpriteStage::Distortions);
                         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
                     }
                 }
@@ -1404,7 +1404,7 @@ impl ModelGlRenderer {
             for (distance, batch, material, pass, blend) in blended {
                 composite_hologram(self, distance);
                 if sprites {
-                    self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(distance));
+                    self.draw_object_sprites(gl, frame, slot, SpriteStage::FartherThan(distance));
                 }
                 gl.enable(glow::BLEND);
                 gl.depth_mask(false);
@@ -1422,7 +1422,7 @@ impl ModelGlRenderer {
             }
             composite_hologram(self, f32::NEG_INFINITY);
             if sprites {
-                self.draw_ce_flares(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                self.draw_object_sprites(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                 if self.h3_distorted {
                     self.h3_apply_distortions(gl, accumulation_target, size);
                     gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1497,7 +1497,7 @@ impl ModelGlRenderer {
             // `c_player_view::render`: after the transparents, before the bloom
             // and the tone curve, so these are in the same light as the scene.
             if sprites {
-                self.draw_ce_flares(gl, frame, slot, SpriteStage::Rest);
+                self.draw_object_sprites(gl, frame, slot, SpriteStage::Rest);
                 self.draw_h4_flares(gl, frame, slot);
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
