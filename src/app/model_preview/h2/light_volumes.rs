@@ -17,6 +17,7 @@ use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::dot;
 
 /// `sprites[256]`.
 const MOST_SPRITES: usize = 256;
@@ -263,9 +264,6 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
     found
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
 /// `(cutoff - distance) / (cutoff - falloff)`, or all of it with no range.
 fn camera_fade([falloff, cutoff]: [f32; 2], distance: f32) -> f32 {

@@ -28,6 +28,7 @@ use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 /// A game tick, which is what `effects_update` steps by.
 pub(in crate::app::model_preview) const STEP: f32 = 1.0 / 30.0;
@@ -1116,18 +1117,8 @@ fn rotate_about(vector: [f32; 3], axis: [f32; 3], sine: f32, cosine: f32) -> [f3
     std::array::from_fn(|at| vector[at] * cosine + across[at] * sine + axis[at] * along * (1.0 - cosine))
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt();
-    if length > 0.0 { a.map(|axis| axis / length) } else { a }
-}
 
 fn turn_by_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|at| (0..3).map(|row| location.axes[row][at] * local[row]).sum::<f32>())
@@ -1464,11 +1455,11 @@ impl CeParticleField {
             else {
                 continue;
             };
-            let to_particle = unit(std::array::from_fn(|axis| center[axis] - view.eye[axis]));
+            let to_particle = unit_or_unchanged(std::array::from_fn(|axis| center[axis] - view.eye[axis]));
             let (across, up) = sprite_basis(def.orientation, direction, to_particle, view);
             // `build_sprite_compute_vertex_fade`, which only a turned sprite takes.
             if def.fade_mode != 0 && def.orientation != 0 {
-                let normal = unit(cross(across, up));
+                let normal = unit_or_unchanged(cross(across, up));
                 let facing = dot(to_particle, normal).abs();
                 fade *= if def.fade_mode == 2 { 1.0 - facing } else { facing };
             }
@@ -1565,9 +1556,9 @@ enum Fate {
 /// with two markers where the particle is, `velocity` along its way and
 /// `gravity` straight down; a location naming neither takes the first.
 fn spawn_effect(def: &Arc<CeEffectDef>, particle: &CeParticle, scale: f32) -> Option<CeEffectAt> {
-    let along = unit(particle.direction);
+    let along = unit_or_unchanged(particle.direction);
     let frame = |forward: [f32; 3]| {
-        let up = unit(perpendicular(forward));
+        let up = unit_or_unchanged(perpendicular(forward));
         CeLocation { node: WORLD_NODE, position: particle.place, axes: [forward, cross(up, forward), up] }
     };
     let locations = def
@@ -1742,14 +1733,14 @@ fn generate_systems(
 fn sprite_basis(orientation: i32, direction: [f32; 3], to_particle: [f32; 3], view: &CeFlareView) -> ([f32; 3], [f32; 3]) {
     match orientation {
         1 => {
-            let along = unit(direction);
-            (along, unit(cross(to_particle, along)))
+            let along = unit_or_unchanged(direction);
+            (along, unit_or_unchanged(cross(to_particle, along)))
         }
         2 => {
-            let along = unit(direction);
+            let along = unit_or_unchanged(direction);
             let world_up = [0.0, 0.0, 1.0];
             let reference = if dot(along, world_up).powi(2) > 0.99 { [0.0, 1.0, 0.0] } else { world_up };
-            let side = unit(cross(along, reference));
+            let side = unit_or_unchanged(cross(along, reference));
             (side, rotate_about(side, along, -1.0, 0.0))
         }
         _ => (view.right, view.up),

@@ -7,9 +7,10 @@ use blam_tags::animation::{decode_extended_block, AnimationGroup, ExtendedChanne
 use blam_tags::math::{Matrix4, RealPoint3d, RealQuaternion};
 use blam_tags::{Skeleton, TagFile};
 
-use super::super::attachment::{added, apart, axis_of, cross, dot, matrix_of, place_of, rigid_inverse, scaled, unit};
+use super::super::attachment::{added, apart, axis_of, matrix_of, place_of, rigid_inverse};
 use super::super::ce::attachments::elements;
 use super::super::RenderModelPreviewNode;
+use crate::app::model_preview::common::math::{cross, dot, scaled, unit_by_reciprocal};
 
 /// `e_animation_ik_chain_event_usage`: whose markers a target names.
 const USAGE_SELF: i128 = 2;
@@ -296,7 +297,7 @@ fn transform_point(matrix: &Matrix4, point: [f32; 3]) -> [f32; 3] {
 /// A matrix with its axes made unit length: `matrix4x3_to_orientation` with
 /// the scale forced to 1.
 fn unscaled(matrix: &Matrix4) -> Matrix4 {
-    matrix_of([0, 1, 2].map(|axis| unit(axis_of(matrix, axis))), place_of(matrix))
+    matrix_of([0, 1, 2].map(|axis| unit_by_reciprocal(axis_of(matrix, axis))), place_of(matrix))
 }
 
 /// Only the turn of `matrix`.
@@ -311,7 +312,7 @@ fn square(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     for other in [b, [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]] {
         let crossed = cross(a, other);
         if dot(crossed, crossed) > 1e-10 {
-            return unit(crossed);
+            return unit_by_reciprocal(crossed);
         }
     }
     [0.0, 0.0, 1.0]
@@ -320,29 +321,29 @@ fn square(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 /// `frame_forward_up`'s axes: forward along `forward`, up as near `up` as
 /// it can be, left square to both.
 fn frame_forward_up(forward: [f32; 3], up: [f32; 3]) -> [[f32; 3]; 3] {
-    let forward = unit(forward);
+    let forward = unit_by_reciprocal(forward);
     let left = square(up, forward);
     [forward, left, cross(forward, left)]
 }
 
 /// `frame_forward_left`'s up: square to `forward` and `left`.
 fn up_of_forward_left(forward: [f32; 3], left: [f32; 3]) -> [f32; 3] {
-    square(unit(forward), unit(left))
+    square(unit_by_reciprocal(forward), unit_by_reciprocal(left))
 }
 
 /// `ik_alignment`: the turn that takes `matrix`'s forward exactly along
 /// `bone`, as a turn to apply after it.
 fn ik_alignment(matrix: &Matrix4, bone: [f32; 3]) -> Matrix4 {
-    let forward = unit(bone);
-    if dot(forward, unit(axis_of(matrix, 0))) >= 1.0 - 1e-4 {
+    let forward = unit_by_reciprocal(bone);
+    if dot(forward, unit_by_reciprocal(axis_of(matrix, 0))) >= 1.0 - 1e-4 {
         return Matrix4::IDENTITY;
     }
     let mut second = [0.0, 0.0, 1.0];
     if dot(forward, second).abs() >= 1.0 - 1e-4 {
         second = [0.0, 1.0, 0.0];
     }
-    let up = unit(cross(forward, cross(forward, second)));
-    let left = unit(cross(up, forward));
+    let up = unit_by_reciprocal(cross(forward, cross(forward, second)));
+    let left = unit_by_reciprocal(cross(up, forward));
     let aligned = matrix_of([forward, left, cross(forward, left)], [0.0; 3]);
     rigid_inverse(&turn_of(matrix)) * aligned
 }
@@ -397,14 +398,14 @@ pub(crate) fn two_bone_ik(
     let (a_at, j_at, e_at) = (place_of(&a), place_of(&j), place_of(&e));
     let upper_bone = apart(j_at, a_at);
     let lower_bone = apart(e_at, j_at);
-    let toward_pole = unit(pole.map_or(upper_bone, |pole| apart(pole, a_at)));
+    let toward_pole = unit_by_reciprocal(pole.map_or(upper_bone, |pole| apart(pole, a_at)));
     let align_a = ik_alignment(&a, upper_bone);
     a = a * align_a;
     let align_j = ik_alignment(&j, lower_bone);
     j = j * align_j;
     let (upper, lower) = (dot(upper_bone, upper_bone).sqrt(), dot(lower_bone, lower_bone).sqrt());
     if upper > 1e-4 && lower > 1e-4 {
-        let reach = unit(apart(e_at, a_at));
+        let reach = unit_by_reciprocal(apart(e_at, a_at));
         let to_goal = apart(place_of(&desired), a_at);
         let length = dot(to_goal, to_goal).sqrt();
         let toward = if length > 0.0 { scaled(to_goal, 1.0 / length) } else { reach };
@@ -421,7 +422,7 @@ pub(crate) fn two_bone_ik(
         let base_axes = frame_forward_up(apart(elbow, a_at), axis_of(&a, 2));
         a = matrix_of(base_axes, a_at);
         j = matrix_of(joint_axes, elbow);
-        e = matrix_of([0, 1, 2].map(|axis| unit(axis_of(&desired, axis))), hand_at);
+        e = matrix_of([0, 1, 2].map(|axis| unit_by_reciprocal(axis_of(&desired, axis))), hand_at);
     }
     a = a * rigid_inverse(&align_a);
     j = j * rigid_inverse(&align_j);

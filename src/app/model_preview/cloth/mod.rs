@@ -10,6 +10,7 @@ use super::ce::lights::posed_on;
 use super::gen3::effects::marker_name;
 use super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, minus, unit_or_unchanged};
 
 /// `k_maximum_vertices_per_cloth`.
 const MOST_VERTICES: usize = 121;
@@ -87,22 +88,9 @@ const H2_MOST_PASSES: usize = 64;
 /// `real_vector3d_exclude_from_pole_by_angle`'s and the wind's own.
 const WIND_POLE_ANGLE: f32 = 20.0 * std::f32::consts::PI / 180.0;
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn minus(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|axis| a[axis] - b[axis])
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt();
-    if length > 0.0 { a.map(|axis| axis / length) } else { a }
-}
 
 fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
     let between = minus(a, b);
@@ -252,7 +240,7 @@ impl ReachWind {
         if self.direction == [0.0; 3] {
             let direction = random_direction(|| self.next());
             if dot(direction, direction).sqrt() >= NEARLY_ZERO {
-                self.direction = unit(direction);
+                self.direction = unit_or_unchanged(direction);
             }
         }
         if frame > self.last_frame {
@@ -300,13 +288,13 @@ fn rough_sqrt(value: f32) -> f32 {
 /// `real_vector3d_exclude_from_pole_by_angle`.
 pub(crate) fn away_from_pole(pole: [f32; 3], angle: f32, vector: [f32; 3]) -> [f32; 3] {
     let length = dot(vector, vector).sqrt();
-    let (pole, toward) = (unit(pole), unit(vector));
+    let (pole, toward) = (unit_or_unchanged(pole), unit_or_unchanged(vector));
     let between = dot(pole, toward).clamp(-1.0, 1.0).acos();
     if angle <= f32::EPSILON || between >= angle {
         return vector;
     }
-    let axis = unit(cross(pole, toward));
-    unit(turned_about(toward, axis, angle - between)).map(|axis| axis * length)
+    let axis = unit_or_unchanged(cross(pole, toward));
+    unit_or_unchanged(turned_about(toward, axis, angle - between)).map(|axis| axis * length)
 }
 
 /// `cloth_generate_flag_grid`: rows hang down from the top, and a square of
@@ -891,14 +879,14 @@ impl RunningCloth {
         let mut sums = if halo2 { self.normals.clone() } else { vec![[0.0; 3]; self.places.len()] };
         for triangle in cloth.indices.chunks_exact(3) {
             let [a, b, c] = [triangle[0], triangle[1], triangle[2]];
-            let normal = unit(cross(minus(self.places[b], self.places[a]), minus(self.places[c], self.places[a])));
+            let normal = unit_or_unchanged(cross(minus(self.places[b], self.places[a]), minus(self.places[c], self.places[a])));
             for corner in [a, b, c] {
                 sums[corner] = std::array::from_fn(|axis| sums[corner][axis] + normal[axis]);
             }
         }
         for (normal, sum) in self.normals.iter_mut().zip(sums) {
             *normal = if sum != [0.0; 3] {
-                unit(sum)
+                unit_or_unchanged(sum)
             } else if halo2 {
                 [0.0, 1.0, 0.0]
             } else {
@@ -1250,7 +1238,7 @@ mod tests {
         assert!((held[2] - limit).abs() < 1e-6);
         assert!((dot(held, held) - 1.0).abs() < 1e-5);
         assert!(held[0] > 0.0, "with nothing level to keep, it goes to the front");
-        let clear = unit([1.0, 0.0, 0.2]);
+        let clear = unit_or_unchanged([1.0, 0.0, 0.2]);
         let kept = held_from_straight_up(clear, H2_WIND_POLE_ANGLE);
         assert!(distance(kept, clear) < 1e-5, "{kept:?}");
     }
@@ -1267,9 +1255,9 @@ mod tests {
     #[test]
     fn the_wind_stays_out_of_the_straight_up_cone() {
         let up = [0.0, 0.0, 1.0];
-        let moved = away_from_pole(up, 0.5, unit([0.01, 0.0, 1.0]));
+        let moved = away_from_pole(up, 0.5, unit_or_unchanged([0.01, 0.0, 1.0]));
         assert!(dot(moved, up).acos() >= 0.499, "{moved:?}");
-        let clear = unit([1.0, 0.0, 0.2]);
+        let clear = unit_or_unchanged([1.0, 0.0, 0.2]);
         assert_eq!(away_from_pole(up, 0.5, clear), clear);
     }
 

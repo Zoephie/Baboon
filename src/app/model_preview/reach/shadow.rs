@@ -5,6 +5,7 @@
 use blam_tags::TagFile;
 
 use super::super::ce::attachments::object_block;
+use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 /// `c_rasterizer_states`' shadow generate biases when the model sets none
 /// (MCC .data 0x1420305C0/C4).
@@ -56,18 +57,8 @@ fn casts(mode: &str, group: &[u8; 4]) -> bool {
 
 type Vector = [f32; 3];
 
-fn dot(a: Vector, b: Vector) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: Vector, b: Vector) -> Vector {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn normalized(vector: Vector) -> Vector {
-    let length = dot(vector, vector).sqrt();
-    if length > 0.0 { vector.map(|value| value / length) } else { vector }
-}
 
 /// `object_shadow_visible`'s camera over one object's bounding sphere.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -104,16 +95,16 @@ impl ReachShadowCamera {
     /// `direction` from the light toward the object; `diameter` the object's
     /// size on screen, in pixels.
     pub(crate) fn new(direction: Vector, center: Vector, radius: f32, diameter: f32) -> Self {
-        let d = normalized(direction);
+        let d = unit_or_unchanged(direction);
         let radius = radius.max(2e-4);
         let along = d[0].abs().max(d[1].abs());
         let plane: Vector = std::array::from_fn(|axis| center[axis] - radius * d[axis]);
         let depth = 3.0 * radius + along;
         let side = if d[1].abs() >= 0.9 { [-1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
-        let up = normalized(cross(d, side));
+        let up = unit_or_unchanged(cross(d, side));
         let left = cross(up, d);
-        let a = normalized(cross(d, up));
-        let b = normalized(cross(a, d));
+        let a = unit_or_unchanged(cross(d, up));
+        let b = unit_or_unchanged(cross(a, d));
         // `compute_shadow_resolution_pixels`, doubled by MCC's high quality.
         let pixels = (diameter as i32).clamp(16, 512) * HIGH_QUALITY;
         // x and y across the map, depth along it into [-1, 1]; the half texel
@@ -197,7 +188,7 @@ pub(crate) fn hull_planes() -> [[f32; 4]; 14] {
     HULL_QUADS.map(|[first, second, third, _]| {
         let [p, q, r] = [first, second, third].map(|index| HULL_VERTICES[index]);
         let edge = |to: Vector| std::array::from_fn(|axis| to[axis] - p[axis]);
-        let mut normal = normalized(cross(edge(q), edge(r)));
+        let mut normal = unit_or_unchanged(cross(edge(q), edge(r)));
         let toward_middle: Vector = std::array::from_fn(|axis| middle[axis] - p[axis]);
         if dot(normal, toward_middle) > 0.0 {
             normal = normal.map(|value| -value);

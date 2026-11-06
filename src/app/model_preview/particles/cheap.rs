@@ -23,6 +23,7 @@ use super::super::particles::{PRE_ROLL, Random, particle_game_time};
 use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 
 /// `s_cheap_particle_system::k_max_particles`: the ring every emitter writes.
 const MOST_PARTICLES: usize = 0x2000;
@@ -62,22 +63,9 @@ const RENDER: usize = 4;
 const EMPTY: CheapParticle =
     CheapParticle { position: [0.0; 3], age: 2.0, velocity: [0.0, 1.0, 0.0], delta_age: 0.0, parameters: [0; 4] };
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn minus(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|axis| a[axis] - b[axis])
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt().max(1e-6);
-    a.map(|axis| axis / length)
-}
 
 /// HLSL's `frac`.
 fn frac(x: f32) -> f32 {
@@ -598,7 +586,7 @@ fn spawn_input(variable: &str, values: Option<&H2FunctionValues>, time: f32, sca
 /// `forward` across a fresh random direction, every frame. Sic: not
 /// normalized after, in either build.
 fn turned_up(forward: [f32; 3], random: &mut Random) -> [f32; 3] {
-    let turn = unit(std::array::from_fn(|_| random.range(-1.0, 1.0)));
+    let turn = clamped_unit(std::array::from_fn(|_| random.range(-1.0, 1.0)));
     cross(forward, turn)
 }
 
@@ -1047,7 +1035,7 @@ impl ReachCheapField {
             } else {
                 size
             };
-            let to_particle = unit(minus(particle.position, view.eye));
+            let to_particle = clamped_unit(minus(particle.position, view.eye));
             // Pulled 1 cm toward the camera.
             let place: [f32; 3] = std::array::from_fn(|axis| particle.position[axis] - to_particle[axis] * 0.01);
             let local = [f32::from(dx) / 63.5 * size, f32::from(dy) / 63.5 * size];
@@ -1060,7 +1048,7 @@ impl ReachCheapField {
                 }
                 let stretch = (stretch_factor * speed).max(1.0) / speed;
                 let along = velocity.map(|axis| axis * stretch);
-                [along, unit(cross(along, to_particle))]
+                [along, clamped_unit(cross(along, to_particle))]
             } else {
                 [view.right, view.up]
             };

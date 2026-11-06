@@ -17,6 +17,7 @@ use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, unit_or_up};
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
@@ -508,12 +509,12 @@ impl CeContrailField {
                     // `render_contrail`: the first vertex of each pair (the far
                     // edge of the texture) lies on the minus side of `across`.
                     let (across, normal) = match def.render_type {
-                        0 => ([0.0, 0.0, 1.0], unit([-along[1], along[0], 0.0])),
-                        1 | 2 => (unit([-along[1], along[0], 0.0]), [0.0, 0.0, 1.0]),
+                        0 => ([0.0, 0.0, 1.0], unit_or_up([-along[1], along[0], 0.0])),
+                        1 | 2 => (unit_or_up([-along[1], along[0], 0.0]), [0.0, 0.0, 1.0]),
                         _ => {
                             let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - from[axis]);
-                            let across = unit(cross(to_eye, along));
-                            (across, unit(cross(across, along)))
+                            let across = unit_or_up(cross(to_eye, along));
+                            (across, unit_or_up(cross(across, along)))
                         }
                     };
                     // `contrail_fade`.
@@ -574,7 +575,7 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
     let cone = def.cone * if def.scale_flags & SCALED_CONE != 0 { density } else { 1.0 };
     for (line, (node, position, forward)) in running.points.iter_mut().zip(&contrail.markers) {
         let (origin, forward) = posed_on(*node, *position, *forward, bones);
-        let forward = unit(forward);
+        let forward = unit_or_up(forward);
         // `contrail_add_points` spreads what one frame adds along the way
         // from the last head point to the marker; the last lands on it.
         let head = line.first().map(|point| (point.place, point.velocity, point.density));
@@ -586,7 +587,7 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
             // `seed_random_vector_in_cone3d`.
             let spread = cone * running.random.next();
             let turn = running.random.next() * std::f32::consts::TAU;
-            let side = unit(cross(forward, [0.0, 0.0, 1.0]));
+            let side = unit_or_up(cross(forward, [0.0, 0.0, 1.0]));
             let side = if dot(side, side) < 0.5 { [0.0, 1.0, 0.0] } else { side };
             let lift = cross(side, forward);
             let direction: [f32; 3] = std::array::from_fn(|axis| {
@@ -621,18 +622,8 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
     }
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt();
-    if length > 0.0001 { a.map(|axis| axis / length) } else { [0.0, 0.0, 1.0] }
-}
 
 #[cfg(test)]
 mod tests {

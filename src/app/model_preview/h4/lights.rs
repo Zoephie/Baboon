@@ -22,6 +22,7 @@ use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::hlsl::emit::Stage;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
 
 const SMALLEST: f32 = 1e-4;
 /// Halo 4's simulation rate.
@@ -220,22 +221,7 @@ pub(crate) struct H4LitLight {
     pub(crate) inner: f32,
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
 
-fn normalized(v: [f32; 3]) -> [f32; 3] {
-    let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-    if length < 1e-6 {
-        v
-    } else {
-        v.map(|axis| axis / length)
-    }
-}
 
 /// `light_color_too_dark` (X360 0x829ECEE8).
 fn too_dark(color: [f32; 3]) -> bool {
@@ -369,8 +355,8 @@ impl H4Light {
             specular: tag.specular,
             diffuse: tag.diffuse,
             position,
-            forward: normalized(forward),
-            up: normalized(up),
+            forward: unit_unless_under_micro(forward),
+            up: unit_unless_under_micro(up),
             color,
             start: tag.start.min(end),
             end,

@@ -15,6 +15,7 @@ use super::super::renderer::H3_EXPOSURE;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 /// `k_maximum_leaves_per_system`.
 const MOST_LEAVES: usize = 64;
@@ -72,18 +73,8 @@ const TRIANGLES: [[usize; 3]; 14] = [
     [11, 9, 8],
 ];
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt();
-    if length > 0.0 { a.map(|axis| axis / length) } else { a }
-}
 
 /// `matrix3x3_to_quaternion`, normalized, as `c_short_quaternion` stores it.
 /// A leaf's orientation lives only here between ticks, always a true rotation.
@@ -137,8 +128,8 @@ fn unpacked(words: [i16; 4]) -> [[f32; 3]; 3] {
 pub(in crate::app::model_preview) fn normals_between(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let angle = dot(a, b).clamp(-1.0, 1.0).acos();
     let (from, axis, by) = if t <= 0.5 { (a, cross(a, b), angle * t) } else { (b, cross(b, a), angle * (1.0 - t)) };
-    let axis = unit(axis);
-    if axis == [0.0; 3] { from } else { unit(turned_about(from, axis, by)) }
+    let axis = unit_or_unchanged(axis);
+    if axis == [0.0; 3] { from } else { unit_or_unchanged(turned_about(from, axis, by)) }
 }
 
 /// `matrix4x3_multiply(orientation, rotation)`, for a rotation about a world
@@ -354,7 +345,7 @@ impl RunningLeaves {
         let reach = system.sphere * self.next();
         let place = std::array::from_fn(|axis| system.origin[axis] + offset[axis] * reach);
         let normal = self.direction();
-        let pendulum = unit(cross(normal, [0.0, 0.0, 1.0]));
+        let pendulum = unit_or_unchanged(cross(normal, [0.0, 0.0, 1.0]));
         let mut pick = self.next() * total;
         let mut kind = 0;
         for (at, leaf) in system.types.iter().enumerate() {
@@ -368,7 +359,7 @@ impl RunningLeaves {
         let mut velocity = self.direction();
         velocity[2] -= leaf_type.mass.max(0.0);
         velocity[2] = -velocity[2].abs();
-        let velocity = unit(velocity).map(|axis| axis * leaf_type.starting_velocity);
+        let velocity = unit_or_unchanged(velocity).map(|axis| axis * leaf_type.starting_velocity);
         self.leaves[slot] = Some(Leaf {
             position: system.word_position(place),
             orientation: [0, 0, 0, i16::MAX],
@@ -391,7 +382,7 @@ impl RunningLeaves {
             return;
         }
         let strength = dot(wind, wind).sqrt() * system.wind_scale;
-        let mut force = unit(wind);
+        let mut force = unit_or_unchanged(wind);
         force[2] = -force[2].abs();
         let direction = force;
         let [low, high] = system.wind_range;
@@ -407,7 +398,7 @@ impl RunningLeaves {
             let kind = &system.types[leaf.kind];
             let mut axes = unpacked(leaf.orientation);
             let place = system.place_of(leaf.position);
-            let facing = unit(leaf.velocity);
+            let facing = unit_or_unchanged(leaf.velocity);
             // `velocity_scale` is still last tick's when the tumble reads it.
             let speed = dot(leaf.velocity, leaf.velocity).sqrt();
             leaf.normal = normals_between(leaf.normal, direction, dt);
@@ -444,18 +435,18 @@ impl RunningLeaves {
                 }
                 let hung: [f32; 3] = std::array::from_fn(|axis| pivot[axis] - swung[axis]);
                 drift = std::array::from_fn(|axis| hung[axis] - place[axis]);
-                let mut normal = unit(std::array::from_fn(|axis| pivot[axis] - hung[axis]));
+                let mut normal = unit_or_unchanged(std::array::from_fn(|axis| pivot[axis] - hung[axis]));
                 normal[2] *= if upward { 1.0 } else { -1.0 };
                 leaf.normal = normal;
                 let desired = normals_between(axes[0], normal, (1.0 - share) * dt);
-                let axis = unit(cross(axes[0], desired));
+                let axis = unit_or_unchanged(cross(axes[0], desired));
                 if axis != [0.0; 3] {
                     let angle = dot(axes[0], desired).clamp(-1.0, 1.0).acos();
                     axes = multiplied(axes, axis, angle);
                 }
             }
             if tumble > 0.0 {
-                let across = unit(cross([0.0, 0.0, 1.0], facing));
+                let across = unit_or_unchanged(cross([0.0, 0.0, 1.0], facing));
                 let across = if across == [0.0; 3] { [0.0, 1.0, 0.0] } else { across };
                 axes = multiplied(axes, across, tumble);
             }
@@ -714,7 +705,7 @@ mod tests {
             ([1.0, 0.0, 0.0], 3.0),
             ([0.0, 1.0, 0.0], 3.0),
             ([0.0, 0.0, 1.0], 3.0),
-            (unit([1.0, 2.0, 3.0]), 2.5),
+            (unit_or_unchanged([1.0, 2.0, 3.0]), 2.5),
         ];
         for (axis, angle) in turns {
             let axes = multiplied([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], axis, angle);
@@ -761,7 +752,7 @@ mod tests {
 
     #[test]
     fn a_turned_orientation_stays_square() {
-        let axes = multiplied([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], unit([1.0, 2.0, 3.0]), 0.7);
+        let axes = multiplied([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], unit_or_unchanged([1.0, 2.0, 3.0]), 0.7);
         assert!((dot(axes[0], axes[0]) - 1.0).abs() < 1e-5);
         assert!(dot(axes[0], axes[1]).abs() < 1e-5);
     }

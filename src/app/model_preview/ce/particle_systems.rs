@@ -19,6 +19,7 @@ use super::lights::{CeFlareView, posed_on};
 use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use super::super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 /// How long a system runs before the preview first shows it.
 const PRE_ROLL: f32 = 4.0;
@@ -412,18 +413,8 @@ pub(crate) struct CeParticleSystemField {
     random: Option<Random>,
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt();
-    if length > 0.0 { a.map(|axis| axis / length) } else { a }
-}
 
 /// `randomize_particle_variables`: scale, rates and alpha at random, the
 /// color's channels together.
@@ -695,8 +686,8 @@ impl Shown<'_> {
     fn rotational(&self, sprite: usize, sideways: bool, view: &CeFlareView, system: usize, quads: &mut Vec<CePctlQuad>) {
         let sheet = &self.state.sheet;
         let first = self.state.sequence;
-        let toward = unit(std::array::from_fn(|axis| self.center[axis] - view.eye[axis]));
-        let axis = unit(self.axis);
+        let toward = unit_or_unchanged(std::array::from_fn(|axis| self.center[axis] - view.eye[axis]));
+        let axis = unit_or_unchanged(self.axis);
         let angle = dot(toward, axis).clamp(-1.0, 1.0).acos();
         let off = angle - std::f32::consts::FRAC_PI_2;
         let end_on = (off * off * 0.405_284_7).clamp(0.0, 1.0);

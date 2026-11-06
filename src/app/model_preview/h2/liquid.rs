@@ -17,6 +17,7 @@ use super::super::dx9::passes::{H2Image, tag_function_at};
 use super::super::gen3::effects::marker_name;
 use super::super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot};
 
 const OCTAVES: usize = 9;
 /// `liquid_arc_state_new`'s random starts, which never need to be the game's.
@@ -265,13 +266,7 @@ impl LiquidArc {
     }
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
 impl H2LiquidAt {
     pub(crate) fn scale_name(&self) -> &str {

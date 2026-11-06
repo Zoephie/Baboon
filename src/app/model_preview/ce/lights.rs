@@ -9,6 +9,7 @@ use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use blam_tags::TagFieldData;
+use crate::app::model_preview::common::math::{cross, dot, lerp};
 
 /// One segment of an antenna: a bitmap sprite stretched along it.
 #[derive(Debug, Clone)]
@@ -325,17 +326,8 @@ pub(crate) struct CeFlareView {
     pub(crate) up: [f32; 3],
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
 fn rgb_of(color: [f32; 4]) -> [f32; 3] {
     [color[0], color[1], color[2]]

@@ -7,6 +7,7 @@ use super::super::ce::lights::posed_on;
 use super::super::ce::particles::CePointPhysics;
 use super::super::h2::lights::H2Antenna;
 use super::super::cloth::REACH_TICK_RATE;
+use crate::app::model_preview::common::math::{minus, plus, scaled};
 
 /// The step `antennas_update` hands every antenna, whatever the tick's length:
 /// the 360's constant `flt_85251DE4`; MCC's `min(tick, 0.0333)` (0x140E52D1B)
@@ -42,17 +43,8 @@ struct RunningAntenna {
     velocity: [f32; 3],
 }
 
-fn plus(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|axis| a[axis] + b[axis])
-}
 
-fn minus(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|axis| a[axis] - b[axis])
-}
 
-fn scaled(a: [f32; 3], by: f32) -> [f32; 3] {
-    a.map(|axis| axis * by)
-}
 
 impl RunningAntenna {
     /// Both ends where the spring rests them. The game starts the far end

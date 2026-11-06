@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::super::attachment::{MarkerFrame, cross, perpendicular, unit};
+use super::super::attachment::{MarkerFrame, perpendicular};
 use super::super::ce::attachments::{elements, object_block};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 
 /// `effect_build_locations`: a location of this name takes the attachment's marker.
 const REPLACE: &str = "replace";
@@ -482,8 +483,8 @@ fn vector_marker<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         found.map_or(([0.0; 3], 0, None), |marker| (marker.position, marker.node_index, marker.only_under.clone()));
     let probe = RenderModelPreviewMarker { node_index, axes: WORLD_AXES, scale: 1.0, ..Default::default() };
     let (world, _) = frame(&probe);
-    let forward = unit(std::array::from_fn(|index| super::super::attachment::dot(world.axes[index], direction)));
-    let up = unit(perpendicular(forward));
+    let forward = unit_by_reciprocal(std::array::from_fn(|index| dot(world.axes[index], direction)));
+    let up = unit_by_reciprocal(perpendicular(forward));
     RenderModelPreviewMarker {
         name: name.to_owned(),
         node_index,

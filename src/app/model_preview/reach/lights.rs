@@ -16,6 +16,7 @@ use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
 use super::super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::cross;
 
 /// `light_update_state`'s range when no function names one.
 const DEFAULT_RANGE: f32 = 0.5;
@@ -223,9 +224,6 @@ pub(crate) struct ReachLitLight {
     pub(crate) near_fading: f32,
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
 /// `light_attenuation`'s cone terms: the cosine cutoff, and the falloff ratio.
 /// A sphere's cutoff of -2 leaves every direction full.

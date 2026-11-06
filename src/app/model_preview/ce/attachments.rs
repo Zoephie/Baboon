@@ -536,6 +536,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::common::math::{dot, unit_by_reciprocal};
 
     struct CeAnimationsForTest(Vec<String>);
 
@@ -586,7 +587,7 @@ mod tests {
         // The elbow started below the line to the goal, and stays there.
         assert!(place_of(&elbow)[1] < place_of(&elbow)[0]);
         // Each bone's first axis still runs down it.
-        let down = unit(apart(place_of(&elbow), place_of(&shoulder)));
+        let down = unit_by_reciprocal(apart(place_of(&elbow), place_of(&shoulder)));
         assert!(dot(axis_of(&shoulder, 0), down) > 0.999);
     }
 

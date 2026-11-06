@@ -15,6 +15,7 @@ use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, nonzero_unit};
 
 /// One of `frames`, as tool leaves it.
 #[derive(Debug, Clone, Copy)]
@@ -130,9 +131,6 @@ pub(in crate::app::model_preview) fn read_ce_light_volumes(
         .collect()
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
 impl super::functions::ReadsOutputs for CeLightVolume {
     fn object(&self) -> u8 {
@@ -372,14 +370,7 @@ pub(in crate::app::model_preview) fn read_ce_lightning(
         .collect()
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn normalized(a: [f32; 3]) -> Option<[f32; 3]> {
-    let length = dot(a, a).sqrt();
-    (length > 0.0).then(|| a.map(|axis| axis / length))
-}
 
 struct Lcg(u32);
 
@@ -447,7 +438,7 @@ impl CeLightning {
                 let steps = 1usize << marker.octaves;
                 points.resize(start + steps + 1, end);
                 let along: [f32; 3] = std::array::from_fn(|axis| end.place[axis] - points[start].place[axis]);
-                let across = normalized(cross(along, view.forward)).unwrap_or([0.0, 0.0, 1.0]);
+                let across = nonzero_unit(cross(along, view.forward)).unwrap_or([0.0, 0.0, 1.0]);
                 let mut amplitude = 1.0;
                 for level in 1..=marker.octaves {
                     let half = 1usize << (marker.octaves - level);
@@ -489,7 +480,7 @@ impl CeLightning {
             let previous = points[at.saturating_sub(1)].place;
             let next = points[(at + 1).min(last)].place;
             let along: [f32; 3] = std::array::from_fn(|axis| next[axis] - previous[axis]);
-            let across = normalized(cross(along, view.forward)).unwrap_or([0.0; 3]);
+            let across = nonzero_unit(cross(along, view.forward)).unwrap_or([0.0; 3]);
             let point = points[at];
             let width = point.thickness * thickness_scale;
             let u = at as f32 * step + start_u;
@@ -984,7 +975,7 @@ impl RunningGlow {
             2 => {
                 let random = &mut self.random;
                 let direction = [random.range(-1.0, 1.0), random.range(-1.0, 1.0), random.range(-1.0, 1.0)];
-                normalized(direction).unwrap_or(direction)
+                nonzero_unit(direction).unwrap_or(direction)
             }
             _ => [0.0; 3],
         };

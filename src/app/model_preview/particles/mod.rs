@@ -28,6 +28,7 @@ use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::game::GameId;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 
 /// Seconds run before the first frame, so a held pose has its particles.
 pub(super) const PRE_ROLL: f32 = 6.0;
@@ -1859,9 +1860,9 @@ impl H3ParticleFlock {
                     let toward = minus(*place, particle.position);
                     let ratio = dot(toward, toward).sqrt() / self.separation_distance.scalar(&state).max(0.1);
                     let scale = if ratio < 1.0 { -ratio * weight } else { weight };
-                    add(unit(toward).map(|axis| axis * scale));
+                    add(clamped_unit(toward).map(|axis| axis * scale));
                 }
-                let (mine, theirs) = (unit(particle.velocity), unit(*velocity));
+                let (mine, theirs) = (clamped_unit(particle.velocity), clamped_unit(*velocity));
                 let weight = self.alignment_weight.scalar(&state);
                 add(minus(theirs, mine).map(|axis| axis * weight));
             }
@@ -1869,12 +1870,12 @@ impl H3ParticleFlock {
             if reach > 0.0 {
                 let toward = minus(home, particle.position);
                 let weight = self.cohesion_weight.scalar(&state) * dot(toward, toward).sqrt() / reach;
-                add(unit(toward).map(|axis| axis * weight));
+                add(clamped_unit(toward).map(|axis| axis * weight));
             }
             let mut change = force.map(|axis| axis * dt);
             let most = self.maximum_acceleration.scalar(&state);
             if dot(change, change).sqrt() > most {
-                change = unit(change).map(|axis| axis * most);
+                change = clamped_unit(change).map(|axis| axis * most);
             }
             let eased: [f32; 3] = std::array::from_fn(|axis| {
                 (particle.velocity[axis] + change[axis]) * 0.25 + particle.velocity[axis] * 0.75
@@ -1882,9 +1883,9 @@ impl H3ParticleFlock {
             let (low, high) = (self.minimum_velocity.scalar(&state), self.maximum_velocity.scalar(&state));
             let speed = dot(eased, eased).sqrt();
             particle.velocity = if speed > high {
-                unit(eased).map(|axis| axis * high)
+                clamped_unit(eased).map(|axis| axis * high)
             } else if speed < low {
-                unit(eased).map(|axis| axis * low)
+                clamped_unit(eased).map(|axis| axis * low)
             } else {
                 eased
             };
@@ -2885,9 +2886,9 @@ fn fresh_emitters(system: &H3ParticleSystem, seed: u32) -> Vec<RunningEmitter> {
 
 /// A location's axes, looking along what a particle was doing.
 fn axes_along(forward: [f32; 3]) -> [[f32; 3]; 3] {
-    let forward = if dot(forward, forward) > 0.0 { unit(forward) } else { [1.0, 0.0, 0.0] };
+    let forward = if dot(forward, forward) > 0.0 { clamped_unit(forward) } else { [1.0, 0.0, 0.0] };
     let reference = if forward[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
-    let left = unit(cross(reference, forward));
+    let left = clamped_unit(cross(reference, forward));
     [forward, left, cross(forward, left)]
 }
 
@@ -3308,22 +3309,9 @@ pub(crate) struct H3ParticleVertex {
     pub(crate) normal: [f32; 3],
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn minus(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|axis| a[axis] - b[axis])
-}
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt().max(1e-6);
-    a.map(|axis| axis / length)
-}
 
 /// `billboard_basis`.
 fn billboard(
@@ -3337,32 +3325,32 @@ fn billboard(
     match style {
         H3Billboard::ScreenFacing => [view.right, view.up],
         H3Billboard::CameraFacing => {
-            let eye = unit(eye);
+            let eye = clamped_unit(eye);
             let other = if eye[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
-            let across = unit(cross(eye, other));
-            [across, unit(cross(across, eye))]
+            let across = clamped_unit(cross(eye, other));
+            [across, clamped_unit(cross(across, eye))]
         }
         H3Billboard::ScreenParallel => {
-            let along = unit(velocity);
-            [along, unit(cross(along, eye))]
+            let along = clamped_unit(velocity);
+            [along, clamped_unit(cross(along, eye))]
         }
         H3Billboard::ScreenPerpendicular => {
-            let motion = unit(velocity);
+            let motion = clamped_unit(velocity);
             let other = if motion[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
-            let across = unit(cross(motion, other));
+            let across = clamped_unit(cross(motion, other));
             [across, cross(motion, across)]
         }
         H3Billboard::ScreenVertical => {
             let up = [0.0, 0.0, 1.0];
-            [up, unit(cross(up, eye))]
+            [up, clamped_unit(cross(up, eye))]
         }
-        H3Billboard::LocalVertical => [local[2], unit(cross(local[2], eye))],
+        H3Billboard::LocalVertical => [local[2], clamped_unit(cross(local[2], eye))],
         H3Billboard::LocalHorizontal => [local[0], local[1]],
         H3Billboard::ScreenHorizontal | H3Billboard::World => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
         H3Billboard::VelocityHorizontal => {
-            let along = unit(velocity);
+            let along = clamped_unit(velocity);
             let other = if along[0].abs() < 0.99 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
-            [along, unit(cross(other, along))]
+            [along, clamped_unit(cross(other, along))]
         }
     }
 }
@@ -3745,19 +3733,19 @@ impl H3ParticleSystem {
                 });
                 let shading = look.shader.lighting;
                 let normal_at = |planar: [f32; 2], spun: [[f32; 3]; 2]| -> [f32; 3] {
-                    let normal = unit(cross(spun[0], spun[1]));
+                    let normal = clamped_unit(cross(spun[0], spun[1]));
                     if shading == H3ParticleLighting::None {
                         return normal;
                     }
                     let tangent = (look.curvature * std::f32::consts::FRAC_PI_2).tan();
                     let bent: [f32; 3] = if tangent > 0.0 {
                         let plane: [f32; 3] = std::array::from_fn(|axis| spun[0][axis] * planar[0] + spun[1][axis] * planar[1]);
-                        let plane = unit(plane);
+                        let plane = clamped_unit(plane);
                         std::array::from_fn(|axis| normal[axis] + plane[axis])
                     } else {
                         normal
                     };
-                    unit(bent)
+                    clamped_unit(bent)
                 };
                 // `per_vertex_ravi_order_0` on the vertex; order 3 on the pixel.
                 // Reach's `per_vertex_ambient` is the probe's ambient, whatever
@@ -3791,7 +3779,7 @@ impl H3ParticleSystem {
                 let at_spot = |spot: [f32; 3], mut uv: [f32; 2], normal: [f32; 3], lit: [f32; 3], lean: [[f32; 3]; 2]| {
                     let mut faded = alpha;
                     if let Some([range, cutoff]) = look.edge_fade {
-                        let toward = unit(minus(spot, view.eye));
+                        let toward = clamped_unit(minus(spot, view.eye));
                         let angle = std::f32::consts::FRAC_PI_2 - dot(toward, normal).abs().min(1.0).acos();
                         faded *= (range * (angle - cutoff)).clamp(0.0, 1.0);
                     }
@@ -3842,7 +3830,7 @@ impl H3ParticleSystem {
                         let at = [vertex.position.x * aspect, vertex.position.y, vertex.position.z];
                         let moved = along(at);
                         let spot = std::array::from_fn(|axis| place[axis] + moved[axis] * size);
-                        let normal = unit(along([vertex.normal.i, vertex.normal.j, vertex.normal.k]));
+                        let normal = clamped_unit(along([vertex.normal.i, vertex.normal.j, vertex.normal.k]));
                         let lit = lit_by(normal);
                         let lean = [plane[0], plane[1]].map(|side| side.map(|axis| axis * size * width));
                         vertices.push(at_spot(spot, [vertex.texcoord.x, vertex.texcoord.y], normal, lit, lean));
@@ -3893,7 +3881,7 @@ fn emitter_frame(
     axes: [[f32; 3]; 3],
     state: &H3ParticleState,
 ) -> ([f32; 3], [[f32; 3]; 3]) {
-    let direction = unit(emitter.direction.around(state));
+    let direction = clamped_unit(emitter.direction.around(state));
     let yaw = direction[1].atan2(direction[0]);
     let pitch = direction[2].asin();
     let (sin_yaw, cos_yaw) = yaw.sin_cos();

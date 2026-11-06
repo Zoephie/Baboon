@@ -21,6 +21,7 @@ use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, unit_unless_under_micro};
 
 const SMALLEST: f32 = 1e-4;
 /// `lens_flares_render`'s least visible share that draws.
@@ -307,13 +308,6 @@ pub(crate) struct H4FlareDraw {
     pub(crate) flip: [bool; 2],
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
 
 /// `lens_flares_evaluate_corona_rotation_function` (X360 0x83AEA388).
 fn corona_rotation(
@@ -340,18 +334,7 @@ fn corona_rotation(
     }
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn normalized(v: [f32; 3]) -> [f32; 3] {
-    let length = dot(v, v).sqrt();
-    if length < 1e-6 {
-        v
-    } else {
-        v.map(|axis| axis / length)
-    }
-}
 
 /// `LensFlareEvaluateParameters`' result (`s_lens_flare_render_parameters`).
 #[derive(Debug, Clone, PartialEq)]
@@ -454,7 +437,7 @@ impl H4FlareAt {
         let depth = dot(view.forward, to_flare);
         let to_center: [f32; 3] =
             std::array::from_fn(|axis| 2.0 * (view.forward[axis] * depth - to_flare[axis]));
-        let to_eye = normalized(to_flare.map(|axis| -axis));
+        let to_eye = unit_unless_under_micro(to_flare.map(|axis| -axis));
         let mut brightness = 1.0;
         let [near, far] = flare.far_fade;
         if near != far {
@@ -570,7 +553,7 @@ impl H4FlareAt {
 
     fn placed(&self, bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
         let (position, forward) = posed_on(self.node, self.position, self.forward, bones);
-        (position, normalized(forward))
+        (position, unit_unless_under_micro(forward))
     }
 
     /// `lens_flare_render_occlusion` (X360 0x83AE82E0): the occlusion
@@ -628,7 +611,7 @@ impl H4FlareAt {
             (0.0, 1.0)
         };
         let left = view.right.map(|axis| -axis);
-        let toward_viewer = normalized(std::array::from_fn(|axis| view.eye[axis] - position[axis]));
+        let toward_viewer = unit_unless_under_micro(std::array::from_fn(|axis| view.eye[axis] - position[axis]));
         let offset = match flare.offset_direction {
             OFFSET_TOWARD_VIEWER => toward_viewer,
             OFFSET_MARKER_FORWARD => forward,

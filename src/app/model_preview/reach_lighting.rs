@@ -81,6 +81,7 @@ pub(super) const REACH_HDR_DIVISOR: f32 = 8.0;
 /// white point of 1 (the 360's 0x8272B0F8; MCC's not located).
 pub(super) const REACH_EXPOSURE: f32 = 1.0;
 use REACH_EXPOSURE as EXPOSURE;
+use crate::app::model_preview::common::math::unit_or_unchanged;
 
 /// `globals\defaults\default.camera_fx_settings`' `self illum preferred` and
 /// `self illum scale`, both fixed.
@@ -135,10 +136,6 @@ fn sum(color: [f32; 3]) -> f32 {
     color[0] + color[1] + color[2]
 }
 
-fn normalized(vector: [f32; 3]) -> [f32; 3] {
-    let length = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt();
-    if length > 0.0 { vector.map(|value| value / length) } else { vector }
-}
 
 /// `s_lightmap_sample::construct_analytical_light_from_dualvmf` (MCC
 /// 0x140828CD0, the 360's 0x827402C8): the light moved toward the vMF's
@@ -153,8 +150,8 @@ fn analytical_light_from_dual_vmf(vmf: &[[f32; 4]; 4], direction: [f32; 3], colo
     if total + carried > 0.0001 && carried / (total + carried) <= mask {
         share = carried / (total + carried);
     }
-    let lobes = normalized(std::array::from_fn(|axis| vmf[0][axis] * first + vmf[2][axis] * second));
-    let toward = normalized(std::array::from_fn(|axis| direction[axis] * share + lobes[axis] * (1.0 - share)));
+    let lobes = unit_or_unchanged(std::array::from_fn(|axis| vmf[0][axis] * first + vmf[2][axis] * second));
+    let toward = unit_or_unchanged(std::array::from_fn(|axis| direction[axis] * share + lobes[axis] * (1.0 - share)));
     let color = std::array::from_fn(|channel| {
         (vmf[1][channel] * first + vmf[3][channel] * second) * (1.0 - share) + color[channel] * share
     });
@@ -200,7 +197,7 @@ fn reach_shadow_direction_at(angle: f32) -> [f32; 3] {
     ];
     let sum: [f32; 3] =
         std::array::from_fn(|axis| light[axis] * weights[0] + first[axis] * weights[1] + second[axis] * weights[2]);
-    normalized(sum).map(|value| -value)
+    unit_or_unchanged(sum).map(|value| -value)
 }
 
 /// The frame's shadow direction, from the light toward the object.

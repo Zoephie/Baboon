@@ -4,6 +4,7 @@
 use blam_tags::math::Matrix4;
 
 use super::*;
+use crate::app::model_preview::common::math::{cross, dot, scaled, unit_by_reciprocal};
 
 /// One row of a weapon dropdown.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,17 +27,7 @@ pub(super) const IDENTITY: Matrix4 = Matrix4 {
     ],
 };
 
-pub(super) fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-pub(super) fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
 
 /// `perpendicular3d`: a vector square to `a`, from its two largest parts.
 pub(super) fn perpendicular(a: [f32; 3]) -> [f32; 3] {
@@ -48,9 +39,6 @@ pub(super) fn perpendicular(a: [f32; 3]) -> [f32; 3] {
     }
 }
 
-pub(super) fn scaled(a: [f32; 3], by: f32) -> [f32; 3] {
-    a.map(|value| value * by)
-}
 
 pub(super) fn added(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|axis| a[axis] + b[axis])
@@ -60,11 +48,6 @@ pub(super) fn apart(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|axis| a[axis] - b[axis])
 }
 
-/// Unit length, or as it is when it has none to speak of.
-pub(super) fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt();
-    if length >= 0.0001 { scaled(a, 1.0 / length) } else { a }
-}
 
 pub(super) fn axis_of(matrix: &Matrix4, axis: usize) -> [f32; 3] {
     std::array::from_fn(|row| matrix.m[row][axis])
@@ -111,7 +94,7 @@ pub(super) fn reach_with_arm(desired: Matrix4, shoulder: &mut Matrix4, elbow: &m
         return;
     }
     let toward = scaled(to_goal, 1.0 / reach);
-    let side = unit(cross(toward, apart(joint, start)));
+    let side = unit_by_reciprocal(cross(toward, apart(joint, start)));
     let bend = cross(side, toward);
     let mut goal = desired;
     let longest = (upper + fore) * LONGEST_REACH;
@@ -128,11 +111,11 @@ pub(super) fn reach_with_arm(desired: Matrix4, shoulder: &mut Matrix4, elbow: &m
     let out = (upper * upper - along * along).max(0.0).sqrt();
     // A bone's first axis runs down it, and its second stays as near as it can.
     let aimed = |x: [f32; 3], up: [f32; 3], place: [f32; 3]| {
-        let z = unit(cross(x, up));
+        let z = unit_by_reciprocal(cross(x, up));
         matrix_of([x, cross(z, x), z], place)
     };
-    let upper_axis = unit(added(scaled(toward, along), scaled(bend, out)));
-    let fore_axis = unit(added(scaled(toward, reach - along), scaled(bend, -out)));
+    let upper_axis = unit_by_reciprocal(added(scaled(toward, along), scaled(bend, out)));
+    let fore_axis = unit_by_reciprocal(added(scaled(toward, reach - along), scaled(bend, -out)));
     let bent = added(start, scaled(upper_axis, upper));
     *elbow = aimed(fore_axis, axis_of(elbow, 1), bent);
     *shoulder = aimed(upper_axis, axis_of(shoulder, 1), start);

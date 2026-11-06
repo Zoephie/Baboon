@@ -6,6 +6,7 @@
 use blam_tags::TagFile;
 
 use super::super::ce::attachments::object_block;
+use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 /// `set_depth_biases(DynamicLightShadowBias, DynamicLightShadowSlopeScaledBias)`
 /// (X .data 0x86E98CA4/A8): the generate's biases, whatever the model sets.
@@ -67,26 +68,8 @@ fn shadow_type(mode: &str, group: &[u8; 4]) -> Option<u8> {
 
 type Vector = [f32; 3];
 
-fn dot(a: Vector, b: Vector) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: Vector, b: Vector) -> Vector {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
 
-fn normalized(vector: Vector) -> Vector {
-    let length = dot(vector, vector).sqrt();
-    if length > 0.0 {
-        vector.map(|value| value / length)
-    } else {
-        vector
-    }
-}
 
 /// `object_shadow_visible`'s camera (X360 0x83A98470) over one object's
 /// bounding sphere, and the map it draws into.
@@ -111,7 +94,7 @@ impl H4ShadowCamera {
     /// sphere's near side 1.2 diameters along the light [inferred: the depth
     /// formula's operands are partly lost in the decompile].
     pub(crate) fn new(direction: Vector, center: Vector, radius: f32) -> Self {
-        let d = normalized(direction);
+        let d = unit_or_unchanged(direction);
         let radius = radius.max(2e-4);
         // `up` across the light, off `global_left`, or `global_backward`
         // when the light runs near it.
@@ -120,7 +103,7 @@ impl H4ShadowCamera {
         } else {
             [0.0, 1.0, 0.0]
         };
-        let up = normalized(cross(d, side));
+        let up = unit_or_unchanged(cross(d, side));
         let left = cross(up, d);
         let plane: Vector = std::array::from_fn(|axis| center[axis] - radius * d[axis]);
         let depth = 1.2 * 2.0 * radius;

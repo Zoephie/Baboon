@@ -27,6 +27,7 @@ use super::super::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::*;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::length;
 
 /// `TracerGpu::k_maxProfilesPerInstance`.
 const MOST_PROFILES: usize = 128;
@@ -700,9 +701,6 @@ pub(crate) struct H4TracerDraw {
     pub(crate) states: Vec<[u32; 16]>,
 }
 
-fn length_of(a: [f32; 3]) -> f32 {
-    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
-}
 
 /// `1 / (length · density)`, held to 0..1, an infinite step 1.
 fn percentile_step(length: f32, density: f32) -> f32 {
@@ -804,7 +802,7 @@ impl H4TracerAt {
                 game_time: time,
                 tracer_seeds: self.seeds,
                 system_age: age.unwrap_or(1.0),
-                lod: self.lod.at(length_of(from_eye)),
+                lod: self.lod.at(length(from_eye)),
                 effect_a,
                 effect_b: read(&self.secondary_by),
                 ..Default::default()
@@ -896,7 +894,7 @@ impl H4TracerAt {
         let end = posed_on(end.0, end.1, [1.0, 0.0, 0.0], bones).0;
         // `SetStatelessPositionAndLength`: a beam of no length runs forward.
         let span: [f32; 3] = std::array::from_fn(|axis| end[axis] - start[axis]);
-        let cap = length_of(span);
+        let cap = length(span);
         let direction = if cap > 0.0 {
             span.map(|axis| axis / cap)
         } else {
@@ -1114,7 +1112,7 @@ impl RunningTracer {
         spawned: &mut usize,
     ) {
         let moved: [f32; 3] = std::array::from_fn(|axis| at[axis] - self.last_placed[axis]);
-        let distance = length_of(moved);
+        let distance = length(moved);
         if self.placed_real && distance <= PLACE_EPSILON {
             return;
         }
@@ -1236,7 +1234,7 @@ impl H4TracerField {
                 running.last_placed = at;
             }
             running.speed = last.map_or(0.0, |last| {
-                length_of(std::array::from_fn(|axis| last[axis] - at[axis])) / dt
+                length(std::array::from_fn(|axis| last[axis] - at[axis])) / dt
             });
             let values = values(tracer.object);
             let onset = onsets.of(tracer.object, &tracer.scale_by, values.as_ref(), time);
@@ -1285,7 +1283,7 @@ impl H4TracerField {
             .map(pack_profile)
             .collect();
         let direction = {
-            let length = length_of(forward).max(1e-6);
+            let length = length(forward).max(1e-6);
             forward.map(|axis| axis / length)
         };
         Some(tracer.draw_of(

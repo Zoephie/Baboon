@@ -18,6 +18,7 @@ use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{checked_unit, cross};
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
@@ -320,14 +321,7 @@ impl H2ContrailAt {
     }
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn unit(a: [f32; 3]) -> Option<[f32; 3]> {
-    let length = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
-    (length >= 0.0001).then(|| a.map(|axis| axis / length))
-}
 
 /// What a slot keeps of its contrails.
 #[derive(Debug, Clone, Default)]
@@ -373,7 +367,7 @@ impl H2ContrailField {
                     let spread = contrail.cone * next_random(&mut running.random);
                     let turn = next_random(&mut running.random) * std::f32::consts::TAU;
                     let side = cross(forward, [0.0, 0.0, 1.0]);
-                    let side = unit(side).unwrap_or([0.0, 1.0, 0.0]);
+                    let side = checked_unit(side).unwrap_or([0.0, 1.0, 0.0]);
                     let lift = cross(side, forward);
                     let direction: [f32; 3] = std::array::from_fn(|axis| {
                         forward[axis] * spread.cos()
@@ -412,8 +406,8 @@ impl H2ContrailField {
             let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - a.place[axis]);
             match contrail.render_type.as_str() {
                 "vertical orientation" => Some([0.0, 0.0, 1.0]),
-                "horizontal orientation" | "media mapped" => unit([along[1], -along[0], 0.0]),
-                _ => unit(cross(along, to_eye)),
+                "horizontal orientation" | "media mapped" => checked_unit([along[1], -along[0], 0.0]),
+                _ => checked_unit(cross(along, to_eye)),
             }
         };
         let vertex = |at: usize| {

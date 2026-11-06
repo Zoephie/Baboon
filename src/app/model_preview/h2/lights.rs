@@ -24,6 +24,7 @@ use super::super::antennas::spring::{ReachAntennaSpring, posed_marker};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, lerp};
 
 /// `flags` of a `lens_flare`.
 const NO_OCCLUSION_TEST: i128 = 2;
@@ -1156,17 +1157,8 @@ pub(in crate::app::model_preview) fn read_h2_flares(
     found
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
 fn from_view(view: &CeFlareView, point: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|axis| point[axis] - view.eye[axis])
@@ -1626,6 +1618,7 @@ impl H2FlareAt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::common::math::length;
 
     /// What every kind of attachment reads for its `scale by`: full with no
     /// name, the object's value, and with none an idle object's input.
@@ -1940,9 +1933,6 @@ mod tests {
         CeFlareView { eye: [2.0, 0.0, 0.2], forward: [-1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] }
     }
 
-    fn length(a: [f32; 3]) -> f32 {
-        dot(a, a).sqrt()
-    }
 
     fn between(a: [f32; 5], b: [f32; 5]) -> [f32; 3] {
         std::array::from_fn(|axis| a[axis] - b[axis])

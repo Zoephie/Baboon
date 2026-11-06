@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::super::attachment::{MarkerFrame, unit};
+use super::super::attachment::MarkerFrame;
 use super::super::gen3::effects::adopt_event_function;
 use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::{CeFlareView, CeSprite, posed_on};
@@ -22,6 +22,7 @@ use super::super::materials::{H3Bitmap, read_h3_bitmap};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 
 /// `flags` of a `light`.
 const ALLOW_SHADOWS_AND_GELS: i128 = 1;
@@ -106,13 +107,7 @@ pub(crate) struct H3LitLight {
     pub(crate) projection: [f32; 16],
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
 /// `c_lights_view::initialize_simple_light`.
 fn simple_light(
@@ -867,7 +862,7 @@ impl H3FlareAt {
         }
         let (position, forward) = posed_on(self.node, self.position, self.forward, bones);
         let offset = match flare.occlusion_offset_direction {
-            OcclusionOffset::TowardViewer => unit(std::array::from_fn(|axis| view.eye[axis] - position[axis])),
+            OcclusionOffset::TowardViewer => unit_by_reciprocal(std::array::from_fn(|axis| view.eye[axis] - position[axis])),
             OcclusionOffset::MarkerForward => forward,
             OcclusionOffset::None => [0.0; 3],
         };

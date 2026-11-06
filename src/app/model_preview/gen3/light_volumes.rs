@@ -27,6 +27,7 @@ use super::super::renderer::{H3_EXPOSURE, reach_alt_exposure};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{clamped_unit, cross, length};
 
 /// What a volume's row can hold, whatever its tag says; also the most
 /// Reach's postprocess bakes.
@@ -710,18 +711,8 @@ pub(in crate::app::model_preview) fn read_h3_light_volumes(
     volumes
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn length_of(a: [f32; 3]) -> f32 {
-    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = length_of(a).max(1e-6);
-    a.map(|axis| axis / length)
-}
 
 /// `c_light_volume_gpu::render`'s count, and the two sizes the shaders get.
 fn profile_layout(length: f32, density: f32) -> (i32, f32, f32) {
@@ -851,7 +842,7 @@ impl H3LightVolumeAt {
             // distance from the location, nothing at no amount, and the
             // amount is state 6.
             let from_eye = std::array::from_fn(|axis| origin[axis] - view.eye[axis]);
-            let amount = lod_amount(volume.lod.as_ref(), length_of(from_eye));
+            let amount = lod_amount(volume.lod.as_ref(), length(from_eye));
             if amount <= 0.0 {
                 return None;
             }
@@ -864,7 +855,7 @@ impl H3LightVolumeAt {
         Some(VolumeLayout {
             state,
             origin,
-            direction: unit(direction),
+            direction: clamped_unit(direction),
             count,
             profiles,
             distance,
@@ -972,10 +963,10 @@ impl H3LightVolumeAt {
             let place: [f32; 3] = std::array::from_fn(|axis| origin[axis] + direction[axis] * along);
             let row = baked.map(|rows| rows[index as usize]);
             let thickness = row.map_or_else(|| volume.thickness.scalar(&state), |(_, thickness)| thickness);
-            let to_profile = unit(std::array::from_fn(|axis| place[axis] - view.eye[axis]));
-            let sine = length_of(cross(direction, to_profile)).min(1.0);
+            let to_profile = clamped_unit(std::array::from_fn(|axis| place[axis] - view.eye[axis]));
+            let sine = length(cross(direction, to_profile)).min(1.0);
             let drawn_length = thickness + (side_length - thickness) * sine;
-            let up = unit(cross(to_profile, direction));
+            let up = clamped_unit(cross(to_profile, direction));
             let across = cross(to_profile, up);
             let corner = |u: f32, v: f32| {
                 let (x, y) = ((u - 0.5) * drawn_length, (v - 0.5) * thickness);

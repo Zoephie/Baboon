@@ -19,6 +19,7 @@ use super::super::particles::{
 };
 use super::super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 
 /// `beams.inl`'s limit, and what a contrail's rows hold.
 const MOST_PROFILES: usize = 128;
@@ -570,22 +571,9 @@ pub(in crate::app::model_preview) fn read_carried_strips(source: &TagSource, pat
     strips
 }
 
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
 
-fn minus(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|axis| a[axis] - b[axis])
-}
 
-fn unit(a: [f32; 3]) -> [f32; 3] {
-    let length = dot(a, a).sqrt().max(1e-6);
-    a.map(|axis| axis / length)
-}
 
 /// `cross_section_world_basis`. Reach's has no guard for straight up, where
 /// `normalize(0)` takes every corner to NaN and the strip does not draw; the
@@ -595,8 +583,8 @@ fn world_basis(direction: [f32; 3]) -> [[f32; 3]; 2] {
     if product == [0.0; 3] {
         return [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
     }
-    let first = unit(product);
-    [first, unit(cross(first, direction))]
+    let first = clamped_unit(product);
+    [first, clamped_unit(cross(first, direction))]
 }
 
 /// One profile, as both systems' vertex shaders read it.
@@ -628,8 +616,8 @@ fn strip_vertices(
     let vertex = |profile: &Profile, strip: usize, offset: usize| {
         let world = world_basis(profile.direction);
         let basis = if shape == StripShape::Ribbon {
-            let first = unit(cross(minus(profile.place, view.eye), profile.direction));
-            [first, unit(cross(first, profile.direction))]
+            let first = clamped_unit(cross(minus(profile.place, view.eye), profile.direction));
+            [first, clamped_unit(cross(first, profile.direction))]
         } else {
             world
         };
@@ -656,7 +644,7 @@ fn strip_vertices(
         let mut color = profile.color;
         color[3] *= origin_fade(profile, place);
         if let Some([range, cutoff]) = look.edge_fade {
-            let normal = unit(cross(basis[0], basis[1]));
+            let normal = clamped_unit(cross(basis[0], basis[1]));
             let angle = dot(edge_view(place), normal).abs().min(1.0).acos();
             color[3] *= look.fade(range * (angle - cutoff));
         }
@@ -704,10 +692,10 @@ fn strip_vertices(
 /// `place` of `profile`: by how far from face on the corner's side is seen,
 /// across the beam's direction. Angle 0 faces the camera.
 fn angle_fade(place: [f32; 3], profile: &Profile, eye: [f32; 3], range: f32, cutoff: f32) -> f32 {
-    let profile_normal = unit(minus(place, profile.place));
-    let camera_to_vertex = unit(minus(place, eye));
-    let profile_ortho = unit(cross(camera_to_vertex, profile.direction));
-    let profile_camera_ortho = unit(cross(profile_ortho, profile.direction));
+    let profile_normal = clamped_unit(minus(place, profile.place));
+    let camera_to_vertex = clamped_unit(minus(place, eye));
+    let profile_ortho = clamped_unit(cross(camera_to_vertex, profile.direction));
+    let profile_camera_ortho = clamped_unit(cross(profile_ortho, profile.direction));
     let angle = dot(profile_camera_ortho, profile_normal).abs().min(1.0).acos();
     // A range of 0 divides by nothing, as the game does: a step at the begin
     // angle, and a NaN on it.
@@ -958,8 +946,8 @@ impl H3StripAt {
         let uncapped = beam.length.scalar(&state);
         let reach = self.end.map(|(node, end)| minus(posed_on(node, end, [1.0, 0.0, 0.0], bones).0, origin));
         let (direction, cap) = match reach {
-            Some(reach) => (unit(reach), dot(reach, reach).sqrt()),
-            None => (unit(forward), 0.0),
+            Some(reach) => (clamped_unit(reach), dot(reach, reach).sqrt()),
+            None => (clamped_unit(forward), 0.0),
         };
         let capped = if cap != 0.0 && cap <= uncapped { cap } else { uncapped };
         state.length = capped;
@@ -1004,7 +992,7 @@ impl H3StripAt {
                     look.fade(range * (dot(from, from).sqrt() - cutoff))
                 })
             },
-            |place| unit(minus(place, view.eye)),
+            |place| clamped_unit(minus(place, view.eye)),
         )
     }
 
