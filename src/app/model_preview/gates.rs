@@ -1168,6 +1168,23 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(REACH.0, REACH.1, "light", "type", Old::Value(1), "frustum"),
     row(REACH.0, REACH.1, "lens_flare", "flags", Old::Bit(0x2), "no occlusion test"),
     row(REACH.0, REACH.1, "lens_flare", "flags", Old::Bit(0x4), "only render in first person"),
+    // materials: Halo 2 shaders
+    row(H2.0, H2.1, "shader", "specular type", Old::Value(0), "none"),
+    // gen3::shaders: render method definitions
+    row(H3.0, H3.1, "render_method_definition", "flags", Old::Bit(0x1), "use automatic macros"),
+    row(H3.0, H3.1, "render_method_definition", "vertex_types/vertex type", Old::Value(0), "world"),
+    row(H3.0, H3.1, "render_method_definition", "vertex_types/vertex type", Old::Value(1), "rigid"),
+    row(H3.0, H3.1, "render_method_definition", "vertex_types/vertex type", Old::Value(2), "skinned"),
+    row(ODST.0, ODST.1, "render_method_definition", "flags", Old::Bit(0x1), "use automatic macros"),
+    row(ODST.0, ODST.1, "render_method_definition", "vertex_types/vertex type", Old::Value(0), "world"),
+    row(ODST.0, ODST.1, "render_method_definition", "vertex_types/vertex type", Old::Value(1), "rigid"),
+    row(ODST.0, ODST.1, "render_method_definition", "vertex_types/vertex type", Old::Value(2), "skinned"),
+    row(REACH.0, REACH.1, "render_method_definition", "flags", Old::Bit(0x1), "use automatic macros"),
+    row(REACH.0, REACH.1, "render_method_definition", "vertex_types/vertex type", Old::Value(0), "world"),
+    row(REACH.0, REACH.1, "render_method_definition", "vertex_types/vertex type", Old::Value(1), "rigid"),
+    row(REACH.0, REACH.1, "render_method_definition", "vertex_types/vertex type", Old::Value(2), "skinned"),
+    labelled(REACH.0, REACH.1, "render_method_definition", "entry_points/passes/flags", Old::Bit(0x1), "shared pixel shader compilation", &["shared entry point compilation"]),
+    row(REACH.0, REACH.1, "render_method_definition", "entry_points/passes/flags", Old::Bit(0x2), "shared VS only care non-default option of depended category"),
     // ce::particle_systems
     row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x1), "type states loop"),
     after(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x2), "type states loop"),
