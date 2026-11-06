@@ -3,7 +3,7 @@
 //! `light_apply` explicit shader. The inline lights go to the static pass as
 //! `simple_lights` instead. See `docs/reach-preview-research/lights.md`.
 
-use super::reach_lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
+use super::super::reach::lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
 use super::reach::lights::{CHEAP_ALBEDO_BLEND, ReachLightMethod, ReachLitLight, inline_rows};
 use super::*;
 use gen3::shaders::H3Value;

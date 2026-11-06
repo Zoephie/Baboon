@@ -12,7 +12,7 @@ use std::borrow::Cow;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::gen3::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
-use super::reach_lighting::{
+use super::super::reach::lighting::{
     REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_composite_gamma, reach_frame_value, reach_noise_offset,
     reach_noise_params,
 };
@@ -239,12 +239,12 @@ void main() {
 const HALF_LENS: f32 = 30.0 * std::f32::consts::PI / 180.0;
 
 /// The targets a frame draws through.
-pub(super) struct H3Targets {
-    pub(super) size: [i32; 2],
-    pub(super) albedo_framebuffer: glow::NativeFramebuffer,
+pub(in crate::app::model_preview) struct H3Targets {
+    pub(in crate::app::model_preview) size: [i32; 2],
+    pub(in crate::app::model_preview) albedo_framebuffer: glow::NativeFramebuffer,
     accumulation_framebuffer: glow::NativeFramebuffer,
-    pub(super) albedo: glow::NativeTexture,
-    pub(super) normal: glow::NativeTexture,
+    pub(in crate::app::model_preview) albedo: glow::NativeTexture,
+    pub(in crate::app::model_preview) normal: glow::NativeTexture,
     accumulation: glow::NativeTexture,
     /// A copy of the scene behind the object, for active camo.
     behind: glow::NativeTexture,
@@ -254,8 +254,8 @@ pub(super) struct H3Targets {
     /// `behind`, to blit into.
     behind_framebuffer: glow::NativeFramebuffer,
     /// A copy of the depth, for what fades against it.
-    pub(super) depth_copy: glow::NativeTexture,
-    pub(super) depth_copy_framebuffer: glow::NativeFramebuffer,
+    pub(in crate::app::model_preview) depth_copy: glow::NativeTexture,
+    pub(in crate::app::model_preview) depth_copy_framebuffer: glow::NativeFramebuffer,
     /// `apply_distortions`' two: how far each pixel leans, and what it reads.
     distortion: glow::NativeTexture,
     distortion_framebuffer: glow::NativeFramebuffer,
@@ -266,7 +266,7 @@ pub(super) struct H3Targets {
 /// A full-screen program for `fragment`, or none if it fails to compile or
 /// link. A failure is logged once and remembered, so callers that ask again
 /// each frame neither rebuild nor log it again.
-pub(super) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Option<glow::NativeProgram> {
+pub(in crate::app::model_preview) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Option<glow::NativeProgram> {
     thread_local! {
         static FAILED: std::cell::RefCell<std::collections::HashSet<String>> = Default::default();
     }

@@ -870,19 +870,19 @@ fn draw_preview_hover_label(
 
 #[derive(Clone, Copy)]
 pub(super) struct ModelGpuCamera {
-    center: [f32; 3],
-    scale: f32,
-    yaw: f32,
-    pitch: f32,
-    clip_scale: [f32; 2],
-    depth_scale: f32,
+    pub(super) center: [f32; 3],
+    pub(super) scale: f32,
+    pub(super) yaw: f32,
+    pub(super) pitch: f32,
+    pub(super) clip_scale: [f32; 2],
+    pub(super) depth_scale: f32,
     /// Linear remap `z = t · x + y` (with `t = view.y · depth_scale`) that
     /// spreads the extended render distance across NDC depth; see
     /// `gpu_uniforms`.
-    depth_map: [f32; 2],
+    pub(super) depth_map: [f32; 2],
     /// `1 / eye` in scaled view units: `w = 1 + view.y · this`. 0.0 is the
     /// orthographic view.
-    perspective: f32,
+    pub(super) perspective: f32,
 }
 
 /// Perspective's vertical field of view (across the viewport's shorter side),
@@ -1390,7 +1390,7 @@ impl ModelGpuFrame {
 
 /// Over the viewer's shoulder, so orbiting never leaves the near side unlit.
 /// The preview's own, in view axes: right, forward and up.
-fn h2_camera_light(yaw: f32, pitch: f32) -> [f32; 3] {
+pub(super) fn h2_camera_light(yaw: f32, pitch: f32) -> [f32; 3] {
     const LIGHT: [f32; 3] = [-0.4, -0.7, 0.6];
     let length = LIGHT.iter().map(|value| value * value).sum::<f32>().sqrt();
     unrotate_view_vector(yaw, pitch, LIGHT.map(|value| value / length))
@@ -1511,9 +1511,7 @@ mod h3_bloom;
 pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
 #[path = "h3_draw.rs"]
 pub(super) mod h3_draw;
-#[path = "reach_lighting.rs"]
-mod reach_lighting;
-pub(super) use reach_lighting::{
+pub(super) use super::reach::lighting::{
     REACH_DARK_MULTIPLIER, REACH_SCREEN_NOISE_BITMAP, reach_alt_exposure, reach_exposure, reach_lightmap_tint,
     reach_particle_light,
 };
@@ -1524,11 +1522,9 @@ mod h4_bloom;
 #[path = "h4_holograms.rs"]
 pub(super) mod h4_holograms;
 #[path = "gen3_shadow.rs"]
-mod gen3_shadow;
+pub(super) mod gen3_shadow;
 #[path = "gen3_screen_lights.rs"]
 mod gen3_screen_lights;
-#[path = "reach_shadow_pass.rs"]
-mod reach_shadow_pass;
 #[path = "reach_light_pass.rs"]
 mod reach_light_pass;
 #[path = "h4_light_pass.rs"]
@@ -4125,7 +4121,7 @@ pub(super) struct RenderCore {
     h2_target: Option<H2Target>,
     scene: Option<H2Target>,
     h2_frame_copy: Option<H2Target>,
-    h3_targets: Option<h3_draw::H3Targets>,
+    pub(in crate::app::model_preview) h3_targets: Option<h3_draw::H3Targets>,
     /// The light drawing now, and its gel.
     h3_light: Option<(h3::lights::H3LitLight, Option<glow::NativeTexture>)>,
     /// Linked passes by their address, or the pass that failed to link: each
@@ -4161,8 +4157,6 @@ pub(super) struct RenderCore {
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
     h4_draw: Option<h4::submit::H4Draw>,
     /// Reach's self shadow: its map and mask, and the apply.
-    reach_shadow: Option<reach_shadow_pass::ReachShadowTargets>,
-    reach_shadow_program: Option<glow::NativeProgram>,
     /// What a Reach pass draws through in place of the camera, and the mask
     /// its static pass reads, while they are set.
     reach_view_projection: Option<[f32; 16]>,
@@ -4324,8 +4318,6 @@ impl RenderCore {
                 h4_shadow_programs: None,
                 h4_shadow_mask: None,
                 h4_draw: None,
-                reach_shadow: None,
-                reach_shadow_program: None,
                 reach_view_projection: None,
                 reach_shadow_mask: None,
                 reach_inline: Vec::new(),
@@ -6798,7 +6790,7 @@ mod tests {
     #[test]
     fn the_flare_and_reach_composite_programs_compile_under_glslang() {
         assert_compiles_under_glslang("flare", &[("vert", CE_FLARE_VERTEX), ("frag", CE_FLARE_FRAGMENT)]);
-        assert_compiles_under_glslang("reach_composite", &[("frag", reach_lighting::REACH_COMPOSITE_FRAGMENT)]);
+        assert_compiles_under_glslang("reach_composite", &[("frag", super::reach::lighting::REACH_COMPOSITE_FRAGMENT)]);
     }
 
     /// Each `(stage, source)` of `name` through `glslangValidator`; without

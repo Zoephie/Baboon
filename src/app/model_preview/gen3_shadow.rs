@@ -6,10 +6,10 @@ use super::*;
 use gen3::shaders::{H3Material, H3Pass};
 
 /// A batch that casts, its material, and that material's `shadow_generate`.
-pub(super) type ShadowCaster<'a> = (&'a RenderModelPreviewBatch, &'a Arc<H3Material>, Arc<H3Pass>);
+pub(in crate::app::model_preview) type ShadowCaster<'a> = (&'a RenderModelPreviewBatch, &'a Arc<H3Material>, Arc<H3Pass>);
 
 /// The batches that cast: opaque, no decal, and with a `shadow_generate`.
-pub(super) fn shadow_casters(batches: &[(RenderModelPreviewBatch, Arc<H3Material>)]) -> Vec<ShadowCaster<'_>> {
+pub(in crate::app::model_preview) fn shadow_casters(batches: &[(RenderModelPreviewBatch, Arc<H3Material>)]) -> Vec<ShadowCaster<'_>> {
     batches
         .iter()
         .filter(|(_, material)| material.blend == gen3::shaders::H3Blend::Opaque && !material.decal)
@@ -23,7 +23,7 @@ impl RenderCore {
     /// and by `depth` in depth units, culled as ever. Leaves depth testing on
     /// and every channel writable.
     #[allow(clippy::too_many_arguments)]
-    pub(super) unsafe fn generate_shadow_depth(
+    pub(in crate::app::model_preview) unsafe fn generate_shadow_depth(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -61,7 +61,7 @@ impl RenderCore {
     /// The scene's depth and stencil, `size` of them, from `scene` (a pass's
     /// framebuffer that holds them) into `depth_copy`, to find each pixel's
     /// place in the world. Leaves the viewport at `size`.
-    pub(super) unsafe fn copy_scene_depth(
+    pub(in crate::app::model_preview) unsafe fn copy_scene_depth(
         gl: &glow::Context,
         size: [i32; 2],
         scene: glow::NativeFramebuffer,
@@ -80,7 +80,7 @@ impl RenderCore {
     /// `program` bound with `textures` on units 0 up, and the frame's
     /// `screen_to_world` and the light's `shadow_view_projection` set.
     #[allow(clippy::too_many_arguments)]
-    pub(super) unsafe fn begin_shadow_apply(
+    pub(in crate::app::model_preview) unsafe fn begin_shadow_apply(
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         size: [i32; 2],
@@ -112,7 +112,7 @@ impl RenderCore {
 
     /// The apply's triangle, kept to `channels` and the least of each, then
     /// the state the scene draws with again and the slot's vertex array.
-    pub(super) unsafe fn draw_shadow_apply(&mut self, gl: &glow::Context, slot: usize, [red, green, blue, alpha]: [bool; 4]) {
+    pub(in crate::app::model_preview) unsafe fn draw_shadow_apply(&mut self, gl: &glow::Context, slot: usize, [red, green, blue, alpha]: [bool; 4]) {
         unsafe {
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::CULL_FACE);

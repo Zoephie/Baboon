@@ -3,15 +3,21 @@
 //! then `shadow_apply` into the mask the static pass reads. See
 //! `docs/reach-preview-research/shadow.md`.
 
-use super::gl::target::{Made, Sampling, Texels};
-use super::reach::shadow::{ReachShadowCamera, ReachShadowFilter, hull_planes};
-use super::*;
-use gen3::shaders::H3Material;
+use eframe::glow::{self, HasContext};
+
+use super::super::gen3::render::Gen3Batch;
+use super::super::gl::target::{Made, Sampling, Texels};
+use super::super::renderer::gen3_shadow::shadow_casters;
+use super::super::renderer::h3_draw::screen_program;
+use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore};
+use super::super::unrotate_view_vector;
+use super::render::ReachGame;
+use super::shadow::{ReachShadowCamera, ReachShadowFilter, hull_planes};
 
 /// `shadow_apply.hlsl`'s `default_ps` with no level: `CHANNEL_TRANSFORM` is
 /// (1, 1, 0.2, 1), and the pixels it touches are those of the scene inside
 /// the hull, which the game finds with two stencil passes over its faces.
-pub(super) const APPLY_FRAGMENT: &str = "#version 410 core
+pub(in crate::app::model_preview) const APPLY_FRAGMENT: &str = "#version 410 core
 uniform sampler2D scene_depth;
 uniform sampler2D normals;
 uniform sampler2D shadow_map;
@@ -107,7 +113,7 @@ void main() {
 ";
 
 /// The map and the mask, kept between frames.
-pub(super) struct ReachShadowTargets {
+pub(in crate::app::model_preview) struct ReachShadowTargets {
     map: glow::NativeTexture,
     map_framebuffer: glow::NativeFramebuffer,
     map_size: i32,
@@ -138,7 +144,7 @@ impl ReachShadowTargets {
         }
     }
 
-    pub(super) unsafe fn delete(&self, gl: &glow::Context) {
+    unsafe fn delete(&self, gl: &glow::Context) {
         unsafe {
             gl.delete_framebuffer(self.map_framebuffer);
             gl.delete_framebuffer(self.mask_framebuffer);
@@ -148,9 +154,9 @@ impl ReachShadowTargets {
     }
 }
 
-impl RenderCore {
+impl ReachGame {
     /// The camera the object's shadow is drawn from this frame.
-    fn reach_shadow_camera(frame: &ModelGpuFrame, viewport: [i32; 2]) -> ReachShadowCamera {
+    fn shadow_camera(frame: &ModelGpuFrame, viewport: [i32; 2]) -> ReachShadowCamera {
         let (low, high) = (frame.preview.bounds_min, frame.preview.bounds_max);
         let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
         let radius = (0..3).map(|axis| (high[axis] - center[axis]).powi(2)).sum::<f32>().sqrt();
@@ -161,52 +167,52 @@ impl RenderCore {
         let ahead = (0..3).map(|axis| (center[axis] - camera.center[axis]) * forward[axis]).sum::<f32>() * camera.scale;
         let w = (1.0 + ahead * camera.perspective).max(0.1);
         let diameter = 2.0 * radius * camera.scale * camera.clip_scale[1] * viewport[1] as f32 * 0.5 / w;
-        let direction = reach_lighting::reach_shadow_direction(frame);
+        let direction = super::lighting::reach_shadow_direction(frame);
         ReachShadowCamera::new(direction, center, radius, diameter)
     }
 
     /// The object's shadow into its mask, if it casts one: the mask, or none.
     /// Reads the depth and normals the albedo pass left.
-    pub(in crate::app::model_preview) unsafe fn draw_reach_shadow(
+    pub(in crate::app::model_preview) unsafe fn draw_shadow(
         &mut self,
-        gl: &glow::Context,
-        frame: &ModelGpuFrame,
-        slot: usize,
-        batches: &[(RenderModelPreviewBatch, Arc<H3Material>)],
+        cx: &mut FrameCx<'_>,
+        batches: &[Gen3Batch],
     ) -> Option<glow::NativeTexture> {
+        let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
+        let core: &mut RenderCore = cx.core;
         let caster = frame.preview.reach_shadow_caster?;
-        let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) = self
+        let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) = core
             .h3_targets
             .as_ref()
             .map(|targets| (targets.size, targets.albedo_framebuffer, targets.normal, targets.depth_copy, targets.depth_copy_framebuffer))?;
-        let camera = Self::reach_shadow_camera(frame, size);
-        let casters = gen3_shadow::shadow_casters(batches);
+        let camera = Self::shadow_camera(frame, size);
+        let casters = shadow_casters(batches);
         if casters.is_empty() {
             return None;
         }
         unsafe {
             let stale = self
-                .reach_shadow
+                .shadow
                 .as_ref()
                 .is_some_and(|targets| targets.map_size != camera.pixels || targets.mask_size != size);
-            if stale && let Some(old) = self.reach_shadow.take() {
+            if stale && let Some(old) = self.shadow.take() {
                 old.delete(gl);
             }
-            if self.reach_shadow.is_none() {
-                self.reach_shadow = ReachShadowTargets::new(gl, camera.pixels, size);
+            if self.shadow.is_none() {
+                self.shadow = ReachShadowTargets::new(gl, camera.pixels, size);
             }
             let (map, map_framebuffer, mask, mask_framebuffer) =
-                self.reach_shadow.as_ref().map(|targets| (targets.map, targets.map_framebuffer, targets.mask, targets.mask_framebuffer))?;
+                self.shadow.as_ref().map(|targets| (targets.map, targets.map_framebuffer, targets.mask, targets.mask_framebuffer))?;
             let bias = [caster.slope_bias, caster.depth_bias];
             let view_projection = camera.view_projection;
-            self.generate_shadow_depth(gl, frame, slot, &casters, map_framebuffer, camera.pixels, view_projection, bias);
-            Self::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
-            if self.reach_shadow_program.is_none() {
-                self.reach_shadow_program = h3_draw::screen_program(gl, APPLY_FRAGMENT);
+            core.generate_shadow_depth(gl, frame, slot, &casters, map_framebuffer, camera.pixels, view_projection, bias);
+            RenderCore::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
+            if self.shadow_program.is_none() {
+                self.shadow_program = screen_program(gl, APPLY_FRAGMENT);
             }
-            let program = self.reach_shadow_program?;
+            let program = self.shadow_program?;
             let textures = [("scene_depth", depth_copy), ("normals", normal), ("shadow_map", map)];
-            Self::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0, 0.5, 0.5, 1.0], program, textures, &view_projection)?;
+            RenderCore::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0, 0.5, 0.5, 1.0], program, textures, &view_projection)?;
             let at = |name: &str| gl.get_uniform_location(program, name);
             let texel = 1.0 / camera.pixels as f32;
             gl.uniform_2_f32(at("texel_offset").as_ref(), -texel, texel);
@@ -226,7 +232,7 @@ impl RenderCore {
             // distance, which a preview's framing stays inside.
             gl.uniform_1_f32(at("shadow_alpha").as_ref(), 1.0);
             // The red and alpha the apply writes.
-            self.draw_shadow_apply(gl, slot, [true, false, false, true]);
+            core.draw_shadow_apply(gl, slot, [true, false, false, true]);
             Some(mask)
         }
     }

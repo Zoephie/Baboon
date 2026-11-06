@@ -3,8 +3,8 @@
 //! Halo 3 lit by nine spherical harmonics, and its final composite has no tone
 //! curve: the frame is encoded by a square root.
 
-use super::gen3::shaders::H3Value;
-use super::*;
+use super::super::gen3::shaders::H3Value;
+use super::super::renderer::*;
 
 /// `c_geometry_sampler::m_default_lightprobe_sample` (MCC 0x14201E920, the
 /// 360's 0x8527C000, the same floats): its dual vMF, as
@@ -75,11 +75,11 @@ pub(crate) fn reach_lightmap_tint() -> [f32; 3] {
 const HDR_TARGET_STOPS: f32 = 3.0;
 
 /// What the stops bring light down by: `2^HDR_TARGET_STOPS`.
-pub(super) const REACH_HDR_DIVISOR: f32 = 8.0;
+pub(in crate::app::model_preview) const REACH_HDR_DIVISOR: f32 = 8.0;
 
 /// `get_render_exposure` at the default `camera_fx_settings`' 0 stops and a
 /// white point of 1 (the 360's 0x8272B0F8; MCC's not located).
-pub(super) const REACH_EXPOSURE: f32 = 1.0;
+pub(in crate::app::model_preview) const REACH_EXPOSURE: f32 = 1.0;
 use REACH_EXPOSURE as EXPOSURE;
 use crate::app::model_preview::common::math::unit_or_unchanged;
 
@@ -126,10 +126,10 @@ pub(crate) fn reach_alt_exposure(stops: f32) -> [f32; 4] {
 /// What `setup_object_lighting_for_pass` (the 360's 0x826DD650) gives an
 /// object's static lighting pass.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct ReachObjectLighting {
-    pub(super) dual_vmf: [[f32; 4]; 4],
-    pub(super) direction: [f32; 3],
-    pub(super) intensity: [f32; 3],
+pub(in crate::app::model_preview) struct ReachObjectLighting {
+    pub(in crate::app::model_preview) dual_vmf: [[f32; 4]; 4],
+    pub(in crate::app::model_preview) direction: [f32; 3],
+    pub(in crate::app::model_preview) intensity: [f32; 3],
 }
 
 fn sum(color: [f32; 3]) -> f32 {
@@ -166,7 +166,7 @@ fn turned(direction: [f32; 3], angle: f32) -> [f32; 3] {
 
 /// The default sample's lighting, its lobes and light turned about the
 /// vertical by `angle`: the preview's own, for a light that follows the camera.
-pub(super) fn reach_object_lighting(angle: f32) -> ReachObjectLighting {
+pub(in crate::app::model_preview) fn reach_object_lighting(angle: f32) -> ReachObjectLighting {
     let mut sample = DEFAULT_DUAL_VMF;
     for lobe in [0, 2] {
         let [x, y, z] = turned([sample[lobe][0], sample[lobe][1], sample[lobe][2]], angle);
@@ -201,7 +201,7 @@ fn reach_shadow_direction_at(angle: f32) -> [f32; 3] {
 }
 
 /// The frame's shadow direction, from the light toward the object.
-pub(super) fn reach_shadow_direction(frame: &ModelGpuFrame) -> [f32; 3] {
+pub(in crate::app::model_preview) fn reach_shadow_direction(frame: &ModelGpuFrame) -> [f32; 3] {
     if !frame.light_follows_camera {
         return reach_shadow_direction_at(0.0);
     }
@@ -216,7 +216,7 @@ fn light_heading() -> f32 {
 
 /// The lighting for this frame: the game's, or turned to come from over the
 /// viewer's shoulder when the light follows the camera.
-pub(super) fn reach_frame_lighting(frame: &ModelGpuFrame) -> ReachObjectLighting {
+pub(in crate::app::model_preview) fn reach_frame_lighting(frame: &ModelGpuFrame) -> ReachObjectLighting {
     if !frame.light_follows_camera {
         return reach_object_lighting(0.0);
     }
@@ -235,7 +235,7 @@ fn reach_vmf_index(name: &str) -> Option<usize> {
 /// What Reach's rasterizer globals hold for an object here, by uniform name,
 /// at the area screen effects' exposure `stops`. Anything not named falls to
 /// what Reach shares with Halo 3.
-pub(super) fn reach_frame_value(frame: &ModelGpuFrame, name: &str, stops: f32) -> Option<H3Value> {
+pub(in crate::app::model_preview) fn reach_frame_value(frame: &ModelGpuFrame, name: &str, stops: f32) -> Option<H3Value> {
     let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
     let lighting = || reach_frame_lighting(frame);
     if let Some(index) = reach_vmf_index(name) {
@@ -279,21 +279,21 @@ pub(crate) const REACH_SCREEN_NOISE_BITMAP: usize = 15;
 /// `postprocess_player_view`'s `gamma` constant's `.z` (MCC
 /// `sub_1408428C0`): half the screen effects' gamma, which the composite
 /// raises the light to (`convert_to_gamma2_and_apply_color_adjustments`).
-pub(super) fn reach_composite_gamma(gamma: f32) -> f32 {
+pub(in crate::app::model_preview) fn reach_composite_gamma(gamma: f32) -> f32 {
     gamma * 0.5
 }
 
 /// `noise_params` (MCC `sub_1408428C0` into `sub_140841DE0`): from the area
 /// screen effects' bright and dark noise, `(2·bright, dark, 1 − bright, 0)`.
 /// No noise leaves the picture as it was.
-pub(super) fn reach_noise_params(bright: f32, dark: f32) -> [f32; 4] {
+pub(in crate::app::model_preview) fn reach_noise_params(bright: f32, dark: f32) -> [f32; 4] {
     [bright + bright, dark, 1.0 - bright, 0.0]
 }
 
 /// The noise's offset for a frame (MCC `sub_1408428C0`): a half texel step
 /// that turns over every other frame, plus `real_random`'s two draws
 /// (`random`, each in [0, 1)), halved.
-pub(super) fn reach_noise_offset(frame: u32, random: [f32; 2]) -> [f32; 2] {
+pub(in crate::app::model_preview) fn reach_noise_offset(frame: u32, random: [f32; 2]) -> [f32; 2] {
     let step = |frame: u32| (frame & 2) as f32 * 0.5;
     [(step(frame) + random[0]) * 0.5, (step(frame.wrapping_add(1)) + random[1]) * 0.5]
 }
@@ -302,7 +302,7 @@ pub(super) fn reach_noise_offset(frame: u32, random: [f32; 2]) -> [f32; 2] {
 /// up, `pow(x, gamma.z)` (0.5 at the default gamma, `convert_output_gamma2`),
 /// the colour matrix, then `apply_noise`. The tone curve's call is commented
 /// out in the source.
-pub(super) const REACH_COMPOSITE_FRAGMENT: &str = "#version 410 core
+pub(in crate::app::model_preview) const REACH_COMPOSITE_FRAGMENT: &str = "#version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
 uniform sampler2D scene_depth;

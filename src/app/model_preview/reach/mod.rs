@@ -2,7 +2,9 @@
 //! draws through too. Its lighting, bloom and passes are the renderer's.
 
 pub(super) mod camo;
+pub(in crate::app::model_preview) mod lighting;
 pub(super) mod lights;
 pub(in crate::app::model_preview) mod render;
 pub(super) mod shadow;
+pub(in crate::app::model_preview) mod shadow_pass;
 pub(super) mod shield;

@@ -14,6 +14,9 @@ use super::lights::ReachLitLight;
 #[derive(Default)]
 pub(in crate::app::model_preview) struct ReachGame {
     mask: Option<glow::NativeTexture>,
+    /// The shadow's map and mask, kept between frames, and its apply program.
+    pub(super) shadow: Option<super::shadow_pass::ReachShadowTargets>,
+    pub(super) shadow_program: Option<glow::NativeProgram>,
 }
 
 impl Gen3Game for ReachGame {
@@ -33,7 +36,7 @@ impl Gen3Game for ReachGame {
         _scene: glow::NativeFramebuffer,
     ) -> bool {
         self.mask = if cx.frame.self_shadow {
-            unsafe { cx.core.draw_reach_shadow(cx.gl, cx.frame, cx.slot, batches) }
+            unsafe { self.draw_shadow(cx, batches) }
         } else {
             None
         };
