@@ -15,13 +15,14 @@ use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::{H2Image, tag_function_at};
-use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
+use super::super::gen3::effects::{marker_name, part_markers};
 use super::super::materials::{H3Bitmap, read_h3_bitmap};
 use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_unless_under_micro};
+use crate::app::model_preview::common::attached::attached;
 
 const SMALLEST: f32 = 1e-4;
 /// `lens_flares_render`'s least visible share that draws.
@@ -348,18 +349,6 @@ struct H4FlareParameters {
 }
 
 impl H4FlareAt {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         let flare = &self.flare;
         let curves = [&flare.time_color, &flare.age_color]
@@ -844,6 +833,8 @@ pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::super::gen3::sh
     )?;
     Ok(super::super::gen3::shaders::pass_of(vertex, pixel))
 }
+
+attached!(H4FlareAt);
 
 #[cfg(test)]
 mod tests {

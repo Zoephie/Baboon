@@ -8,7 +8,6 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::effects::adopt_event_function;
 use super::super::ce::attachments::elements;
 use super::super::ce::lights::{CeFlareView, posed_on};
 use super::super::h2::functions::H2FunctionValues;
@@ -21,6 +20,7 @@ use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
+use crate::app::model_preview::common::attached::attached;
 
 /// `beams.inl`'s limit, and what a contrail's rows hold.
 const MOST_PROFILES: usize = 128;
@@ -872,21 +872,10 @@ pub(crate) struct H3StripField {
 }
 
 impl H3StripAt {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
     pub(crate) fn scale_names(&self) -> [&str; 2] {
         [&self.scale_by, &self.secondary_by]
     }
 
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
 
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
@@ -1170,6 +1159,8 @@ impl H3StripField {
         }
     }
 }
+
+attached!(H3StripAt);
 
 #[cfg(test)]
 mod tests {

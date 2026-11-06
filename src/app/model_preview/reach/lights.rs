@@ -13,10 +13,11 @@ use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
-use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
+use super::super::gen3::effects::{marker_name, part_markers};
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::cross;
+use crate::app::model_preview::common::attached::attached;
 
 /// `light_update_state`'s range when no function names one.
 const DEFAULT_RANGE: f32 = 0.5;
@@ -237,19 +238,6 @@ fn cone(frustum: bool, field_of_view: f32, hotspot: f32) -> [f32; 2] {
 }
 
 impl ReachLight {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         let tag = &self.tag;
         [&tag.color.input, &tag.color.range, &tag.intensity.input, &tag.intensity.range, &self.scale_by]
@@ -344,19 +332,6 @@ impl ReachLight {
 }
 
 impl ReachCheapLight {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    /// As [`ReachLight::on_attached`].
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         [&self.scale_by, &self.secondary_by].into_iter().map(String::as_str)
     }
@@ -523,6 +498,8 @@ pub(crate) fn inline_rows(lit: &[ReachLitLight]) -> Vec<[[f32; 4]; 5]> {
         .map(ReachLitLight::simple_light_rows)
         .collect()
 }
+
+attached!(ReachLight, ReachCheapLight);
 
 #[cfg(test)]
 mod tests {

@@ -16,13 +16,14 @@ use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
-use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
+use super::super::gen3::effects::{marker_name, part_markers};
 use super::super::gen3::shaders::H3Pass;
 use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::hlsl::emit::Stage;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
+use crate::app::model_preview::common::attached::attached;
 
 const SMALLEST: f32 = 1e-4;
 /// Halo 4's simulation rate.
@@ -237,19 +238,6 @@ fn tinted(color: [f32; 3], change_color: Option<usize>, change_colors: &[[f32; 3
 }
 
 impl H4Light {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.scale_by.as_str())
     }
@@ -367,19 +355,6 @@ impl H4Light {
 }
 
 impl H4CheapLight {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         [&self.scale_by, &self.secondary_by]
             .into_iter()
@@ -764,6 +739,8 @@ pub(crate) fn h4_light_pass(
         textures: pixel.textures,
     })
 }
+
+attached!(H4Light, H4CheapLight);
 
 #[cfg(test)]
 mod tests {

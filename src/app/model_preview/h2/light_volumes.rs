@@ -10,7 +10,7 @@ use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::functions::H2FunctionValues;
 use super::lights::H2EffectPart;
-use super::super::gen3::effects::{adopt_event_function, for_each_attached_part, part_markers};
+use super::super::gen3::effects::{for_each_attached_part, part_markers};
 use super::super::dx9::passes::{H2Image, tag_function_at};
 use super::super::gen3::effects::marker_name;
 use super::super::materials::decode_h2_image;
@@ -18,6 +18,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::dot;
+use crate::app::model_preview::common::attached::attached;
 
 /// `sprites[256]`.
 const MOST_SPRITES: usize = 256;
@@ -433,20 +434,7 @@ impl H2LightVolume {
         self.effect.as_ref()
     }
 
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
 
-    /// Follow the regions `merge_attached` renames for what `name` brings,
-    /// and an effect event's function to the owner that plays it, as the
-    /// event's flares and lights do.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
 
     pub(crate) fn volumes(&self) -> &[H2Volume] {
         &self.volumes
@@ -571,9 +559,12 @@ impl H2LightVolume {
     }
 }
 
+attached!(H2LightVolume);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::common::attached::Attached;
     use crate::core::game::GameId;
 
     /// A held weapon's firing-effect volume answers its owner's panel under

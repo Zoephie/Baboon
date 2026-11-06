@@ -14,7 +14,7 @@ use super::super::ce::lights::{
 };
 use super::super::ce::passes::argb;
 use super::functions::H2FunctionValues;
-use super::super::gen3::effects::{H3EffectTimes, adopt_event_function, for_each_attached_part, part_markers};
+use super::super::gen3::effects::{H3EffectTimes, for_each_attached_part, part_markers};
 use blam_tags::tag_function::h2::transition_evaluate;
 use super::super::dx9::passes::{
     H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
@@ -26,6 +26,8 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, lerp};
 use crate::app::model_preview::common::random::lcg_step;
+use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::common::attached::Attached;
 
 /// `flags` of a `lens_flare`.
 const NO_OCCLUSION_TEST: i128 = 2;
@@ -355,17 +357,7 @@ impl H2Antenna {
         self.reach.as_ref()
     }
 
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
 
-    /// On an attached object, its marker's region carries the object's name.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
 
     /// Where its marker is posed, and the unit way it faces.
     pub(crate) fn marker(&self, bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
@@ -1236,20 +1228,6 @@ impl H2Light {
 }
 
 impl H2PointLight {
-    /// An attached object's event light answers to its owner's panel, and
-    /// follows the regions `merge_attached` renames.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
     /// The layer its diffuse draws on.
     pub(crate) fn diffuse_layer(&self) -> H2Layer {
         H2Layer::diffuse_with_contrast(self.light.contrast)
@@ -1328,18 +1306,6 @@ impl H2Frustum {
 }
 
 impl H2GelLight {
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
@@ -1408,18 +1374,7 @@ impl H2FlareAt {
         }
     }
 
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
 
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
 
     /// The function that scales it, which sliders and frames must answer for.
     pub(crate) fn scale_name(&self) -> &str {
@@ -1615,6 +1570,9 @@ impl H2FlareAt {
         sprites
     }
 }
+
+attached!(H2PointLight, H2GelLight, H2FlareAt);
+attached!(keeps function: H2Antenna);
 
 #[cfg(test)]
 mod tests {

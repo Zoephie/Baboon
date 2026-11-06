@@ -17,6 +17,7 @@ use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::app::model_preview::common::attached::Attached;
 
 const ARMATURE_COLOR: Color32 = Color32::from_rgb(255, 204, 0);
 const MARKER_TOOLTIP_COLOR: Color32 = Color32::from_rgb(120, 235, 255);

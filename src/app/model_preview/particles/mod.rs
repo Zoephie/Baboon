@@ -12,7 +12,6 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, ParameterSou
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::gen3::effects::adopt_event_function;
 use super::ce::attachments::elements;
 use super::ce::lights::CeFlareView;
 use super::h2::functions::H2FunctionValues;
@@ -30,6 +29,7 @@ use crate::core::game::GameId;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::random::{high_bits, lcg_step};
+use crate::app::model_preview::common::attached::attached;
 
 /// Seconds run before the first frame, so a held pose has its particles.
 pub(super) const PRE_ROLL: f32 = 6.0;
@@ -2551,10 +2551,6 @@ pub(super) fn carried_strips(systems: &[Arc<H3ParticleSystem>]) -> Vec<Arc<H3Str
 }
 
 impl H3ParticleSystem {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
@@ -2563,13 +2559,6 @@ impl H3ParticleSystem {
         [&self.scale_by, &self.secondary_by]
     }
 
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
 }
 
 /// The systems of an object's attached effects, one at each marker of a location.
@@ -3911,6 +3900,8 @@ impl H3ParticleSystem {
     }
 
 }
+
+attached!(H3ParticleSystem);
 
 #[cfg(test)]
 mod tests {

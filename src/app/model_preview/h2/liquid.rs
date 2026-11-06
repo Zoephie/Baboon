@@ -19,6 +19,7 @@ use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot};
 use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
+use crate::app::model_preview::common::attached::attached;
 
 const OCTAVES: usize = 9;
 /// `liquid_arc_state_new`'s random starts, which never need to be the game's.
@@ -274,17 +275,7 @@ impl H2LiquidAt {
         &self.scale_by
     }
 
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
 
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
 
     pub(crate) fn arcs(&self) -> &[LiquidArc] {
         &self.arcs
@@ -393,6 +384,8 @@ impl H2LiquidAt {
         quads
     }
 }
+
+attached!(keeps function: H2LiquidAt);
 
 #[cfg(test)]
 mod tests {

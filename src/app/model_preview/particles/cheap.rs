@@ -16,7 +16,7 @@ use super::super::ce::lights::{CeFlareView, posed_on};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::{
-    CHEAP_PARTICLE_EMITTER, H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
+    CHEAP_PARTICLE_EMITTER, H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame,
     read_part_placement,
 };
 use super::super::particles::{PRE_ROLL, Random, particle_game_time};
@@ -24,6 +24,7 @@ use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
+use crate::app::model_preview::common::attached::attached;
 
 /// `s_cheap_particle_system::k_max_particles`: the ring every emitter writes.
 const MOST_PARTICLES: usize = 0x2000;
@@ -803,19 +804,6 @@ pub(in crate::app::model_preview) fn read_reach_cheap_emitters(
 }
 
 impl ReachCheapEmitterAt {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     /// The functions it reads off its object: its effect's scales and its
     /// spawn rate's inputs.
     pub(crate) fn scale_names(&self) -> [&str; 4] {
@@ -1141,6 +1129,8 @@ void main() {
     out_color = vec4(texel.rgb * mix(u_exposure, u_self_illum, texel.a), texel.a);
 }
 ";
+
+attached!(ReachCheapEmitterAt);
 
 #[cfg(test)]
 mod tests {

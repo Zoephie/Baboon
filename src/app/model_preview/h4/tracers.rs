@@ -18,7 +18,7 @@ use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::{
-    H3EffectOnsets, H3EffectTimes, adopt_event_function, for_each_attached_part, part_frame,
+    H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame,
     read_part_placement,
 };
 use super::super::particles::{read_ends, slerped};
@@ -29,6 +29,7 @@ use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::length;
 use crate::app::model_preview::common::random::{high16_over_65535, high24_over_2_24, lcg_step};
+use crate::app::model_preview::common::attached::attached;
 
 /// `TracerGpu::k_maxProfilesPerInstance`.
 const MOST_PROFILES: usize = 128;
@@ -732,10 +733,6 @@ struct TracerFrame {
 }
 
 impl H4TracerAt {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
     pub(crate) fn scale_names(&self) -> [&str; 2] {
         [&self.scale_by, &self.secondary_by]
     }
@@ -744,13 +741,6 @@ impl H4TracerAt {
         &self.scale_by
     }
 
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
 
     pub(crate) fn sort_layer(&self) -> i32 {
         self.definition.sort_layer
@@ -1293,6 +1283,8 @@ impl H4TracerField {
         ))
     }
 }
+
+attached!(H4TracerAt);
 
 #[cfg(test)]
 mod tests {

@@ -17,6 +17,7 @@ use super::super::dx9::passes::{h2_change_colors_for, read_h2_change_colors};
 use super::super::cloth::ClothGame;
 use super::super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::attached::{Attached, named};
 
 /// The mode a unit nobody controls is in.
 const RESTING_MODE: &str = "combat";
@@ -690,17 +691,6 @@ fn fold_attached(
     Some(H2AttachedObject { owner, functions, change_colors })
 }
 
-/// What was read off an attached object, named after it when it has a name,
-/// so its owner's panel can tell its effects apart.
-macro_rules! named {
-    ($found:expr, $name:expr) => {
-        $found.into_iter().map(|at| match $name {
-            Some(name) => at.on_attached(name),
-            None => at,
-        })
-    };
-}
-
 /// What hangs on a Halo 3 or ODST object brought into the preview: its
 /// lights, flares, light volumes, particle systems and the strips they carry,
 /// strips, cloth and screen effects, at `markers` as `frame` places them.
@@ -716,20 +706,20 @@ fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, u
     let lights = super::super::h3::lights::read_h3_lights(source, object, owner, markers, frame);
     let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
     let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
-    preview.h3_light_volumes.extend(named!(volumes, name));
+    preview.h3_light_volumes.extend(named(volumes, name));
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
-    let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
+    let particles: Vec<_> = named(particles, name).map(Arc::new).collect();
     let carried = super::super::particles::carried_strips(&particles);
     preview.h3_particles.extend(particles);
     preview.h3_strips.extend(carried);
     let strips = super::super::gen3::strips::read_h3_strips(source, object, owner, markers, frame);
-    preview.h3_strips.extend(named!(strips, name).map(Arc::new));
+    preview.h3_strips.extend(named(strips, name).map(Arc::new));
     super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     let screens = super::super::gen3::screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
     super::super::gen3::screen_effects::add_screen_shader_materials(preview);
-    let lights: Vec<_> = named!(lights, name).collect();
-    preview.h3_flares.extend(named!(flares, name));
+    let lights: Vec<_> = named(lights, name).collect();
+    preview.h3_flares.extend(named(flares, name));
     preview.h3_flares.extend(super::super::h3::lights::light_flares(&lights));
     preview.h3_lights.extend(lights);
 }
@@ -752,21 +742,21 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     preview: &mut RenderModelPreview,
 ) {
     let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
-    preview.h3_flares.extend(named!(flares, name));
+    preview.h3_flares.extend(named(flares, name));
     let (lights, cheap) = super::super::reach::lights::read_reach_lights(source, object, owner, markers, frame);
-    preview.reach_lights.extend(named!(lights, name));
-    preview.reach_cheap_lights.extend(named!(cheap, name));
+    preview.reach_lights.extend(named(lights, name));
+    preview.reach_cheap_lights.extend(named(cheap, name));
     let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
-    preview.h3_light_volumes.extend(named!(volumes, name));
+    preview.h3_light_volumes.extend(named(volumes, name));
     let cheap = super::super::particles::cheap::read_reach_cheap_emitters(source, object, owner, markers, frame);
-    preview.reach_cheap_emitters.extend(named!(cheap, name));
+    preview.reach_cheap_emitters.extend(named(cheap, name));
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
-    let particles: Vec<_> = named!(particles, name).map(Arc::new).collect();
+    let particles: Vec<_> = named(particles, name).map(Arc::new).collect();
     let carried = super::super::particles::carried_strips(&particles);
     preview.h3_particles.extend(particles);
     preview.h3_strips.extend(carried);
     let strips = super::super::gen3::strips::read_h3_strips(source, object, owner, markers, frame);
-    preview.h3_strips.extend(named!(strips, name).map(Arc::new));
+    preview.h3_strips.extend(named(strips, name).map(Arc::new));
     let screens = super::super::gen3::screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.h3_screen_effects.extend(screens);
     super::super::gen3::screen_effects::add_screen_shader_materials(preview);
@@ -801,19 +791,19 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderMode
     // A weapon opened on its own has no parent to hold it.
     let lone_weapon = name.is_none() && object.group().tag == u32::from_be_bytes(*b"weap");
     let (lights, cheap) = super::super::h4::lights::read_h4_lights(source, object, owner, markers, frame, lone_weapon);
-    preview.h4_lights.extend(named!(lights, name));
-    preview.h4_cheap_lights.extend(named!(cheap, name));
+    preview.h4_lights.extend(named(lights, name));
+    preview.h4_cheap_lights.extend(named(cheap, name));
     super::super::h4::lights::read_h4_light_passes(source, preview);
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
-    preview.h3_particles.extend(named!(particles, name).map(Arc::new));
+    preview.h3_particles.extend(named(particles, name).map(Arc::new));
     let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
-    preview.h3_light_volumes.extend(named!(volumes, name));
+    preview.h3_light_volumes.extend(named(volumes, name));
     let tracers = super::super::h4::tracers::read_h4_tracers(source, object, owner, markers, frame);
-    preview.h4_tracers.extend(named!(tracers, name));
+    preview.h4_tracers.extend(named(tracers, name));
     let cheap = super::super::particles::cheap::read_reach_cheap_emitters(source, object, owner, markers, frame);
-    preview.reach_cheap_emitters.extend(named!(cheap, name));
+    preview.reach_cheap_emitters.extend(named(cheap, name));
     let flares = super::super::h4::flares::read_h4_flares(source, object, owner, markers, frame);
-    preview.h4_flares.extend(named!(flares, name));
+    preview.h4_flares.extend(named(flares, name));
     if !preview.h4_flares.is_empty() && preview.h4_flare_pass.is_none() {
         preview.h4_flare_pass = super::super::h4::flares::h4_flare_pass(source).ok().map(Arc::new);
     }
@@ -856,15 +846,15 @@ pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPr
             continue;
         }
         let particles = super::super::particles::read_h3_particles(source, &weapon, owner, markers, frame);
-        preview.h3_particles.extend(named!(particles, within).map(Arc::new));
+        preview.h3_particles.extend(named(particles, within).map(Arc::new));
         let (flares, lights, gels) = super::lights::read_h2_flares(source, &weapon, owner, markers, frame);
-        preview.h2_flares.extend(named!(flares, within));
-        preview.h2_point_lights.extend(named!(lights, within));
-        preview.h2_gel_lights.extend(named!(gels, within));
+        preview.h2_flares.extend(named(flares, within));
+        preview.h2_point_lights.extend(named(lights, within));
+        preview.h2_gel_lights.extend(named(gels, within));
         let volumes = super::light_volumes::read_h2_light_volumes(source, &weapon, owner, markers, frame);
-        preview.h2_light_volumes.extend(named!(volumes, within));
+        preview.h2_light_volumes.extend(named(volumes, within));
         let contrails = super::contrails::read_h2_contrails(source, &weapon, owner, markers, frame);
-        preview.h2_contrails.extend(named!(contrails, within));
+        preview.h2_contrails.extend(named(contrails, within));
     }
 }
 

@@ -4274,6 +4274,7 @@ mod tests {
 #[cfg(test)]
 pub(super) mod kit_object_tests {
     use super::*;
+    use crate::app::model_preview::common::attached::Attached;
     use crate::core::format::TagNameIndex;
     use crate::core::game::GameId;
     use crate::core::source::TagEntryLocation;

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::gen3::effects::adopt_event_function;
 use super::super::ce::attachments::{elements, object_block};
 use super::super::ce::lights::{CeFlareView, CeSprite, posed_on};
 use super::super::gen3::effects::{
@@ -23,6 +22,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
+use crate::app::model_preview::common::attached::attached;
 
 /// `flags` of a `light`.
 const ALLOW_SHADOWS_AND_GELS: i128 = 1;
@@ -139,19 +139,6 @@ fn simple_light(
 }
 
 impl H3Light {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         [&self.color.input, &self.color.range, &self.intensity.input, &self.intensity.range]
             .into_iter()
@@ -755,19 +742,6 @@ impl H3EffectScale {
 }
 
 impl H3FlareAt {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
@@ -985,6 +959,8 @@ impl H3FlareAt {
         })
     }
 }
+
+attached!(H3Light, H3FlareAt);
 
 #[cfg(test)]
 mod tests {

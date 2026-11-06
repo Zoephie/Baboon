@@ -9,7 +9,6 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::effects::adopt_event_function;
 use super::super::ce::attachments::elements;
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::super::h2::functions::H2FunctionValues;
@@ -29,6 +28,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, length};
 use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
+use crate::app::model_preview::common::attached::attached;
 
 /// What a volume's row can hold, whatever its tag says; also the most
 /// Reach's postprocess bakes.
@@ -735,19 +735,6 @@ fn overdraw(profiles: f32, profile_length: f32, spacing: f32) -> f32 {
 }
 
 impl H3LightVolumeAt {
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
-
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        adopt_event_function(name, &mut self.scale_by, &mut self.object);
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
-
     /// The functions it reads off its object.
     pub(crate) fn scale_names(&self) -> [&str; 2] {
         [&self.scale_by, &self.secondary_by]
@@ -983,6 +970,8 @@ impl H3LightVolumeAt {
         quads
     }
 }
+
+attached!(H3LightVolumeAt);
 
 #[cfg(test)]
 mod tests {

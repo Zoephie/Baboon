@@ -20,6 +20,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{checked_unit, cross};
 use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
+use crate::app::model_preview::common::attached::attached;
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
@@ -301,17 +302,7 @@ impl H2ContrailAt {
         &self.scale_by
     }
 
-    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
-        self.only_under.as_ref()
-    }
 
-    /// Follow the regions `merge_attached` renames for what `name` brings.
-    pub(crate) fn on_attached(mut self, name: &str) -> Self {
-        if let Some((region, _)) = &mut self.only_under {
-            *region = format!("{name}: {region}");
-        }
-        self
-    }
 
     pub(crate) fn bitmap(&self) -> Option<&Arc<H2Image>> {
         self.bitmap.as_ref()
@@ -434,6 +425,8 @@ impl H2ContrailField {
             .collect()
     }
 }
+
+attached!(keeps function: H2ContrailAt);
 
 #[cfg(test)]
 mod tests {
