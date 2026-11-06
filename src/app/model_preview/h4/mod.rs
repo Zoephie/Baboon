@@ -7,6 +7,7 @@ pub(super) mod flares;
 pub(super) mod lighting;
 pub(super) mod lights;
 pub(super) mod particles;
+pub(in crate::app::model_preview) mod render;
 pub(crate) mod shaders;
 pub(super) mod shadow;
 pub(super) mod shield;

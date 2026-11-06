@@ -195,7 +195,7 @@ fn scaled_sphere(
 }
 
 /// What the generate pass leaves for the composite.
-pub(super) struct HologramPicture {
+pub(in crate::app::model_preview) struct HologramPicture {
     screen: HologramScreen,
     post: Arc<H4HologramPost>,
     /// The object whose functions the screen materials read
@@ -203,12 +203,12 @@ pub(super) struct HologramPicture {
     owner: u8,
     /// How far along the view the sphere's centre lies, for its place among
     /// the transparents (`QueueHologramApply`).
-    pub(super) distance: f32,
+    pub(in crate::app::model_preview) distance: f32,
 }
 
 /// A hologram's material is drawn by `RenderHolograms` when its screen
 /// materials were read.
-pub(super) fn draws_as_hologram(material: &H3Material) -> bool {
+pub(in crate::app::model_preview) fn draws_as_hologram(material: &H3Material) -> bool {
     material.h4.as_ref().is_some_and(|submit| submit.is_hologram() && submit.post().is_some())
 }
 
@@ -226,7 +226,7 @@ impl RenderCore {
     /// X360 0x82A3B5F4): the holograms into their own surface, then its bloom
     /// and `final_combine_hologram`. `scene` holds the depth to test against.
     #[allow(clippy::too_many_arguments)]
-    pub(super) unsafe fn h4_generate_holograms(
+    pub(in crate::app::model_preview) unsafe fn h4_generate_holograms(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -371,7 +371,7 @@ impl RenderCore {
     /// `hologram_apply_callback` (X360 0x83AF4CF0): `hologram_composite` over
     /// the crop into the scene's light, premultiplied (blend mode 5), with no
     /// depth. Leaves the blend as it found it off.
-    pub(super) unsafe fn h4_composite_holograms(
+    pub(in crate::app::model_preview) unsafe fn h4_composite_holograms(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,

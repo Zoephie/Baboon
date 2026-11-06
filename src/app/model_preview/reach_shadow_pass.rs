@@ -167,7 +167,7 @@ impl RenderCore {
 
     /// The object's shadow into its mask, if it casts one: the mask, or none.
     /// Reads the depth and normals the albedo pass left.
-    pub(super) unsafe fn draw_reach_shadow(
+    pub(in crate::app::model_preview) unsafe fn draw_reach_shadow(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,

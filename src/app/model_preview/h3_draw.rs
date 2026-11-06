@@ -2,6 +2,7 @@
 //! albedo and normal into targets, a lit pass reading them back into an HDR
 //! accumulation target, and the final composite's tone curve onto the scene.
 
+use super::gen3::render::Gen3Game;
 use super::gl::program::Linked;
 use super::gl::target::{Made, Sampling, Texels};
 use super::h3_bloom::H3Bloom;
@@ -1124,7 +1125,15 @@ impl RenderCore {
     }
 
     /// The object's passes, between the preview's own draw and the scene's end.
-    pub(in crate::app::model_preview) unsafe fn draw_h3(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, order: &[usize]) {
+    /// The gen3 pipeline, `game` filling in where the gen3 games differ.
+    pub(in crate::app::model_preview) unsafe fn draw_h3(
+        &mut self,
+        game: &mut dyn Gen3Game,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        order: &[usize],
+    ) {
         // Direct3D 11 always filters across a cube's faces; OpenGL has to be asked.
         unsafe { gl.enable(glow::TEXTURE_CUBE_MAP_SEAMLESS) };
         let Some(scene) = self.scene.as_ref() else {
@@ -1171,29 +1180,9 @@ impl RenderCore {
                     Some((batch.clone(), Arc::clone(material)))
                 })
                 .collect();
-            // Halo 4's holograms draw apart from the scene (`RenderHolograms`).
-            let (mut holograms, mut batches): (Vec<_>, Vec<_>) =
-                batches.into_iter().partition(|(_, material)| super::h4_holograms::draws_as_hologram(material));
-            let reach = frame.preview.game == Some(GameId::HaloReach);
-            let halo4 = frame.preview.game == Some(GameId::Halo4);
-            // Halo 4's full camo (`render_object_mesh_parts`): a camo object's
-            // parts draw only into the shadow and as camo, so nothing of it
-            // lands in the light; below full transparency its lit base does.
-            let h4_camo = frame
-                .preview
-                .h4_camo
-                .as_ref()
-                .filter(|_| halo4 && frame.active_camo)
-                .map(|camo| camo.draw(1.0, frame.time));
-            let camo_batches: Vec<_> = match h4_camo {
-                Some(draw) if !draw.has_base => batches.drain(..).chain(holograms.drain(..)).collect(),
-                Some(_) => batches.clone(),
-                None => Vec::new(),
-            };
-            // Reach shadows into a mask ahead of the lights, which is not
-            // built, so its self shadow does not run. Halo 4's shadow is not
-            // built yet.
-            let (bloomed, self_shadow) = (frame.bloom, frame.self_shadow && !reach && !halo4);
+            let mut batches = batches;
+            game.split(frame, &mut batches);
+            let bloomed = frame.bloom;
             // `screen_effect_sample`, ahead of the scene: Reach's
             // `c_player_view::render` hands its exposure stops to
             // `setup_camera_fx_parameters` before anything draws.
@@ -1205,7 +1194,7 @@ impl RenderCore {
                 let effects = &frame.preview.h3_screen_effects;
                 gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
             };
-            self.reach_stops = if reach { screen.stops() } else { 0.0 };
+            self.reach_stops = game.stops(&screen);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear_depth_f32(1.0);
@@ -1246,31 +1235,9 @@ impl RenderCore {
             gl.color_mask(true, true, true, true);
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.disable(glow::BLEND);
-            // `RenderHolograms`' generate pass: after the albedo and its
-            // decals, before the lights.
-            let hologram = if holograms.is_empty() {
-                None
-            } else {
-                self.h4_generate_holograms(gl, frame, slot, &holograms, albedo_target, size)
-            };
-            // `render_fullscreen_shadow_buffer`: Reach's mask, between the
-            // albedo and the static lighting that reads it.
-            let reach_mask =
-                if reach && frame.self_shadow { self.draw_reach_shadow(gl, frame, slot, &batches) } else { None };
-            // `render_fullscreen_shadow_buffer`: Halo 4's mask, between the
-            // albedo and the static lighting that reads it.
-            let h4_mask = if halo4 && frame.self_shadow && h4_camo.is_none_or(|draw| draw.has_base) {
-                self.draw_h4_shadow(gl, frame, slot, &batches)
-            } else {
-                None
-            };
-            // Generated from the light, for the apply pass below.
-            let shadowed = self_shadow && {
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-                let drawn = self.draw_h2_shadow(gl, frame, slot, order);
-                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-                drawn
-            };
+            game.after_albedo(&mut FrameCx { gl, frame, core: self, slot }, albedo_target, size);
+            // Whether a shadow map was drawn for the apply after the opaque pass.
+            let shadowed = game.self_shadow(&mut FrameCx { gl, frame, core: self, slot }, &batches, order, framebuffer);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
             gl.disable(glow::BLEND);
             h3_set_cull(gl, frame);
@@ -1281,22 +1248,14 @@ impl RenderCore {
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
             // `build_simple_light_draw_list`, before the static pass reads it.
-            let reach_lit = if reach { self.reach_frame_lights(frame, slot) } else { Vec::new() };
+            let reach_lit = game.frame_lights(&mut FrameCx { gl, frame, core: self, slot });
             self.set_reach_inline_lights(&reach_lit);
             let (opaque, blended): (Vec<_>, Vec<_>) =
                 batches
                     .iter()
                     .filter(|(_, material)| !material.decal || material.after_lighting)
                     .partition(|(_, material)| material.blend == H3Blend::Opaque);
-            if let Some(mask) = reach_mask {
-                self.reach_shadow_mask = Some(mask);
-                self.reach_pass_values = Some([("shadow_mask_enabled", [1.0; 4])].into_iter().collect());
-            }
-            if let Some(mask) = h4_mask {
-                self.h4_shadow_mask = Some(mask);
-                let floor = [0.0, super::super::h4::shadow::DIRECT_FLOOR, 0.0, 0.0];
-                self.reach_pass_values = Some([("ps_bsp_lightmap_scale_constants", floor)].into_iter().collect());
-            }
+            game.lit_values(self);
             for (batch, material) in opaque {
                 let pass = h3_lit_pass(frame, batch, material);
                 self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
@@ -1336,25 +1295,7 @@ impl RenderCore {
                 }
                 self.h3_light = None;
             }
-            // `MidnightLightParfait::Render`: Halo 4's lights after the static
-            // lighting, before what blends.
-            if halo4 {
-                self.draw_h4_lights(gl, frame, accumulation_target);
-                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-                h3_set_cull(gl, frame);
-                gl.depth_func(glow::LEQUAL);
-                gl.depth_mask(false);
-                gl.blend_func(glow::ONE, glow::ONE);
-            }
-            // `c_lights_view::render`: after the static lighting, before what blends.
-            if reach {
-                self.draw_reach_screen_lights(gl, frame, &reach_lit, accumulation_target);
-                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-                h3_set_cull(gl, frame);
-                gl.depth_func(glow::LEQUAL);
-                gl.depth_mask(false);
-                gl.blend_func(glow::ONE, glow::ONE);
-            }
+            game.screen_lights(&mut FrameCx { gl, frame, core: self, slot }, &reach_lit, accumulation_target);
             // `c_transparency_renderer`: what blends, far to near, sprites among
             // the materials.
             let sprites = self.draws_object_sprites(frame);
@@ -1393,16 +1334,8 @@ impl RenderCore {
                 })
                 .collect();
             blended.sort_by(|(a, ..), (b, ..)| b.total_cmp(a));
-            // `QueueHologramApply`: the holograms' composite is one more
-            // transparent, at their sphere.
-            let mut hologram = hologram;
-            let mut composite_hologram = |this: &mut Self, nearer_than: f32| {
-                if let Some(picture) = hologram.take_if(|picture| h3_layered_distance(2, picture.distance) > nearer_than) {
-                    this.h4_composite_holograms(gl, frame, slot, &picture, size);
-                }
-            };
             for (distance, batch, material, pass, blend) in blended {
-                composite_hologram(self, distance);
+                game.blended(&mut FrameCx { gl, frame, core: self, slot }, distance, size);
                 if sprites {
                     self.draw_object_sprites(gl, frame, slot, SpriteStage::FartherThan(distance));
                 }
@@ -1420,7 +1353,7 @@ impl RenderCore {
                 self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
                 gl.disable(glow::POLYGON_OFFSET_FILL);
             }
-            composite_hologram(self, f32::NEG_INFINITY);
+            game.blended(&mut FrameCx { gl, frame, core: self, slot }, f32::NEG_INFINITY, size);
             if sprites {
                 self.draw_object_sprites(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                 if self.h3_distorted {
@@ -1436,13 +1369,7 @@ impl RenderCore {
             // put the model's own geometry back after the lights and sprites.
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             let mut bloom = None;
-            // Reach's: full camo, through `globals`' curves.
-            let reach_camo = frame.preview.reach_camo.as_ref().filter(|_| reach).map(|camo| camo.draw(1.0));
-            if let Some(draw) = reach_camo {
-                let values = [("k_vs_active_camo_factor", draw.factor), ("p_lighting_constant_9", draw.factor)];
-                self.reach_pass_values = Some(values.into_iter().collect());
-            }
-            if frame.active_camo && !halo4 && (!reach || reach_camo.is_some()) {
+            if let Some(opaque) = game.camo(self, frame) {
                 // Camo shows what is behind it, which the game blooms the same
                 // with or without the object. A preview's backdrop has no bloom
                 // of its own, so what camo hides is left dark for it.
@@ -1453,7 +1380,7 @@ impl RenderCore {
                             self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
                         }
                     }
-                    bloom = self.h3_built_bloom(gl, accumulation_target, accumulation, size, reach, halo4.then_some(frame));
+                    bloom = game.bloom(&mut FrameCx { gl, frame, core: self, slot }, accumulation_target, accumulation, size);
                     gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
                     gl.enable(glow::DEPTH_TEST);
                     gl.enable(glow::BLEND);
@@ -1461,7 +1388,6 @@ impl RenderCore {
                 gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
                 // `render_object_callback`: fully transparent camo has no base
                 // to blend over, and draws opaque in its place.
-                let opaque = reach_camo.is_some_and(|draw| draw.opaque);
                 if opaque {
                     gl.disable(glow::BLEND);
                     gl.depth_mask(true);
@@ -1488,45 +1414,18 @@ impl RenderCore {
                 }
                 gl.color_mask(true, true, true, true);
             }
-            if reach {
-                self.draw_reach_shield(gl, frame, slot);
-            }
-            if halo4 {
-                self.draw_h4_shield(gl, frame, slot);
-            }
+            game.shield(&mut FrameCx { gl, frame, core: self, slot });
             // `c_player_view::render`: after the transparents, before the bloom
             // and the tone curve, so these are in the same light as the scene.
             if sprites {
                 self.draw_object_sprites(gl, frame, slot, SpriteStage::Rest);
-                self.draw_h4_flares(gl, frame, slot);
+                game.late_sprites(&mut FrameCx { gl, frame, core: self, slot });
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             if bloomed && bloom.is_none() {
-                bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size, reach, halo4.then_some(frame));
+                bloom = game.bloom(&mut FrameCx { gl, frame, core: self, slot }, framebuffer, accumulation, size);
             }
-            if reach || halo4 {
-                // The object's depth, which tells the composite what it covers.
-                let depth = self.h3_targets.as_ref().map(|targets| {
-                    let [width, height] = targets.size;
-                    gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                    gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
-                    let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-                    gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
-                    gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-                    targets.depth_copy
-                });
-                if halo4 {
-                    self.h4_composite(gl, frame, accumulation, bloom, depth, screen);
-                    if let Some(draw) = h4_camo {
-                        self.draw_h4_camo(gl, frame, slot, &camo_batches, draw, size);
-                    }
-                } else {
-                    let noise = frame.preview.reach_screen_noise.as_ref();
-                    self.reach_composite(gl, accumulation, bloom, depth, screen, noise);
-                }
-            } else {
-                self.h3_composite(gl, accumulation, bloom, screen);
-            }
+            game.composite(&mut FrameCx { gl, frame, core: self, slot }, framebuffer, accumulation, bloom, screen, size);
             self.reach_stops = 0.0;
             self.h3_finish_picture(gl, frame, slot, framebuffer, size, &screen, &shaders);
             gl.depth_mask(true);
@@ -1535,11 +1434,29 @@ impl RenderCore {
         }
     }
 
+    /// The object's depth, which tells a composite what it covers, copied
+    /// from the lit target; `framebuffer` left bound.
+    pub(in crate::app::model_preview) unsafe fn object_depth(
+        &mut self,
+        gl: &glow::Context,
+        framebuffer: glow::NativeFramebuffer,
+    ) -> Option<glow::NativeTexture> {
+        self.h3_targets.as_ref().map(|targets| unsafe {
+            let [width, height] = targets.size;
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
+            let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
+            gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            targets.depth_copy
+        })
+    }
+
     /// Halo 4's `c_render_shield::render_object_internal`: every part that
     /// takes the shield through explicit 61, added (`ONE, ONE`) over what
     /// lies behind, no depth written, no face culled. The pass applies its
     /// own exposure.
-    unsafe fn draw_h4_shield(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn draw_h4_shield(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         let Some(shield) = frame.preview.h4_shield.clone() else {
             return;
         };
@@ -1603,7 +1520,7 @@ impl RenderCore {
     /// `c_render_shield::render_object_internal`: every part that takes the
     /// shield, through 61 or 119, added over what lies behind with no depth
     /// written and no face culled.
-    unsafe fn draw_reach_shield(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn draw_reach_shield(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         let Some(shield) = frame.preview.reach_shield.clone() else {
             return;
         };
@@ -1666,7 +1583,7 @@ impl RenderCore {
         }
     }
 
-    unsafe fn h3_built_bloom(
+    pub(in crate::app::model_preview) unsafe fn h3_built_bloom(
         &mut self,
         gl: &glow::Context,
         framebuffer: glow::NativeFramebuffer,
@@ -1734,7 +1651,7 @@ impl RenderCore {
         }
     }
 
-    unsafe fn h3_composite(
+    pub(in crate::app::model_preview) unsafe fn h3_composite(
         &mut self,
         gl: &glow::Context,
         accumulation: glow::NativeTexture,
@@ -1802,7 +1719,7 @@ impl RenderCore {
     }
 
     /// Halo 4's `final_composite`: see `h4::lighting::H4_COMPOSITE_FRAGMENT`.
-    unsafe fn h4_composite(
+    pub(in crate::app::model_preview) unsafe fn h4_composite(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -1857,7 +1774,7 @@ impl RenderCore {
     /// and the nearest part alone shows, as its depth decides. Otherwise its
     /// lit base wrote depth, which the camo meets nudged toward the eye by
     /// `camo depth bias function`'s constant.
-    unsafe fn draw_h4_camo(
+    pub(in crate::app::model_preview) unsafe fn draw_h4_camo(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -1929,7 +1846,7 @@ impl RenderCore {
     }
 
     /// Reach's `final_composite`: see [`REACH_COMPOSITE_FRAGMENT`].
-    unsafe fn reach_composite(
+    pub(in crate::app::model_preview) unsafe fn reach_composite(
         &mut self,
         gl: &glow::Context,
         accumulation: glow::NativeTexture,
@@ -2234,7 +2151,7 @@ mod layer_tests {
 }
 
 /// A distance to sort by, far first, that puts `sort layer` before it.
-pub(super) fn h3_layered_distance(layer: i32, distance: f32) -> f32 {
+pub(in crate::app::model_preview) fn h3_layered_distance(layer: i32, distance: f32) -> f32 {
     distance - layer as f32 * SORT_LAYER_SPAN
 }
 
@@ -2275,7 +2192,7 @@ fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Optio
 /// `c_object_renderer::render_albedo` and its like: `_cull_mode_cw` throughout.
 /// Tags lean on it, storing some faces twice with opposite winding, and with
 /// both drawn the back one takes the depth tie and its lighting with it.
-pub(super) unsafe fn h3_set_cull(gl: &glow::Context, frame: &ModelGpuFrame) {
+pub(in crate::app::model_preview) unsafe fn h3_set_cull(gl: &glow::Context, frame: &ModelGpuFrame) {
     unsafe {
         if frame.show_backfaces {
             gl.disable(glow::CULL_FACE);

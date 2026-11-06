@@ -72,7 +72,7 @@ fn near_fade(light: &ReachLitLight, eye: [f32; 3]) -> f32 {
 impl RenderCore {
     /// Every Reach light of the frame, lit: its attached lights by age since
     /// their scale came on, and its cheap lights by render time.
-    pub(super) fn reach_frame_lights(&mut self, frame: &ModelGpuFrame, slot: usize) -> Vec<ReachLitLight> {
+    pub(in crate::app::model_preview) fn reach_frame_lights(&mut self, frame: &ModelGpuFrame, slot: usize) -> Vec<ReachLitLight> {
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let mut lit = Vec::new();
         let lights = frame.preview.reach_lights.len();
@@ -98,14 +98,14 @@ impl RenderCore {
     }
 
     /// The inline lights, as the static pass reads them.
-    pub(super) fn set_reach_inline_lights(&mut self, lit: &[ReachLitLight]) {
+    pub(in crate::app::model_preview) fn set_reach_inline_lights(&mut self, lit: &[ReachLitLight]) {
         self.reach_inline = inline_rows(lit);
     }
 
     /// `render_cheap_screenspace_lights_from_draw_list`, then the screen-space
     /// `light`s, into `accumulation_target`. Its depth is copied first, for the
     /// pass to read.
-    pub(super) unsafe fn draw_reach_screen_lights(
+    pub(in crate::app::model_preview) unsafe fn draw_reach_screen_lights(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,

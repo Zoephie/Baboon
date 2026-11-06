@@ -48,7 +48,7 @@ impl RenderCore {
     /// the falloff reaches zero within it, so the picture's whole is the same
     /// \[inferred\], save a physically correct light whose radius from its
     /// colour outreaches its end, which the volume would cut.
-    pub(super) unsafe fn draw_h4_lights(
+    pub(in crate::app::model_preview) unsafe fn draw_h4_lights(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,

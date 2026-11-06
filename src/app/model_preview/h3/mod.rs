@@ -4,4 +4,5 @@
 
 pub(crate) mod leaves;
 pub(crate) mod lights;
+pub(in crate::app::model_preview) mod render;
 pub(crate) mod vision;

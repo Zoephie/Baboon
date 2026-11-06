@@ -62,7 +62,7 @@ impl RenderCore {
     /// object's flares, into the bound light target, which holds the
     /// object's depth. A pane paints on demand, so each patch's count is
     /// waited for rather than read a frame late.
-    pub(super) unsafe fn draw_h4_flares(
+    pub(in crate::app::model_preview) unsafe fn draw_h4_flares(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,

@@ -160,7 +160,7 @@ impl H4ShadowTargets {
 impl RenderCore {
     /// The object's shadow into its mask, if it casts one: the mask, or none.
     /// Reads the depth and normals the albedo pass left.
-    pub(super) unsafe fn draw_h4_shadow(
+    pub(in crate::app::model_preview) unsafe fn draw_h4_shadow(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,

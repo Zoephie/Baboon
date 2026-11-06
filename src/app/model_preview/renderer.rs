@@ -1510,7 +1510,7 @@ pub(super) mod headless_shot;
 mod h3_bloom;
 pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
 #[path = "h3_draw.rs"]
-mod h3_draw;
+pub(super) mod h3_draw;
 #[path = "reach_lighting.rs"]
 mod reach_lighting;
 pub(super) use reach_lighting::{
@@ -1522,7 +1522,7 @@ mod reach_bloom;
 #[path = "h4_bloom.rs"]
 mod h4_bloom;
 #[path = "h4_holograms.rs"]
-mod h4_holograms;
+pub(super) mod h4_holograms;
 #[path = "gen3_shadow.rs"]
 mod gen3_shadow;
 #[path = "gen3_screen_lights.rs"]
@@ -4156,7 +4156,7 @@ pub(super) struct RenderCore {
     /// programs, and the mask while the static pass reads it.
     h4_shadow: Option<h4_shadow_pass::H4ShadowTargets>,
     h4_shadow_programs: Option<[Option<glow::NativeProgram>; 3]>,
-    h4_shadow_mask: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) h4_shadow_mask: Option<glow::NativeTexture>,
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
     h4_draw: Option<h4::submit::H4Draw>,
@@ -4166,11 +4166,11 @@ pub(super) struct RenderCore {
     /// What a Reach pass draws through in place of the camera, and the mask
     /// its static pass reads, while they are set.
     reach_view_projection: Option<[f32; 16]>,
-    reach_shadow_mask: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) reach_shadow_mask: Option<glow::NativeTexture>,
     /// Reach's inline lights this frame, `simple_lights` rows.
     reach_inline: Vec<[[f32; 4]; 5]>,
     /// Constants a Reach pass of the frame sets over the material's: the shield's and the camo's.
-    reach_pass_values: Option<std::collections::HashMap<&'static str, [f32; 4]>>,
+    pub(in crate::app::model_preview) reach_pass_values: Option<std::collections::HashMap<&'static str, [f32; 4]>>,
     /// The exposure stops Reach's area screen effects come to this frame,
     /// set before its scene draws; 0 outside a Reach picture.
     reach_stops: f32,
@@ -4532,7 +4532,8 @@ impl RenderCore {
             self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials));
             if self.h3_draws(frame) {
                 let order = frame.visible_batches.clone();
-                self.draw_h3(gl, frame, slot, &order);
+                // Only a game without hooks of its own lands here: Halo 3's.
+                self.draw_h3(&mut h3::render::H3Game, gl, frame, slot, &order);
             }
             if frame.game_shaders && self.h2_camo_on(frame) {
                 let order = frame.visible_batches.clone();
@@ -4669,6 +4670,11 @@ impl RenderCore {
             }
             None
         }
+    }
+
+    /// Bind the slot's model vertex array again.
+    pub(in crate::app::model_preview) unsafe fn bind_slot_vertices(&self, gl: &glow::Context, slot: usize) {
+        unsafe { gl.bind_vertex_array(Some(self.slots[slot].vertex_array)) }
     }
 
     /// The slot's own draw of the visible batches, in the shared program:
@@ -5666,7 +5672,7 @@ impl RenderCore {
 
     /// Mark in the stencil what the key light cannot reach: the shadow map
     /// from the light's side, then the model in view against it.
-    unsafe fn draw_h2_shadow(
+    pub(in crate::app::model_preview) unsafe fn draw_h2_shadow(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
