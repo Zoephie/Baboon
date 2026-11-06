@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachments::{elements, has_flag, object_block};
+use super::attachments::{elements, function_slot, function_slot_of, has_flag, object_block};
 use super::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::passes::argb;
 use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
@@ -97,7 +97,7 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
     if brightness == [0.0; 2] {
         brightness = [1.0; 2];
     }
-    let source_slot = usize::try_from(root.read_int_any("brightness scale source").unwrap_or(0) - 1).ok().filter(|slot| *slot < 4);
+    let source_slot = function_slot_of(root, "brightness scale source");
     Some(CeLightVolume {
         object: owner,
         node,
@@ -282,10 +282,6 @@ pub(crate) struct CeLightningQuad {
     pub(crate) colors: [[f32; 4]; 4],
 }
 
-fn slot(value: Option<i128>) -> Option<usize> {
-    usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
-}
-
 fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightning> {
     let tag = load_referenced_tag_from_source(source, path, "lightning", b"elec").ok()?;
     let root = tag.root();
@@ -339,7 +335,7 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
         // `global_shader_effect_additive`.
         None => (3, false, false),
     };
-    let source_of = |name: &str| slot(root.read_int_any(name));
+    let source_of = |name: &str| function_slot_of(root, name);
     Some(CeLightning {
         object: owner,
         markers: found,
@@ -583,11 +579,6 @@ pub(crate) struct CeGlow {
 }
 
 /// The `n`th field named `name`, as an integer.
-fn nth_int(root: TagStruct<'_>, name: &str, n: usize) -> Option<i128> {
-    let field = root.fields().filter(|field| field.name() == name).nth(n)?;
-    root.read_int_any(&format!("{name}#{}", field.ordinal()))
-}
-
 fn read_bounds(root: TagStruct<'_>, name: &str) -> [f32; 2] {
     match root.field(name).and_then(|field| field.value()) {
         Some(blam_tags::TagFieldData::RealBounds(bounds)) => [bounds.lower, bounds.upper],
@@ -627,7 +618,7 @@ fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPr
     let dimension = ((rect[1] - rect[0]) * image_width).trunc();
     let image = Arc::new(decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, index)?);
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
-    let attachment = |n: usize| slot(nth_int(root, "attachment", n));
+    let attachment = |n: usize| function_slot(root.fields().filter(|field| field.name() == "attachment").nth(n));
     let [color_low, color_high] = [argb(root, "color_bound_0"), argb(root, "color_bound_1")];
     Some(CeGlow {
         object: owner,

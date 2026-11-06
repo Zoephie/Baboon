@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachments::{elements, has_flag, object_block};
+use super::attachments::{elements, function_slot_of, has_flag, object_block};
 use super::lights::{CeFlareView, posed_on};
 use super::particles::CePointPhysics;
 use super::passes::argb;
@@ -191,10 +191,6 @@ pub(crate) struct CeContrailAt {
     markers: Vec<(usize, [f32; 3], [f32; 3])>,
 }
 
-fn function_slot(value: Option<i128>) -> Option<usize> {
-    usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
-}
-
 fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
     let tag = load_referenced_tag_from_source(source, path, "contrail", b"cont").ok()?;
     let root = tag.root();
@@ -292,8 +288,8 @@ pub(in crate::app::model_preview) fn read_ce_contrails(
         found.push(CeContrailAt {
             object: owner,
             def: Arc::new(def),
-            primary: function_slot(attachment.read_int_any("primary scale")),
-            change_color: function_slot(attachment.read_int_any("change color")),
+            primary: function_slot_of(attachment, "primary scale"),
+            change_color: function_slot_of(attachment, "change color"),
             markers: at,
         });
     }

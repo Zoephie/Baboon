@@ -2,7 +2,7 @@
 //! `light`, and the sprites `rasterizer_lens_flares_draw` makes of one.
 
 use super::super::attachment::MarkerFrame;
-use super::attachments::{attached_marker_frame, elements, has_flag, has_flag_in_any, object_block};
+use super::attachments::{attached_marker_frame, elements, function_slot_of, has_flag, has_flag_in_any, object_block};
 use super::passes::{argb, periodic_evaluate};
 use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_h2_image;
@@ -687,11 +687,6 @@ fn baked_colors(mut lower: [f32; 4], mut upper: [f32; 4]) -> ([f32; 4], [f32; 4]
     (lower, upper)
 }
 
-/// `A out`..`D out` of a `primary scale` or `change color` option, `none` first.
-fn function_slot(value: Option<i128>) -> Option<usize> {
-    usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
-}
-
 /// A `light` tag as tool's postprocess leaves it, placed nowhere yet.
 fn read_light_tag(source: &TagSource, path: &str) -> Option<CeLight> {
     let light = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
@@ -839,8 +834,8 @@ pub(in crate::app::model_preview) fn read_ce_lights(
                 node,
                 position: place.position,
                 forward: place.axes[0],
-                primary: function_slot(attachment.read_int_any("primary scale")),
-                change_color: function_slot(attachment.read_int_any("change color")),
+                primary: function_slot_of(attachment, "primary scale"),
+                change_color: function_slot_of(attachment, "change color"),
                 ..template.clone()
             });
         }

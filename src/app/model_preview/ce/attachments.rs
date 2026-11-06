@@ -220,6 +220,28 @@ pub(in crate::app::model_preview) fn has_flag(holder: TagStruct<'_>, name: &str,
     holder.field(name).and_then(|field| field.flag(option)).is_some_and(|flag| flag.is_set())
 }
 
+/// The function slot an `A out` to `D out` option names (a change color's
+/// `A` to `D`), 0 to 3: none for `none`, for a number its list does not
+/// name, and for no field.
+pub(in crate::app::model_preview) fn function_slot(field: Option<blam_tags::TagField<'_>>) -> Option<usize> {
+    let Some(blam_tags::TagOptions::Enum { names, current }) = field?.options() else {
+        return None;
+    };
+    let held = names.get(usize::try_from(current?).ok()?)?;
+    match blam_tags::option_display_name(held).as_ref() {
+        "A out" | "A" => Some(0),
+        "B out" | "B" => Some(1),
+        "C out" | "C" => Some(2),
+        "D out" | "D" => Some(3),
+        _ => None,
+    }
+}
+
+/// [`function_slot`] of `holder`'s field `name`.
+pub(in crate::app::model_preview) fn function_slot_of(holder: TagStruct<'_>, name: &str) -> Option<usize> {
+    function_slot(holder.field(name))
+}
+
 /// Whether `option` is set in any of `holder`'s fields named `name`: a
 /// struct can hold more than one (a shader's own `flags` beside its
 /// kind's), whose options don't repeat.

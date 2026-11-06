@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::attachments::{elements, has_flag, has_flag_after, object_block};
+use super::attachments::{elements, function_slot_of, has_flag, has_flag_after, object_block};
 use super::lights::{CeFlareView, posed_on};
 use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use super::super::*;
@@ -317,10 +317,6 @@ pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &st
     Some(CePctlDef { types, physics: read_physics(source, root), sheets })
 }
 
-fn function_slot(value: Option<i128>) -> Option<usize> {
-    usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
-}
-
 /// The particle systems among the object's attachments.
 pub(in crate::app::model_preview) fn read_ce_particle_systems(
     source: &TagSource,
@@ -359,8 +355,8 @@ pub(in crate::app::model_preview) fn read_ce_particle_systems(
             object: owner,
             def: Arc::new(def),
             markers: found,
-            primary: function_slot(attachment.read_int_any("primary scale")),
-            change_color: function_slot(attachment.read_int_any("change color")),
+            primary: function_slot_of(attachment, "primary scale"),
+            change_color: function_slot_of(attachment, "change color"),
         });
     }
     systems

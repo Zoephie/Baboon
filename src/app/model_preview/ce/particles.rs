@@ -16,7 +16,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::perpendicular;
-use super::attachments::{elements, has_flag, object_block};
+use super::attachments::{elements, function_slot_of, has_flag, object_block};
 use super::lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
 use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,
@@ -910,10 +910,6 @@ impl super::functions::ReadsOutputs for CeEffectAt {
     }
 }
 
-fn function_slot(value: Option<i128>) -> Option<usize> {
-    usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
-}
-
 /// The effects among `object`'s attachments.
 pub(in crate::app::model_preview) fn read_ce_effects(
     source: &TagSource,
@@ -944,9 +940,9 @@ pub(in crate::app::model_preview) fn read_ce_effects(
             def,
             spawn: None,
             event: None,
-            primary: function_slot(attachment.read_int_any("primary scale")),
-            secondary: function_slot(attachment.read_int_any("secondary scale")),
-            change_color: function_slot(attachment.read_int_any("change color")),
+            primary: function_slot_of(attachment, "primary scale"),
+            secondary: function_slot_of(attachment, "secondary scale"),
+            change_color: function_slot_of(attachment, "change color"),
             locations,
         });
     }
