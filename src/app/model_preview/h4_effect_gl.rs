@@ -10,19 +10,15 @@ use std::collections::HashMap;
 use super::gen3::shaders::{H3Pass, H3Value, H3Values};
 use super::materials::H4EffectMaterial;
 use super::*;
+use super::gl::program::Linked;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
-/// A linked pass and its uniforms' locations, by name.
-type LinkedProgram = (
-    glow::NativeProgram,
-    HashMap<String, Option<glow::NativeUniformLocation>>,
-);
 
 /// The GL a slot keeps for its Halo 4 effects: programs by pass, textures
 /// by material and sampler, and the buffer the states go through.
 #[derive(Default)]
 pub(super) struct H4EffectGl {
-    programs: HashMap<usize, Option<LinkedProgram>>,
+    programs: HashMap<usize, Option<Linked>>,
     textures: HashMap<(usize, String), Option<glow::NativeTexture>>,
     buffer: Option<(glow::NativeBuffer, glow::NativeTexture)>,
     /// `mesh_vertices`: a particle model's strip, 20 bytes a vertex.
@@ -33,8 +29,8 @@ pub(super) struct H4EffectGl {
 impl H4EffectGl {
     pub(super) unsafe fn clear(&mut self, gl: &glow::Context) {
         unsafe {
-            for (program, _) in self.programs.drain().filter_map(|(_, known)| known) {
-                gl.delete_program(program);
+            for linked in self.programs.drain().filter_map(|(_, known)| known) {
+                gl.delete_program(linked.program);
             }
             for texture in self.textures.drain().filter_map(|(_, known)| known) {
                 gl.delete_texture(texture);
@@ -45,14 +41,13 @@ impl H4EffectGl {
     unsafe fn program(&mut self, gl: &glow::Context, pass: &H3Pass) -> Option<glow::NativeProgram> {
         let key = pass as *const H3Pass as usize;
         if let Some(known) = self.programs.get(&key) {
-            return known.as_ref().map(|(program, _)| *program);
+            return known.as_ref().map(|linked| linked.program);
         }
         let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
         let linked = unsafe { super::gl::link::link(gl, &stages, &[]) }
             .map_err(|error| eprintln!("h4 effect program: {error}"))
             .ok();
-        self.programs
-            .insert(key, linked.map(|program| (program, HashMap::new())));
+        self.programs.insert(key, linked.map(Linked::new));
         linked
     }
 
@@ -83,13 +78,7 @@ impl H4EffectGl {
         name: &str,
     ) -> Option<glow::NativeUniformLocation> {
         let key = pass as *const H3Pass as usize;
-        let (program, locations) = self.programs.get_mut(&key)?.as_mut()?;
-        if let Some(found) = locations.get(name) {
-            return *found;
-        }
-        let found = unsafe { gl.get_uniform_location(*program, name) };
-        locations.insert(name.to_owned(), found);
-        found
+        unsafe { self.programs.get(&key)?.as_ref()?.location(gl, name) }
     }
 
     /// A sampler's bitmap: a texture array of all its images where the pass

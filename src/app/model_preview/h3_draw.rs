@@ -2,6 +2,7 @@
 //! albedo and normal into targets, a lit pass reading them back into an HDR
 //! accumulation target, and the final composite's tone curve onto the scene.
 
+use super::gl::program::Linked;
 use super::gl::target::{Made, Sampling, Texels};
 use super::h3_bloom::H3Bloom;
 use super::gen3::prt::{H3PrtKind, second_order_rotation};
@@ -358,18 +359,14 @@ impl H3Targets {
 pub(super) struct H3Program {
     /// Held so its address, the program's key, stays its own.
     _pass: Arc<H3Pass>,
-    pub(super) program: glow::NativeProgram,
-    locations: HashMap<String, Option<glow::NativeUniformLocation>>,
+    linked: Linked,
 }
 
-impl H3Program {
-    pub(super) unsafe fn location(&mut self, gl: &glow::Context, name: &str) -> Option<glow::NativeUniformLocation> {
-        if let Some(found) = self.locations.get(name) {
-            return *found;
-        }
-        let found = unsafe { gl.get_uniform_location(self.program, name) };
-        self.locations.insert(name.to_owned(), found);
-        found
+impl std::ops::Deref for H3Program {
+    type Target = Linked;
+
+    fn deref(&self) -> &Linked {
+        &self.linked
     }
 }
 
@@ -737,22 +734,19 @@ impl ModelGlRenderer {
         &mut self,
         gl: &glow::Context,
         pass: &Arc<H3Pass>,
-        draw: impl FnOnce(&mut Self, &mut H3Program) -> R,
+        draw: impl FnOnce(&mut Self, &H3Program) -> R,
     ) -> Option<R> {
-        let mut program = unsafe { self.take_h3_program(gl, pass) }?;
-        let drawn = draw(self, &mut program);
-        self.h3_programs.insert(Arc::as_ptr(pass) as usize, Ok(program));
-        Some(drawn)
+        let program = unsafe { self.h3_program(gl, pass) }?;
+        Some(draw(self, &program))
     }
 
-    unsafe fn take_h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<H3Program> {
+    /// `pass`'s program, linked the first time it is asked for. It stays in
+    /// the cache while lent, so a pass drawn inside another's draw finds it.
+    unsafe fn h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<Rc<H3Program>> {
         let key = Arc::as_ptr(pass) as usize;
-        match self.h3_programs.remove(&key) {
-            Some(Ok(program)) => return Some(program),
-            Some(Err(failed)) => {
-                self.h3_programs.insert(key, Err(failed));
-                return None;
-            }
+        match self.h3_programs.get(&key) {
+            Some(Ok(program)) => return Some(Rc::clone(program)),
+            Some(Err(_)) => return None,
             None => {}
         }
         unsafe {
@@ -765,7 +759,11 @@ impl ModelGlRenderer {
             }
             attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
             match super::gl::link::link(gl, &stages, &attributes) {
-                Ok(program) => Some(H3Program { _pass: Arc::clone(pass), program, locations: HashMap::new() }),
+                Ok(program) => {
+                    let program = Rc::new(H3Program { _pass: Arc::clone(pass), linked: Linked::new(program) });
+                    self.h3_programs.insert(key, Ok(Rc::clone(&program)));
+                    Some(program)
+                }
                 Err(error) => {
                     eprintln!("h3 program: {error}");
                     self.h3_programs.insert(key, Err(Arc::clone(pass)));

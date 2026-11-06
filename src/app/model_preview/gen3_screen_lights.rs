@@ -38,7 +38,7 @@ impl ModelGlRenderer {
     pub(super) unsafe fn bind_screen_light_textures(
         gl: &glow::Context,
         pass: &H3Pass,
-        program: &mut H3Program,
+        program: &H3Program,
         texture: impl Fn(&str) -> Option<Option<glow::NativeTexture>>,
     ) {
         for (unit, (name, _)) in pass.textures.iter().enumerate() {

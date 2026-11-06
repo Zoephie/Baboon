@@ -2,6 +2,7 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::gl::link::link;
+use super::gl::program::Linked;
 use super::gl::scope::PostScope;
 use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use super::*;
@@ -2634,28 +2635,6 @@ fn grid_line_color(background: [f32; 3]) -> [f32; 3] {
     background.map(|channel| (channel + step).clamp(0.0, 1.0))
 }
 
-/// One linked Halo 2 pass program. Uniforms are looked up once by name: a
-/// translated shader declares a different handful of constants each.
-struct H2GlProgram {
-    program: glow::NativeProgram,
-    uniforms: HashMap<String, Option<glow::NativeUniformLocation>>,
-}
-
-impl H2GlProgram {
-    unsafe fn location(
-        &mut self,
-        gl: &glow::Context,
-        name: &str,
-    ) -> Option<glow::NativeUniformLocation> {
-        if let Some(found) = self.uniforms.get(name) {
-            return *found;
-        }
-        let found = unsafe { gl.get_uniform_location(self.program, name) };
-        self.uniforms.insert(name.to_owned(), found);
-        found
-    }
-}
-
 /// Link a pass with the main program's attribute locations, because the
 /// model's vertex array is bound to those.
 unsafe fn link_h2_program(
@@ -3964,7 +3943,7 @@ struct ModelGlRenderer {
     h3_supported: bool,
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.
-    h2_programs: HashMap<(H2VertexStage, String), Option<H2GlProgram>>,
+    h2_programs: HashMap<(H2VertexStage, String), Option<Rc<Linked>>>,
     h2_black_cube: Option<glow::NativeTexture>,
     /// What Halo 3's composite reads with no bloom built.
     h3_no_bloom: Option<glow::NativeTexture>,
@@ -3981,7 +3960,7 @@ struct ModelGlRenderer {
     h3_light: Option<(h3::lights::H3LitLight, Option<glow::NativeTexture>)>,
     /// Linked passes by their address, or the pass that failed to link: each
     /// holds its pass, so no other pass can come to have its address.
-    h3_programs: HashMap<usize, Result<h3_draw::H3Program, Arc<gen3::shaders::H3Pass>>>,
+    h3_programs: HashMap<usize, Result<Rc<h3_draw::H3Program>, Arc<gen3::shaders::H3Pass>>>,
     h3_composite_program: Option<glow::NativeProgram>,
     reach_composite_program: Option<glow::NativeProgram>,
     h4_composite_program: Option<glow::NativeProgram>,
@@ -5356,7 +5335,7 @@ impl ModelGlRenderer {
             let vertex = pass.stage.source(H2_GLSL_VERSION);
             let linked = unsafe { link_h2_program(gl, self.program, &vertex, &pass.fragment) };
             let program = match linked {
-                Ok(program) => Some(H2GlProgram { program, uniforms: HashMap::new() }),
+                Ok(program) => Some(Rc::new(Linked::new(program))),
                 Err(error) => {
                     eprintln!("model preview: {error}");
                     None
@@ -5645,13 +5624,13 @@ impl ModelGlRenderer {
                     continue;
                 }
                 let key = (pass.stage, pass.fragment.clone());
-                let Some(Some(mut program)) = self.h2_programs.remove(&key) else {
+                let Some(Some(program)) = self.h2_programs.get(&key).cloned() else {
                     continue;
                 };
                 drew = true;
                 unsafe {
                     gl.use_program(Some(program.program));
-                    self.bind_h2_uniforms(gl, frame, material, &mut program, pass, eye, light);
+                    self.bind_h2_uniforms(gl, frame, material, &program, pass, eye, light);
                     let textures = self.slots[slot]
                         .materials
                         .get(material)
@@ -5750,7 +5729,6 @@ impl ModelGlRenderer {
                         }
                     }
                 }
-                self.h2_programs.insert(key, Some(program));
             }
         }
         if drew {
@@ -5773,7 +5751,7 @@ impl ModelGlRenderer {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         material: usize,
-        program: &mut H2GlProgram,
+        program: &Linked,
         pass: &H2DrawPass,
         eye: [f32; 3],
         light: Option<&H2DefaultLight>,
@@ -5851,7 +5829,7 @@ impl ModelGlRenderer {
                 }
             }
             let camera = &frame.camera;
-            let set_1 = |gl: &glow::Context, program: &mut H2GlProgram, name: &str, value: f32| {
+            let set_1 = |gl: &glow::Context, program: &Linked, name: &str, value: f32| {
                 let location = program.location(gl, name);
                 gl.uniform_1_f32(location.as_ref(), value);
             };
