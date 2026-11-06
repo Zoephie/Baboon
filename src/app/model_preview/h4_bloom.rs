@@ -9,7 +9,7 @@
 //! (`floor(side / divisor + 0.5)`, no fixed sizes; O8) and the pixel size a
 //! pass steps by, the source's.
 
-use super::gl::scope::PostScope;
+use super::gl::chain::ScreenChain;
 use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
@@ -233,9 +233,8 @@ impl Surfaces {
 }
 
 pub(super) struct H4Bloom {
-    program: glow::NativeProgram,
+    chain: ScreenChain,
     surfaces: Option<Surfaces>,
-    nothing: Option<glow::NativeTexture>,
     /// Bound for the grading lookup when there is none: an empty 3D unit is
     /// "unloadable" to a sampler the program declares even where it never
     /// reads it (Apple's GL warns once).
@@ -255,7 +254,7 @@ impl H4Bloom {
         nothing: Option<glow::NativeTexture>,
         no_volume: Option<glow::NativeTexture>,
     ) -> Option<Self> {
-        unsafe { Some(Self { program: screen_program(gl, FRAGMENT)?, surfaces: None, nothing, no_volume }) }
+        unsafe { Some(Self { chain: ScreenChain { program: screen_program(gl, FRAGMENT)?, nothing }, surfaces: None, no_volume }) }
     }
 
     unsafe fn step(
@@ -267,20 +266,14 @@ impl H4Bloom {
         added: Option<glow::NativeTexture>,
         scale: [f32; 4],
     ) {
-        let uniform = |name: &str| unsafe { gl.get_uniform_location(self.program, name) };
         unsafe {
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
-            gl.viewport(0, 0, target.size[0], target.size[1]);
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, added.or(self.nothing));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(source.0));
-            gl.uniform_1_i32(uniform("pass").as_ref(), pass as i32);
-            gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
-            gl.uniform_2_f32(uniform("target_size").as_ref(), target.size[0] as f32, target.size[1] as f32);
-            let [width, height] = source.1.map(|side| 1.0 / side as f32);
-            gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
-            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            self.chain.pass(gl, target, source.0, added, |uniform| {
+                gl.uniform_1_i32(uniform("pass").as_ref(), pass as i32);
+                gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
+                gl.uniform_2_f32(uniform("target_size").as_ref(), target.size[0] as f32, target.size[1] as f32);
+                let [width, height] = source.1.map(|side| 1.0 / side as f32);
+                gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
+            });
         }
     }
 
@@ -315,16 +308,8 @@ impl H4Bloom {
                 self.surfaces = Surfaces::new(gl, frame);
             }
             let surfaces = self.surfaces.as_ref()?;
-            let scope = PostScope::capture(gl);
-            gl.disable(glow::SCISSOR_TEST);
-            gl.disable(glow::DEPTH_TEST);
-            gl.disable(glow::BLEND);
-            gl.color_mask(true, true, true, true);
-            gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(vertex_array));
-            let uniform = |name: &str| gl.get_uniform_location(self.program, name);
-            gl.uniform_1_i32(uniform("source").as_ref(), 0);
-            gl.uniform_1_i32(uniform("added").as_ref(), 1);
+            let run = self.chain.begin(gl, vertex_array, accumulation);
+            let uniform = |name: &str| self.chain.uniform(gl, name);
             gl.uniform_1_i32(uniform("grading").as_ref(), 2);
             gl.active_texture(glow::TEXTURE2);
             gl.bind_texture(glow::TEXTURE_3D, grading.map(|grading| grading.texture).or(self.no_volume));
@@ -334,12 +319,6 @@ impl H4Bloom {
             if let Some(grading) = grading {
                 gl.uniform_3_f32_slice(uniform("grading_scale").as_ref(), &grading.scale);
                 gl.uniform_3_f32_slice(uniform("grading_offset").as_ref(), &grading.offset);
-            }
-            // The lit target is read by texel elsewhere; this first tap leans
-            // on bilinear filtering.
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::LINEAR as i32);
             }
 
             let ones = [1.0; 4];
@@ -363,17 +342,8 @@ impl H4Bloom {
 
             gl.active_texture(glow::TEXTURE2);
             gl.bind_texture(glow::TEXTURE_3D, None);
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, None);
             gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            scope.restore(gl);
-            // Back to the scene: making the surfaces may have left theirs bound.
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
+            self.chain.end(gl, run, scene);
             // `small` holds `blur_11_horizontal` of the result.
             Some(if settings.hologram { small.texture } else { small2.texture })
         }

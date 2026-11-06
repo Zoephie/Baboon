@@ -5,7 +5,7 @@
 //! clamps where the game's shaders do. The final composite adds the top level
 //! at eight times. See `docs/reach-preview-research/bloom.md`.
 
-use super::gl::scope::PostScope;
+use super::gl::chain::ScreenChain;
 use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
@@ -153,10 +153,8 @@ impl Surfaces {
 }
 
 pub(super) struct ReachBloom {
-    program: glow::NativeProgram,
+    chain: ScreenChain,
     surfaces: Option<Surfaces>,
-    /// What a pass adding nothing leaves bound, as `added` is sampled regardless.
-    nothing: Option<glow::NativeTexture>,
 }
 
 /// A colour scaled by the intensity, as `sub_140841B00` hands its passes.
@@ -166,7 +164,7 @@ fn scaled(color: [f32; 3]) -> [f32; 4] {
 
 impl ReachBloom {
     pub(super) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
-        unsafe { Some(Self { program: screen_program(gl, FRAGMENT)?, surfaces: None, nothing }) }
+        unsafe { Some(Self { chain: ScreenChain { program: screen_program(gl, FRAGMENT)?, nothing }, surfaces: None }) }
     }
 
     /// `c_screen_postprocess::copy` and `apply_binary_op_ex`: `source` (and
@@ -180,20 +178,14 @@ impl ReachBloom {
         added: Option<glow::NativeTexture>,
         scale: [f32; 4],
     ) {
-        let uniform = |name: &str| unsafe { gl.get_uniform_location(self.program, name) };
         unsafe {
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
-            gl.viewport(0, 0, target.size[0], target.size[1]);
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, added.or(self.nothing));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(source.0));
-            gl.uniform_1_i32(uniform("pass").as_ref(), pass as i32);
-            gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
-            gl.uniform_2_f32(uniform("target_size").as_ref(), target.size[0] as f32, target.size[1] as f32);
-            let [width, height] = source.1.map(|side| 1.0 / side as f32);
-            gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
-            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            self.chain.pass(gl, target, source.0, added, |uniform| {
+                gl.uniform_1_i32(uniform("pass").as_ref(), pass as i32);
+                gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
+                gl.uniform_2_f32(uniform("target_size").as_ref(), target.size[0] as f32, target.size[1] as f32);
+                let [width, height] = source.1.map(|side| 1.0 / side as f32);
+                gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
+            });
         }
     }
 
@@ -224,22 +216,7 @@ impl ReachBloom {
                 self.surfaces = Surfaces::new(gl, frame);
             }
             let surfaces = self.surfaces.as_ref()?;
-            let scope = PostScope::capture(gl);
-            gl.disable(glow::SCISSOR_TEST);
-            gl.disable(glow::DEPTH_TEST);
-            gl.disable(glow::BLEND);
-            gl.color_mask(true, true, true, true);
-            gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(vertex_array));
-            let uniform = |name: &str| gl.get_uniform_location(self.program, name);
-            gl.uniform_1_i32(uniform("source").as_ref(), 0);
-            gl.uniform_1_i32(uniform("added").as_ref(), 1);
-            // The lit target is read by texel elsewhere; the first pass's tap
-            // leans on bilinear filtering.
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::LINEAR as i32);
-            }
+            let run = self.chain.begin(gl, vertex_array, accumulation);
 
             let ones = [1.0; 4];
             let curve = [HIGHLIGHT, INHERENT, 1.0, 1.0];
@@ -263,17 +240,7 @@ impl ReachBloom {
             self.step(gl, small2, Pass::Add, (small.texture, small.size), Some(tiny2.texture), scaled(SMALL_COLOR));
             self.blur(gl, small2, small, ones);
 
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            scope.restore(gl);
-            // Back to the scene: making the surfaces may have left theirs bound.
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
+            self.chain.end(gl, run, scene);
             Some(small2.texture)
         }
     }

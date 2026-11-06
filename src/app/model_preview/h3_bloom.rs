@@ -3,7 +3,7 @@
 //! blurred and added to the one above. The final composite adds the top level
 //! ahead of its tone curve.
 
-use super::gl::scope::PostScope;
+use super::gl::chain::ScreenChain;
 use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
@@ -99,15 +99,13 @@ impl Levels {
 }
 
 pub(super) struct H3Bloom {
-    program: glow::NativeProgram,
+    chain: ScreenChain,
     levels: Option<Levels>,
-    /// What a pass adding nothing leaves bound, as `added` is sampled regardless.
-    nothing: Option<glow::NativeTexture>,
 }
 
 impl H3Bloom {
     pub(super) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
-        unsafe { Some(Self { program: screen_program(gl, FRAGMENT)?, levels: None, nothing }) }
+        unsafe { Some(Self { chain: ScreenChain { program: screen_program(gl, FRAGMENT)?, nothing }, levels: None }) }
     }
 
     /// One step of the chain, drawing `source` through `mode` into `target`.
@@ -120,21 +118,15 @@ impl H3Bloom {
         added: Option<glow::NativeTexture>,
         scale: f32,
     ) {
-        let uniform = |name: &str| unsafe { gl.get_uniform_location(self.program, name) };
         unsafe {
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
-            gl.viewport(0, 0, target.size[0], target.size[1]);
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, added.or(self.nothing));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(source.0));
-            gl.uniform_1_i32(uniform("mode").as_ref(), mode);
-            gl.uniform_1_f32(uniform("scale").as_ref(), scale);
-            let [width, height] = target.size.map(|side| 1.0 / side as f32);
-            gl.uniform_2_f32(uniform("target_texel").as_ref(), width, height);
-            let [width, height] = source.1.map(|side| 1.0 / side as f32);
-            gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
-            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            self.chain.pass(gl, target, source.0, added, |uniform| {
+                gl.uniform_1_i32(uniform("mode").as_ref(), mode);
+                gl.uniform_1_f32(uniform("scale").as_ref(), scale);
+                let [width, height] = target.size.map(|side| 1.0 / side as f32);
+                gl.uniform_2_f32(uniform("target_texel").as_ref(), width, height);
+                let [width, height] = source.1.map(|side| 1.0 / side as f32);
+                gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
+            });
         }
     }
 
@@ -164,25 +156,9 @@ impl H3Bloom {
                 self.levels = Levels::new(gl, frame);
             }
             let levels = self.levels.as_ref()?;
-            let scope = PostScope::capture(gl);
-            gl.disable(glow::SCISSOR_TEST);
-            gl.disable(glow::DEPTH_TEST);
-            gl.disable(glow::BLEND);
-            gl.color_mask(true, true, true, true);
-            gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(vertex_array));
-            let uniform = |name: &str| gl.get_uniform_location(self.program, name);
-            gl.uniform_1_i32(uniform("source").as_ref(), 0);
-            gl.uniform_1_i32(uniform("added").as_ref(), 1);
+            let run = self.chain.begin(gl, vertex_array, accumulation);
             let point = BLOOM_POINT_EXPOSURE * BLOOM_POINT;
-            gl.uniform_2_f32(uniform("curve").as_ref(), point, BLOOM_INHERENT);
-
-            // The target reads by texel, but the downsample's taps lean on the
-            // game's bilinear filter.
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::LINEAR as i32);
-            }
+            gl.uniform_2_f32(self.chain.uniform(gl, "curve").as_ref(), point, BLOOM_INHERENT);
 
             let [small, _] = &levels.small;
             let ([tiny, _], [mini, _]) = (&levels.tiny, &levels.mini);
@@ -200,17 +176,7 @@ impl H3Bloom {
             self.step(gl, small, 2, (small_sum.texture, small_sum.size), None, 1.0);
             self.step(gl, small_sum, 3, (small.texture, small.size), None, 1.0);
 
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            scope.restore(gl);
-            // Back to the scene: making the surfaces may have left theirs bound.
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
+            self.chain.end(gl, run, scene);
             Some(small_sum.texture)
         }
     }
