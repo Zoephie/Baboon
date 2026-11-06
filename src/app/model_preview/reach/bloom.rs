@@ -5,11 +5,11 @@
 //! clamps where the game's shaders do. The final composite adds the top level
 //! at eight times. See `docs/reach-preview-research/bloom.md`.
 
-use super::gl::chain::ScreenChain;
-use super::gl::target::{ColorTarget, Made, Sampling, Texels};
+use super::super::gl::chain::ScreenChain;
+use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
-use super::h3_draw::screen_program;
+use super::super::renderer::h3_draw::screen_program;
 
 /// `globals\defaults\default.camera_fx_settings`, which every bloom parameter
 /// falls through to with no level: `bloom_highlight`, `bloom_inherent`,
@@ -152,7 +152,7 @@ impl Surfaces {
     }
 }
 
-pub(super) struct ReachBloom {
+pub(in crate::app::model_preview) struct ReachBloom {
     chain: ScreenChain,
     surfaces: Option<Surfaces>,
 }
@@ -163,7 +163,7 @@ fn scaled(color: [f32; 3]) -> [f32; 4] {
 }
 
 impl ReachBloom {
-    pub(super) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
+    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, nothing: Option<glow::NativeTexture>) -> Option<Self> {
         unsafe { Some(Self { chain: ScreenChain { program: screen_program(gl, FRAGMENT)?, nothing }, surfaces: None }) }
     }
 
@@ -200,7 +200,7 @@ impl ReachBloom {
 
     /// What the final composite adds: `aux_small2`. Leaves `scene` bound, and
     /// the viewport and scissor as they were.
-    pub(super) unsafe fn build(
+    pub(in crate::app::model_preview) unsafe fn build(
         &mut self,
         gl: &glow::Context,
         vertex_array: glow::NativeVertexArray,

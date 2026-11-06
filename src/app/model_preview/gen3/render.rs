@@ -79,7 +79,7 @@ pub(in crate::app::model_preview) trait Gen3Game {
         accumulation: glow::NativeTexture,
         size: [i32; 2],
     ) -> Option<glow::NativeTexture> {
-        unsafe { cx.core.h3_built_bloom(cx.gl, framebuffer, accumulation, size, false, None) }
+        unsafe { cx.core.h3_built_bloom(cx.gl, framebuffer, accumulation, size, None) }
     }
 
     /// The lit scene and its bloom onto `framebuffer`.

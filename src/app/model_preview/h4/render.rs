@@ -115,7 +115,7 @@ impl Gen3Game for H4Game {
         accumulation: glow::NativeTexture,
         size: [i32; 2],
     ) -> Option<glow::NativeTexture> {
-        unsafe { cx.core.h3_built_bloom(cx.gl, framebuffer, accumulation, size, false, Some(cx.frame)) }
+        unsafe { cx.core.h3_built_bloom(cx.gl, framebuffer, accumulation, size, Some(cx.frame)) }
     }
 
     unsafe fn composite(

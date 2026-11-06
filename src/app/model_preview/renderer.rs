@@ -1515,8 +1515,6 @@ pub(super) use super::reach::lighting::{
     REACH_DARK_MULTIPLIER, REACH_SCREEN_NOISE_BITMAP, reach_alt_exposure, reach_exposure, reach_lightmap_tint,
     reach_particle_light,
 };
-#[path = "reach_bloom.rs"]
-mod reach_bloom;
 #[path = "h4_bloom.rs"]
 mod h4_bloom;
 #[path = "h4_holograms.rs"]
@@ -4112,7 +4110,7 @@ pub(super) struct RenderCore {
     h2_programs: HashMap<(H2VertexStage, String), Option<Rc<Linked>>>,
     black_cube: Option<glow::NativeTexture>,
     /// What Halo 3's composite reads with no bloom built.
-    h3_no_bloom: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) h3_no_bloom: Option<glow::NativeTexture>,
     black_volume: Option<glow::NativeTexture>,
     /// What an H3 array sampler reads with nothing of its own.
     h3_black_array: Option<glow::NativeTexture>,
@@ -4128,7 +4126,6 @@ pub(super) struct RenderCore {
     /// holds its pass, so no other pass can come to have its address.
     h3_programs: HashMap<usize, Result<Rc<h3_draw::H3Program>, Arc<gen3::shaders::H3Pass>>>,
     h3_composite_program: Option<glow::NativeProgram>,
-    reach_composite_program: Option<glow::NativeProgram>,
     h4_composite_program: Option<glow::NativeProgram>,
     /// Halo 4's colour grading lookup, uploaded for the preview whose image
     /// it is (by that image's address).
@@ -4140,7 +4137,6 @@ pub(super) struct RenderCore {
     /// How much of its effect the `shader_screen` drawing now is.
     h3_screen_alpha: Option<f32>,
     h3_bloom: Option<h3_bloom::H3Bloom>,
-    reach_bloom: Option<reach_bloom::ReachBloom>,
     h4_bloom: Option<h4_bloom::H4Bloom>,
     /// Halo 4's hologram surfaces and the screen materials' bitmaps.
     h4_holograms: Option<h4_holograms::H4Holograms>,
@@ -4168,10 +4164,6 @@ pub(super) struct RenderCore {
     /// The exposure stops Reach's area screen effects come to this frame,
     /// set before its scene draws; 0 outside a Reach picture.
     reach_stops: f32,
-    /// `rasterizer_globals`' screen noise, uploaded on first use.
-    reach_noise: Option<glow::NativeTexture>,
-    /// The composites drawn, for the noise's frame-to-frame offset.
-    reach_noise_frame: u32,
     empty_vertex_array: Option<glow::NativeVertexArray>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -4300,7 +4292,6 @@ impl RenderCore {
                 h3_light: None,
                 h3_programs: HashMap::new(),
                 h3_composite_program: None,
-                reach_composite_program: None,
                 h4_composite_program: None,
                 h4_grading: None,
                 h3_blur_program: None,
@@ -4309,7 +4300,6 @@ impl RenderCore {
                 h3_vision_mask: None,
                 h3_screen_alpha: None,
                 h3_bloom: None,
-                reach_bloom: None,
                 h4_bloom: None,
                 h4_holograms: None,
                 h4_flare_geometry: None,
@@ -4323,8 +4313,6 @@ impl RenderCore {
                 reach_inline: Vec::new(),
                 reach_pass_values: None,
                 reach_stops: 0.0,
-                reach_noise: None,
-                reach_noise_frame: 0,
                 empty_vertex_array: None,
                 h2_gel: None,
                 h2_bloom: None,

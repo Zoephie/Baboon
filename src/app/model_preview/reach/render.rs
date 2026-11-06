@@ -17,6 +17,13 @@ pub(in crate::app::model_preview) struct ReachGame {
     /// The shadow's map and mask, kept between frames, and its apply program.
     pub(super) shadow: Option<super::shadow_pass::ReachShadowTargets>,
     pub(super) shadow_program: Option<glow::NativeProgram>,
+    bloom: Option<super::bloom::ReachBloom>,
+    /// The final composite's program.
+    pub(super) composite_program: Option<glow::NativeProgram>,
+    /// `rasterizer_globals`' screen noise, uploaded on first use.
+    pub(super) noise: Option<glow::NativeTexture>,
+    /// The composites drawn, for the noise's frame-to-frame offset.
+    pub(super) noise_frame: u32,
 }
 
 impl Gen3Game for ReachGame {
@@ -86,7 +93,13 @@ impl Gen3Game for ReachGame {
         accumulation: glow::NativeTexture,
         size: [i32; 2],
     ) -> Option<glow::NativeTexture> {
-        unsafe { cx.core.h3_built_bloom(cx.gl, framebuffer, accumulation, size, true, None) }
+        unsafe {
+            let vertices = cx.core.h3_empty_array(cx.gl);
+            if self.bloom.is_none() {
+                self.bloom = super::bloom::ReachBloom::new(cx.gl, cx.core.h3_no_bloom);
+            }
+            self.bloom.as_mut()?.build(cx.gl, vertices, framebuffer, accumulation, size)
+        }
     }
 
     unsafe fn composite(
@@ -100,8 +113,7 @@ impl Gen3Game for ReachGame {
     ) {
         unsafe {
             let depth = cx.core.object_depth(cx.gl, framebuffer);
-            let noise = cx.frame.preview.reach_screen_noise.as_ref();
-            cx.core.reach_composite(cx.gl, accumulation, bloom, depth, screen, noise);
+            self.draw_composite(cx, accumulation, bloom, depth, screen);
         }
     }
 }

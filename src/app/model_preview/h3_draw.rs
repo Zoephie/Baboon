@@ -12,10 +12,7 @@ use std::borrow::Cow;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::gen3::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
-use super::super::reach::lighting::{
-    REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_composite_gamma, reach_frame_value, reach_noise_offset,
-    reach_noise_params,
-};
+use super::super::reach::lighting::reach_frame_value;
 use super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
@@ -236,7 +233,7 @@ void main() {
 ";
 
 /// The preview lens' half angle, in `PERSPECTIVE_FOV_Y`'s terms.
-const HALF_LENS: f32 = 30.0 * std::f32::consts::PI / 180.0;
+pub(in crate::app::model_preview) const HALF_LENS: f32 = 30.0 * std::f32::consts::PI / 180.0;
 
 /// The targets a frame draws through.
 pub(in crate::app::model_preview) struct H3Targets {
@@ -1589,7 +1586,6 @@ impl RenderCore {
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         size: [i32; 2],
-        reach: bool,
         halo4: Option<&ModelGpuFrame>,
     ) -> Option<glow::NativeTexture> {
         unsafe {
@@ -1601,12 +1597,6 @@ impl RenderCore {
                 }
                 let settings = &super::h4_bloom::VIEW_BLOOM;
                 return self.h4_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref(), settings);
-            }
-            if reach {
-                if self.reach_bloom.is_none() {
-                    self.reach_bloom = super::reach_bloom::ReachBloom::new(gl, self.h3_no_bloom);
-                }
-                return self.reach_bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size);
             }
             if self.h3_bloom.is_none() {
                 self.h3_bloom = H3Bloom::new(gl, self.h3_no_bloom);
@@ -1845,70 +1835,6 @@ impl RenderCore {
         self.reach_pass_values = None;
     }
 
-    /// Reach's `final_composite`: see [`REACH_COMPOSITE_FRAGMENT`].
-    pub(in crate::app::model_preview) unsafe fn reach_composite(
-        &mut self,
-        gl: &glow::Context,
-        accumulation: glow::NativeTexture,
-        bloom: Option<glow::NativeTexture>,
-        depth: Option<glow::NativeTexture>,
-        screen: gen3::screen_effects::H3ScreenSettings,
-        noise: Option<&materials::H3Bitmap>,
-    ) {
-        unsafe {
-            if self.reach_noise.is_none()
-                && let Some((image, texels, mips)) = noise
-            {
-                // Sampler 7: wrapped, point.
-                let sampler = H3Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Point };
-                self.reach_noise = upload_h2_image_linear(gl, image, *texels, mips, Some(sampler));
-            }
-            if self.reach_composite_program.is_none() {
-                self.reach_composite_program = screen_program(gl, REACH_COMPOSITE_FRAGMENT);
-            }
-            let Some(program) = self.reach_composite_program else {
-                return;
-            };
-            gl.use_program(Some(program));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            gl.uniform_1_i32(gl.get_uniform_location(program, "accumulation").as_ref(), 0);
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, bloom.or(self.h3_no_bloom));
-            gl.uniform_1_i32(gl.get_uniform_location(program, "bloom").as_ref(), 1);
-            gl.active_texture(glow::TEXTURE2);
-            gl.bind_texture(glow::TEXTURE_2D, depth);
-            gl.uniform_1_i32(gl.get_uniform_location(program, "scene_depth").as_ref(), 2);
-            gl.active_texture(glow::TEXTURE3);
-            gl.bind_texture(glow::TEXTURE_2D, self.reach_noise.or(self.h3_no_bloom));
-            gl.uniform_1_i32(gl.get_uniform_location(program, "noise").as_ref(), 3);
-            gl.active_texture(glow::TEXTURE0);
-            let matrix = screen.color_matrix();
-            let columns: [f32; 16] = std::array::from_fn(|at| matrix[at % 4][at / 4]);
-            gl.uniform_matrix_4_f32_slice(gl.get_uniform_location(program, "hue_saturation").as_ref(), false, &columns);
-            let gamma = reach_composite_gamma(screen.gamma());
-            gl.uniform_1_f32(gl.get_uniform_location(program, "gamma").as_ref(), gamma);
-            // With no map to read, no noise.
-            let [bright, dark] = if self.reach_noise.is_some() { screen.noise() } else { [0.0; 2] };
-            let params = reach_noise_params(bright, dark);
-            gl.uniform_4_f32_slice(gl.get_uniform_location(program, "noise_params").as_ref(), &params);
-            // `real_random`'s two draws, new each frame.
-            self.reach_noise_frame = self.reach_noise_frame.wrapping_add(1);
-            let frame_number = self.reach_noise_frame as f32;
-            let random = [0, 1].map(|salt| reach::shield::real_random(frame_number, salt));
-            let [x, y] = reach_noise_offset(self.reach_noise_frame, random);
-            gl.uniform_2_f32(gl.get_uniform_location(program, "noise_offset").as_ref(), x, y);
-            gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), REACH_DARK_MULTIPLIER);
-            gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
-            gl.disable(glow::DEPTH_TEST);
-            gl.enable(glow::BLEND);
-            gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
-            gl.draw_arrays(glow::TRIANGLES, 0, 3);
-            gl.enable(glow::DEPTH_TEST);
-        }
-    }
-
     /// `c_player_view`'s last steps: `render_screen_shaders`, then the blur, on
     /// a surface that holds light rather than the encoded frame, as the game's
     /// sRGB one does.
@@ -2130,7 +2056,7 @@ impl RenderCore {
         }
     }
 
-    pub(super) unsafe fn h3_empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
+    pub(in crate::app::model_preview) unsafe fn h3_empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
         unsafe {
             *self.empty_vertex_array.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
         }
@@ -2313,7 +2239,7 @@ fn signed_bytes(rgba: &[u8], texels: H3Texels) -> Cow<'_, [u8]> {
 }
 
 /// `upload_h2_image` with an sRGB format, for the curve the card decodes.
-pub(super) unsafe fn upload_h2_image_linear(
+pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
     gl: &glow::Context,
     image: &H2Image,
     texels: H3Texels,
