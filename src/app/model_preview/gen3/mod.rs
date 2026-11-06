@@ -4,6 +4,7 @@
 
 pub(super) mod effects;
 pub(crate) mod light_volumes;
+pub(in crate::app::model_preview) mod render;
 pub(in crate::app) mod prt;
 pub(crate) mod screen_effects;
 pub(crate) mod shaders;

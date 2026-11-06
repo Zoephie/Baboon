@@ -720,7 +720,7 @@ impl RenderCore {
         self.h3_targets.as_ref().map(|targets| targets.normal)
     }
 
-    pub(super) fn h3_draws(&self, frame: &ModelGpuFrame) -> bool {
+    pub(in crate::app::model_preview) fn h3_draws(&self, frame: &ModelGpuFrame) -> bool {
         frame.game_shaders
             && self.h3_supported
             && frame.textures.iter().any(|textures| textures.iter().any(|texture| texture.h3.is_some()))
@@ -1124,7 +1124,7 @@ impl RenderCore {
     }
 
     /// The object's passes, between the preview's own draw and the scene's end.
-    pub(super) unsafe fn draw_h3(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, order: &[usize]) {
+    pub(in crate::app::model_preview) unsafe fn draw_h3(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, order: &[usize]) {
         // Direct3D 11 always filters across a cube's faces; OpenGL has to be asked.
         unsafe { gl.enable(glow::TEXTURE_CUBE_MAP_SEAMLESS) };
         let Some(scene) = self.scene.as_ref() else {

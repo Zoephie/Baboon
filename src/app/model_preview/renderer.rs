@@ -869,7 +869,7 @@ fn draw_preview_hover_label(
 }
 
 #[derive(Clone, Copy)]
-struct ModelGpuCamera {
+pub(super) struct ModelGpuCamera {
     center: [f32; 3],
     scale: f32,
     yaw: f32,
@@ -921,70 +921,70 @@ const PREVIEW_RENDER_DISTANCE: f32 = 8.0;
 pub(in crate::app) const MAX_PREVIEW_BONES: usize = 256;
 
 #[derive(Clone)]
-struct ModelGpuFrame {
-    preview: Arc<RenderModelPreview>,
-    geometry_id: u64,
+pub(super) struct ModelGpuFrame {
+    pub(super) preview: Arc<RenderModelPreview>,
+    pub(super) geometry_id: u64,
     /// See `ModelPreviewData::mesh_id`.
-    mesh_id: u64,
+    pub(super) mesh_id: u64,
     /// What `textures` belongs to; see `ModelPreviewData::textures_id`.
-    textures_id: u64,
-    visible_batches: Vec<usize>,
+    pub(super) textures_id: u64,
+    pub(super) visible_batches: Vec<usize>,
     /// `visible_batches` with the parts only a shield draws.
-    shield_batches: Vec<usize>,
-    camera: ModelGpuCamera,
-    render_mode: ModelRenderMode,
-    show_backfaces: bool,
+    pub(super) shield_batches: Vec<usize>,
+    pub(super) camera: ModelGpuCamera,
+    pub(super) render_mode: ModelRenderMode,
+    pub(super) show_backfaces: bool,
     /// What the frame clears to.
-    background: [f32; 3],
+    pub(super) background: [f32; 3],
     /// Draw the world-unit ground grid on the z = 0 plane.
-    show_grid: bool,
+    pub(super) show_grid: bool,
     /// `None` until the worker has resolved them, or when shading is off.
-    textures: Option<Arc<Vec<MaterialTextures>>>,
+    pub(super) textures: Option<Arc<Vec<MaterialTextures>>>,
     /// Skinning matrices for this frame — three vec4 rows per bone, in
     /// `RenderModelPreview::nodes` order. `None` draws the bind pose.
-    bones: Option<Arc<Vec<[f32; 4]>>>,
+    pub(super) bones: Option<Arc<Vec<[f32; 4]>>>,
     /// The selected variant's change colors for Halo 2 passes.
-    change_colors: [[f32; 3]; 4],
+    pub(super) change_colors: [[f32; 3]; 4],
     /// Halo CE: each object's `A out` to `D out` and change colors this frame,
     /// the opened one first. Empty with none.
-    object_states: Vec<CeObjectState>,
+    pub(super) object_states: Vec<CeObjectState>,
     /// Whether those change by themselves.
-    object_moves: bool,
+    pub(super) object_moves: bool,
     /// Halo 2: what its shaders can read of the object's functions.
-    function_values: Option<functions::FunctionValues>,
+    pub(super) function_values: Option<functions::FunctionValues>,
     /// What a held weapon's own functions read, by owner.
-    attached_values: Vec<(u8, functions::FunctionValues)>,
+    pub(super) attached_values: Vec<(u8, functions::FunctionValues)>,
     /// Each attached Halo 2 or Halo 3 object's own change colors, by owner.
-    attached_colors: Vec<(u8, [[f32; 3]; 4])>,
-    h3_flares_shown: Vec<bool>,
-    h3_lights_shown: Vec<bool>,
+    pub(super) attached_colors: Vec<(u8, [[f32; 3]; 4])>,
+    pub(super) h3_flares_shown: Vec<bool>,
+    pub(super) h3_lights_shown: Vec<bool>,
     /// Reach's lights and then its cheap lights, as `h3_lights_shown`.
-    reach_lights_shown: Vec<bool>,
-    h3_volumes_shown: Vec<bool>,
-    h4_tracers_shown: Vec<bool>,
-    h3_systems_shown: Vec<bool>,
-    h3_strips_shown: Vec<bool>,
-    reach_cheap_shown: Vec<bool>,
-    h2_flares_shown: Vec<bool>,
+    pub(super) reach_lights_shown: Vec<bool>,
+    pub(super) h3_volumes_shown: Vec<bool>,
+    pub(super) h4_tracers_shown: Vec<bool>,
+    pub(super) h3_systems_shown: Vec<bool>,
+    pub(super) h3_strips_shown: Vec<bool>,
+    pub(super) reach_cheap_shown: Vec<bool>,
+    pub(super) h2_flares_shown: Vec<bool>,
     /// The rest of Halo 2's lights and effects, by whether their marker is
     /// under what is selected.
-    h2_shown: H2Shown,
+    pub(super) h2_shown: H2Shown,
     /// Each object's point lights this frame, in step with `object_states`.
-    ce_points: Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>,
+    pub(super) ce_points: Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>,
     /// The panel's plays of Halo CE's event effects.
-    ce_plays: ce::particles::CeEventPlays,
+    pub(super) ce_plays: ce::particles::CeEventPlays,
     /// Draw opaque Halo 2 materials through their passes.
-    game_shaders: bool,
-    default_lights: bool,
-    active_camo: bool,
-    bloom: bool,
-    self_shadow: bool,
-    prt: bool,
-    light_follows_camera: bool,
+    pub(super) game_shaders: bool,
+    pub(super) default_lights: bool,
+    pub(super) active_camo: bool,
+    pub(super) bloom: bool,
+    pub(super) self_shadow: bool,
+    pub(super) prt: bool,
+    pub(super) light_follows_camera: bool,
     /// Seconds, for what Halo 2 shaders animate.
-    time: f32,
+    pub(super) time: f32,
     /// A PRT model's constants on the object path: lit, then in shadow.
-    h2_prt_clusters: Option<[Vec<[f32; 4]>; 2]>,
+    pub(super) h2_prt_clusters: Option<[Vec<[f32; 4]>; 2]>,
 }
 
 /// Wrapped to keep a frame time precise in the `f32` the shaders take.
@@ -997,7 +997,7 @@ pub(super) fn preview_clock(ui: &Ui) -> f32 {
 
 /// What the parts an object owns draw with.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct CeObjectState {
+pub(super) struct CeObjectState {
     outputs: [f32; 4],
     /// Which outputs are on, as `object_get_function_value` answers.
     active: [bool; 4],
@@ -3975,17 +3975,17 @@ struct ModelGlRenderer {
 }
 
 /// What a game's drawing is handed each frame.
-struct FrameCx<'a> {
-    gl: &'a glow::Context,
-    frame: &'a ModelGpuFrame,
-    core: &'a mut RenderCore,
+pub(super) struct FrameCx<'a> {
+    pub(super) gl: &'a glow::Context,
+    pub(super) frame: &'a ModelGpuFrame,
+    pub(super) core: &'a mut RenderCore,
     /// The frame's slot in `core`.
-    slot: usize,
+    pub(super) slot: usize,
 }
 
 /// A game's drawing: the renderer runs the frame and hands these steps to
 /// the game it is from.
-trait GameRender {
+pub(super) trait GameRender {
     /// Before the scene target: what moves the geometry or makes lights.
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>);
     /// The shading, when the mode draws any.
@@ -3996,7 +3996,7 @@ trait GameRender {
 
 /// Today's drawing, every game's at once, until each game has its own.
 #[derive(Default)]
-struct LegacyRender {
+pub(super) struct LegacyRender {
     /// What Halo 2's bloom covers, from the shading to the finish.
     bloom_order: Option<Vec<usize>>,
 }
@@ -4020,13 +4020,17 @@ impl GameRender for LegacyRender {
 #[derive(Default)]
 struct GameRenders {
     legacy: LegacyRender,
+    gen3: gen3::render::Gen3Render,
 }
 
 impl GameRenders {
-    /// The drawing for a preview of `game`: today's, for every game, until
-    /// each has its own.
-    fn of(&mut self, _game: Option<GameId>) -> &mut dyn GameRender {
-        &mut self.legacy
+    /// The drawing for a preview of `game`: the gen3 games' own, and
+    /// today's for the rest until each has its own.
+    fn of(&mut self, game: Option<GameId>) -> &mut dyn GameRender {
+        match game {
+            Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4) => &mut self.gen3,
+            _ => &mut self.legacy,
+        }
     }
 }
 
@@ -4079,7 +4083,7 @@ impl ModelGlRenderer {
 /// The GL state the preview draws with: the shared program, slots and
 /// targets, and, until each game's drawing moves to its own folder, every
 /// game's own state too.
-struct RenderCore {
+pub(super) struct RenderCore {
     /// As `h2_bloom`.
     sprite_gl: Option<Option<SpriteGl>>,
     /// The frame's CE point lights with those its effects have made, which
@@ -4522,7 +4526,7 @@ impl RenderCore {
     /// Today's shading, for every game: the slot draw, the gen3 pipeline,
     /// the dx9 lit passes, transparents and shields. What Halo 2 blooms over,
     /// if it does.
-    unsafe fn legacy_shade(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) -> Option<Vec<usize>> {
+    pub(super) unsafe fn legacy_shade(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) -> Option<Vec<usize>> {
         unsafe {
             self.prepare_h2_programs(gl, frame);
             self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials));
@@ -4665,6 +4669,12 @@ impl RenderCore {
             }
             None
         }
+    }
+
+    /// The slot's own draw of the visible batches, in the shared program:
+    /// what a game's passes do not replace.
+    pub(super) unsafe fn draw_slot_batches(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        unsafe { self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials)) }
     }
 
     /// The wireframe over what shaded, in the shared program.
@@ -5506,7 +5516,9 @@ impl RenderCore {
             })
     }
 
-    unsafe fn prepare_h2_programs(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+    /// Link the dx9 pass programs the frame's materials name: Halo 2's and
+    /// Halo CE's passes, and the shadow passes Halo 3 and ODST borrow.
+    pub(super) unsafe fn prepare_h2_programs(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
         if !self.shaders_supported {
             return;
         }
