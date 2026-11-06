@@ -914,62 +914,71 @@ mod tests {
 
     #[test]
     fn h2_hud_input_and_range_lookup_commit_exact_ids_to_the_selected_wrapper() {
-        for name in ["input name", "range name"] {
-            let (mut tag, effect_path) = new_h2_hud_effect("bitmap widgets");
-            let wrapper_field = tag.root().descend(&effect_path).unwrap().fields()
-                .filter(|field| field.as_struct().is_some_and(|st| st.definition().name() == "hud_widget_effect_function_struct_2"))
-                .nth(1).unwrap();
-            let wrapper_path = append_field_path_for(&effect_path, &wrapper_field);
-            let wrapper = wrapper_field.as_struct().unwrap();
-            let field = wrapper.field(name).unwrap();
-            let path = append_field_path_for(&wrapper_path, &field);
-            let ctx = egui::Context::default();
-            ctx.set_fonts(crate::app::foundation_fonts());
-            let mut pending = Vec::new();
-            let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
-                events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0))),
-                ..Default::default()
-            }, |ui| {
-                with_test_edit_context(|edit| {
-                    edit.game = Some(GameId::Halo2);
-                    edit.group_tag = u32::from_be_bytes(*b"nhdt");
-                    draw_field(ui, field, path.clone(), wrapper.raw(), &TagNameIndex::default(),
-                        0, false, &wrapper_path, edit, None, None, 300.0);
-                    pending.extend(edit.pending.iter().cloned());
+        for block in ["bitmap widgets", "text widgets"] {
+            for name in ["input name", "range name"] {
+                let (mut tag, effect_path) = new_h2_hud_effect(block);
+                let wrapper_field = tag.root().descend(&effect_path).unwrap().fields()
+                    .filter(|field| field.as_struct().is_some_and(|st| st.definition().name() == "hud_widget_effect_function_struct_2"))
+                    .nth(1).unwrap();
+                let wrapper_path = append_field_path_for(&effect_path, &wrapper_field);
+                let wrapper = wrapper_field.as_struct().unwrap();
+                let field = wrapper.field(name).unwrap();
+                let path = append_field_path_for(&wrapper_path, &field);
+                let ctx = egui::Context::default();
+                ctx.set_fonts(crate::app::foundation_fonts());
+                let mut pending = Vec::new();
+                let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
+                    events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0))),
+                    ..Default::default()
+                }, |ui| {
+                    with_test_edit_context(|edit| {
+                        edit.game = Some(GameId::Halo2);
+                        edit.group_tag = u32::from_be_bytes(*b"nhdt");
+                        draw_field(ui, field, path.clone(), wrapper.raw(), &TagNameIndex::default(),
+                            0, false, &wrapper_path, edit, None, None, 300.0);
+                        pending.extend(edit.pending.iter().cloned());
+                    });
                 });
-            });
-            let click = |frame: &mut dyn FnMut(Vec<egui::Event>) -> egui::FullOutput, pos| {
-                frame(vec![egui::Event::PointerMoved(pos)]);
-                for pressed in [true, false] {
-                    frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]);
+                let click = |frame: &mut dyn FnMut(Vec<egui::Event>) -> egui::FullOutput, pos| {
+                    frame(vec![egui::Event::PointerMoved(pos)]);
+                    for pressed in [true, false] {
+                        frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]);
+                    }
+                    frame(vec![])
+                };
+                frame(vec![]);
+                let output = frame(vec![]);
+                let input = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if (rect.rect.width() - 180.0).abs() < 1.0
+                        && (rect.rect.height() - 24.0).abs() < 1.0 => Some(rect.rect), _ => None,
+                }).expect("native string-id input");
+                assert!(ctx.memory(|memory| memory.focused().is_none()), "open the picker without an active field");
+                click(&mut frame, input.right_center() + egui::vec2(ctx.global_style().spacing.item_spacing.x + 24.0, 0.0));
+                let output = frame(vec![]);
+                assert!(hud_texts(&output).contains(&"Search Functions"));
+                let texts = hud_texts(&output);
+                for input in ["hud_input1", "hud_input2", "hud_input3", "hud_input4"] {
+                    assert_eq!(texts.iter().filter(|text| **text == input).count(), 1, "{input} must appear directly in the popup: {texts:?}");
                 }
-                frame(vec![])
-            };
-            frame(vec![]);
-            let output = frame(vec![]);
-            let input = output.shapes.iter().find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(rect) if (rect.rect.width() - 180.0).abs() < 1.0
-                    && (rect.rect.height() - 24.0).abs() < 1.0 => Some(rect.rect), _ => None,
-            }).expect("native string-id input");
-            assert!(ctx.memory(|memory| memory.focused().is_none()), "open the picker without an active field");
-            click(&mut frame, input.right_center() + egui::vec2(ctx.global_style().spacing.item_spacing.x + 24.0, 0.0));
-            let output = frame(vec![]);
-            assert!(hud_texts(&output).contains(&"Search Functions"));
-            frame(vec![egui::Event::Text("HUD_INPUT4".into())]);
-            let output = frame(vec![]);
-            let target = output.shapes.iter().find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "hud_input4" => Some(text.pos + text.galley.size() * 0.5), _ => None,
-            }).expect("HUD functions are searchable");
-            click(&mut frame, target);
-            frame(vec![]);
-            drop(frame);
-            assert_eq!(pending.len(), 1);
-            assert_eq!(pending[0].path, path);
-            assert_eq!(pending[0].input, "hud_input4");
-            crate::core::document::apply::apply_field_edit(&mut tag, &path, &pending[0].input).unwrap();
-            let reloaded = blam_tags::classic::read_classic_tag_file(&tag.write_to_bytes().unwrap(),
-                blam_tags::layout::TagLayout::from_json(test_definition_path("halo2_mcc/new_hud_definition.json")).unwrap()).unwrap();
-            assert_eq!(reloaded.root().descend(&wrapper_path).unwrap().read_string_id(name).as_deref(), Some("hud_input4"));
+                for other in ["hud", "vehicle", "weapon", "time", "engine_power", "body_vitality"] {
+                    assert!(!texts.contains(&other), "HUD Effect choices must not include other function groups: {texts:?}");
+                }
+                frame(vec![egui::Event::Text("HUD_INPUT4".into())]);
+                let output = frame(vec![]);
+                let target = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "hud_input4" => Some(text.pos + text.galley.size() * 0.5), _ => None,
+                }).expect("HUD functions are searchable");
+                click(&mut frame, target);
+                frame(vec![]);
+                drop(frame);
+                assert_eq!(pending.len(), 1);
+                assert_eq!(pending[0].path, path);
+                assert_eq!(pending[0].input, "hud_input4");
+                crate::core::document::apply::apply_field_edit(&mut tag, &path, &pending[0].input).unwrap();
+                let reloaded = blam_tags::classic::read_classic_tag_file(&tag.write_to_bytes().unwrap(),
+                    blam_tags::layout::TagLayout::from_json(test_definition_path("halo2_mcc/new_hud_definition.json")).unwrap()).unwrap();
+                assert_eq!(reloaded.root().descend(&wrapper_path).unwrap().read_string_id(name).as_deref(), Some("hud_input4"));
+            }
         }
     }
 

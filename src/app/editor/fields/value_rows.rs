@@ -273,14 +273,14 @@ pub(in crate::app) fn draw_foundation_value_row(
         let function_lookup = is_h2_hud_function_tag(edit.game, edit.group_tag)
             && matches!(field.name(), "input name" | "range name");
         let function_menu = function_lookup.then(|| {
-            let menu_id = egui::Id::new(("native function catalog", edit.definitions_root, edit.game));
-            ui.data_mut(|data| {
-                data.get_temp_mut_or_insert_with::<Option<std::sync::Arc<blam_tags::string_editor::Menu>>>(menu_id, || {
-                    string_editors::string_editors(edit.definitions_root, edit.game)
-                        .and_then(|editors| editors.built_in_function_menu()).map(std::sync::Arc::new)
-                }).clone()
-            })
-        }).flatten();
+            // HUD effects consume four local inputs. Shader lookups keep the
+            // full built-in catalog, including these names in its HUD submenu.
+            blam_tags::string_editor::Menu {
+                items: (1..=4).map(|index| blam_tags::string_editor::MenuItem::item(format!("hud_input{index}"))).collect(),
+                accepts_anything: true,
+                ..Default::default()
+            }
+        });
         let enabled = edit.can_edit(meta);
         let buffer_key = format!("{}|{}", edit.tag_key, path);
         let id = edit.widget_id(("text", &buffer_key));
@@ -296,7 +296,7 @@ pub(in crate::app) fn draw_foundation_value_row(
             // Culling offscreen rows changes automatic UI IDs. Anchor the
             // popup to this field so focusing its search cannot replace it.
             let picked = function_lookup && ui.scope_builder(egui::UiBuilder::new().id(function_menu_id), |ui| {
-                function_name_suggestions(ui, &buffer_key, &mut draft.text, enabled, function_menu.as_deref())
+                function_name_suggestions(ui, &buffer_key, &mut draft.text, enabled, function_menu.as_ref())
             }).inner;
             if picked {
                 edit.pending.extend(field_edit_ops(path, &draft.text).pending);

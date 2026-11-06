@@ -1607,43 +1607,49 @@ mod tests {
     #[test]
     fn input_and_range_search_built_in_functions_and_write_exact_ids() {
         let defs = crate::core::bundled::locate_definitions_root();
-        let menu = crate::app::editor::fields::string_editors::string_editors(Some(&defs), Some(GameId::Halo4))
-            .unwrap().built_in_function_menu().unwrap();
-        for id in ["foundation_fn_input", "foundation_fn_range"] {
-            let ctx = egui::Context::default();
-            let origin = std::cell::Cell::new(egui::Pos2::ZERO);
-            let mut value = "my_custom_export".to_owned();
-            let mut changed = false;
-            let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
-                ui.set_width(280.0);
-                ui.horizontal(|ui| {
-                    origin.set(ui.cursor().min);
-                    changed |= function_name_input(ui, id, &mut value, true, Some(&menu));
+        for (game, query, expected) in [
+            (GameId::Halo4, "ENGINE_TURBO", "engine_turbo"),
+            (GameId::Halo2, "ENGINE_POWER", "engine_power"),
+            (GameId::Halo2, "HUD_INPUT4", "hud_input4"),
+        ] {
+            let menu = crate::app::editor::fields::string_editors::string_editors(Some(&defs), Some(game))
+                .unwrap().built_in_function_menu().unwrap();
+            for id in ["foundation_fn_input", "foundation_fn_range"] {
+                let ctx = egui::Context::default();
+                let origin = std::cell::Cell::new(egui::Pos2::ZERO);
+                let mut value = "my_custom_export".to_owned();
+                let mut changed = false;
+                let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+                    ui.set_width(280.0);
+                    ui.horizontal(|ui| {
+                        origin.set(ui.cursor().min);
+                        changed |= function_name_input(ui, id, &mut value, true, Some(&menu));
+                    });
                 });
-            });
-            let click = |pos| vec![
-                egui::Event::PointerMoved(pos),
-                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
-                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
-            ];
-            frame(vec![]);frame(vec![]);
-            frame(click(origin.get() + Vec2::new(256.0, 12.0)));
-            let output = frame(vec![]);
-            assert!(output.shapes.iter().any(|shape| matches!(
-                &shape.shape, egui::Shape::Text(text) if text.galley.text() == "Search Functions")));
-            // The shared search field receives focus on opening. Search a
-            // vehicle-only input from a shader with no owning object tag.
-            frame(vec![egui::Event::Text("ENGINE_TURBO".into())]);
-            let output = frame(vec![]);
-            let target = output.shapes.iter().find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "engine_turbo" => Some(text.pos + text.galley.size() * 0.5),
-                _ => None,
-            }).expect("search reaches built-ins inside object type groups");
-            frame(click(target));
-            frame(vec![]);
-            drop(frame);
-            assert_eq!(value, "engine_turbo", "write the exact ID rather than the search query or heading");
-            assert!(changed);
+                let click = |pos| vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+                ];
+                frame(vec![]);frame(vec![]);
+                frame(click(origin.get() + Vec2::new(256.0, 12.0)));
+                let output = frame(vec![]);
+                assert!(output.shapes.iter().any(|shape| matches!(
+                    &shape.shape, egui::Shape::Text(text) if text.galley.text() == "Search Functions")));
+                // Shader input and range pickers retain the full catalog,
+                // including the HUD functions alongside vehicle functions.
+                frame(vec![egui::Event::Text(query.into())]);
+                let output = frame(vec![]);
+                let target = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == expected => Some(text.pos + text.galley.size() * 0.5),
+                    _ => None,
+                }).unwrap_or_else(|| panic!("{game:?}: search should find {expected} in the built-in function groups"));
+                frame(click(target));
+                frame(vec![]);
+                drop(frame);
+                assert_eq!(value, expected, "write the exact ID rather than the search query or heading");
+                assert!(changed);
+            }
         }
     }
 
