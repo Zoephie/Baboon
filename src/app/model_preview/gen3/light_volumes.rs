@@ -9,7 +9,7 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::elements;
+use super::super::ce::attachments::{elements, has_flag};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
@@ -122,8 +122,8 @@ struct H3VolumeProperty {
 impl H3VolumeProperty {
     fn read(holder: TagStruct<'_>, name: &str) -> Option<Self> {
         let property = holder.descend(name)?;
-        let input = |field: &str| H3VolumeInput::named(&property.read_enum_name(field).unwrap_or_default());
-        let adds = match property.read_enum_name("Output Modifier").as_deref() {
+        let input = |field: &str| H3VolumeInput::named(&property.read_enum_option(field).unwrap_or_default());
+        let adds = match property.read_enum_option("Output Modifier").as_deref() {
             Some("Plus") => Some(true),
             Some("Times") => Some(false),
             _ => None,
@@ -528,8 +528,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
     // not in the kit, and no volume uses it.
     let depth_fade = (reach && chosen("depth_fade") == "on" && blend != H3Blend::Opaque)
         .then(|| resolved_real("depth_fade_range", 0.1).max(1e-4));
-    let flags = element.read_flag_names("flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let flagged = |wanted: &str| has_flag(element, "flags", wanted);
     let lod = if reach { ReachVolumeLod::read(element, flagged) } else { None };
     let properties = VolumeProperties::read(element)?;
     // The postprocess tests what the properties read before it narrows the
@@ -564,8 +563,7 @@ fn read_h4_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Vo
     let resolved = resolve_h4_effect_material(source, &material, "light_volume")
         .map_err(|error| eprintln!("h4 light volume material: {error}"))
         .ok()?;
-    let flags = element.read_flag_names("flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let flagged = |wanted: &str| has_flag(element, "flags", wanted);
     let lod = ReachVolumeLod::read(element, flagged);
     let appearance = element.read_int_any("appearance flags").unwrap_or(0) as u32;
     let properties = VolumeProperties::read(element)?;
