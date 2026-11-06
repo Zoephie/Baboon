@@ -8,7 +8,7 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::elements;
+use super::super::ce::attachments::{elements, has_flag};
 use super::super::ce::lights::{CeFlareView, posed_on};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
@@ -136,11 +136,11 @@ struct StripProperty {
 impl StripProperty {
     fn read(holder: TagStruct<'_>, name: &str) -> Option<Self> {
         let property = holder.descend(name)?;
-        let input = |field: &str| StripInput::named(&property.read_enum_name(field).unwrap_or_default());
+        let input = |field: &str| StripInput::named(&property.read_enum_option(field).unwrap_or_default());
         Some(Self {
             input: input("Input Variable"),
             range: input("Range Variable"),
-            adds: match property.read_enum_name("Output Modifier").as_deref() {
+            adds: match property.read_enum_option("Output Modifier").as_deref() {
                 Some("Plus") => Some(true),
                 Some("Times") => Some(false),
                 _ => None,
@@ -305,7 +305,7 @@ fn read_strip_look(source: &TagSource, element: TagStruct<'_>, beam: bool) -> Op
         shader.plasma_second_sprite = false;
         shader.unit_particle_alpha = true;
     }
-    let shape = match element.read_enum_name("profile shape").as_deref() {
+    let shape = match element.read_enum_option("profile shape").as_deref() {
         Some("cross") => StripShape::Cross,
         Some("n-gon") => {
             let sides = element.read_int_any("number of n-gon sides").unwrap_or(0).max(0) as usize;
@@ -313,7 +313,6 @@ fn read_strip_look(source: &TagSource, element: TagStruct<'_>, beam: bool) -> Op
         }
         _ => StripShape::Ribbon,
     };
-    let flags = element.read_flag_names("appearance flags").unwrap_or_default();
     let tiling = element.read_vec2("uv tiling");
     let scroll = element.read_vec2("uv scrolling");
     let real = |name: &str| element.read_real(name).unwrap_or(0.0);
@@ -323,7 +322,7 @@ fn read_strip_look(source: &TagSource, element: TagStruct<'_>, beam: bool) -> Op
     let [angle_range, angle_begin] = [real("angle fade range"), real("angle fade begin")];
     Some(StripLook {
         shape,
-        double_sided: flags.iter().any(|(_, name)| name.starts_with("double-sided")),
+        double_sided: has_flag(element, "appearance flags", "double-sided"),
         // The postprocess's: no tiling is one tile.
         tiling: [tiling.i, tiling.j].map(|rate| if rate == 0.0 { 1.0 } else { rate }),
         scroll: [scroll.i, scroll.j],
@@ -396,8 +395,7 @@ struct ContrailDefinition {
 
 fn read_contrail(element: TagStruct<'_>) -> Option<ContrailDefinition> {
     let read = |name: &str| StripProperty::read(element, name);
-    let flags = element.read_flag_names("appearance flags").unwrap_or_default();
-    let flagged = |wanted: &str| flags.iter().any(|(_, name)| name.starts_with(wanted));
+    let flagged = |wanted: &str| has_flag(element, "appearance flags", wanted);
     let mut contrail = ContrailDefinition {
         emission_rate: read("emission rate")?,
         lifespan: read("profile lifespan")?,
