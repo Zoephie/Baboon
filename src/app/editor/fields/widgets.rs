@@ -306,13 +306,27 @@ pub(in crate::app) fn foundation_value_cell_with_error(
     editable: bool,
     invalid: bool,
 ) -> egui::Response {
+    foundation_value_cell_with_error_and_corners(
+        ui, text, width, id, editable, invalid, crate::app::ui_kit::INPUT_CORNER_RADIUS,
+    )
+}
+
+pub(in crate::app) fn foundation_value_cell_with_error_and_corners(
+    ui: &mut Ui,
+    text: &mut String,
+    width: f32,
+    id: egui::Id,
+    editable: bool,
+    invalid: bool,
+    corners: egui::CornerRadius,
+) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
     let fill = invalid.then(invalid_value_fill);
     let color = if invalid { invalid_value_text() } else { text_dark() };
     if editable {
-        foundation_value_text_filled(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None)
+        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, false, corners)
     } else {
-        foundation_value_text_filled(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None)
+        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, false, corners)
     }
 }
 
@@ -325,9 +339,9 @@ pub(in crate::app) fn foundation_string_id_value_cell(
     let color = if invalid { invalid_value_text() } else { text_dark() };
     let fill = invalid.then(invalid_value_fill);
     if editable {
-        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, true)
+        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, true, crate::app::ui_kit::INPUT_CORNER_RADIUS)
     } else {
-        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, true)
+        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, true, crate::app::ui_kit::INPUT_CORNER_RADIUS)
     }
 }
 
@@ -359,7 +373,7 @@ fn foundation_value_text_filled(
     fill: Option<Color32>,
     status: Option<&str>,
 ) -> egui::Response {
-    foundation_value_text_filled_with_placeholder(ui, rect, text, id, color, left_padding, fill, status, false)
+    foundation_value_text_filled_with_placeholder(ui, rect, text, id, color, left_padding, fill, status, false, crate::app::ui_kit::INPUT_CORNER_RADIUS)
 }
 
 fn foundation_value_text_filled_with_placeholder(
@@ -372,6 +386,7 @@ fn foundation_value_text_filled_with_placeholder(
     fill: Option<Color32>,
     status: Option<&str>,
     string_id_placeholder: bool,
+    corners: egui::CornerRadius,
 ) -> egui::Response {
     // A box whose text can't change is greyed, as Foundation greys a
     // read-only field's: a dimmer fill and dimmer text (a missing reference
@@ -384,7 +399,7 @@ fn foundation_value_text_filled_with_placeholder(
     let appearance = input_appearance(ui, state, read_only, false);
     let fill = fill.unwrap_or(appearance.fill);
     let color = if read_only && color == text_dark() { subtle_dark() } else { color };
-    ui.painter().rect_filled(rect, appearance.corners, fill);
+    ui.painter().rect_filled(rect, corners, fill);
     let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
     let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
     let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
@@ -417,7 +432,7 @@ fn foundation_value_text_filled_with_placeholder(
     let response = ui.put(rect, edit);
     if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
     let appearance = input_appearance(ui, state, read_only, response.has_focus());
-    ui.painter().rect_stroke(rect, appearance.corners, appearance.stroke, egui::StrokeKind::Middle);
+    ui.painter().rect_stroke(rect, corners, appearance.stroke, egui::StrokeKind::Middle);
     if let Some(status) = status {
         ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
             egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
