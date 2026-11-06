@@ -37,6 +37,7 @@ pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod antennas;
 mod common;
+mod gl;
 mod renderer;
 #[cfg(test)]
 mod gates;
