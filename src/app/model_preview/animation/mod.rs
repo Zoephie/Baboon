@@ -1933,7 +1933,7 @@ fn ce_rest_pose(skeleton: &Skeleton, gbxmodel: Option<&TagFile>) -> Vec<NodeTran
         .and_then(|tag| tag.root().field("nodes"))
         .and_then(|field| field.as_block())
     {
-        for node in (0..nodes.len()).filter_map(|index| nodes.element(index)) {
+        for node in nodes.iter() {
             let Some(name) = node.read_string("name") else {
                 continue;
             };

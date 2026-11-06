@@ -1026,8 +1026,7 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
     // unpacker's winding, which the append below undoes per triangle.
     let mut mesh_compression: HashMap<usize, usize> = HashMap::new();
     if let Some(defs) = &defs {
-        for index in 0..defs.len() {
-            let def = defs.element(index).unwrap();
+        for def in defs.iter() {
             let mesh_index = def.read_int_any("mesh index").unwrap_or(-1);
             let compression = def.read_int_any("compression index").unwrap_or(0).max(0) as usize;
             if mesh_index >= 0 {
@@ -1048,8 +1047,7 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
     // per part would be the slow way to spend a frame.
     let mut render_indices: Vec<Vec<u32>> = vec![Vec::new(); preview.materials.len()];
     let identity = InstancePlacement::identity();
-    for index in 0..clusters.len() {
-        let cluster = clusters.element(index).unwrap();
+    for cluster in clusters.iter() {
         let mesh_index = cluster.read_int_any("mesh index").unwrap_or(-1);
         let Some(mesh) = usize::try_from(mesh_index).ok().and_then(|i| meshes.get(i)) else {
             continue;
@@ -1057,12 +1055,11 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
         append_sbsp_mesh(&mut preview, &mut render_indices, mesh, &identity, false);
     }
     if let (Some(defs), Some(instances)) = (&defs, &instances) {
-        for index in 0..instances.len() {
-            let instance = instances.element(index).unwrap();
+        for instance in instances.iter() {
             let def_index = instance.read_int_any("instance definition").unwrap_or(-1);
             let Some(def) = usize::try_from(def_index)
                 .ok()
-                .and_then(|i| (i < defs.len()).then(|| defs.element(i).unwrap()))
+                .and_then(|i| defs.element(i))
             else {
                 continue;
             };
@@ -1274,8 +1271,7 @@ fn append_sbsp_portals(root: &TagStruct<'_>, preview: &mut RenderModelPreview) {
         return;
     };
     let mut triples: Vec<([f32; 3], [f32; 3])> = Vec::new();
-    for index in 0..portals.len() {
-        let portal = portals.element(index).unwrap();
+    for portal in portals.iter() {
         let Some(vertices) = portal.field("vertices").and_then(|field| field.as_block()) else {
             continue;
         };
@@ -1307,8 +1303,7 @@ fn append_sbsp_collision(root: &TagStruct<'_>, preview: &mut RenderModelPreview)
         else {
             continue;
         };
-        for index in 0..block.len() {
-            let bsp = block.element(index).unwrap();
+        for bsp in block.iter() {
             append_collision_bsp_triangles(&bsp, &mut triples);
         }
     }
@@ -1349,8 +1344,7 @@ fn append_collision_bsp_triangles(bsp: &TagStruct<'_>, triples: &mut Vec<([f32; 
             index(&edge, "right surface"),
         ))
     };
-    for surface_index in 0..surfaces.len() {
-        let surface = surfaces.element(surface_index).unwrap();
+    for (surface_index, surface) in surfaces.iter().enumerate() {
         let first_edge = index(&surface, "first edge");
         if first_edge < 0 {
             continue;

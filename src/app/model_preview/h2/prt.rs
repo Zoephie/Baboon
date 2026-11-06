@@ -128,7 +128,7 @@ fn cluster_constants(basis: &[f32], light: &[[f32; SH_COEFFICIENTS]; 3]) -> Vec<
 
 fn reals(info: &TagStruct<'_>, block: &str, field: &str) -> Option<Vec<f32>> {
     let block = info.field(block)?.as_block()?;
-    (0..block.len()).map(|index| block.element(index)?.read_real(field)).collect()
+    block.iter().map(|element| element.read_real(field)).collect()
 }
 
 /// Read a Halo 2 render_model's PRT data, walking `meshes` in the order the

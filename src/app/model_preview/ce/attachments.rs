@@ -427,8 +427,9 @@ pub(in crate::app::model_preview) fn object_block<'a>(object: &'a TagFile, block
 /// The unit's first weapon, which it has ready, by path.
 pub(in crate::app::model_preview) fn first_weapon(object: &TagFile) -> Option<String> {
     let weapons = object_block(object, "weapons")?.field("weapons")?.as_block()?;
-    (0..weapons.len())
-        .filter_map(|index| weapons.element(index)?.read_tag_ref_path("weapon"))
+    weapons
+        .iter()
+        .filter_map(|weapon| weapon.read_tag_ref_path("weapon"))
         .find(|path| !path.is_empty())
 }
 

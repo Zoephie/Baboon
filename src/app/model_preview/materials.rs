@@ -1394,7 +1394,7 @@ fn resolve_h2_shader(
 fn h2_shader_parameters<'a>(root: TagStruct<'a>) -> HashMap<String, TagStruct<'a>> {
     let mut parameters = HashMap::new();
     if let Some(block) = root.field("parameters").and_then(|field| field.as_block()) {
-        for parameter in (0..block.len()).filter_map(|index| block.element(index)) {
+        for parameter in block.iter() {
             if let Some(name) = parameter.read_string_id("name") {
                 parameters.entry(name).or_insert(parameter);
             }
@@ -1661,11 +1661,11 @@ fn cached_h2_template(
         .map(|template| {
             let mut parameters = HashMap::new();
             if let Some(categories) = template.root().field("categories").and_then(|f| f.as_block()) {
-                for category in (0..categories.len()).filter_map(|index| categories.element(index)) {
+                for category in categories.iter() {
                     let Some(block) = category.field("parameters").and_then(|f| f.as_block()) else {
                         continue;
                     };
-                    for parameter in (0..block.len()).filter_map(|index| block.element(index)) {
+                    for parameter in block.iter() {
                         let Some(name) = parameter.read_string_id("name") else {
                             continue;
                         };

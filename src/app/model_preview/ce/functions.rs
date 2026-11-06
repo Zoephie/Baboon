@@ -474,7 +474,7 @@ pub(in crate::app) fn read_ce_object_functions(object: &TagFile) -> Option<CeObj
         }
     }
     let block = chain.last()?.field("functions")?.as_block()?;
-    let functions = (0..block.len()).filter_map(|index| block.element(index)).map(CeFunction::read);
+    let functions = block.iter().map(CeFunction::read);
     Some(CeObjectFunctions { inputs, input_names, functions: functions.collect() })
 }
 
