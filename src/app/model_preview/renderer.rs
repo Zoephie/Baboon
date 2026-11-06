@@ -1497,6 +1497,8 @@ mod h4_bloom;
 mod h4_holograms;
 #[path = "gen3_shadow.rs"]
 mod gen3_shadow;
+#[path = "gen3_screen_lights.rs"]
+mod gen3_screen_lights;
 #[path = "reach_shadow_pass.rs"]
 mod reach_shadow_pass;
 #[path = "reach_light_pass.rs"]

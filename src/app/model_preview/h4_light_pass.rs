@@ -75,32 +75,9 @@ impl ModelGlRenderer {
             Some(super::gen3::shaders::H3Value::Floats(exposure)) => exposure[0],
             _ => return,
         };
+        let depth_copy_framebuffer = targets.depth_copy_framebuffer;
         unsafe {
-            let [width, height] = size;
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(accumulation_target));
-            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
-            let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-            gl.blit_framebuffer(
-                0,
-                0,
-                width,
-                height,
-                0,
-                0,
-                width,
-                height,
-                mask,
-                glow::NEAREST,
-            );
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
-            gl.disable(glow::DEPTH_TEST);
-            gl.disable(glow::CULL_FACE);
-            gl.enable(glow::BLEND);
-            gl.blend_func(glow::ONE, glow::ONE);
-            // `RenderSSLightInternal`'s colour write mask 7.
-            gl.color_mask(true, true, true, false);
-            let empty = self.h3_empty_array(gl);
-            gl.bind_vertex_array(Some(empty));
+            self.begin_screen_lights(gl, size, accumulation_target, depth_copy_framebuffer);
             for light in &lit {
                 let Some(pass) = frame
                     .preview
@@ -152,27 +129,20 @@ impl ModelGlRenderer {
                             h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
                         }
                     }
-                    for (unit, (name, _)) in pass.textures.iter().enumerate() {
-                        gl.active_texture(glow::TEXTURE0 + unit as u32);
-                        let texture = match name.as_str() {
-                            "depth_samplerTexture" => Some(depth_copy),
-                            "albedo_samplerTexture" => Some(albedo),
-                            "normal_samplerTexture" => Some(normal),
-                            _ => this.placeholder,
-                        };
-                        gl.bind_texture(glow::TEXTURE_2D, texture);
-                        gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
-                    }
+                    let placeholder = this.placeholder;
+                    Self::bind_screen_light_textures(gl, &pass, program, |name| match name {
+                        "depth_samplerTexture" => Some(Some(depth_copy)),
+                        "albedo_samplerTexture" => Some(Some(albedo)),
+                        "normal_samplerTexture" => Some(Some(normal)),
+                        _ => Some(placeholder),
+                    });
                     gl.draw_arrays(glow::TRIANGLES, 0, 3);
                 });
                 if linked.is_none() {
                     continue;
                 }
             }
-            gl.active_texture(glow::TEXTURE0);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.color_mask(true, true, true, true);
-            gl.enable(glow::DEPTH_TEST);
+            Self::end_screen_lights(gl);
         }
     }
 }

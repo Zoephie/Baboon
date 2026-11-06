@@ -123,21 +123,9 @@ impl ModelGlRenderer {
         let (size, albedo, normal, depth_copy) = (targets.size, targets.albedo, targets.normal, targets.depth_copy);
         let eye = h2_eye_position(&frame.camera);
         let view_projection = h3_draw::view_projection(&frame.camera);
+        let depth_copy_framebuffer = targets.depth_copy_framebuffer;
         unsafe {
-            let [width, height] = size;
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(accumulation_target));
-            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
-            let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-            gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
-            gl.disable(glow::DEPTH_TEST);
-            gl.disable(glow::CULL_FACE);
-            gl.enable(glow::BLEND);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.blend_func(glow::ONE, glow::ONE);
-            gl.color_mask(true, true, true, false);
-            let empty = self.h3_empty_array(gl);
-            gl.bind_vertex_array(Some(empty));
+            self.begin_screen_lights(gl, size, accumulation_target, depth_copy_framebuffer);
             for light in screen {
                 let combo = usize::from(light.frustum) + 2 * usize::from(light.specular);
                 let Some(pass) = frame.preview.reach_light_passes.get(combo).cloned().flatten() else {
@@ -184,26 +172,19 @@ impl ModelGlRenderer {
                             }
                         }
                     }
-                    for (unit, (name, _)) in pass.textures.iter().enumerate() {
-                        gl.active_texture(glow::TEXTURE0 + unit as u32);
-                        let texture = match name.as_str() {
-                            "GlobalTexture_depth_sampler" => depth_copy,
-                            "GlobalTexture_albedo_sampler" => albedo,
-                            "GlobalTexture_normal_sampler" => normal,
-                            _ => continue,
-                        };
-                        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                        gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
-                    }
+                    Self::bind_screen_light_textures(gl, &pass, program, |name| match name {
+                        "GlobalTexture_depth_sampler" => Some(Some(depth_copy)),
+                        "GlobalTexture_albedo_sampler" => Some(Some(albedo)),
+                        "GlobalTexture_normal_sampler" => Some(Some(normal)),
+                        _ => None,
+                    });
                     gl.draw_arrays(glow::TRIANGLES, 0, 3);
                 });
                 if linked.is_none() {
                     continue;
                 }
             }
-            gl.active_texture(glow::TEXTURE0);
-            gl.color_mask(true, true, true, true);
-            gl.enable(glow::DEPTH_TEST);
+            Self::end_screen_lights(gl);
         }
     }
 

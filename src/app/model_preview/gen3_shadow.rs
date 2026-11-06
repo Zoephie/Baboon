@@ -58,18 +58,18 @@ impl ModelGlRenderer {
         }
     }
 
-    /// The scene's depth and stencil, `size` of them, from the albedo pass's
-    /// framebuffer into `depth_copy`, to find each pixel's place in the world.
-    /// Leaves the viewport at `size`.
+    /// The scene's depth and stencil, `size` of them, from `scene` (a pass's
+    /// framebuffer that holds them) into `depth_copy`, to find each pixel's
+    /// place in the world. Leaves the viewport at `size`.
     pub(super) unsafe fn copy_scene_depth(
         gl: &glow::Context,
         size: [i32; 2],
-        albedo: glow::NativeFramebuffer,
+        scene: glow::NativeFramebuffer,
         depth_copy: glow::NativeFramebuffer,
     ) {
         unsafe {
             gl.viewport(0, 0, size[0], size[1]);
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(albedo));
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(scene));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(depth_copy));
             let bits = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
             gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], bits, glow::NEAREST);
