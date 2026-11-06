@@ -13,10 +13,9 @@ use eframe::egui::{self, Ui};
 
 use crate::app::ui_kit::ThemedCheckbox;
 
-use super::super::ce::attachments::{elements, object_block};
+use super::super::common::fields::{elements, has_flag, object_block};
 use super::super::dx9::passes::{object_input, tag_function_at};
 use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
-use crate::app::model_preview::ce::attachments::has_flag;
 
 /// What the panel has set, by object geometry and input name.
 pub(crate) type H2FunctionInputs = HashMap<(u64, String), f32>;

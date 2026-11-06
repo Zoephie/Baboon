@@ -4,7 +4,7 @@
 
 use blam_tags::TagFile;
 
-use super::super::ce::attachments::{has_flag, object_block};
+use super::super::common::fields::{has_flag, object_block};
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 
 /// `c_rasterizer_states`' shadow generate biases when the model sets none

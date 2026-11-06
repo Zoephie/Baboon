@@ -8,7 +8,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, object_block};
+use super::super::common::fields::{elements, has_flag, object_block};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::functions::H2FunctionValues;
 use super::light_volumes::{read_glow, read_h2_bitmap};
@@ -20,7 +20,6 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot};
 use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::ce::attachments::has_flag;
 
 const OCTAVES: usize = 9;
 /// `liquid_arc_state_new`'s random starts, which never need to be the game's.

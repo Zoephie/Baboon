@@ -15,7 +15,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, BLEND_MODES,
 use blam_tags::TagStruct;
 use blam_tags::tag_function::FunctionType;
 
-use super::super::ce::attachments::elements;
+use super::super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::H2Image;
 use super::super::*;
@@ -23,7 +23,6 @@ use crate::core::hlsl::emit::{Stage, Translated, translate};
 use crate::core::hlsl::parse::{TextureKind, Type, parse};
 use crate::core::hlsl::pre::Preprocessor;
 use crate::core::source::TagSource;
-use crate::app::model_preview::ce::attachments::{has_flag, has_flag_labelled};
 
 /// Indices into [`VERTEX_TYPES`].
 #[cfg(test)]

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, has_flag};
+use super::super::common::fields::{elements, has_flag};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;

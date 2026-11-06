@@ -6,7 +6,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::{MarkerFrame, perpendicular};
-use super::super::ce::attachments::{elements, function_slot_of, has_flag, object_block};
+use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::*;
 use crate::core::source::TagSource;

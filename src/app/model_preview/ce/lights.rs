@@ -2,7 +2,8 @@
 //! `light`, and the sprites `rasterizer_lens_flares_draw` makes of one.
 
 use super::super::attachment::MarkerFrame;
-use super::attachments::{attached_marker_frame, elements, function_slot_of, has_flag, has_flag_in_any, object_block};
+use super::attachments::attached_marker_frame;
+use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
 use super::passes::{argb, periodic_evaluate};
 use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_h2_image;

@@ -8,7 +8,7 @@ use blam_tags::math::{Matrix4, RealPoint3d, RealQuaternion};
 use blam_tags::{Skeleton, TagFile};
 
 use super::super::attachment::{added, apart, axis_of, matrix_of, place_of, rigid_inverse};
-use super::super::ce::attachments::elements;
+use super::super::common::fields::elements;
 use super::super::RenderModelPreviewNode;
 use crate::app::model_preview::common::math::{cross, dot, scaled, unit_by_reciprocal};
 

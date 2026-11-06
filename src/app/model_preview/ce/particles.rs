@@ -16,7 +16,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::perpendicular;
-use super::attachments::{elements, function_slot_of, has_flag, object_block};
+use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
 use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,

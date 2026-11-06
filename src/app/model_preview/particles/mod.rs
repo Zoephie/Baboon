@@ -12,7 +12,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, ParameterSou
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
-use super::ce::attachments::elements;
+use super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::ce::lights::CeFlareView;
 use super::h2::functions::H2FunctionValues;
 use super::dx9::passes::tag_function_at;
@@ -30,7 +30,6 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::random::{high_bits, lcg_step};
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::ce::attachments::{has_flag, has_flag_labelled};
 
 /// Seconds run before the first frame, so a held pose has its particles.
 pub(super) const PRE_ROLL: f32 = 6.0;

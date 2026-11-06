@@ -819,7 +819,7 @@ fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::Ma
 /// A Halo 4 object's `bounding offset` and `bounding radius`
 /// (`object_compute_bounding_sphere_recursive`, X360 0x84A489C0, reads both).
 fn read_h4_bounding_sphere(object: &TagFile) -> Option<([f32; 3], f32)> {
-    let holder = super::ce::attachments::object_block(object, "bounding radius")?;
+    let holder = super::common::fields::object_block(object, "bounding radius")?;
     let radius = holder.read_real("bounding radius")?;
     let offset = match holder.field("bounding offset").and_then(|field| field.value()) {
         Some(blam_tags::TagFieldData::RealPoint3d(point)) => [point.x, point.y, point.z],
@@ -833,8 +833,8 @@ fn read_h4_bounding_sphere(object: &TagFile) -> Option<([f32; 3], f32)> {
 /// four the object has (`object_get_change_color` answers for each index
 /// below the block's count).
 fn read_h4_change_color_count(object: &TagFile) -> u8 {
-    let holder = super::ce::attachments::object_block(object, "change colors");
-    let count = holder.map_or(0, |holder| super::ce::attachments::elements(holder, "change colors").len());
+    let holder = super::common::fields::object_block(object, "change colors");
+    let count = holder.map_or(0, |holder| super::common::fields::elements(holder, "change colors").len());
     count.min(4) as u8
 }
 

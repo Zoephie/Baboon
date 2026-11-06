@@ -43,7 +43,7 @@ pub(in crate::app::model_preview) fn object_attachments(
     object: &blam_tags::TagFile,
     groups: &[u32],
 ) -> Vec<ObjectAttachment> {
-    use crate::app::model_preview::ce::attachments::{elements, function_slot_of, has_flag, object_block};
+    use crate::app::model_preview::common::fields::{elements, function_slot_of, has_flag, object_block};
     use crate::app::model_preview::gen3::effects::marker_name;
     let Some(block) = object_block(object, "attachments") else {
         return Vec::new();

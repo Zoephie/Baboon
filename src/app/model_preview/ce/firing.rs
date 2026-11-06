@@ -16,7 +16,7 @@
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachments::{elements, has_flag, object_block};
+use super::super::common::fields::{elements, has_flag, object_block};
 use super::functions::TICKS_PER_SECOND;
 use super::particles::{CeEffectAt, Random, STEP};
 

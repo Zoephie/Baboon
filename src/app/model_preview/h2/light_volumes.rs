@@ -6,7 +6,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, object_block};
+use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::functions::H2FunctionValues;
 use super::lights::H2EffectPart;
@@ -19,7 +19,6 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::dot;
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::ce::attachments::{function_slot_of, has_flag};
 
 /// `sprites[256]`.
 const MOST_SPRITES: usize = 256;

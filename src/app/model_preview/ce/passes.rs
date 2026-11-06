@@ -14,7 +14,7 @@ use super::super::dx9::passes::{
     H2Blend, H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2Depth, H2DrawPass, H2DrawTexture,
     H2Image, H2_GLSL_VERSION,
 };
-use super::attachments::{has_flag, has_flag_in_any};
+use super::super::common::fields::{has_flag, has_flag_in_any};
 use super::super::dx9::stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::super::load_referenced_tag_from_source;
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};

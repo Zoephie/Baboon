@@ -9,7 +9,8 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::attachment::{MarkerFrame, WeaponOption, merge_attached};
-use super::super::ce::attachments::{attached_marker_frame, elements, loose_weapon_paths, weapon_ik};
+use super::super::ce::attachments::{attached_marker_frame, loose_weapon_paths, weapon_ik};
+use super::super::common::fields::{elements, has_flag};
 use super::super::attachment::{attach_point, attach_vector};
 use super::super::loading::build_render_preview;
 use super::super::ce::attachments::CeWeaponIk;
@@ -18,7 +19,6 @@ use super::super::cloth::ClothGame;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::attached::{Attached, named};
-use crate::app::model_preview::ce::attachments::has_flag;
 
 /// The mode a unit nobody controls is in.
 const RESTING_MODE: &str = "combat";
@@ -817,7 +817,7 @@ pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPr
     preview: &mut RenderModelPreview,
     within: Option<&str>,
 ) {
-    let Some(holder) = super::super::ce::attachments::object_block(object, "weapons") else {
+    let Some(holder) = super::super::common::fields::object_block(object, "weapons") else {
         return;
     };
     for entry in elements(holder, "weapons") {
@@ -827,7 +827,7 @@ pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPr
         let Ok(weapon) = load_referenced_tag_from_source(source, &path, "weapon", b"weap") else {
             continue;
         };
-        let object = super::super::ce::attachments::object_block(&weapon, "bounding radius");
+        let object = super::super::common::fields::object_block(&weapon, "bounding radius");
         if !object.is_some_and(|object| has_flag(object, "flags", "extension of parent")) {
             continue;
         }

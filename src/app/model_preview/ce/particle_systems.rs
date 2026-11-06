@@ -15,7 +15,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::passes::FramebufferBlend;
-use super::attachments::{elements, function_slot_of, has_flag, has_flag_after, object_block};
+use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_after, object_block};
 use super::lights::{CeFlareView, posed_on};
 use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use super::super::*;

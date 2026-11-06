@@ -21,7 +21,7 @@ use super::super::h2::prt::H2PrtLight;
 use super::super::ce::passes::{CeModelAnimation, CeNumeric};
 use super::stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::super::materials::TextureImage;
-use crate::app::model_preview::ce::attachments::has_flag;
+use crate::app::model_preview::common::fields::has_flag;
 use crate::core::h2_pixel_shader::{
     AlphaCompare, AlphaTest, PixelShaderOptions, SamplerKind, translate,
 };

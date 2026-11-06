@@ -9,7 +9,7 @@
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 use eframe::egui::{self, Ui};
 
-use super::attachments::has_flag;
+use super::super::common::fields::has_flag;
 use super::passes::{option_index, periodic_evaluate};
 
 const INPUTS: [&str; 4] = ["A in", "B in", "C in", "D in"];

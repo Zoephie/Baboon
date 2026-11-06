@@ -11,7 +11,7 @@ use blam_tags::tag_function::transition_function_evaluate;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, has_flag};
+use super::super::common::fields::{elements, has_flag};
 use super::super::h3::lights::{OcclusionOffset, rotation_function};
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;

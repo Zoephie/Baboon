@@ -7,7 +7,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, object_block};
+use super::super::common::fields::{elements, has_flag, object_block};
 use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::functions::H2FunctionValues;
 use super::lights::attachment_value;
@@ -21,7 +21,6 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{checked_unit, cross};
 use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::ce::attachments::has_flag;
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.

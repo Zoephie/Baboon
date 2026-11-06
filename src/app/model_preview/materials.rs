@@ -13,7 +13,7 @@ use super::ce::passes::{
     CeCamoSettings, CeModelCommon, CeNumeric, ce_camo_pass, ce_model_passes, ce_transparent_passes,
     read_ce_camo_settings,
 };
-use super::ce::attachments::elements;
+use super::common::fields::{elements, has_flag};
 use super::gen3::shaders::{
     H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
     H3Dialect, H3Sampler, H3Texels, H3Texture, H3Value,
@@ -28,7 +28,6 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;
 use std::sync::Arc;
 use std::collections::HashMap;
-use crate::app::model_preview::ce::attachments::has_flag;
 
 mod h4;
 pub(super) use h4::{H4EffectMaterial, h4_screen_vertex, resolve_h4_effect_material};

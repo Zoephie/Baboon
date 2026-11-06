@@ -11,7 +11,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::elements;
+use super::super::common::fields::{elements, has_flag};
 use super::super::ce::lights::{CeFlareView, posed_on};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
@@ -25,7 +25,6 @@ use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::ce::attachments::has_flag;
 
 /// `s_cheap_particle_system::k_max_particles`: the ring every emitter writes.
 const MOST_PARTICLES: usize = 0x2000;

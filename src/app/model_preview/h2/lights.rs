@@ -8,7 +8,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, object_block};
+use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
 use super::super::ce::lights::{
     ANTENNA_TRIM, AntennaSprite, CeAntennaQuad, CeFlareView, CeSprite, REACH_ANTENNA_TRIM, antenna_sprite, posed_on,
 };
@@ -28,7 +28,6 @@ use crate::app::model_preview::common::math::{cross, dot, lerp};
 use crate::app::model_preview::common::random::lcg_step;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::Attached;
-use crate::app::model_preview::ce::attachments::{function_slot_of, has_flag, has_flag_in_any};
 use crate::app::model_preview::ce::lights::OcclusionOffset;
 use crate::app::model_preview::dx9::passes::ce_color_interpolation;
 

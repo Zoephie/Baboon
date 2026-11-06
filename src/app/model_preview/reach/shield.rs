@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::super::ce::attachments::{elements, has_flag};
+use super::super::common::fields::{elements, has_flag};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::gen3::shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
 use super::super::materials::decode_h2_image;

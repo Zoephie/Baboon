@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachments::{elements, function_slot_of, has_flag, object_block};
+use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::lights::{CeFlareView, posed_on};
 use super::particles::CePointPhysics;
 use super::passes::{FramebufferBlend, argb};

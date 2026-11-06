@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachments::{elements, function_slot, function_slot_of, has_flag, object_block};
+use super::super::common::fields::{elements, function_slot, function_slot_of, has_flag, object_block};
 use super::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::passes::{FramebufferBlend, argb};
 use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};

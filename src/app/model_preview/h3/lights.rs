@@ -7,7 +7,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::{elements, object_block};
+use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_labelled, object_block};
 use super::super::ce::lights::{CeFlareView, CeSprite, posed_on};
 use super::super::gen3::effects::{
     H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
@@ -24,7 +24,6 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::named_function::NamedFunction;
-use crate::app::model_preview::ce::attachments::{function_slot_of, has_flag, has_flag_labelled};
 
 /// `allow shadows and gels`, and what older layouts label it.
 pub(in crate::app::model_preview) const SHADOWS_AND_GELS: [&str; 3] = ["allow shadows and gels", "allow shadows", "expensive light"];
