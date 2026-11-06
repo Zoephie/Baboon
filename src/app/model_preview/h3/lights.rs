@@ -24,7 +24,7 @@ use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::named_function::NamedFunction;
-use crate::app::model_preview::ce::attachments::{has_flag, has_flag_labelled};
+use crate::app::model_preview::ce::attachments::{function_slot_of, has_flag, has_flag_labelled};
 
 /// `allow shadows and gels`, and what older layouts label it.
 const SHADOWS_AND_GELS: [&str; 3] = ["allow shadows and gels", "allow shadows", "expensive light"];
@@ -308,7 +308,7 @@ pub(in crate::app::model_preview) fn read_h3_lights(
                            node: usize,
                            only_under: Option<(String, String)>,
                            scale_by: String,
-                           change_color: i128,
+                           change_color: Option<usize>,
                            by_effect: Option<H3EffectScale>,
                            event: Option<(Arc<H3EffectTimes>, usize)>,
                            world_oriented: bool| H3Light {
@@ -323,8 +323,7 @@ pub(in crate::app::model_preview) fn read_h3_lights(
         only_under,
         scale_by,
         by_effect,
-        // The tag's first option is none; the channels follow.
-        change_color: usize::try_from(change_color - 1).ok(),
+        change_color,
         frustum: tag.frustum,
         maximum_distance: tag.maximum_distance,
         near_width: tag.near_width,
@@ -354,7 +353,7 @@ pub(in crate::app::model_preview) fn read_h3_lights(
         };
         let (place, node) = frame(marker);
         let scale_by = attachment.read_string_id("primary scale").unwrap_or_default();
-        let change_color = attachment.read_int_any("change color").unwrap_or(0);
+        let change_color = function_slot_of(attachment, "change color");
         lights.push(place_light(tag, place, node, None, scale_by, change_color, None, None, false));
     }
     for_each_attached_part(source, object, |part| {

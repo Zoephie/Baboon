@@ -19,7 +19,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::dot;
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::ce::attachments::has_flag;
+use crate::app::model_preview::ce::attachments::{function_slot_of, has_flag};
 
 /// `sprites[256]`.
 const MOST_SPRITES: usize = 256;
@@ -211,7 +211,7 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
         let volumes = Arc::new(volumes);
         let name = marker_name(attachment, "marker");
         // `sub_86F0D0`: none, or one of the four. A light's own volume is white.
-        let change_color = usize::try_from(attachment.read_int_any("change color").unwrap_or(0) - 1).ok().filter(|_| attached);
+        let change_color = function_slot_of(attachment, "change color").filter(|_| attached);
         let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name));
         for marker in named.take(if attached { usize::MAX } else { 1 }) {
             let (place, node) = frame(marker);

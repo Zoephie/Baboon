@@ -6,7 +6,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::{MarkerFrame, perpendicular};
-use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::attachments::{elements, function_slot_of, has_flag, object_block};
 use super::super::h2::functions::H2FunctionValues;
 use super::super::*;
 use crate::core::source::TagSource;
@@ -92,7 +92,6 @@ pub(in crate::app::model_preview) struct H3EffectTimes {
 
 impl H3EffectTimes {
     pub(in crate::app::model_preview) fn read(effect: TagStruct<'_>) -> Self {
-        let flags = effect.read_flag_names("flags").unwrap_or_default();
         // Reach's effect gathers its looping sound into `looping sounds`, which
         // Halo 3's and ODST's lack; only Reach's postprocess leaves durations
         // as authored.
@@ -100,7 +99,7 @@ impl H3EffectTimes {
         Self {
             events: elements(effect, "events").iter().map(|event| H3EventTime::read(*event, baked)).collect(),
             loop_start: usize::try_from(effect.read_block_index("loop start event")).unwrap_or(0),
-            parallel: flags.iter().any(|(_, name)| name == PARALLEL),
+            parallel: has_flag(effect, "flags", PARALLEL),
             once: false,
         }
     }
@@ -321,8 +320,7 @@ pub(in crate::app::model_preview) fn part_runs_by(part: TagStruct<'_>, environme
 /// `disabled for debugging`, which the cache build's `s_effect_scrubber::scrub`
 /// drops.
 fn part_disabled(part: TagStruct<'_>) -> bool {
-    let flags = part.read_flag_names("flags").unwrap_or_default();
-    flags.iter().any(|(_, name)| name.starts_with(DISABLED))
+    has_flag(part, "flags", DISABLED)
 }
 
 /// A `cheap_particle_emitter` part's group.
@@ -364,12 +362,9 @@ pub(in crate::app::model_preview) fn for_each_attached_part(
                 let marker = object_effect.marker_of(*location);
                 let secondary = usize::try_from(part.read_block_index("secondary location (beams)")).ok();
                 let secondary_marker = secondary.and_then(|at| locations.get(at)).map(|at| marker_name(*at, "marker name"));
-                let flags = part.read_flag_names("flags").unwrap_or_default();
-                let unattached = flags.iter().any(|(_, name)| name.starts_with("never attached to object"));
-                let scales = part.read_flag_names("A scales values").unwrap_or_default();
-                let scaled = scales.iter().any(|(_, name)| name == PART_SCALE);
-                let b_scales = part.read_flag_names("B scales values").unwrap_or_default();
-                let b_scaled = b_scales.iter().any(|(_, name)| name == PART_SCALE);
+                let unattached = has_flag(part, "flags", "never attached to object");
+                let scaled = has_flag(part, "A scales values", PART_SCALE);
+                let b_scaled = has_flag(part, "B scales values", PART_SCALE);
                 let times = Arc::clone(&times);
                 visit(H3EffectPart {
                     effect: &object_effect,
@@ -406,7 +401,7 @@ pub(in crate::app::model_preview) struct H3ObjectEffect {
     marker: String,
     pub(in crate::app::model_preview) scale_by: String,
     pub(in crate::app::model_preview) secondary_by: String,
-    pub(in crate::app::model_preview) change_color: i128,
+    pub(in crate::app::model_preview) change_color: Option<usize>,
     /// Plays through once, as an event's does; attachments and `looping effect`s loop.
     pub(in crate::app::model_preview) once: bool,
     /// Made with `gravity` and `up` vectors at its marker, as Reach's
@@ -424,8 +419,7 @@ impl H3ObjectEffect {
 
     /// `use parent position but world orientation`.
     pub(in crate::app::model_preview) fn world_oriented(effect: TagStruct<'_>) -> bool {
-        let flags = effect.read_flag_names("flags").unwrap_or_default();
-        flags.iter().any(|(_, name)| name.starts_with(WORLD_ORIENTATION))
+        has_flag(effect, "flags", WORLD_ORIENTATION)
     }
 
     pub(in crate::app::model_preview) fn times_of(&self, effect: TagStruct<'_>) -> H3EffectTimes {
@@ -557,7 +551,7 @@ pub(in crate::app::model_preview) fn h3_object_effects(source: &TagSource, objec
                     marker: marker_name(attachment, "marker"),
                     scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
                     secondary_by: attachment.read_string_id("secondary scale").unwrap_or_default(),
-                    change_color: attachment.read_int_any("change color").unwrap_or(0),
+                    change_color: function_slot_of(attachment, "change color"),
                     once: false,
                     vectors: reach,
                 });
@@ -580,7 +574,7 @@ pub(in crate::app::model_preview) fn h3_object_effects(source: &TagSource, objec
                 path,
                 marker: String::new(),
                 secondary_by: String::new(),
-                change_color: 0,
+                change_color: None,
                 vectors: false,
             });
         }
@@ -845,7 +839,7 @@ mod tests {
             marker: "fx_anchor".to_owned(),
             scale_by: String::new(),
             secondary_by: String::new(),
-            change_color: 0,
+            change_color: None,
             once: false,
             vectors,
         }

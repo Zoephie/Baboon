@@ -1115,7 +1115,7 @@ pub(in crate::app::model_preview) fn read_h2_flares(
                 return;
             };
             let flare = Arc::new(flare);
-            let change_color = usize::try_from(part.effect.change_color - 1).ok();
+            let change_color = part.effect.change_color;
             for marker in part_markers(markers, &part.marker, part.effect.once) {
                 let (place, node) = frame(&marker);
                 let (place, node) = part.placed(place, node);
