@@ -12,7 +12,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::elements;
+use super::super::ce::attachments::{elements, has_flag};
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
@@ -37,9 +37,6 @@ const ATTACHED_CREATION_TICK: f32 = -1.0;
 /// `RenderSSLightInternal`'s angle falloff power, `c[4].w`, for every light.
 const SPOT_POWER: f32 = 2.0;
 
-/// `light` `flags`.
-const FIRST_PERSON_ONLY: i128 = 1 << 2;
-const ALWAYS_ON_FOR_WEAPON: i128 = 1 << 11;
 
 /// `RenderSSLightInternal`'s technique bits: the place among
 /// `MAKE_SS_LIGHT_TECHNIQUE`'s sixteen.
@@ -137,16 +134,16 @@ fn read_light_tag(source: &TagSource, path: &str) -> Option<H4LightTag> {
     let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
     let root = tag.root().descend("Midnight_Light_Parameters")?;
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
-    let int = |name: &str| root.read_int_any(name).unwrap_or(0);
-    let flags = int("flags");
+    let is = |name: &str, option: &str| root.field(name).is_some_and(|field| field.enum_is(option));
+    let flagged = |wanted: &str| has_flag(root, "flags", wanted);
     Some(H4LightTag {
-        kind: match int("Light Type") {
-            1 => H4LightKind::Spot,
-            2 => H4LightKind::Directional,
+        kind: match root.read_enum_option("Light Type").as_deref() {
+            Some("Spot") => H4LightKind::Spot,
+            Some("Directional") => H4LightKind::Directional,
             // Area and sun draw as points (`MidnightLightFromDefinition`).
             _ => H4LightKind::Point,
         },
-        physical: int("Lighting Mode") == 0,
+        physical: is("Lighting Mode", "Physically Correct"),
         color: read_rgb(root, "Light Color"),
         target_color: read_rgb(root, "Target Color"),
         intensity: H4LightFunction::read(root, "Intensity")?,
@@ -159,11 +156,11 @@ fn read_light_tag(source: &TagSource, path: &str) -> Option<H4LightTag> {
             real("Camera Distance Fade Start"),
             real("Camera Distance Fade End"),
         ],
-        screenspace: int("Screenspace Light") != 0,
-        specular: int("Specular Contribution") as f32,
-        diffuse: int("Diffuse Contribution") as f32,
-        first_person_only: flags & FIRST_PERSON_ONLY != 0,
-        always_on_for_weapon: flags & ALWAYS_ON_FOR_WEAPON != 0,
+        screenspace: is("Screenspace Light", "On"),
+        specular: f32::from(u8::from(is("Specular Contribution", "On"))),
+        diffuse: f32::from(u8::from(is("Diffuse Contribution", "On"))),
+        first_person_only: flagged("render first person only"),
+        always_on_for_weapon: flagged("always on for weapon"),
     })
 }
 
@@ -619,7 +616,7 @@ fn read_cheap_light(source: &TagSource, path: &str) -> Option<H4CheapLight> {
         scale_by: String::new(),
         secondary_by: String::new(),
         change_color: None,
-        on_time: root.read_int_any("function input").unwrap_or(0) == 0,
+        on_time: root.field("function input").is_none_or(|input| input.enum_is("time/age")),
         color: function("color")?,
         intensity: function("intensity")?,
         falloff_end: function("Falloff End")?,

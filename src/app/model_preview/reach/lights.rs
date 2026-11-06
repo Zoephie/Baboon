@@ -9,7 +9,9 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction};
 
 use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::{has_flag, has_flag_labelled};
 use super::super::ce::lights::posed_on;
+use super::super::h3::lights::SHADOWS_AND_GELS;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::part_markers;
@@ -24,9 +26,6 @@ use crate::app::model_preview::common::attached::{ObjectAttachment, object_attac
 const DEFAULT_RANGE: f32 = 0.5;
 const SMALLEST: f32 = 1e-4;
 
-/// `light` `flags`.
-const FIRST_PERSON_ONLY: i128 = 0x4;
-const SCREENSPACE_SPECULAR: i128 = 0x400;
 
 /// `default.performance_throttles`' `max gpu dynamic lights`, the inline
 /// lights `build_simple_light_draw_list` takes; `simple_lights` holds 8.
@@ -84,17 +83,25 @@ fn read_light_tag(source: &TagSource, path: &str) -> Option<ReachLightTag> {
     let root = tag.root();
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let version = root.read_int_any("version").unwrap_or(4);
-    let mut flags = root.read_int_any("flags").unwrap_or(0);
-    let mut method = root.read_int_any("light method").unwrap_or(0);
+    let flagged = |wanted: &str| has_flag(root, "flags", wanted);
+    let mut method = match root.read_enum_option("light method").as_deref() {
+        Some("Inline") => ReachLightMethod::Inline,
+        Some("Re-render") => ReachLightMethod::Rerender,
+        _ => ReachLightMethod::Screenspace,
+    };
     let end = real("attenuation end distance");
     let mut start = real("attenuation start distance");
     let mut field_of_view = real("frustum field of view");
     let mut hotspot = real("angular hotspot");
     let mut falloff_speed = real("angular falloff speed");
-    // `light_definition_version_update`.
+    // `light_definition_version_update`: version 0's first flag picks the
+    // method, which it then clears; nothing below reads that flag.
     if version == 0 {
-        method = (flags & 1) + 1;
-        flags &= !1;
+        method = if has_flag_labelled(root, "flags", &SHADOWS_AND_GELS) {
+            ReachLightMethod::Rerender
+        } else {
+            ReachLightMethod::Inline
+        };
     }
     if version <= 2 {
         start = end / 3.0;
@@ -120,14 +127,10 @@ fn read_light_tag(source: &TagSource, path: &str) -> Option<ReachLightTag> {
         (true, false) => 1.0 / diffusion,
     };
     Some(ReachLightTag {
-        method: match method {
-            1 => ReachLightMethod::Inline,
-            2 => ReachLightMethod::Rerender,
-            _ => ReachLightMethod::Screenspace,
-        },
-        first_person_only: flags & FIRST_PERSON_ONLY != 0,
-        specular: flags & SCREENSPACE_SPECULAR != 0,
-        frustum: root.read_int_any("type") == Some(1),
+        method,
+        first_person_only: flagged("render first person only"),
+        specular: flagged("screenspace specular lighting"),
+        frustum: root.field("type").is_some_and(|kind| kind.enum_is("frustum")),
         end,
         start,
         near_width: real("frustum near width"),

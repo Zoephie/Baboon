@@ -11,7 +11,8 @@ use blam_tags::tag_function::transition_function_evaluate;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
-use super::super::ce::attachments::elements;
+use super::super::ce::attachments::{elements, has_flag};
+use super::super::h3::lights::{OcclusionOffset, rotation_function};
 use super::super::ce::lights::posed_on;
 use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::{H2Image, tag_function_at};
@@ -33,28 +34,61 @@ const FEWEST_SAMPLES: f32 = 10.0;
 /// Width plus height, in pixels, past which a patch tests its inner share alone.
 const OCCLUSION_PIXELS: f32 = 600.0;
 
-/// `lens_flare` `flags`.
-const ROTATE_OCCLUSION_BOX: i128 = 0x1;
-const NO_OCCLUSION_TEST: i128 = 0x2;
-const FIRST_PERSON_ONLY: i128 = 0x4;
-const SIMPLE_OCCLUSION_BOX: i128 = 0x10;
-const NO_OPACITY_FEEDBACK: i128 = 0x20;
+/// The `lens_flare` `flags` the preview reads.
+#[derive(Debug, Clone, Copy)]
+struct H4FlareFlags {
+    rotate_occlusion_box: bool,
+    no_occlusion_test: bool,
+    first_person_only: bool,
+    simple_occlusion_box: bool,
+    no_opacity_feedback: bool,
+}
 
-/// A reflection's `flags`.
-const ROTATE_FROM_CENTER: i128 = 0x1;
-const RADIUS_BY_DISTANCE: i128 = 0x2;
-const RADIUS_BY_OCCLUSION: i128 = 0x4;
-const IGNORE_EXTERNAL_COLOR: i128 = 0x8;
-const LOCK_X: i128 = 0x10;
-const LOCK_Y: i128 = 0x20;
-const PROXIMITY_INPUT: i128 = 0x40;
-const MIRROR: i128 = 0x80;
-const FLIP_U: i128 = 0x200;
-const FLIP_V: i128 = 0x400;
+impl H4FlareFlags {
+    fn read(root: TagStruct<'_>) -> Self {
+        let flagged = |wanted: &str| has_flag(root, "flags", wanted);
+        Self {
+            rotate_occlusion_box: flagged("rotate occlusion testing box with lens flare"),
+            no_occlusion_test: flagged("no occlusion test"),
+            first_person_only: flagged("only render in first person"),
+            simple_occlusion_box: flagged("use simple occlusion box test"),
+            no_opacity_feedback: flagged("no reflection opacity feedback"),
+        }
+    }
+}
 
-/// `occlusion offset direction`.
-const OFFSET_TOWARD_VIEWER: i128 = 0;
-const OFFSET_MARKER_FORWARD: i128 = 1;
+/// A reflection's `flags` the preview reads.
+#[derive(Debug, Clone, Copy)]
+struct H4ReflectionFlags {
+    rotate_from_center: bool,
+    radius_by_distance: bool,
+    radius_by_occlusion: bool,
+    ignore_external_color: bool,
+    lock_x: bool,
+    lock_y: bool,
+    proximity_input: bool,
+    mirror: bool,
+    flip_u: bool,
+    flip_v: bool,
+}
+
+impl H4ReflectionFlags {
+    fn read(reflection: TagStruct<'_>) -> Self {
+        let flagged = |wanted: &str| has_flag(reflection, "flags", wanted);
+        Self {
+            rotate_from_center: flagged("rotate from center of screen"),
+            radius_by_distance: flagged("radius scaled by distance"),
+            radius_by_occlusion: flagged("radius scaled by occlusion factor"),
+            ignore_external_color: flagged("ignore external color"),
+            lock_x: flagged("lock to flare X"),
+            lock_y: flagged("lock to flare Y"),
+            proximity_input: flagged("proximity to center as function input"),
+            mirror: flagged("mirror across flare"),
+            flip_u: flagged("flip U coordinate"),
+            flip_v: flagged("flip V coordinate"),
+        }
+    }
+}
 
 /// A curve driven by game time or the flare's age, with the object function
 /// that drives it instead when it names one (`s_editing_function`).
@@ -80,7 +114,7 @@ impl H4FlareCurve {
 /// One of a flare's `reflections` (148 bytes at run time).
 #[derive(Debug, Clone)]
 struct H4Reflection {
-    flags: i128,
+    flags: H4ReflectionFlags,
     /// Into the flare's images.
     image: usize,
     /// `lens_flare_get_bitmap_aspect_ratio`.
@@ -107,7 +141,7 @@ enum H4ReflectionColor {
 /// A `lens_flare` tag, by field name: the kit holds two reflection layouts.
 #[derive(Debug, Clone)]
 pub(crate) struct H4LensFlare {
-    flags: i128,
+    flags: H4FlareFlags,
     /// Radians.
     falloff: f32,
     cutoff: f32,
@@ -116,7 +150,7 @@ pub(crate) struct H4LensFlare {
     far_fade: [f32; 2],
     occlusion_reflection: usize,
     occlusion_offset: f32,
-    offset_direction: i128,
+    offset_direction: OcclusionOffset,
     inner_scale: f32,
     falloff_function: u8,
     rotation_function: i128,
@@ -155,7 +189,7 @@ pub(crate) fn read_h4_lens_flare(source: &TagSource, path: &str) -> Option<H4Len
     let tag = load_referenced_tag_from_source(source, path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
-    let flags = root.read_int_any("flags").unwrap_or(0);
+    let flags = H4FlareFlags::read(root);
     let bitmap = root
         .read_tag_ref_path("bitmap")
         .filter(|path| !path.is_empty());
@@ -206,7 +240,7 @@ pub(crate) fn read_h4_lens_flare(source: &TagSource, path: &str) -> Option<H4Len
         };
         let bounds = reflection.read_real_bounds("offset bounds");
         reflections.push(H4Reflection {
-            flags: reflection.read_int_any("flags").unwrap_or(0),
+            flags: H4ReflectionFlags::read(reflection),
             image,
             aspect: aspect_of(&images[image].2.0),
             rotation_offset: reflection.read_real("rotation offset").unwrap_or(0.0),
@@ -237,15 +271,13 @@ pub(crate) fn read_h4_lens_flare(source: &TagSource, path: &str) -> Option<H4Len
             .unwrap_or(0)
             .max(0) as usize,
         occlusion_offset: real("occlusion offset distance"),
-        offset_direction: root
-            .read_int_any("occlusion offset direction")
-            .unwrap_or(OFFSET_TOWARD_VIEWER),
+        offset_direction: OcclusionOffset::read(root),
         inner_scale: real("occlusion inner radius scale"),
         falloff_function: root
             .read_int_any("falloff function")
             .and_then(|at| u8::try_from(at).ok())
             .unwrap_or(0),
-        rotation_function: root.read_int_any("rotation function").unwrap_or(0),
+        rotation_function: rotation_function(root),
         rotation_scale: real("rotation function scale"),
         time_brightness: block_function(root, "time brightness"),
         age_brightness: block_function(root, "age brightness"),
@@ -493,7 +525,7 @@ impl H4FlareAt {
             corona += PI * function.evaluate(age, 0.0);
         }
         let mut input = scale;
-        if reflection.flags & PROXIMITY_INPUT != 0 {
+        if reflection.flags.proximity_input {
             let from_center = (center[0] * center[0] + center[1] * center[1]).sqrt();
             input *= ((std::f32::consts::SQRT_2 - from_center) / std::f32::consts::SQRT_2)
                 .clamp(0.0, 1.0);
@@ -517,16 +549,16 @@ impl H4FlareAt {
         }
         let mut rotation = reflection.rotation_offset.to_radians() + corona;
         color = std::array::from_fn(|channel| color[channel] * tint3[channel]);
-        if reflection.flags & IGNORE_EXTERNAL_COLOR == 0 {
+        if !reflection.flags.ignore_external_color {
             color = std::array::from_fn(|channel| color[channel] * tint[channel]);
         }
-        if reflection.flags & ROTATE_FROM_CENTER != 0 {
+        if reflection.flags.rotate_from_center {
             rotation += screen_angle;
         }
-        if reflection.flags & RADIUS_BY_OCCLUSION != 0 {
+        if reflection.flags.radius_by_occlusion {
             radius *= (opacity * 0.5 + 0.5).clamp(0.0, 1.0);
         }
-        if reflection.flags & RADIUS_BY_DISTANCE != 0 {
+        if reflection.flags.radius_by_distance {
             radius *= depth;
         }
         Some(H4FlareParameters {
@@ -559,7 +591,7 @@ impl H4FlareAt {
         time: f32,
     ) -> Option<H4OcclusionPatch> {
         let flare = &*self.flare;
-        if flare.flags & (NO_OCCLUSION_TEST | FIRST_PERSON_ONLY) != 0 {
+        if flare.flags.no_occlusion_test || flare.flags.first_person_only {
             return None;
         }
         let (scale, tint) = self.created(values, change_colors)?;
@@ -582,7 +614,7 @@ impl H4FlareAt {
             0.5 * view.viewport[1] / depth,
         ];
         let across = ((2.0 * half[0] + 2.0 * half[1]) / OCCLUSION_PIXELS).clamp(0.0, 1.0);
-        let share = if flare.flags & SIMPLE_OCCLUSION_BOX != 0 {
+        let share = if flare.flags.simple_occlusion_box {
             flare.inner_scale
         } else {
             flare.inner_scale + (1.0 - flare.inner_scale) * (1.0 - across)
@@ -595,7 +627,7 @@ impl H4FlareAt {
         let expected = (2.5 * 2.0 * half[0] * 2.0 * half[1]).max(1.0);
         // The quad's own frame: facing the eye, upright on the screen, turned
         // by the flare's rotation when it asks.
-        let (sine, cosine) = if flare.flags & ROTATE_OCCLUSION_BOX != 0 {
+        let (sine, cosine) = if flare.flags.rotate_occlusion_box {
             parameters.rotation.sin_cos()
         } else {
             (0.0, 1.0)
@@ -603,9 +635,9 @@ impl H4FlareAt {
         let left = view.right.map(|axis| -axis);
         let toward_viewer = unit_unless_under_micro(std::array::from_fn(|axis| view.eye[axis] - position[axis]));
         let offset = match flare.offset_direction {
-            OFFSET_TOWARD_VIEWER => toward_viewer,
-            OFFSET_MARKER_FORWARD => forward,
-            _ => [0.0; 3],
+            OcclusionOffset::TowardViewer => toward_viewer,
+            OcclusionOffset::MarkerForward => forward,
+            OcclusionOffset::None => [0.0; 3],
         };
         let corners =
             [[-1.0, -1.0], [-1.0, 1.0], [1.0, 1.0], [1.0, -1.0]].map(|[x, y]: [f32; 2]| {
@@ -624,7 +656,7 @@ impl H4FlareAt {
     /// `lens_flares_render`' share of the patch seen, from the samples that
     /// passed; 1 for a flare that tests nothing.
     pub(crate) fn visibility(&self, passed: Option<(f32, f32)>) -> f32 {
-        if self.flare.flags & NO_OCCLUSION_TEST != 0 {
+        if self.flare.flags.no_occlusion_test {
             return 1.0;
         }
         let Some((passed, expected)) = passed else {
@@ -651,7 +683,7 @@ impl H4FlareAt {
         visibility: f32,
     ) -> Vec<H4FlareDraw> {
         let flare = &*self.flare;
-        if visibility <= MINIMUM_VISIBLE || flare.flags & FIRST_PERSON_ONLY != 0 {
+        if visibility <= MINIMUM_VISIBLE || flare.flags.first_person_only {
             return Vec::new();
         }
         let Some((scale, tint)) = self.created(values, change_colors) else {
@@ -663,7 +695,7 @@ impl H4FlareAt {
         for reflection in &flare.reflections {
             // Each reflection eases the last one's opacity, unless the flare
             // turns that feedback off.
-            let from = if flare.flags & NO_OPACITY_FEEDBACK != 0 {
+            let from = if flare.flags.no_opacity_feedback {
                 visibility
             } else {
                 opacity
@@ -691,12 +723,12 @@ impl H4FlareAt {
                 reflection.aspect[0] * parameters.scale[0] * parameters.radius / depth,
                 reflection.aspect[1] * parameters.scale[1] * parameters.radius / depth,
             ];
-            let x = if reflection.flags & LOCK_X != 0 {
+            let x = if reflection.flags.lock_x {
                 center[0]
             } else {
                 at[0]
             };
-            let y = if reflection.flags & LOCK_Y != 0 {
+            let y = if reflection.flags.lock_y {
                 center[1]
             } else {
                 at[1]
@@ -710,7 +742,7 @@ impl H4FlareAt {
                 origin_bounds: [center[0], center[1], lower, upper],
                 // World-space axes (flag 0x800) are not read.
                 axes: [1.0, 0.0, 0.0, 1.0],
-                mirror: reflection.flags & MIRROR != 0,
+                mirror: reflection.flags.mirror,
                 modulation: [
                     1.0 - reflection.modulation,
                     reflection.tint_power,
@@ -719,8 +751,8 @@ impl H4FlareAt {
                 ],
                 tint: [r, g, b, 1.0],
                 flip: [
-                    reflection.flags & FLIP_U != 0,
-                    reflection.flags & FLIP_V != 0,
+                    reflection.flags.flip_u,
+                    reflection.flags.flip_v,
                 ],
             });
         }
@@ -750,7 +782,7 @@ pub(crate) fn read_h4_flares(
                 flare
             }
         };
-        let Some(flare) = flare.filter(|flare| flare.flags & FIRST_PERSON_ONLY == 0) else {
+        let Some(flare) = flare.filter(|flare| !flare.flags.first_person_only) else {
             continue;
         };
         for marker in part_markers(markers, &name, false) {
@@ -893,7 +925,7 @@ mod tests {
         assert_eq!(at.flare.images.len(), 2);
         assert_eq!(at.flare.reflections[1].image, 1);
         assert!((at.flare.cutoff - 25f32.to_radians()).abs() < 1e-5);
-        assert!(at.flare.reflections[0].flags & PROXIMITY_INPUT != 0);
+        assert!(at.flare.reflections[0].flags.proximity_input);
     }
 
     /// Seen from in front it draws both reflections, centred where the eye
@@ -933,7 +965,7 @@ mod tests {
     fn a_simple_box_occludes_against_its_inner_share() {
         let Some(source) = kit() else { return };
         let at = sniper_eye(&source);
-        assert!(at.flare.flags & SIMPLE_OCCLUSION_BOX != 0);
+        assert!(at.flare.flags.simple_occlusion_box);
         let front = project([2.0, 0.0, 0.0]);
         let ahead = view([2.0, 0.0, 0.0], [-1.0, 0.0, 0.0], &front);
         let patch = at
@@ -962,7 +994,7 @@ mod tests {
         assert_eq!(at.visibility(Some((20.0, 3.0))), 2.0);
         assert_eq!(at.visibility(None), 0.0, "no patch, nothing seen");
         let mut untested = (*at.flare).clone();
-        untested.flags |= NO_OCCLUSION_TEST;
+        untested.flags.no_occlusion_test = true;
         let untested = H4FlareAt {
             flare: Arc::new(untested),
             ..at

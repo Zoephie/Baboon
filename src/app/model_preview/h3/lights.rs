@@ -27,7 +27,7 @@ use crate::app::model_preview::common::named_function::NamedFunction;
 use crate::app::model_preview::ce::attachments::{function_slot_of, has_flag, has_flag_labelled};
 
 /// `allow shadows and gels`, and what older layouts label it.
-const SHADOWS_AND_GELS: [&str; 3] = ["allow shadows and gels", "allow shadows", "expensive light"];
+pub(in crate::app::model_preview) const SHADOWS_AND_GELS: [&str; 3] = ["allow shadows and gels", "allow shadows", "expensive light"];
 /// What `add_simple_light_to_draw_list` falls back on.
 const FALLBACK_DISTANCE: f32 = 5.0;
 const FALLBACK_CONE: f32 = 0.5;
@@ -525,7 +525,7 @@ struct H3EffectScale {
 /// `occlusion offset direction`: where the occlusion quad moves
 /// `occlusion offset distance` to (`lens_flare_render_internal`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OcclusionOffset {
+pub(in crate::app::model_preview) enum OcclusionOffset {
     /// Along the flare-to-eye line.
     TowardViewer,
     MarkerForward,
@@ -533,12 +533,24 @@ enum OcclusionOffset {
 }
 
 impl OcclusionOffset {
-    fn read(root: TagStruct<'_>) -> Self {
+    pub(in crate::app::model_preview) fn read(root: TagStruct<'_>) -> Self {
         match root.read_enum_option("occlusion offset direction").as_deref() {
             Some("marker forward") => Self::MarkerForward,
             Some("none") => Self::None,
             _ => Self::TowardViewer,
         }
+    }
+}
+
+/// `rotation function`, as `lens_flares_evaluate_corona_rotation_function`
+/// numbers it: 0 for none.
+pub(in crate::app::model_preview) fn rotation_function(root: TagStruct<'_>) -> i128 {
+    match root.read_enum_option("rotation function").as_deref() {
+        Some("rotation A") => 1,
+        Some("rotation B") => 2,
+        Some("rotation-translation") => 3,
+        Some("translation") => 4,
+        _ => 0,
     }
 }
 
@@ -606,13 +618,7 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         age_rotation: block_function(root, "age rotation"),
         time_color: H3FlareColor::read(root, "time color"),
         age_color: H3FlareColor::read(root, "age color"),
-        rotation_function: match root.read_enum_option("rotation function").as_deref() {
-            Some("rotation A") => 1,
-            Some("rotation B") => 2,
-            Some("rotation-translation") => 3,
-            Some("translation") => 4,
-            _ => 0,
-        },
+        rotation_function: rotation_function(root),
         rotation_scale: root.read_real("rotation function scale").unwrap_or(0.0),
         rotates_from_center: reflected("rotate from center of screen"),
         radius_by_distance: reflected("radius scaled by distance"),
