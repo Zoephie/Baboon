@@ -711,12 +711,12 @@ fn reach_shield_passes_link() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let model = load_referenced_tag_from_source(&source, "objects\\characters\\spartans\\spartans", "model", b"hlmt").unwrap();
-    let shield = super::reach_shield::read_reach_shield(&source, &model).expect("the Spartan's shield");
+    let shield = super::reach::shield::read_reach_shield(&source, &model).expect("the Spartan's shield");
     let gl = headless_gl();
     let passes: Vec<_> = shield.passes().collect();
     assert_eq!(passes.len(), 2, "both explicit shaders");
     for pass in passes {
-        assert!(pass.pixel.contains(super::reach_shield::DEPTH_DECODE), "the depth read is the preview's");
+        assert!(pass.pixel.contains(super::reach::shield::DEPTH_DECODE), "the depth read is the preview's");
         assert!(!pass.pixel.contains("depth_constants.z - "), "Reach's own depth read is gone");
         assert!(!pass.vertex.contains("GlobalTexture_shield_impact_noise_texture"), "the vertex stage reads oscillation");
         unsafe {

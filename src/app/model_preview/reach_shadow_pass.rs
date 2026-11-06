@@ -3,7 +3,7 @@
 //! then `shadow_apply` into the mask the static pass reads. See
 //! `docs/reach-preview-research/shadow.md`.
 
-use super::reach_shadow::{ReachShadowCamera, ReachShadowFilter, hull_planes};
+use super::reach::shadow::{ReachShadowCamera, ReachShadowFilter, hull_planes};
 use super::*;
 use gen3::shaders::H3Material;
 

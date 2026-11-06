@@ -18,7 +18,7 @@ use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
 use super::super::gen3::shaders::H3Pass;
-use super::super::reach_lights::object_value;
+use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::hlsl::emit::Stage;
 use crate::core::source::TagSource;

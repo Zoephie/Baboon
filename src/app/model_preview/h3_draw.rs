@@ -1672,7 +1672,7 @@ impl ModelGlRenderer {
                 let index = batch.material_index as usize;
                 let material = self.h3_material(frame, index)?;
                 let textures = frame.textures.as_ref()?.get(index)?;
-                super::reach_shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
+                super::reach::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
                     .then(|| (batch.clone(), Arc::clone(material)))
             })
             .collect();
@@ -1736,7 +1736,7 @@ impl ModelGlRenderer {
                 let index = batch.material_index as usize;
                 let material = self.h3_material(frame, index)?;
                 let textures = frame.textures.as_ref()?.get(index)?;
-                super::reach_shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
+                super::reach::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
                     .then(|| (batch.clone(), Arc::clone(material)))
             })
             .collect();
@@ -1750,10 +1750,10 @@ impl ModelGlRenderer {
         let camera = &frame.camera;
         let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
         values.insert(
-            super::reach_shield::DEPTH_DECODE,
+            super::reach::shield::DEPTH_DECODE,
             [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye],
         );
-        values.insert(super::reach_shield::WORLD_SCALE, [camera.scale; 4]);
+        values.insert(super::reach::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
             // What the pass fades against: everything drawn so far.
             if let Some(targets) = self.h3_targets.as_ref() {
@@ -2095,7 +2095,7 @@ impl ModelGlRenderer {
             // `real_random`'s two draws, new each frame.
             self.reach_noise_frame = self.reach_noise_frame.wrapping_add(1);
             let frame_number = self.reach_noise_frame as f32;
-            let random = [0, 1].map(|salt| reach_shield::real_random(frame_number, salt));
+            let random = [0, 1].map(|salt| reach::shield::real_random(frame_number, salt));
             let [x, y] = reach_noise_offset(self.reach_noise_frame, random);
             gl.uniform_2_f32(gl.get_uniform_location(program, "noise_offset").as_ref(), x, y);
             gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), REACH_DARK_MULTIPLIER);

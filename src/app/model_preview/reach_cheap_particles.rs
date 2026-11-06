@@ -20,7 +20,7 @@ use super::gen3::effects::{
     read_part_placement,
 };
 use super::particles::{PRE_ROLL, Random, particle_game_time};
-use super::reach_lights::object_value;
+use super::reach::lights::object_value;
 use super::*;
 use crate::core::source::TagSource;
 

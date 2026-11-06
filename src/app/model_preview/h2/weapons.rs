@@ -753,7 +753,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
 ) {
     let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
     preview.h3_flares.extend(named!(flares, name));
-    let (lights, cheap) = super::super::reach_lights::read_reach_lights(source, object, owner, markers, frame);
+    let (lights, cheap) = super::super::reach::lights::read_reach_lights(source, object, owner, markers, frame);
     preview.reach_lights.extend(named!(lights, name));
     preview.reach_cheap_lights.extend(named!(cheap, name));
     let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);

@@ -769,7 +769,7 @@ fn prepare_h3_material(
     // Reach's writes back what it samples, which the preview's copy holds
     // encoded.
     let camo = match dialect {
-        H3Dialect::Reach => camo.and_then(|pass| super::reach_camo::camo_pass(&pass)).map(Arc::new),
+        H3Dialect::Reach => camo.and_then(|pass| super::reach::camo::camo_pass(&pass)).map(Arc::new),
         H3Dialect::Halo3 => camo,
         H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
     };

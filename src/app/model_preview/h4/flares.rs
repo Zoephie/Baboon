@@ -17,7 +17,7 @@ use super::super::h2::functions::H2FunctionValues;
 use super::super::dx9::passes::{H2Image, tag_function_at};
 use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
 use super::super::materials::{H3Bitmap, read_h3_bitmap};
-use super::super::reach_lights::object_value;
+use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;

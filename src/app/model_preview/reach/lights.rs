@@ -8,13 +8,13 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
-use super::ce::attachments::{elements, object_block};
-use super::ce::lights::posed_on;
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::tag_function_at;
-use super::gen3::effects::{adopt_event_function, marker_name, part_markers};
-use super::*;
+use super::super::attachment::MarkerFrame;
+use super::super::ce::attachments::{elements, object_block};
+use super::super::ce::lights::posed_on;
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::tag_function_at;
+use super::super::gen3::effects::{adopt_event_function, marker_name, part_markers};
+use super::super::*;
 use crate::core::source::TagSource;
 
 /// `light_update_state`'s range when no function names one.
@@ -65,7 +65,7 @@ impl ReachChannel {
 
 /// `object_get_function_value_simple`: no name reads full, and a name the
 /// object does not answer, nothing.
-pub(super) fn object_value(values: Option<&H2FunctionValues>, name: &str) -> f32 {
+pub(in crate::app::model_preview) fn object_value(values: Option<&H2FunctionValues>, name: &str) -> f32 {
     if name.is_empty() || name == "one" {
         return 1.0;
     }

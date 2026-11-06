@@ -31,6 +31,7 @@ pub(crate) mod cloth;
 pub(crate) mod gen3;
 pub(crate) mod h3;
 pub(crate) mod h4;
+mod reach;
 pub(crate) mod particles;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
@@ -38,11 +39,7 @@ mod reach_antennas;
 mod reach_ik;
 mod h4_ik;
 mod reach_cheap_particles;
-mod reach_lights;
 mod reach_blend_screens;
-mod reach_camo;
-mod reach_shadow;
-mod reach_shield;
 mod renderer;
 #[cfg(test)]
 mod gates;
@@ -127,8 +124,8 @@ pub(crate) struct RenderModelPreview {
     pub h3_shield: Option<Arc<gen3::shaders::H3ShieldSettings>>,
     pub h3_lights: Vec<h3::lights::H3Light>,
     /// Reach's attached `light`s and `cheap_light`s.
-    pub reach_lights: Vec<reach_lights::ReachLight>,
-    pub reach_cheap_lights: Vec<reach_lights::ReachCheapLight>,
+    pub reach_lights: Vec<reach::lights::ReachLight>,
+    pub reach_cheap_lights: Vec<reach::lights::ReachCheapLight>,
     /// Reach's cheap particle emitters, on its attached effects' parts.
     pub reach_cheap_emitters: Vec<reach_cheap_particles::ReachCheapEmitterAt>,
     /// `light_apply`, `_frustum`, `_specular` and `_frustum_specular`, by
@@ -150,11 +147,11 @@ pub(crate) struct RenderModelPreview {
     /// Whether a Halo 4 object shadows itself, and how.
     pub h4_shadow_caster: Option<h4::shadow::H4ShadowCaster>,
     /// Reach's shield impact, as its damage sections choose it.
-    pub reach_shield: Option<Arc<reach_shield::ReachShield>>,
+    pub reach_shield: Option<Arc<reach::shield::ReachShield>>,
     /// `globals`' active camo curves, for a Reach object.
-    pub reach_camo: Option<Arc<reach_camo::ReachCamo>>,
+    pub reach_camo: Option<Arc<reach::camo::ReachCamo>>,
     /// Whether a Reach object shadows itself, and its map's biases.
-    pub reach_shadow_caster: Option<reach_shadow::ReachShadowCaster>,
+    pub reach_shadow_caster: Option<reach::shadow::ReachShadowCaster>,
     /// The markers a Reach unit's IK chains can reach for: its own and its
     /// held weapons', in bind space on the nodes they ride.
     pub reach_ik_markers: Vec<reach_ik::ReachIkMarker>,

@@ -835,9 +835,9 @@ fn read_h4_change_color_count(object: &TagFile) -> u8 {
 /// What a Reach object brings so far: its flares and lights. Its light
 /// volumes and effects read differently, and wait on their own readers.
 fn read_reach_object_features(source: &TagSource, model_tag: &TagFile, model: &TagFile, preview: &mut RenderModelPreview) {
-    preview.reach_shield = super::reach_shield::read_reach_shield(source, model);
-    preview.reach_camo = super::reach_camo::ReachCamo::read(source).map(std::sync::Arc::new);
-    preview.reach_shadow_caster = super::reach_shadow::reach_shadow_caster(model_tag, model);
+    preview.reach_shield = super::reach::shield::read_reach_shield(source, model);
+    preview.reach_camo = super::reach::camo::ReachCamo::read(source).map(std::sync::Arc::new);
+    preview.reach_shadow_caster = super::reach::shadow::reach_shadow_caster(model_tag, model);
     let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
     preview.reach_ik_markers = super::reach_ik::reach_ik_markers(preview, super::reach_ik::ReachIkHolder::Unit, own, None);
     let markers = preview.markers.clone();

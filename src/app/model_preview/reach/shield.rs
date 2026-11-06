@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::ce::attachments::elements;
-use super::h2::functions::H2FunctionValues;
-use super::dx9::passes::tag_function_at;
-use super::gen3::shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
-use super::materials::decode_h2_image;
+use super::super::ce::attachments::elements;
+use super::super::h2::functions::H2FunctionValues;
+use super::super::dx9::passes::tag_function_at;
+use super::super::gen3::shaders::{H3Pass, H3Sources, H3Texels, H3Texture};
+use super::super::materials::decode_h2_image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
