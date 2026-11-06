@@ -20,7 +20,7 @@ use super::super::dx9::passes::{
     H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
 };
 use super::super::materials::{H3Bitmap, decode_h2_image, read_h3_bitmap};
-use super::super::reach_antennas::{ReachAntennaSpring, posed_marker};
+use super::super::antennas::spring::{ReachAntennaSpring, posed_marker};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;

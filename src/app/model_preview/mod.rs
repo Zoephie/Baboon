@@ -35,7 +35,7 @@ mod reach;
 pub(crate) mod particles;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
-mod reach_antennas;
+mod antennas;
 mod reach_ik;
 mod h4_ik;
 mod reach_blend_screens;

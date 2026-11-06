@@ -2100,7 +2100,7 @@ struct ModelGpuSlot {
     /// How long VISR has been on, as of when.
     h3_vision_clock: Option<(f32, f32)>,
     h3_cloth: cloth::H3ClothField,
-    reach_antennas: reach_antennas::ReachAntennaField,
+    reach_antennas: antennas::spring::ReachAntennaField,
     h3_leaves: h3::leaves::H3LeafField,
     leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,

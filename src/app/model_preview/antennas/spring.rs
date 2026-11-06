@@ -1,12 +1,12 @@
 //! Reach's antennas as they move: `antennas_update` (the 360's 0x82C932B0,
 //! MCC's 0x140E52C90) springs each antenna's far end toward the line out of
 //! its marker, once a game tick, under its point physics. The near end is the
-//! marker itself; [`super::h2::lights::H2Antenna`] draws the curve between.
+//! marker itself; [`super::super::h2::lights::H2Antenna`] draws the curve between.
 
-use super::ce::lights::posed_on;
-use super::ce::particles::CePointPhysics;
-use super::h2::lights::H2Antenna;
-use super::cloth::REACH_TICK_RATE;
+use super::super::ce::lights::posed_on;
+use super::super::ce::particles::CePointPhysics;
+use super::super::h2::lights::H2Antenna;
+use super::super::cloth::REACH_TICK_RATE;
 
 /// The step `antennas_update` hands every antenna, whatever the tick's length:
 /// the 360's constant `flt_85251DE4`; MCC's `min(tick, 0.0333)` (0x140E52D1B)
@@ -143,7 +143,7 @@ impl ReachAntennaField {
 }
 
 /// A marker's place and unit forward on `node`, where the pose puts them.
-pub(super) fn posed_marker(
+pub(in crate::app::model_preview) fn posed_marker(
     node: usize,
     position: [f32; 3],
     forward: [f32; 3],
