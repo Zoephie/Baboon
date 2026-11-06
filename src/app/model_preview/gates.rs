@@ -1786,7 +1786,8 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(H4.0, H4.1, "tracer_system", "tracers/profile shape", Old::Value(0), "aligned ribbon"),
     row(H4.0, H4.1, "tracer_system", "tracers/profile shape", Old::Value(1), "cross"),
     row(H4.0, H4.1, "tracer_system", "tracers/profile shape", Old::Value(2), "n-gon"),
-    // horizontal and vertical have no rows: 15 older tags list only the first three shapes.
+    row(H4.0, H4.1, "tracer_system", "tracers/profile shape", Old::Value(3), "horizontal"),
+    row(H4.0, H4.1, "tracer_system", "tracers/profile shape", Old::Value(4), "vertical"),
     row(H4.0, H4.1, "tracer_system", "tracers/length/Output Modifier", Old::Value(1), "Plus"),
     row(H4.0, H4.1, "tracer_system", "tracers/length/Output Modifier", Old::Value(2), "Times"),
     row(H4.0, H4.1, "tracer_system", "tracers/length/Input Variable", Old::Value(13), "tracer length"),
@@ -1939,11 +1940,24 @@ fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out:
                     None => return,
                 },
             };
+            let held_raw = match row.old {
+                Old::Bit(bit) => match field.value() {
+                    Some(blam_tags::TagFieldData::ByteFlags { value, .. }) => i128::from(value) & bit != 0,
+                    Some(blam_tags::TagFieldData::WordFlags { value, .. }) => i128::from(value) & bit != 0,
+                    Some(blam_tags::TagFieldData::LongFlags { value, .. }) => i128::from(value) & bit != 0,
+                    _ => true,
+                },
+                Old::Value(_) => old,
+                Old::Prefix(_) => false,
+            };
             let label = row.labels().find(|label| field.flag(label).is_some());
             let found = label.and_then(|label| field.flag(label)).map(|option| option.bit() + u32::from(row.after));
             let set = |index: u32| options.get(index as usize).is_some_and(|option| option.is_set);
             let named = match found {
                 None if matches!(row.old, Old::Prefix(_)) => Named::Read(false),
+                // A layout with a shorter list stores nothing under the name;
+                // only a tag that holds the bit or value has lost it.
+                None if !held_raw => Named::Read(false),
                 None => Named::Missing,
                 Some(index) => {
                     let expected = match row.old {
@@ -1964,8 +1978,8 @@ fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out:
 }
 
 /// G-opt: each option in [`OPTION_ROWS`] reads the same by name as by number
-/// over every tag of its group in its kit, and its name is in every tag's
-/// list. Each control must disagree.
+/// over every tag of its group in its kit, and its name is in the list of
+/// every tag that holds its bit or value. Each control must disagree.
 #[test]
 fn gate_options() {
     use crate::core::source::read_tag_from_bytes;
