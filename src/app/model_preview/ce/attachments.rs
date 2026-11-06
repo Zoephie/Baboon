@@ -220,6 +220,16 @@ pub(in crate::app::model_preview) fn has_flag(holder: TagStruct<'_>, name: &str,
     holder.field(name).and_then(|field| field.flag(option)).is_some_and(|flag| flag.is_set())
 }
 
+/// Whether `option` is set in any of `holder`'s fields named `name`: a
+/// struct can hold more than one (a shader's own `flags` beside its
+/// kind's), whose options don't repeat.
+pub(in crate::app::model_preview) fn has_flag_in_any(holder: TagStruct<'_>, name: &str, option: &str) -> bool {
+    holder
+        .fields()
+        .filter(|field| field.clean_name() == name)
+        .any(|field| field.flag(option).is_some_and(|flag| flag.is_set()))
+}
+
 /// Whether the option after `option` in `holder`'s `name` flags is set: for
 /// an option whose own name another shares, found by the one before it.
 pub(in crate::app::model_preview) fn has_flag_after(holder: TagStruct<'_>, name: &str, option: &str) -> bool {

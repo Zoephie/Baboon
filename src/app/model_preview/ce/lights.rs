@@ -2,13 +2,12 @@
 //! `light`, and the sprites `rasterizer_lens_flares_draw` makes of one.
 
 use super::super::attachment::MarkerFrame;
-use super::attachments::{attached_marker_frame, elements, object_block};
+use super::attachments::{attached_marker_frame, elements, has_flag, has_flag_in_any, object_block};
 use super::passes::{argb, periodic_evaluate};
-use super::super::dx9::passes::{H2Image, ce_color_interpolate};
+use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use blam_tags::TagFieldData;
 use crate::app::model_preview::common::math::{cross, dot, lerp};
 
 /// One segment of an antenna: a bitmap sprite stretched along it.
@@ -218,22 +217,18 @@ pub(in crate::app::model_preview) fn read_ce_antennas(
 /// Colors of a reflection that all read zero take the light's instead.
 const NO_COLOR: [f32; 4] = [0.0; 4];
 
-/// `reflection.flags`, as `rasterizer_lens_flares_draw` reads them.
-const ALIGN_WITH_SCREEN_CENTER: i128 = 1;
-const RADIUS_NOT_SCALED_BY_DISTANCE: i128 = 2;
-const RADIUS_SCALED_BY_OCCLUSION: i128 = 4;
 
 /// Below this tool's light postprocess takes a value for unset.
 const UNSET: f32 = 0.0001;
 
-/// A `light`'s `flags`.
-const LIGHT_DYNAMIC: i128 = 1;
-const LIGHT_SPARES_OWNER: i128 = 4;
 
 /// One sprite of a flare, set along the axis through the screen's center.
 #[derive(Debug, Clone)]
 pub(crate) struct CeReflection {
-    flags: i128,
+    /// Its `flags`, as `rasterizer_lens_flares_draw` reads them.
+    align_with_screen_center: bool,
+    radius_not_scaled_by_distance: bool,
+    radius_scaled_by_occlusion: bool,
     /// Which of [`CeFlare::images`] it draws.
     pub(crate) image: usize,
     position: f32,
@@ -244,11 +239,31 @@ pub(crate) struct CeReflection {
     tint: [f32; 4],
     lower: [f32; 4],
     upper: [f32; 4],
-    /// Its second `flags`, for [`ce_color_interpolate`].
+    /// [`ce_color_interpolate`]'s flags.
     interpolation: i128,
+    /// `animation function`'s number, which [`periodic_evaluate`] switches on.
     animation_function: usize,
     animation_period: f32,
     animation_phase: f32,
+}
+
+/// A flare's `occlusion offset direction`: where it tests from, beside its
+/// marker. A number with no name tests from the marker, as `none` does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OcclusionOffset {
+    TowardViewer,
+    MarkerForward,
+    None,
+}
+
+impl OcclusionOffset {
+    fn read(root: TagStruct<'_>) -> Self {
+        match root.read_enum_option("occlusion offset direction").as_deref() {
+            Some("toward viewer") => Self::TowardViewer,
+            Some("marker forward") => Self::MarkerForward,
+            _ => Self::None,
+        }
+    }
 }
 
 /// A `lens_flare` tag.
@@ -263,8 +278,7 @@ pub(crate) struct CeFlare {
     rotation_scale: f32,
     /// How big a patch `rasterizer_lens_flares_submit_occlusion_tests` tests.
     pub(crate) occlusion_radius: f32,
-    /// `occlusion offset direction`: toward the viewer, along the marker, none.
-    occlusion_offset: i128,
+    occlusion_offset: OcclusionOffset,
     reflections: Vec<CeReflection>,
     pub(crate) images: Vec<Arc<H2Image>>,
 }
@@ -333,17 +347,6 @@ fn rgb_of(color: [f32; 4]) -> [f32; 3] {
     [color[0], color[1], color[2]]
 }
 
-/// The second `flags` of a tag struct that has two. A flare's reflections keep
-/// their first for how they draw and this for how their color blends.
-fn second_flags(holder: TagStruct<'_>) -> i128 {
-    holder.fields_all().filter(|field| field.name() == "flags").nth(1).map_or(0, |field| {
-        match field.value() {
-            Some(TagFieldData::WordFlags { value, .. }) => i128::from(value),
-            _ => 0,
-        }
-    })
-}
-
 /// `lens_flare_evaluate_corona_rotation_function`: how far round a corona
 /// turns as a share of a whole turn, or none for `none`.
 fn corona_rotation(function: i128, forward: [f32; 3], to_light: [f32; 3], view: &CeFlareView) -> f32 {
@@ -392,9 +395,9 @@ impl CeLight {
         let (position, forward) = self.posed(bones);
         let radius = flare.occlusion_radius;
         let offset = match flare.occlusion_offset {
-            0 => view.forward.map(|axis| -axis * radius),
-            1 => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
-            _ => [0.0; 3],
+            OcclusionOffset::TowardViewer => view.forward.map(|axis| -axis * radius),
+            OcclusionOffset::MarkerForward => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
+            OcclusionOffset::None => [0.0; 3],
         };
         Some(CeSprite {
             center: std::array::from_fn(|axis| position[axis] + offset[axis]),
@@ -499,17 +502,17 @@ impl CeLight {
                 continue;
             }
             let mut radius = lerp(reflection.radius[0], reflection.radius[1], value);
-            if reflection.flags & RADIUS_SCALED_BY_OCCLUSION != 0 {
+            if reflection.radius_scaled_by_occlusion {
                 radius *= (occlusion + 1.0) * 0.5;
             }
-            if reflection.flags & RADIUS_NOT_SCALED_BY_DISTANCE != 0 {
+            if reflection.radius_not_scaled_by_distance {
                 radius *= distance;
             }
             let mut rotation = reflection.rotation.to_radians();
             if index == 0 {
                 rotation += corona * flare.rotation_scale;
             }
-            if reflection.flags & ALIGN_WITH_SCREEN_CENTER != 0 {
+            if reflection.align_with_screen_center {
                 rotation += screen_angle;
             }
             let stretch = if index == 0 { flare.corona_scale } else { [1.0; 2] };
@@ -571,7 +574,9 @@ fn read_flare(source: &TagSource, path: &str) -> Option<CeFlare> {
         let radius = reflection.read_real_bounds("radius");
         let brightness = reflection.read_fraction_bounds("brightness");
         reflections.push(CeReflection {
-            flags: reflection.read_int_any("flags").unwrap_or(0),
+            align_with_screen_center: has_flag(reflection, "flags", "align rotation with screen center"),
+            radius_not_scaled_by_distance: has_flag(reflection, "flags", "radius NOT scaled by distance"),
+            radius_scaled_by_occlusion: has_flag(reflection, "flags", "radius scaled by occlusion factor"),
             image,
             position: reflection.read_real("position").unwrap_or(0.0),
             rotation: reflection.read_real("rotation offset").unwrap_or(0.0),
@@ -581,7 +586,11 @@ fn read_flare(source: &TagSource, path: &str) -> Option<CeFlare> {
             tint: argb(reflection, "tint color"),
             lower: argb(reflection, "color lower bound"),
             upper: argb(reflection, "color upper bound"),
-            interpolation: second_flags(reflection),
+            // Its second `flags` field holds these.
+            interpolation: ce_color_interpolation(
+                has_flag_in_any(reflection, "flags", "interpolate color in hsv"),
+                has_flag_in_any(reflection, "flags", "...more colors"),
+            ),
             animation_function: reflection.read_int_any("animation function").unwrap_or(0).max(0) as usize,
             animation_period: reflection.read_real("animation period").unwrap_or(0.0),
             animation_phase: reflection.read_real("animation phase").unwrap_or(0.0),
@@ -605,7 +614,7 @@ fn read_flare(source: &TagSource, path: &str) -> Option<CeFlare> {
             scale => scale,
         },
         occlusion_radius: root.read_real("occlusion radius").unwrap_or(0.0),
-        occlusion_offset: root.read_int_any("occlusion offset direction").unwrap_or(0),
+        occlusion_offset: OcclusionOffset::read(root),
         reflections,
         images,
     })
@@ -689,7 +698,6 @@ fn read_light_tag(source: &TagSource, path: &str) -> Option<CeLight> {
     let root = light.root();
     let flare_path = root.read_tag_ref_path("lens flare").filter(|flare| !flare.is_empty());
     let flare = flare_path.and_then(|flare| read_flare(source, &flare)).map(Arc::new);
-    let flags = root.read_int_any("flags").unwrap_or(0);
     // Tags on disk lack what tool's postprocess gives them for the game.
     let modifier = root.read_real_bounds("radius modifier");
     let radius_bounds = if modifier.lower < UNSET && modifier.upper < UNSET {
@@ -709,9 +717,12 @@ fn read_light_tag(source: &TagSource, path: &str) -> Option<CeLight> {
         change_color: None,
         lower,
         upper,
-        interpolation: root.read_int_any("interpolation flags").unwrap_or(0),
-        dynamic: flags & LIGHT_DYNAMIC != 0,
-        spares_owner: flags & LIGHT_SPARES_OWNER != 0,
+        interpolation: ce_color_interpolation(
+            has_flag(root, "interpolation flags", "blend in hsv"),
+            has_flag(root, "interpolation flags", "...more colors"),
+        ),
+        dynamic: has_flag(root, "flags", "dynamic"),
+        spares_owner: has_flag(root, "flags", "don't light own object"),
         radius,
         radius_bounds,
         cone: baked_cone(angle("falloff angle"), angle("cutoff angle")),
@@ -864,7 +875,9 @@ mod tests {
 
     fn reflection(position: f32) -> CeReflection {
         CeReflection {
-            flags: 0,
+            align_with_screen_center: false,
+            radius_not_scaled_by_distance: false,
+            radius_scaled_by_occlusion: false,
             image: 0,
             position,
             rotation: 0.0,
@@ -905,7 +918,7 @@ mod tests {
                 rotation_function: 0,
                 rotation_scale: std::f32::consts::TAU,
                 occlusion_radius: 0.1,
-                occlusion_offset: 0,
+                occlusion_offset: OcclusionOffset::TowardViewer,
                 reflections,
                 images: Vec::new(),
             })),
@@ -1020,9 +1033,9 @@ mod tests {
             light.flare = Some(Arc::new(flare));
             light.occlusion_patch(&[1.0; 4], &[[1.0; 3]; 4], None, &VIEW).unwrap().center
         };
-        assert_eq!(patch(0), [1.0, -0.1, 0.0]);
-        assert!((patch(1)[1] + 0.141_421_4).abs() < 1e-6);
-        assert_eq!(patch(2), [1.0, 0.0, 0.0]);
+        assert_eq!(patch(OcclusionOffset::TowardViewer), [1.0, -0.1, 0.0]);
+        assert!((patch(OcclusionOffset::MarkerForward)[1] + 0.141_421_4).abs() < 1e-6);
+        assert_eq!(patch(OcclusionOffset::None), [1.0, 0.0, 0.0]);
         // A dark light tests nothing.
         assert!(light(Vec::new()).occlusion_patch(&[0.0; 4], &[[1.0; 3]; 4], None, &VIEW).is_none());
     }

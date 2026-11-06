@@ -23,7 +23,7 @@ use super::particle_systems::{
     unattached_quads, update_unattached,
 };
 use super::passes::{CeMapAnimation, argb, read_effect_map_animation};
-use super::super::dx9::passes::{H2Image, ce_color_interpolate};
+use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -124,8 +124,7 @@ impl EffectParticleFlags {
             stay_attached: set("stay attached to marker"),
             random_initial_angle: set("random initial angle"),
             tint_from_object: set("tint from object color"),
-            tint_interpolation: i128::from(set("interpolate tint as HSV"))
-                | i128::from(set("... across the long hue path")) << 1,
+            tint_interpolation: ce_color_interpolation(set("interpolate tint as HSV"), set("... across the long hue path")),
         }
     }
 }

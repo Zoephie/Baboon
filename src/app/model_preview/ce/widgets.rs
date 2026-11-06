@@ -10,7 +10,7 @@ use blam_tags::{TagFile, TagStruct};
 use super::attachments::{elements, has_flag, object_block};
 use super::lights::{CeAntennaQuad, CeFlareView, posed_on};
 use super::passes::argb;
-use super::super::dx9::passes::{H2Image, ce_color_interpolate};
+use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -107,9 +107,10 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
         brightness,
         source: source_slot,
         count,
-        // `rgb_colors_interpolate`'s word, from the tag's two options.
-        interpolation: i128::from(has_flag(root, "flags", "interpolate color in hsv"))
-            | i128::from(has_flag(root, "flags", "...more colors")) << 1,
+        interpolation: ce_color_interpolation(
+            has_flag(root, "flags", "interpolate color in hsv"),
+            has_flag(root, "flags", "...more colors"),
+        ),
         frame,
         image,
     })

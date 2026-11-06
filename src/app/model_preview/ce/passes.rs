@@ -14,7 +14,7 @@ use super::super::dx9::passes::{
     H2Blend, H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2Depth, H2DrawPass, H2DrawTexture,
     H2Image, H2_GLSL_VERSION,
 };
-use super::attachments::has_flag;
+use super::attachments::{has_flag, has_flag_in_any};
 use super::super::dx9::stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::super::load_referenced_tag_from_source;
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
@@ -1232,10 +1232,7 @@ impl<'a> ShaderFlags<'a> {
 
     /// Whether the option `name` is set in any of the root's flags.
     pub(in crate::app::model_preview) fn has(&self, name: &str) -> bool {
-        self.0
-            .fields()
-            .filter(|field| matches!(field.clean_name().as_ref(), "flags" | "extra flags"))
-            .any(|field| field.flag(name).is_some_and(|flag| flag.is_set()))
+        has_flag_in_any(self.0, "flags", name) || has_flag_in_any(self.0, "extra flags", name)
     }
 }
 

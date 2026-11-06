@@ -1486,6 +1486,12 @@ fn ce_change_color(permutations: &[H2ChangePermutation], channel: usize) -> [f32
     [1.0; 3]
 }
 
+/// `rgb_colors_interpolate`'s flags from a tag's two options: whether to
+/// blend in HSV, and whether the long way round the hue wheel.
+pub(crate) fn ce_color_interpolation(hsv: bool, long_way: bool) -> i128 {
+    i128::from(hsv) | i128::from(long_way) << 1
+}
+
 /// `rgb_colors_interpolate`: bit 0 of `flags` blends in HSV, bit 1 the long way.
 pub(crate) fn ce_color_interpolate(flags: i128, lower: [f32; 3], upper: [f32; 3], u: f32) -> [f32; 3] {
     if flags & 1 != 0 {
