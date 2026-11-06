@@ -26,19 +26,95 @@ const MOST_POINTS: usize = 256;
 /// `contrail_new` follows at most this many markers of the name.
 const MOST_MARKERS: usize = 4;
 
-/// The contrail's `scale flags`.
-const SCALED_RATE: i128 = 0x1;
-const SCALED_VELOCITY: u32 = 1;
-const SCALED_CONE: i128 = 0x8;
-const SCALED_ANIMATION_RATE: i128 = 0x20;
-const SCALED_REPEATS_U: i128 = 0x40;
-const SCALED_REPEATS_V: i128 = 0x80;
-const SCALED_SCROLL_U: i128 = 0x100;
-const SCALED_SCROLL_V: i128 = 0x200;
-/// Its `flags`.
-const FIRST_POINT_UNFADED: i128 = 0x1;
-const LAST_POINT_UNFADED: i128 = 0x2;
-const EDGE_FADES_SLOWLY: i128 = 0x40;
+/// What a contrail's `scale flags` scale by its density, by name; ranges as
+/// their lower bound and delta.
+#[derive(Debug, Clone, Copy)]
+struct ContrailScales {
+    rate: bool,
+    velocity: [bool; 2],
+    cone: bool,
+    animation_rate: bool,
+    repeats: [bool; 2],
+    scroll: [bool; 2],
+}
+
+impl ContrailScales {
+    fn read(root: TagStruct<'_>) -> Self {
+        let set = |option: &str| has_flag(root, "scale flags", option);
+        Self {
+            rate: set("point generation rate"),
+            velocity: [set("point velocity"), set("point velocity delta")],
+            cone: set("point velocity cone angle"),
+            animation_rate: set("sequence animation rate"),
+            repeats: [set("texture scale u"), set("texture scale v")],
+            scroll: [set("texture animation u"), set("texture animation v")],
+        }
+    }
+}
+
+/// What a point state's `scale flags` scale by what the point was born with.
+#[derive(Debug, Clone, Copy, Default)]
+struct StateScales {
+    duration: [bool; 2],
+    transition: [bool; 2],
+    width: bool,
+    color: bool,
+}
+
+impl StateScales {
+    fn read(state: TagStruct<'_>) -> Self {
+        let set = |option: &str| has_flag(state, "scale flags", option);
+        Self {
+            duration: [set("duration"), set("duration delta")],
+            transition: [set("transition duration"), set("transition duration delta")],
+            width: set("width"),
+            color: set("color"),
+        }
+    }
+}
+
+/// `render type`: how a contrail lies in space. A number with no name draws
+/// nothing, as ground mapped and double-marker linked do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderType {
+    Vertical,
+    Horizontal,
+    MediaMapped,
+    GroundMapped,
+    ViewerFacing,
+    DoubleMarkerLinked,
+}
+
+impl RenderType {
+    fn read(root: TagStruct<'_>) -> Self {
+        match root.read_enum_option("render type").as_deref() {
+            Some("vertical orientation") => Self::Vertical,
+            Some("horizontal orientation") => Self::Horizontal,
+            Some("media mapped") => Self::MediaMapped,
+            Some("ground mapped") => Self::GroundMapped,
+            Some("viewer facing") => Self::ViewerFacing,
+            _ => Self::DoubleMarkerLinked,
+        }
+    }
+}
+
+/// `framebuffer fade mode`. A number with no name fades as perpendicular.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FadeMode {
+    None,
+    WhenPerpendicular,
+    WhenParallel,
+}
+
+impl FadeMode {
+    fn read(root: TagStruct<'_>) -> Self {
+        match root.read_enum_option("framebuffer fade mode").as_deref() {
+            Some("none") => Self::None,
+            Some("fade when parallel") => Self::WhenParallel,
+            _ => Self::WhenPerpendicular,
+        }
+    }
+}
 
 /// One of `point states`.
 #[derive(Debug, Clone)]
@@ -49,9 +125,7 @@ struct PointState {
     width: f32,
     /// Alpha, red, green and blue, lower and upper.
     colors: [[f32; 4]; 2],
-    /// `duration`, `duration delta`, `transition duration`, `transition
-    /// duration delta`, `width` and `color`, scaled by what the point was born with.
-    scaled: i128,
+    scaled: StateScales,
 }
 
 fn read_state(source: &TagSource, state: TagStruct<'_>) -> PointState {
@@ -74,19 +148,21 @@ fn read_state(source: &TagSource, state: TagStruct<'_>) -> PointState {
         physics,
         width: state.read_real("width").unwrap_or(0.0),
         colors: [color("color lower bound"), color("color upper bound")],
-        scaled: state.read_int_any("scale flags").unwrap_or(0),
+        scaled: StateScales::read(state),
     }
 }
 
 /// A `contrail` tag.
 #[derive(Debug, Clone)]
 pub(crate) struct CeContrailDef {
-    flags: i128,
-    scale_flags: i128,
+    first_point_unfaded: bool,
+    last_point_unfaded: bool,
+    edge_fades_slowly: bool,
+    scale_flags: ContrailScales,
     rate: f32,
     velocity: [f32; 2],
     cone: f32,
-    render_type: i32,
+    render_type: RenderType,
     repeats: [f32; 2],
     scroll: [f32; 2],
     animation_rate: f32,
@@ -94,7 +170,7 @@ pub(crate) struct CeContrailDef {
     first_sequence: i32,
     sequence_count: i32,
     pub(crate) blend: i32,
-    fade_mode: i32,
+    fade_mode: FadeMode,
     pub(crate) nonlinear_tint: bool,
     /// `shader flags`' `sort bias`: sorted a quarter unit nearer.
     pub(crate) sort_bias: bool,
@@ -151,14 +227,16 @@ fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
         },
         None => (Vec::new(), Vec::new()),
     };
-    let shader_flags = root.read_int_any("shader flags").unwrap_or(0);
+    let flag = |option: &str| has_flag(root, "flags", option);
     Some(CeContrailDef {
-        flags: root.read_int_any("flags").unwrap_or(0),
-        scale_flags: root.read_int_any("scale flags").unwrap_or(0),
+        first_point_unfaded: flag("first point unfaded"),
+        last_point_unfaded: flag("last point unfaded"),
+        edge_fades_slowly: flag("edge effect fades slowly"),
+        scale_flags: ContrailScales::read(root),
         rate: real("point generation rate"),
         velocity: [velocity.lower, velocity.upper],
         cone: real("point velocity cone angle"),
-        render_type: short("render type"),
+        render_type: RenderType::read(root),
         repeats: [real("texture repeats u"), real("texture repeats v")],
         scroll: [real("texture animation u"), real("texture animation v")],
         animation_rate: real("animation rate"),
@@ -166,8 +244,8 @@ fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
         first_sequence: short("first sequence index"),
         sequence_count: short("sequence count"),
         blend: short("framebuffer blend function"),
-        fade_mode: short("framebuffer fade mode"),
-        nonlinear_tint: shader_flags & 2 != 0,
+        fade_mode: FadeMode::read(root),
+        nonlinear_tint: has_flag(root, "shader flags", "nonlinear tint"),
         sort_bias: has_flag(root, "shader flags", "sort bias"),
         states,
         images,
@@ -247,9 +325,11 @@ impl Random {
     }
 }
 
-fn scaled_range(bounds: [f32; 2], flags: i128, bit: u32, scale: f32, random: f32) -> f32 {
-    let lower = bounds[0] * if flags & (1 << bit) != 0 { scale } else { 1.0 };
-    let delta = (bounds[1] - bounds[0]) * if flags & (1 << (bit + 1)) != 0 { scale } else { 1.0 };
+/// A range at `random`, its lower bound and delta each by `scale` where
+/// `scaled` says.
+fn scaled_range(bounds: [f32; 2], scaled: [bool; 2], scale: f32, random: f32) -> f32 {
+    let lower = bounds[0] * if scaled[0] { scale } else { 1.0 };
+    let delta = (bounds[1] - bounds[0]) * if scaled[1] { scale } else { 1.0 };
     lower + random * delta
 }
 
@@ -264,14 +344,14 @@ fn step_point(point: &mut Point, states: &[PointState], ground: f32, dt: f32, ra
             point.state += 1;
             point.moving_on = false;
             let state = &states[point.state as usize];
-            scaled_range(state.duration, state.scaled, 0, point.density, random.next())
+            scaled_range(state.duration, state.scaled.duration, point.density, random.next())
         } else if point.state as usize + 1 >= states.len() {
             point.done = true;
             return;
         } else {
             point.moving_on = true;
             let state = &states[point.state as usize];
-            scaled_range(state.transition, state.scaled, 2, point.density, random.next())
+            scaled_range(state.transition, state.scaled.transition, point.density, random.next())
         };
         point.age = 0.0;
         point.inverse = if seconds != 0.0 { seconds.recip() } else { 0.0 };
@@ -287,10 +367,10 @@ fn step_point(point: &mut Point, states: &[PointState], ground: f32, dt: f32, ra
 /// Width and color (alpha first), blended on the way between two states.
 fn point_look(point: &Point, states: &[PointState]) -> (f32, [f32; 4]) {
     let at = |state: &PointState| {
-        let color_by = if state.scaled & 0x20 != 0 { point.density } else { 1.0 };
+        let color_by = if state.scaled.color { point.density } else { 1.0 };
         let [low, high] = state.colors;
         let color: [f32; 4] = std::array::from_fn(|channel| low[channel] + (high[channel] - low[channel]) * color_by);
-        (state.width * if state.scaled & 0x10 != 0 { point.density } else { 1.0 }, color)
+        (state.width * if state.scaled.width { point.density } else { 1.0 }, color)
     };
     let (width, color) = at(&states[point.state.max(0) as usize]);
     if !point.moving_on || point.state + 1 >= states.len() as i32 {
@@ -415,7 +495,7 @@ impl CeContrailField {
                 running.on = on;
                 if on {
                     // `contrail_compute_new_point_count`.
-                    let rate = def.rate * if def.scale_flags & SCALED_RATE != 0 { density } else { 1.0 };
+                    let rate = def.rate * if def.scale_flags.rate { density } else { 1.0 };
                     let period = if rate != 0.0 { 1.0 / rate } else { f32::MAX };
                     let mut left = step;
                     while running.until_next <= left {
@@ -431,7 +511,7 @@ impl CeContrailField {
                 if count > 0 {
                     add_points(contrail, running, count, bones);
                 }
-                let rate = def.animation_rate * if def.scale_flags & SCALED_ANIMATION_RATE != 0 { density } else { 1.0 };
+                let rate = def.animation_rate * if def.scale_flags.animation_rate { density } else { 1.0 };
                 if rate > 0.0 {
                     let mut left = step;
                     loop {
@@ -452,9 +532,9 @@ impl CeContrailField {
                         }
                     }
                 }
-                let scroll = |speed: f32, flag: i128| speed * if def.scale_flags & flag != 0 { density } else { 1.0 };
-                running.scroll[0] -= scroll(def.scroll[0], SCALED_SCROLL_U) * step;
-                running.scroll[1] += scroll(def.scroll[1], SCALED_SCROLL_V) * step;
+                let scroll = |speed: f32, scaled: bool| speed * if scaled { density } else { 1.0 };
+                running.scroll[0] -= scroll(def.scroll[0], def.scale_flags.scroll[0]) * step;
+                running.scroll[1] += scroll(def.scroll[1], def.scale_flags.scroll[1]) * step;
                 let RunningContrail { points, random, .. } = running;
                 for line in points.iter_mut() {
                     for point in line.iter_mut() {
@@ -485,7 +565,7 @@ impl CeContrailField {
         for (index, (contrail, running)) in contrails.iter().zip(&self.running).enumerate() {
             let def = &contrail.def;
             // Ground mapped and double-marker linked draw nothing.
-            if def.render_type == 3 || def.render_type > 4 {
+            if matches!(def.render_type, RenderType::GroundMapped | RenderType::DoubleMarkerLinked) {
                 continue;
             }
             let image = usize::try_from(running.sequence)
@@ -493,8 +573,8 @@ impl CeContrailField {
                 .and_then(|at| def.sequences.get(at))
                 .map_or(0, |[first, _]| first + running.frame.max(0) as usize);
             let tint = contrail.change_color.map_or([1.0; 3], |channel| change_colors(contrail.object)[channel]);
-            let repeats_u = def.repeats[0] * if def.scale_flags & SCALED_REPEATS_U != 0 { running.density } else { 1.0 };
-            let repeats_v = def.repeats[1] * if def.scale_flags & SCALED_REPEATS_V != 0 { running.density } else { 1.0 };
+            let repeats_u = def.repeats[0] * if def.scale_flags.repeats[0] { running.density } else { 1.0 };
+            let repeats_v = def.repeats[1] * if def.scale_flags.repeats[1] { running.density } else { 1.0 };
             for points in &running.points {
                 if points.len() < 2 {
                     continue;
@@ -510,8 +590,10 @@ impl CeContrailField {
                     // `render_contrail`: the first vertex of each pair (the far
                     // edge of the texture) lies on the minus side of `across`.
                     let (across, normal) = match def.render_type {
-                        0 => ([0.0, 0.0, 1.0], unit_or_up([-along[1], along[0], 0.0])),
-                        1 | 2 => (unit_or_up([-along[1], along[0], 0.0]), [0.0, 0.0, 1.0]),
+                        RenderType::Vertical => ([0.0, 0.0, 1.0], unit_or_up([-along[1], along[0], 0.0])),
+                        RenderType::Horizontal | RenderType::MediaMapped => {
+                            (unit_or_up([-along[1], along[0], 0.0]), [0.0, 0.0, 1.0])
+                        }
                         _ => {
                             let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - from[axis]);
                             let across = unit_or_up(cross(to_eye, along));
@@ -520,18 +602,18 @@ impl CeContrailField {
                     };
                     // `contrail_fade`.
                     let mut fade = 1.0;
-                    if def.fade_mode != 0 {
+                    if def.fade_mode != FadeMode::None {
                         let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - point.place[axis]);
                         let distance = dot(to_eye, to_eye).sqrt().max(0.0001);
                         fade = (dot(normal, to_eye) / distance).abs();
-                        if def.flags & EDGE_FADES_SLOWLY != 0 {
+                        if def.edge_fades_slowly {
                             fade = super::lights::transition_evaluate(2, fade);
                         }
-                        if def.fade_mode == 2 {
+                        if def.fade_mode == FadeMode::WhenParallel {
                             fade = 1.0 - fade;
                         }
                     }
-                    let unfaded = if at == 0 { def.flags & FIRST_POINT_UNFADED != 0 } else { def.flags & LAST_POINT_UNFADED != 0 };
+                    let unfaded = if at == 0 { def.first_point_unfaded } else { def.last_point_unfaded };
                     let ends = (at == 0 || at == last) && !unfaded;
                     let alpha = if ends { 0.0 } else { (alpha * fade).clamp(0.0, 1.0) };
                     let u = running.scroll[0] - at as f32 * repeats_u;
@@ -573,7 +655,7 @@ impl super::functions::ReadsOutputs for CeContrailAt {
 fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usize, bones: Option<&[[f32; 4]]>) {
     let def = &contrail.def;
     let density = running.density;
-    let cone = def.cone * if def.scale_flags & SCALED_CONE != 0 { density } else { 1.0 };
+    let cone = def.cone * if def.scale_flags.cone { density } else { 1.0 };
     for (line, (node, position, forward)) in running.points.iter_mut().zip(&contrail.markers) {
         let (origin, forward) = posed_on(*node, *position, *forward, bones);
         let forward = unit_or_up(forward);
@@ -584,7 +666,7 @@ fn add_points(contrail: &CeContrailAt, running: &mut RunningContrail, count: usi
             if line.len() >= MOST_POINTS {
                 break;
             }
-            let speed = scaled_range(def.velocity, def.scale_flags, SCALED_VELOCITY, density, running.random.next());
+            let speed = scaled_range(def.velocity, def.scale_flags.velocity, density, running.random.next());
             // `seed_random_vector_in_cone3d`.
             let spread = cone * running.random.next();
             let turn = running.random.next() * std::f32::consts::TAU;
@@ -637,7 +719,7 @@ mod tests {
             physics: None,
             width: 0.1,
             colors: [[0.0; 4], [1.0; 4]],
-            scaled: 0x20,
+            scaled: StateScales { color: true, ..Default::default() },
         }
     }
 
