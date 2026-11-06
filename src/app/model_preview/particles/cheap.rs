@@ -25,6 +25,7 @@ use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::attached::attached;
+use crate::app::model_preview::ce::attachments::has_flag;
 
 /// `s_cheap_particle_system::k_max_particles`: the ring every emitter writes.
 const MOST_PARTICLES: usize = 0x2000;
@@ -203,7 +204,7 @@ impl CheapTypeTag {
             elasticity: real("elasticity"),
             death: real("death"),
             change: index("change type"),
-            velocity_facing: element.read_enum_name("orientation").as_deref() == Some("velocity"),
+            velocity_facing: element.field("orientation").is_some_and(|field| field.enum_is("velocity")),
             color,
             intensity: real("intensity0"),
             fade_start: real("fade start"),
@@ -645,8 +646,7 @@ impl CheapEmitterDefinition {
             maps.entry(path.to_ascii_lowercase()).or_insert_with(|| CheapTexels::read(source, &path).map(Arc::new)).clone()
         };
         let (position, velocity) = (map("position texture", DEFAULT_POSITION)?, map("velocity texture", DEFAULT_VELOCITY)?);
-        let flags = root.read_flag_names("flags").unwrap_or_default();
-        let flagged = |wanted: &str| flags.iter().any(|(_, name)| name == wanted);
+        let flagged = |wanted: &str| has_flag(root, "flags", wanted);
         let spawnrate = root.descend("spawnrate");
         let variable = |name: &str| spawnrate.and_then(|holder| holder.read_string_id(name)).unwrap_or_default();
         Some(Self {
