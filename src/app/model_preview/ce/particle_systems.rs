@@ -20,6 +20,7 @@ use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSprite
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
+use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
 /// How long a system runs before the preview first shows it.
 const PRE_ROLL: f32 = 4.0;
@@ -384,8 +385,8 @@ impl Random {
     }
 
     fn next(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.0 >> 8) as f32 / 16_777_216.0
+        self.0 = lcg_step(self.0);
+        high24_over_2_24(self.0)
     }
 
     fn range(&mut self, low: f32, high: f32) -> f32 {

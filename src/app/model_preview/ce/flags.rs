@@ -12,6 +12,7 @@ use super::lights::posed_on;
 use super::particles::CePointPhysics;
 use super::super::*;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
 /// The time `flag_render` gives the update that settles a flag first.
 const SETTLE: f32 = 5.0;
@@ -252,8 +253,8 @@ impl RunningFlag {
     /// `seed_random_direction3d`.
     fn direction(&mut self) -> [f32; 3] {
         let mut next = || {
-            self.random = self.random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            (self.random >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0
+            self.random = lcg_step(self.random);
+            high24_over_2_24(self.random) * 2.0 - 1.0
         };
         loop {
             let direction = [next(), next(), next()];

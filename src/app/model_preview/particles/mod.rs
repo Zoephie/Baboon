@@ -29,6 +29,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::game::GameId;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
+use crate::app::model_preview::common::random::{high_bits, lcg_step};
 
 /// Seconds run before the first frame, so a held pose has its particles.
 pub(super) const PRE_ROLL: f32 = 6.0;
@@ -2681,8 +2682,8 @@ impl Random {
 
     /// `_random`: the next state's high 16 bits, which [`Self::next`] scales.
     pub(super) fn bits(&mut self) -> u32 {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        self.0 >> 16
+        self.0 = lcg_step(self.0);
+        high_bits(self.0)
     }
 
     pub(super) fn range(&mut self, low: f32, high: f32) -> f32 {

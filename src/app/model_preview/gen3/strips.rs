@@ -20,6 +20,7 @@ use super::super::particles::{
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
+use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
 /// `beams.inl`'s limit, and what a contrail's rows hold.
 const MOST_PROFILES: usize = 128;
@@ -457,8 +458,8 @@ pub(crate) struct H3StripAt {
 fn seeds_of(index: usize) -> [f32; OWN_SEEDS] {
     let mut random = (index as u32).wrapping_mul(2654435761) | 1;
     std::array::from_fn(|_| {
-        random = random.wrapping_mul(1664525).wrapping_add(1013904223);
-        (random >> 8) as f32 / (1u32 << 24) as f32
+        random = lcg_step(random);
+        high24_over_2_24(random)
     })
 }
 
@@ -744,8 +745,8 @@ struct RunningContrail {
 
 impl RunningContrail {
     fn next_seed(&mut self) -> f32 {
-        self.random = self.random.wrapping_mul(1664525).wrapping_add(1013904223);
-        (self.random >> 8) as f32 / (1u32 << 24) as f32
+        self.random = lcg_step(self.random);
+        high24_over_2_24(self.random)
     }
 
     /// `create_profile`.

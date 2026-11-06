@@ -19,6 +19,7 @@ use super::super::load_referenced_tag_from_source;
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
+use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
 
 const COMMON_FILE: &str = "model_common.h";
 const GENERIC_FILE: &str = "transparent_generic_shader.psh";
@@ -57,8 +58,8 @@ struct SeedRandom(u32);
 
 impl SeedRandom {
     fn real(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.0 >> 16) as f32 * 0.000_015_259_022
+        self.0 = lcg_step(self.0);
+        high16_times_inverse_65535(self.0)
     }
 }
 

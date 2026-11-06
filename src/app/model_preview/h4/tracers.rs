@@ -28,6 +28,7 @@ use super::super::*;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::length;
+use crate::app::model_preview::common::random::{high16_over_65535, high24_over_2_24, lcg_step};
 
 /// `TracerGpu::k_maxProfilesPerInstance`.
 const MOST_PROFILES: usize = 128;
@@ -516,9 +517,8 @@ pub(crate) struct H4TracerAt {
 
 /// The tracer's two correlations, a generator's for each tracer in turn.
 fn seeds_of(index: usize) -> [f32; 2] {
-    let step = |state: u32| state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-    let first = step((index as u32).wrapping_mul(2_654_435_761) | 1);
-    [first, step(first)].map(|state| (state >> 8) as f32 / (1u32 << 24) as f32)
+    let first = lcg_step((index as u32).wrapping_mul(2_654_435_761) | 1);
+    [first, lcg_step(first)].map(high24_over_2_24)
 }
 
 /// The tracers of an object's attached effects, one for each location (and,
@@ -986,11 +986,8 @@ struct RunningTracer {
 
 impl RunningTracer {
     fn next_seed(&mut self) -> f32 {
-        self.random = self
-            .random
-            .wrapping_mul(1_664_525)
-            .wrapping_add(1_013_904_223);
-        (self.random >> 16) as f32 / 65_535.0
+        self.random = lcg_step(self.random);
+        high16_over_65535(self.random)
     }
 
     fn count(&self) -> usize {

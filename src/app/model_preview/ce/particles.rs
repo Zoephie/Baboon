@@ -29,6 +29,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
+use crate::app::model_preview::common::random::{high24_over_2_24, high_bits, lcg_step};
 
 /// A game tick, which is what `effects_update` steps by.
 pub(in crate::app::model_preview) const STEP: f32 = 1.0 / 30.0;
@@ -961,8 +962,8 @@ pub(in crate::app::model_preview) struct Random(u32);
 
 impl Random {
     fn next(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.0 >> 8) as f32 / 16_777_216.0
+        self.0 = lcg_step(self.0);
+        high24_over_2_24(self.0)
     }
 
     fn range(&mut self, low: f32, high: f32) -> f32 {
@@ -971,8 +972,8 @@ impl Random {
 
     /// `seed_random`: the high half of the next seed.
     pub(in crate::app::model_preview) fn bits(&mut self) -> u32 {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        self.0 >> 16
+        self.0 = lcg_step(self.0);
+        high_bits(self.0)
     }
 
     fn direction(&mut self) -> [f32; 3] {

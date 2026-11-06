@@ -25,6 +25,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, lerp};
+use crate::app::model_preview::common::random::lcg_step;
 
 /// `flags` of a `lens_flare`.
 const NO_OCCLUSION_TEST: i128 = 2;
@@ -756,7 +757,7 @@ impl H2FlareAt {
         let seed = self.position.iter().fold(self.node as u32, |seed, axis| {
             seed.rotate_left(5) ^ axis.to_bits()
         });
-        let hashed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223).to_le_bytes();
+        let hashed = lcg_step(seed).to_le_bytes();
         f32::from(hashed[0]) / 256.0 + f32::from(hashed[1])
     }
 }

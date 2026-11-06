@@ -28,6 +28,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, length};
+use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
 
 /// What a volume's row can hold, whatever its tag says; also the most
 /// Reach's postprocess bakes.
@@ -232,9 +233,8 @@ fn first_free_seed(properties: &[&H3VolumeProperty]) -> usize {
 
 /// `real_internal_random_range`'s generator, for a volume's own seeds.
 fn volume_seeds(index: usize) -> [f32; SEEDS] {
-    let step = |state: u32| state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-    let first = step(index as u32);
-    [first, step(first)].map(|state| (state >> 16) as f32 / 65_535.0)
+    let first = lcg_step(index as u32);
+    [first, lcg_step(first)].map(high16_over_65535)
 }
 
 /// Reach's `LOD in distance` and the rest, as `postprocess` (tool

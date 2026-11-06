@@ -19,6 +19,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{checked_unit, cross};
+use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
@@ -227,8 +228,8 @@ impl Point {
 }
 
 fn next_random(random: &mut u32) -> f32 {
-    *random = random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-    (*random >> 16) as f32 / 65_536.0
+    *random = lcg_step(*random);
+    high16_over_65536(*random)
 }
 
 #[derive(Debug, Clone, Default)]

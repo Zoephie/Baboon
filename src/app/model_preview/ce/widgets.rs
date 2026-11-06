@@ -16,6 +16,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, nonzero_unit};
+use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
 /// One of `frames`, as tool leaves it.
 #[derive(Debug, Clone, Copy)]
@@ -376,8 +377,8 @@ struct Lcg(u32);
 
 impl Lcg {
     fn next(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.0 >> 8) as f32 / 16_777_216.0
+        self.0 = lcg_step(self.0);
+        high24_over_2_24(self.0)
     }
 }
 

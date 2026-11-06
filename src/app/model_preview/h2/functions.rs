@@ -15,6 +15,7 @@ use crate::app::ui_kit::ThemedCheckbox;
 
 use super::super::ce::attachments::{elements, object_block};
 use super::super::dx9::passes::{object_input, tag_function_at};
+use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
 
 /// What the panel has set, by object geometry and input name.
 pub(crate) type H2FunctionInputs = HashMap<(u64, String), f32>;
@@ -67,8 +68,7 @@ struct Clock {
 
 impl Clock {
     fn of(time: f32, owner: u8) -> Self {
-        let hashed = u32::from(owner).wrapping_mul(1_664_525).wrapping_add(1_013_904_223) >> 16;
-        Self { time, offset: hashed as f32 / 65_535.0 }
+        Self { time, offset: high16_over_65535(lcg_step(u32::from(owner))) }
     }
 }
 /// How far `scale by` can chain before it has to be a loop.

@@ -18,6 +18,7 @@ use super::super::gen3::effects::marker_name;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot};
+use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
 
 const OCTAVES: usize = 9;
 /// `liquid_arc_state_new`'s random starts, which never need to be the game's.
@@ -197,8 +198,8 @@ pub(in crate::app::model_preview) fn read_h2_liquids(
 fn scrambled(seed: u32) -> impl FnMut() -> f32 {
     let mut seed = seed;
     move || {
-        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        ((seed >> 16) as f32 * 1.525_902_2e-5) * 2.0 - 1.0
+        seed = lcg_step(seed);
+        high16_times_inverse_65535(seed) * 2.0 - 1.0
     }
 }
 

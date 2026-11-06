@@ -11,6 +11,7 @@ use super::gen3::effects::marker_name;
 use super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, minus, unit_or_unchanged};
+use crate::app::model_preview::common::random::{high_bits, lcg_step};
 
 /// `k_maximum_vertices_per_cloth`.
 const MOST_VERTICES: usize = 121;
@@ -123,8 +124,8 @@ impl Default for H3Wind {
 /// The random generator the winds draw on: the seed's next step, and the
 /// upper half of it.
 fn next_random(seed: &mut u32) -> f32 {
-    *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-    (*seed >> 16) as f32
+    *seed = lcg_step(*seed);
+    high_bits(*seed) as f32
 }
 
 /// `random_direction3d`, from two of `next`'s draws in `0..1`.

@@ -16,6 +16,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
+use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
 
 /// `k_maximum_leaves_per_system`.
 const MOST_LEAVES: usize = 64;
@@ -320,8 +321,8 @@ struct RunningLeaves {
 
 impl RunningLeaves {
     fn next(&mut self) -> f32 {
-        self.random = self.random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.random >> 16) as f32 / 65_536.0
+        self.random = lcg_step(self.random);
+        high16_over_65536(self.random)
     }
 
     fn direction(&mut self) -> [f32; 3] {
@@ -540,8 +541,8 @@ impl H3LeafField {
             let place = system.place_of(leaf.position);
             let mut random = (at as u32).wrapping_mul(2_362_187);
             let mut next = || {
-                random = random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                (random >> 16) as f32 / 65_536.0
+                random = lcg_step(random);
+                high16_over_65536(random)
             };
             let [low, high] = kind.scale;
             let size = if low != 0.0 && high != 0.0 { low + next() * (high - low) } else { 0.02 };
