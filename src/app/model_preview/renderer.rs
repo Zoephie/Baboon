@@ -3967,18 +3967,107 @@ unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Optio
     }
 }
 
-/// The preview's renderer: what every game draws with ([`RenderCore`]).
+/// The preview's renderer: what every game draws with ([`RenderCore`]),
+/// and each game's own drawing ([`GameRender`]), which it hands the frame to.
 struct ModelGlRenderer {
     core: RenderCore,
+    games: GameRenders,
+}
+
+/// What a game's drawing is handed each frame.
+struct FrameCx<'a> {
+    gl: &'a glow::Context,
+    frame: &'a ModelGpuFrame,
+    core: &'a mut RenderCore,
+    /// The frame's slot in `core`.
+    slot: usize,
+}
+
+/// A game's drawing: the renderer runs the frame and hands these steps to
+/// the game it is from.
+trait GameRender {
+    /// Before the scene target: what moves the geometry or makes lights.
+    unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>);
+    /// The shading, when the mode draws any.
+    unsafe fn shade(&mut self, cx: &mut FrameCx<'_>);
+    /// After the wireframe: what draws over it.
+    unsafe fn finish(&mut self, cx: &mut FrameCx<'_>);
+}
+
+/// Today's drawing, every game's at once, until each game has its own.
+#[derive(Default)]
+struct LegacyRender {
+    /// What Halo 2's bloom covers, from the shading to the finish.
+    bloom_order: Option<Vec<usize>>,
+}
+
+impl GameRender for LegacyRender {
+    unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
+        unsafe { cx.core.legacy_prepare(cx.gl, cx.frame, cx.slot) }
+    }
+
+    unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
+        self.bloom_order = unsafe { cx.core.legacy_shade(cx.gl, cx.frame, cx.slot) };
+    }
+
+    unsafe fn finish(&mut self, cx: &mut FrameCx<'_>) {
+        let bloom_order = self.bloom_order.take();
+        unsafe { cx.core.legacy_finish(cx.gl, cx.frame, cx.slot, bloom_order) }
+    }
+}
+
+/// Each game's drawing, by the game a preview is from.
+#[derive(Default)]
+struct GameRenders {
+    legacy: LegacyRender,
+}
+
+impl GameRenders {
+    /// The drawing for a preview of `game`: today's, for every game, until
+    /// each has its own.
+    fn of(&mut self, _game: Option<GameId>) -> &mut dyn GameRender {
+        &mut self.legacy
+    }
 }
 
 impl ModelGlRenderer {
     fn new(gl: &glow::Context) -> Result<Self, String> {
-        Ok(Self { core: RenderCore::new(gl)? })
+        Ok(Self { core: RenderCore::new(gl)?, games: GameRenders::default() })
     }
 
+    /// Draw `frame`: its slot, the game's preparation, the scene target, the
+    /// shared program and grid, the game's shading, the wireframe, what the
+    /// game draws over it, and the scene put back.
     unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
-        unsafe { self.core.paint(gl, frame) }
+        // Set again if this frame steps the effects and something runs on.
+        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&frame.geometry_id));
+        unsafe {
+            let Some(slot) = self.core.acquire_frame_slot(gl, frame) else {
+                return;
+            };
+            let game = self.games.of(frame.preview.game);
+            game.prepare(&mut FrameCx { gl, frame, core: &mut self.core, slot });
+            let scene = self.core.begin_scene(gl, frame);
+            // The game's passes need the scene target's stencil and copies;
+            // without one, the frame draws as with them off.
+            if scene.is_none() && frame.game_shaders && self.core.shaders_supported {
+                let plain = ModelGpuFrame { game_shaders: false, ..frame.clone() };
+                self.paint(gl, &plain);
+                return;
+            }
+            self.core.begin_drawing(gl, frame, slot);
+            let game = self.games.of(frame.preview.game);
+            if frame.render_mode.draws_shading() {
+                gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+                gl.uniform_1_f32(Some(&self.core.unlit), 0.0);
+                game.shade(&mut FrameCx { gl, frame, core: &mut self.core, slot });
+            }
+            if frame.render_mode.draws_wireframe() {
+                self.core.draw_wireframe(gl, frame, slot);
+            }
+            game.finish(&mut FrameCx { gl, frame, core: &mut self.core, slot });
+            self.core.end_frame(gl, scene);
+        }
     }
 
     #[cfg(test)]
@@ -4274,9 +4363,9 @@ impl RenderCore {
         }
     }
 
-    unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
-        // Set again if this frame steps the effects and something runs on.
-        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&frame.geometry_id));
+    /// The frame's slot, its geometry and textures uploaded and its
+    /// simulations restarted for a new model; none if no slot can be made.
+    unsafe fn acquire_frame_slot(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) -> Option<usize> {
         unsafe {
             let (slot, upload) = self.lru.acquire(frame.geometry_id, MODEL_GPU_SLOTS);
             if slot == self.slots.len() {
@@ -4285,7 +4374,7 @@ impl RenderCore {
                     Err(error) => {
                         eprintln!("model preview: {error}");
                         self.lru.abandon(slot);
-                        return;
+                        return None;
                     }
                 }
             }
@@ -4298,14 +4387,22 @@ impl RenderCore {
                 self.slots[slot].upload_geometry(gl, frame);
             }
             self.slots[slot].sync_textures(gl, frame);
+            self.ce_points_now = None;
+            self.h3_depth_copy = None;
+            Some(slot)
+        }
+    }
+
+    /// Today's game work before the scene target, for every game: Halo 2's
+    /// cloth, Halo CE's flags and effects.
+    unsafe fn legacy_prepare(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        unsafe {
             if frame.preview.h3_cloth.first().is_some_and(|cloth| cloth.halo2()) {
                 self.move_cloth(gl, frame, slot);
             }
             if !frame.preview.ce_flags.is_empty() {
                 self.move_ce_flags(gl, frame, slot);
             }
-            self.ce_points_now = None;
-            self.h3_depth_copy = None;
             // Halo CE's effects advance once a frame, here, before anything
             // draws or lights by them.
             if !frame.preview.ce_effects.is_empty() {
@@ -4318,16 +4415,12 @@ impl RenderCore {
                     self.ce_points_now = Some(frame.ce_point_lights_with(&made));
                 }
             }
-            let scene = self.begin_scene(gl, frame);
-            // The game's passes need the scene target's stencil and copies;
-            // without one, the frame draws as with them off.
-            if scene.is_none() && frame.game_shaders && self.shaders_supported {
-                let plain = ModelGpuFrame { game_shaders: false, ..frame.clone() };
-                self.paint(gl, &plain);
-                return;
-            }
-            let mut bloom_order: Option<Vec<usize>> = None;
+        }
+    }
 
+    /// The shared program's state, camera and pose, then the ground grid.
+    unsafe fn begin_drawing(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        unsafe {
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             // Sampler i reads texture unit i, fixed for the life of the program.
@@ -4423,149 +4516,160 @@ impl RenderCore {
                 }
             }
 
-            if frame.render_mode.draws_shading() {
-                gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
-                gl.uniform_1_f32(Some(&self.unlit), 0.0);
-                self.prepare_h2_programs(gl, frame);
-                self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials));
-                if self.h3_draws(frame) {
-                    let order = frame.visible_batches.clone();
-                    self.draw_h3(gl, frame, slot, &order);
+        }
+    }
+
+    /// Today's shading, for every game: the slot draw, the gen3 pipeline,
+    /// the dx9 lit passes, transparents and shields. What Halo 2 blooms over,
+    /// if it does.
+    unsafe fn legacy_shade(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) -> Option<Vec<usize>> {
+        unsafe {
+            self.prepare_h2_programs(gl, frame);
+            self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials));
+            if self.h3_draws(frame) {
+                let order = frame.visible_batches.clone();
+                self.draw_h3(gl, frame, slot, &order);
+            }
+            if frame.game_shaders && self.h2_camo_on(frame) {
+                let order = frame.visible_batches.clone();
+                self.copy_h2_frame(gl, frame, &order);
+                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::ActiveCamo, None);
+            } else if frame.game_shaders && !self.h3_draws(frame) {
+                // Halo 3 lit itself in `draw_h3`, its shadow included; the
+                // passes and lights here are Halo 2's and Halo CE's.
+                let order = frame.visible_batches.clone();
+                self.copy_h2_frame(gl, frame, &order);
+                self.fill_h2_texaccum(gl, frame, slot, &order);
+                let lightmap = frame.h2_lightmap_layer();
+                self.draw_h2_passes(gl, frame, slot, &order, lightmap, None);
+                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Prt, None);
+                if frame.self_shadow
+                    && !frame.default_lights
+                    && self.draw_h2_shadow(gl, frame, slot, &order)
+                {
+                    gl.enable(glow::STENCIL_TEST);
+                    gl.stencil_func(glow::EQUAL, 1, 0xFF);
+                    gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+                    let shadowed = Some(&H2_SHADOWED_LIGHT);
+                    self.draw_h2_passes(gl, frame, slot, &order, lightmap, shadowed);
+                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Prt, shadowed);
+                    gl.disable(glow::STENCIL_TEST);
                 }
-                if frame.game_shaders && self.h2_camo_on(frame) {
-                    let order = frame.visible_batches.clone();
-                    self.copy_h2_frame(gl, frame, &order);
-                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::ActiveCamo, None);
-                } else if frame.game_shaders && !self.h3_draws(frame) {
-                    // Halo 3 lit itself in `draw_h3`, its shadow included; the
-                    // passes and lights here are Halo 2's and Halo CE's.
-                    let order = frame.visible_batches.clone();
-                    self.copy_h2_frame(gl, frame, &order);
-                    self.fill_h2_texaccum(gl, frame, slot, &order);
-                    let lightmap = frame.h2_lightmap_layer();
-                    self.draw_h2_passes(gl, frame, slot, &order, lightmap, None);
-                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Prt, None);
-                    if frame.self_shadow
-                        && !frame.default_lights
-                        && self.draw_h2_shadow(gl, frame, slot, &order)
-                    {
-                        gl.enable(glow::STENCIL_TEST);
-                        gl.stencil_func(glow::EQUAL, 1, 0xFF);
-                        gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
-                        let shadowed = Some(&H2_SHADOWED_LIGHT);
-                        self.draw_h2_passes(gl, frame, slot, &order, lightmap, shadowed);
-                        self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Prt, shadowed);
+                for layer in [
+                    H2Layer::Environment,
+                    H2Layer::SelfIllumination,
+                    H2Layer::Overlay,
+                ] {
+                    self.draw_h2_passes(gl, frame, slot, &order, layer, None);
+                }
+                if frame.default_lights {
+                    let shadowed = frame.self_shadow && self.draw_h2_shadow(gl, frame, slot, &order);
+                    for (index, light) in H2_DEFAULT_LIGHTS.iter().enumerate() {
+                        if shadowed && index == 0 {
+                            gl.enable(glow::STENCIL_TEST);
+                            gl.stencil_func(glow::EQUAL, 0, 0xFF);
+                            gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+                        }
+                        for layer in [H2Layer::LightDiffuse, H2Layer::LightSpecular] {
+                            self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
+                        }
                         gl.disable(glow::STENCIL_TEST);
                     }
-                    for layer in [
-                        H2Layer::Environment,
-                        H2Layer::SelfIllumination,
-                        H2Layer::Overlay,
-                    ] {
-                        self.draw_h2_passes(gl, frame, slot, &order, layer, None);
-                    }
-                    if frame.default_lights {
-                        let shadowed = frame.self_shadow && self.draw_h2_shadow(gl, frame, slot, &order);
-                        for (index, light) in H2_DEFAULT_LIGHTS.iter().enumerate() {
-                            if shadowed && index == 0 {
-                                gl.enable(glow::STENCIL_TEST);
-                                gl.stencil_func(glow::EQUAL, 0, 0xFF);
-                                gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
-                            }
-                            for layer in [H2Layer::LightDiffuse, H2Layer::LightSpecular] {
-                                self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
-                            }
-                            gl.disable(glow::STENCIL_TEST);
-                        }
-                    }
-                    // `render_lights`: real lights draw whichever rig stands behind them.
-                    let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-                    for (index, point) in frame.preview.h2_point_lights.iter().enumerate() {
-                        if !is_shown(&frame.h2_shown.points, index) {
-                            continue;
-                        }
-                        let values = frame.function_values_of_object(point.object);
-                        let onsets = &mut self.slots[slot].simulations.effect_onsets;
-                        let onset = onsets.of(point.object, point.scale_name(), values, frame.time);
-                        let Some(light) = point.lit(values, bones, frame.time, onset) else {
-                            continue;
-                        };
-                        let (light, draws) = h2::lights::overbrighten(&light);
-                        let specular = H2DefaultLight { color: light.specular, ..light };
-                        for _ in 0..draws {
-                            for (layer, light) in
-                                [(point.diffuse_layer(), &light), (H2Layer::LightSpecular, &specular)]
-                            {
-                                self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
-                            }
-                        }
-                    }
-                    let uploaded = &mut self.slots[slot];
-                    if uploaded.gel_geometry != Some(frame.geometry_id) {
-                        for texture in uploaded.gel_textures.drain(..).flatten() {
-                            gl.delete_texture(texture);
-                        }
-                        let gels = frame.preview.h2_gel_lights.iter().map(|light| light.gel());
-                        uploaded.gel_textures =
-                            gels.map(|gel| gel.and_then(|gel| upload_h2_image(gl, gel))).collect();
-                        uploaded.gel_geometry = Some(frame.geometry_id);
-                    }
-                    let mut masked = false;
-                    for (index, gel) in frame.preview.h2_gel_lights.iter().enumerate() {
-                        if !is_shown(&frame.h2_shown.gels, index) {
-                            continue;
-                        }
-                        let values = frame.function_values_of_object(gel.object);
-                        let onsets = &mut self.slots[slot].simulations.effect_onsets;
-                        let onset = onsets.of(gel.object, gel.scale_name(), values, frame.time);
-                        let Some((light, rows)) = gel.lit(values, bones, frame.time, onset) else {
-                            continue;
-                        };
-                        let specular = h2::lights::has_specular(&light);
-                        let (light, draws) = h2::lights::overbrighten(&light);
-                        self.h2_gel = Some((self.slots[slot].gel_textures[index], rows.rows));
-                        if specular {
-                            self.draw_h2_passes(gl, frame, slot, &order, H2Layer::GelMask, Some(&light));
-                            masked = true;
-                        }
-                        let layer = if specular { H2Layer::LightFrustum } else { H2Layer::LightGel };
-                        for _ in 0..draws {
-                            self.draw_h2_passes(gl, frame, slot, &order, layer, Some(&light));
-                        }
-                        self.h2_gel = None;
-                    }
-                    if masked {
-                        gl.color_mask(false, false, false, true);
-                        gl.clear_color(0.0, 0.0, 0.0, 1.0);
-                        gl.clear(glow::COLOR_BUFFER_BIT);
-                        gl.color_mask(true, true, true, true);
-                    }
-                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
                 }
-                let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
-                if ce_sorts_transparents(frame) {
-                    self.draw_ce_transparents(gl, frame, slot);
-                } else {
-                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Transparent, None);
-                }
-                // `sub_6C18F0`: `object_overshield_amount` is the vitality past 1.
-                let value = |name: &str| {
-                    frame.function_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
-                };
-                for (layer, name) in [
-                    (H2Layer::ShieldDamaged, "current_shield_damage"),
-                    (H2Layer::Overshield, "object_overshield_amount"),
-                ] {
-                    if value(name) > 0.0 {
-                        self.draw_h2_passes(gl, frame, slot, &order, layer, None);
+                // `render_lights`: real lights draw whichever rig stands behind them.
+                let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+                for (index, point) in frame.preview.h2_point_lights.iter().enumerate() {
+                    if !is_shown(&frame.h2_shown.points, index) {
+                        continue;
+                    }
+                    let values = frame.function_values_of_object(point.object);
+                    let onsets = &mut self.slots[slot].simulations.effect_onsets;
+                    let onset = onsets.of(point.object, point.scale_name(), values, frame.time);
+                    let Some(light) = point.lit(values, bones, frame.time, onset) else {
+                        continue;
+                    };
+                    let (light, draws) = h2::lights::overbrighten(&light);
+                    let specular = H2DefaultLight { color: light.specular, ..light };
+                    for _ in 0..draws {
+                        for (layer, light) in
+                            [(point.diffuse_layer(), &light), (H2Layer::LightSpecular, &specular)]
+                        {
+                            self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
+                        }
                     }
                 }
-                // `rasterizer_postprocess_scene` blooms the finished frame,
-                // after every transparent and effect.
-                if frame.game_shaders && frame.bloom && !self.h3_draws(frame) {
-                    bloom_order = Some(order.clone());
+                let uploaded = &mut self.slots[slot];
+                if uploaded.gel_geometry != Some(frame.geometry_id) {
+                    for texture in uploaded.gel_textures.drain(..).flatten() {
+                        gl.delete_texture(texture);
+                    }
+                    let gels = frame.preview.h2_gel_lights.iter().map(|light| light.gel());
+                    uploaded.gel_textures =
+                        gels.map(|gel| gel.and_then(|gel| upload_h2_image(gl, gel))).collect();
+                    uploaded.gel_geometry = Some(frame.geometry_id);
+                }
+                let mut masked = false;
+                for (index, gel) in frame.preview.h2_gel_lights.iter().enumerate() {
+                    if !is_shown(&frame.h2_shown.gels, index) {
+                        continue;
+                    }
+                    let values = frame.function_values_of_object(gel.object);
+                    let onsets = &mut self.slots[slot].simulations.effect_onsets;
+                    let onset = onsets.of(gel.object, gel.scale_name(), values, frame.time);
+                    let Some((light, rows)) = gel.lit(values, bones, frame.time, onset) else {
+                        continue;
+                    };
+                    let specular = h2::lights::has_specular(&light);
+                    let (light, draws) = h2::lights::overbrighten(&light);
+                    self.h2_gel = Some((self.slots[slot].gel_textures[index], rows.rows));
+                    if specular {
+                        self.draw_h2_passes(gl, frame, slot, &order, H2Layer::GelMask, Some(&light));
+                        masked = true;
+                    }
+                    let layer = if specular { H2Layer::LightFrustum } else { H2Layer::LightGel };
+                    for _ in 0..draws {
+                        self.draw_h2_passes(gl, frame, slot, &order, layer, Some(&light));
+                    }
+                    self.h2_gel = None;
+                }
+                if masked {
+                    gl.color_mask(false, false, false, true);
+                    gl.clear_color(0.0, 0.0, 0.0, 1.0);
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                    gl.color_mask(true, true, true, true);
+                }
+                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
+            }
+            let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
+            if ce_sorts_transparents(frame) {
+                self.draw_ce_transparents(gl, frame, slot);
+            } else {
+                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Transparent, None);
+            }
+            // `sub_6C18F0`: `object_overshield_amount` is the vitality past 1.
+            let value = |name: &str| {
+                frame.function_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
+            };
+            for (layer, name) in [
+                (H2Layer::ShieldDamaged, "current_shield_damage"),
+                (H2Layer::Overshield, "object_overshield_amount"),
+            ] {
+                if value(name) > 0.0 {
+                    self.draw_h2_passes(gl, frame, slot, &order, layer, None);
                 }
             }
+            // `rasterizer_postprocess_scene` blooms the finished frame,
+            // after every transparent and effect.
+            if frame.game_shaders && frame.bloom && !self.h3_draws(frame) {
+                return Some(order.clone());
+            }
+            None
+        }
+    }
+
+    /// The wireframe over what shaded, in the shared program.
+    unsafe fn draw_wireframe(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        unsafe {
             if frame.render_mode.draws_wireframe() {
                 // Halo 3's passes end on their own programs; the camera and
                 // material uniforms below are the preview's.
@@ -4577,6 +4681,13 @@ impl RenderCore {
                 gl.uniform_1_f32(Some(&self.unlit), 1.0);
                 self.draw_batches(gl, frame, true, Self::bound_materials(frame, &self.slots[slot].materials));
             }
+        }
+    }
+
+    /// Today's work after the wireframe, for every game: dx9's sprites and
+    /// Halo 2's bloom over `bloom_order`.
+    unsafe fn legacy_finish(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, bloom_order: Option<Vec<usize>>) {
+        unsafe {
             if !self.h3_draws(frame) && self.draws_object_sprites(frame) {
                 self.draw_object_sprites(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                 self.draw_object_sprites(gl, frame, slot, SpriteStage::Rest);
@@ -4587,6 +4698,13 @@ impl RenderCore {
                 self.draw_h2_bloom(gl, frame, slot, &order);
             }
 
+        }
+    }
+
+    /// The frame's end: fill polygons again, `scene` copied to where the
+    /// frame belonged, and nothing left bound.
+    unsafe fn end_frame(&mut self, gl: &glow::Context, scene: Option<PostScope>) {
+        unsafe {
             // Polygon mode is not reset by egui_glow's generic callback-state
             // restoration and would otherwise turn subsequent UI meshes into wireframes.
             gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
