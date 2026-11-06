@@ -16,7 +16,7 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::passes::FramebufferBlend;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_after, object_block};
-use super::lights::{CeFlareView, posed_on};
+use super::super::common::view::{ViewFrame, posed_on};
 use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use super::super::*;
 use crate::core::source::TagSource;
@@ -553,7 +553,7 @@ impl CeParticleSystemField {
     pub(crate) fn quads(
         &mut self,
         systems: &[CeParticleSystemAt],
-        view: &CeFlareView,
+        view: &ViewFrame,
         pixel: impl Fn([f32; 3]) -> f32,
     ) -> Vec<CePctlQuad> {
         let mut quads = Vec::new();
@@ -573,7 +573,7 @@ fn system_quads(
     def: &CePctlDef,
     running: &mut CeRunningSystem,
     index: usize,
-    view: &CeFlareView,
+    view: &ViewFrame,
     pixel: &impl Fn([f32; 3]) -> f32,
     random: &mut Random,
     time: f32,
@@ -698,7 +698,7 @@ impl Shown<'_> {
     /// `build_sprite`'s color: the fade is the alpha unless the blend is alpha
     /// blend or the tint nonlinear.
     #[allow(clippy::too_many_arguments)]
-    fn push(&self, sequence: i32, sprite: usize, rotation: f32, fade: f32, mirror: bool, view: &CeFlareView, system: usize, quads: &mut Vec<CePctlQuad>) {
+    fn push(&self, sequence: i32, sprite: usize, rotation: f32, fade: f32, mirror: bool, view: &ViewFrame, system: usize, quads: &mut Vec<CePctlQuad>) {
         let Some((image, corners)) = self.state.sheet.corners(sequence, sprite, self.center, rotation, self.size, mirror, view) else {
             return;
         };
@@ -721,14 +721,14 @@ impl Shown<'_> {
         });
     }
 
-    fn simple(&self, sprite: usize, view: &CeFlareView, system: usize, quads: &mut Vec<CePctlQuad>) {
+    fn simple(&self, sprite: usize, view: &ViewFrame, system: usize, quads: &mut Vec<CePctlQuad>) {
         self.push(self.state.sequence, sprite, self.rotation, self.fade, false, view, system, quads);
     }
 
     /// `build_sprite_rotational`: end on, the next sequence's sprite; side
     /// on, the sequence's sprite for the angle it turns through, laid along
     /// the axis on screen; between, both.
-    fn rotational(&self, sprite: usize, sideways: bool, view: &CeFlareView, system: usize, quads: &mut Vec<CePctlQuad>) {
+    fn rotational(&self, sprite: usize, sideways: bool, view: &ViewFrame, system: usize, quads: &mut Vec<CePctlQuad>) {
         let sheet = &self.state.sheet;
         let first = self.state.sequence;
         let toward = unit_or_unchanged(std::array::from_fn(|axis| self.center[axis] - view.eye[axis]));
@@ -839,7 +839,7 @@ pub(crate) fn unattached_quads(
     def: &CePctlDef,
     running: &mut CeRunningSystem,
     index: usize,
-    view: &CeFlareView,
+    view: &ViewFrame,
     pixel: impl Fn([f32; 3]) -> f32,
     random: &mut Random,
     time: f32,

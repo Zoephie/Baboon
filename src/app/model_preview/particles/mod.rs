@@ -13,7 +13,7 @@ use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
 use super::common::fields::{elements, has_flag, has_flag_labelled};
-use super::ce::lights::CeFlareView;
+use super::common::view::ViewFrame;
 use super::functions::FunctionValues;
 use super::dx9::passes::tag_function_at;
 use super::gen3::effects::H3EffectOnsets;
@@ -3322,7 +3322,7 @@ fn billboard(
     place: [f32; 3],
     velocity: [f32; 3],
     local: [[f32; 3]; 3],
-    view: &CeFlareView,
+    view: &ViewFrame,
 ) -> [[f32; 3]; 2] {
     let eye: [f32; 3] = std::array::from_fn(|axis| place[axis] - view.eye[axis]);
     match style {
@@ -3600,7 +3600,7 @@ impl H3ParticleField {
         system: &H3ParticleSystem,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         lighting: &[[f32; 4]; 10],
         time: f32,
         onset: f32,
@@ -3638,7 +3638,7 @@ impl H3ParticleField {
         index: usize,
         system: &H3ParticleSystem,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
     ) -> f32 {
         let run = self.instances.get(index).and_then(|runs| runs.first());
         match run.filter(|_| system.child) {
@@ -3656,7 +3656,7 @@ impl H3ParticleSystem {
         running: &[RunningEmitter],
         (origin, axes, onset): ([f32; 3], [[f32; 3]; 3], f32),
         values: Option<&FunctionValues>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         lighting: &[[f32; 4]; 10],
         time: f32,
         stops: f32,
@@ -3906,7 +3906,7 @@ fn emitter_frame(
 
 impl H3ParticleSystem {
     /// Its sort position, nudged by its tag: `add_element`'s `sort_bias`.
-    pub(crate) fn distance(&self, bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> f32 {
+    pub(crate) fn distance(&self, bones: Option<&[[f32; 4]]>, view: &ViewFrame) -> f32 {
         let (origin, _) = location(self, bones);
         let eye: [f32; 3] = std::array::from_fn(|axis| origin[axis] - view.eye[axis]);
         dot(view.forward, eye) - self.sort_bias * 0.05
@@ -4848,7 +4848,7 @@ impl H3ParticleField {
         system: &H3ParticleSystem,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         onset: f32,
     ) -> Vec<H4EmitterDraw> {
@@ -4879,7 +4879,7 @@ impl H3ParticleSystem {
         running: &[RunningEmitter],
         (origin, axes, onset): ([f32; 3], [[f32; 3]; 3], f32),
         values: Option<&FunctionValues>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         draws: &mut Vec<H4EmitterDraw>,
     ) {

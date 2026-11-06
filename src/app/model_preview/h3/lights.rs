@@ -8,7 +8,8 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_labelled, object_block};
-use super::super::ce::lights::{CeFlareView, CeSprite, posed_on};
+use super::super::ce::lights::CeSprite;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::gen3::effects::{
     H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
 };
@@ -479,7 +480,7 @@ impl H3FlareColor {
 }
 
 /// `lens_flares_evaluate_corona_rotation_function`.
-fn corona_rotation(function: i128, scale: f32, position: [f32; 3], forward: [f32; 3], view: &CeFlareView) -> f32 {
+fn corona_rotation(function: i128, scale: f32, position: [f32; 3], forward: [f32; 3], view: &ViewFrame) -> f32 {
     let across = cross(cross(forward, view.forward), forward);
     let to_flare: [f32; 3] = std::array::from_fn(|axis| position[axis] - view.eye[axis]);
     let back = forward.map(|axis| -axis);
@@ -822,7 +823,7 @@ impl H3FlareAt {
         light: Option<([f32; 3], f32)>,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         pixels: &dyn Fn([f32; 3], [f32; 2]) -> f32,
     ) -> Option<CeSprite> {
@@ -862,7 +863,7 @@ impl H3FlareAt {
         light: Option<([f32; 3], f32)>,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         occlusion: f32,
         image: usize,
@@ -1057,7 +1058,7 @@ mod tests {
 
     #[test]
     fn a_coronas_rotation_follows_the_eye_only_when_it_has_a_function() {
-        let view = CeFlareView { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] };
+        let view = ViewFrame { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] };
         assert_eq!(corona_rotation(0, 1.0, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], &view), 0.0);
         let turned = corona_rotation(4, std::f32::consts::PI, [1.0, 0.0, 1.0], [0.0, 1.0, 0.0], &view);
         assert!((turned - (1.0f32).atan2(-1.0)).abs() < 1e-5, "{turned}");

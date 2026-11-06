@@ -9,7 +9,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
-use super::lights::{CeFlareView, posed_on};
+use super::super::common::view::{ViewFrame, posed_on};
 use super::particles::CePointPhysics;
 use super::passes::{FramebufferBlend, argb};
 use super::super::dx9::passes::H2Image;
@@ -555,7 +555,7 @@ impl CeContrailField {
         &self,
         contrails: &[CeContrailAt],
         change_colors: impl Fn(u8) -> [[f32; 3]; 4],
-        view: &CeFlareView,
+        view: &ViewFrame,
     ) -> Vec<CeContrailQuad> {
         let mut quads = Vec::new();
         for (index, (contrail, running)) in contrails.iter().zip(&self.running).enumerate() {

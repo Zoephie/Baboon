@@ -14,7 +14,7 @@ use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::ce::lights::posed_on;
+use super::super::common::view::posed_on;
 use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::{

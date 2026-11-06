@@ -10,7 +10,8 @@ use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::super::ce::lights::CeAntennaQuad;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::effects::{
@@ -814,7 +815,7 @@ impl H3LightVolumeAt {
         &self,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         onset: f32,
     ) -> Option<VolumeLayout> {
@@ -855,7 +856,7 @@ impl H3LightVolumeAt {
         &self,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         onset: f32,
     ) -> Option<H4VolumeDraw> {
@@ -869,7 +870,7 @@ impl H3LightVolumeAt {
         appearance: u32,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         onset: f32,
     ) -> Option<H4VolumeDraw> {
@@ -925,7 +926,7 @@ impl H3LightVolumeAt {
         &self,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         onset: f32,
         stops: f32,
@@ -1123,8 +1124,8 @@ mod tests {
     }
 
     /// Side on, from 10 units out.
-    fn view(distance: f32) -> CeFlareView {
-        CeFlareView { eye: [0.0, -distance, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] }
+    fn view(distance: f32) -> ViewFrame {
+        ViewFrame { eye: [0.0, -distance, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] }
     }
 
     /// Reach's state 6 is the LOD amount, 1 with `lod enabled` off; Halo

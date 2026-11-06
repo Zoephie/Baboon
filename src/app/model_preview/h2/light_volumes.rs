@@ -7,7 +7,8 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
-use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::super::ce::lights::CeAntennaQuad;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::lights::H2EffectPart;
 use super::super::gen3::effects::{for_each_attached_part, part_markers};
@@ -472,7 +473,7 @@ impl H2LightVolume {
         values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         onset: f32,
     ) -> Vec<CeAntennaQuad> {

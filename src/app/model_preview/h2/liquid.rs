@@ -9,7 +9,8 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
-use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::super::ce::lights::CeAntennaQuad;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::light_volumes::{read_glow, read_h2_bitmap};
 use super::lights::attachment_value;
@@ -283,7 +284,7 @@ impl H2LiquidAt {
         arc: &LiquidArc,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
     ) -> Vec<CeAntennaQuad> {
         // `sub_515280`: what an effect's part of no duration asks for is all

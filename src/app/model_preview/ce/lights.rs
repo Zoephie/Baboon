@@ -1,6 +1,7 @@
 //! Halo CE's lens flares: what `attachments_new` hangs on an object as a
 //! `light`, and the sprites `rasterizer_lens_flares_draw` makes of one.
 
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::attachment::MarkerFrame;
 use super::attachments::attached_marker_frame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
@@ -51,23 +52,11 @@ pub(crate) struct CeAntennaQuad {
     pub(crate) color: [f32; 4],
 }
 
-/// A point and direction on `node`, where the pose puts them.
-pub(in crate::app::model_preview) fn posed_on(node: usize, position: [f32; 3], direction: [f32; 3], bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
-    let Some(rows) = bones.and_then(|bones| bones.get(node * 3..node * 3 + 3)) else {
-        return (position, direction);
-    };
-    let [x, y, z] = position;
-    let [i, j, k] = direction;
-    let place = |row: &[f32; 4]| row[0] * x + row[1] * y + row[2] * z + row[3];
-    let turn = |row: &[f32; 4]| row[0] * i + row[1] * j + row[2] * k;
-    ([place(&rows[0]), place(&rows[1]), place(&rows[2])], [turn(&rows[0]), turn(&rows[1]), turn(&rows[2])])
-}
-
 impl CeAntenna {
     /// `antenna_render_proper`, for an antenna at rest: its vertices lie
     /// straight out of the marker, which is where `antenna_update`'s spring
     /// pulls them, without the point physics that sway them.
-    pub(crate) fn quads(&self, bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> Vec<CeAntennaQuad> {
+    pub(crate) fn quads(&self, bones: Option<&[[f32; 4]]>, view: &ViewFrame) -> Vec<CeAntennaQuad> {
         let (mut origin, forward) = posed_on(self.node, self.position, self.forward, bones);
         let length = dot(forward, forward).sqrt().max(0.0001);
         let forward = forward.map(|axis| axis / length);
@@ -332,25 +321,13 @@ pub(crate) struct CeSprite {
     pub(crate) depth_tested: bool,
 }
 
-/// Where the preview's camera sits, as the flare math wants it.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CeFlareView {
-    pub(crate) eye: [f32; 3],
-    pub(crate) forward: [f32; 3],
-    pub(crate) right: [f32; 3],
-    pub(crate) up: [f32; 3],
-}
-
-
-
-
 fn rgb_of(color: [f32; 4]) -> [f32; 3] {
     [color[0], color[1], color[2]]
 }
 
 /// `lens_flare_evaluate_corona_rotation_function`: how far round a corona
 /// turns as a share of a whole turn, or none for `none`.
-fn corona_rotation(function: i128, forward: [f32; 3], to_light: [f32; 3], view: &CeFlareView) -> f32 {
+fn corona_rotation(function: i128, forward: [f32; 3], to_light: [f32; 3], view: &ViewFrame) -> f32 {
     let back = view.forward.map(|axis| -axis);
     let along = cross(cross(forward, view.right), forward);
     let (sine, cosine) = match function {
@@ -387,7 +364,7 @@ impl CeLight {
         outputs: &[f32; 4],
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
     ) -> Option<CeSprite> {
         let flare = self.flare.as_deref()?;
         if self.color(self.value(outputs), change_colors) == [0.0; 3] {
@@ -454,7 +431,7 @@ impl CeLight {
         outputs: &[f32; 4],
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         occlusion: f32,
     ) -> Vec<CeSprite> {
@@ -862,7 +839,7 @@ pub(in crate::app::model_preview) fn read_attached_lights(
 mod tests {
     use super::*;
 
-    const VIEW: CeFlareView = CeFlareView {
+    const VIEW: ViewFrame = ViewFrame {
         eye: [0.0, -10.0, 0.0],
         forward: [0.0, 1.0, 0.0],
         right: [1.0, 0.0, 0.0],

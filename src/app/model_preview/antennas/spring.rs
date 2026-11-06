@@ -3,7 +3,7 @@
 //! its marker, once a game tick, under its point physics. The near end is the
 //! marker itself; [`super::super::h2::lights::H2Antenna`] draws the curve between.
 
-use super::super::ce::lights::posed_on;
+use super::super::common::view::posed_on;
 use super::super::ce::particles::CePointPhysics;
 use super::super::h2::lights::H2Antenna;
 use super::super::cloth::REACH_TICK_RATE;

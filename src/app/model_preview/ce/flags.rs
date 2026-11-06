@@ -8,7 +8,7 @@
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, object_block};
-use super::lights::posed_on;
+use super::super::common::view::posed_on;
 use super::particles::CePointPhysics;
 use super::super::*;
 use crate::core::source::TagSource;

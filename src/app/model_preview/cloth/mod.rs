@@ -6,7 +6,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::attachment::MarkerFrame;
 use super::common::fields::{elements, has_flag, object_block};
-use super::ce::lights::posed_on;
+use super::common::view::posed_on;
 use super::gen3::effects::marker_name;
 use super::*;
 use crate::core::source::TagSource;

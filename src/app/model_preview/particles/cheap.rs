@@ -12,7 +12,7 @@ use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::ce::lights::{CeFlareView, posed_on};
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::super::gen3::effects::{
@@ -1003,7 +1003,7 @@ impl ReachCheapField {
     /// triangles each: facing along the velocity, stretched by its speed, or
     /// the screen; coloured by the type's colour, its fade and the packed
     /// lighting. There is no fog to scatter in.
-    pub(crate) fn vertices(&self, library: &CheapLibrary, view: &CeFlareView) -> Vec<ReachCheapVertex> {
+    pub(crate) fn vertices(&self, library: &CheapLibrary, view: &ViewFrame) -> Vec<ReachCheapVertex> {
         let mut vertices = Vec::new();
         for (index, particle) in self.particles.iter().enumerate() {
             if particle.age.abs() > 1.0 {
@@ -1214,8 +1214,8 @@ mod tests {
         }
     }
 
-    fn view() -> CeFlareView {
-        CeFlareView { eye: [0.0, -10.0, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] }
+    fn view() -> ViewFrame {
+        ViewFrame { eye: [0.0, -10.0, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] }
     }
 
     fn live(field: &ReachCheapField) -> usize {

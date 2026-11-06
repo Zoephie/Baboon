@@ -9,9 +9,8 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
-use super::super::ce::lights::{
-    ANTENNA_TRIM, AntennaSprite, CeAntennaQuad, CeFlareView, CeSprite, REACH_ANTENNA_TRIM, antenna_sprite, posed_on,
-};
+use super::super::ce::lights::{ANTENNA_TRIM, AntennaSprite, CeAntennaQuad, CeSprite, REACH_ANTENNA_TRIM, antenna_sprite};
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::ce::passes::argb;
 use super::super::functions::FunctionValues;
 use super::super::gen3::effects::{H3EffectTimes, for_each_attached_part, part_markers};
@@ -358,7 +357,7 @@ impl H2Antenna {
     /// the place it pulls toward, with no wind or motion to sway it. Reach's
     /// far end is at `tip`, where its spring has it, or at rest before it has
     /// run.
-    pub(crate) fn quads(&self, bones: Option<&[[f32; 4]]>, view: &CeFlareView, tip: Option<[f32; 3]>) -> Vec<CeAntennaQuad> {
+    pub(crate) fn quads(&self, bones: Option<&[[f32; 4]]>, view: &ViewFrame, tip: Option<[f32; 3]>) -> Vec<CeAntennaQuad> {
         if let (Some(_), Some(curve)) = (&self.reach, &self.curve) {
             return self.reach_quads(curve, bones, view, tip);
         }
@@ -411,7 +410,7 @@ impl H2Antenna {
         &self,
         curve: &H3AntennaCurve,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         tip: Option<[f32; 3]>,
     ) -> Vec<CeAntennaQuad> {
         let (origin, forward) = self.marker(bones);
@@ -1160,7 +1159,7 @@ pub(in crate::app::model_preview) fn read_h2_flares(
 
 
 
-fn from_view(view: &CeFlareView, point: [f32; 3]) -> [f32; 3] {
+fn from_view(view: &ViewFrame, point: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|axis| point[axis] - view.eye[axis])
 }
 
@@ -1172,7 +1171,7 @@ fn corona_rotation(
     scale: f32,
     to_light: [f32; 3],
     forward: [f32; 3],
-    view: &CeFlareView,
+    view: &ViewFrame,
 ) -> f32 {
     let turned = cross(cross(forward, view.right), forward);
     let back = view.forward.map(|axis| -axis);
@@ -1425,7 +1424,7 @@ impl H2FlareAt {
     pub(crate) fn occlusion_patches(
         &self,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
     ) -> Option<(CeSprite, Option<CeSprite>)> {
         let flare = &*self.flare;
         if !flare.tests_occlusion() {
@@ -1461,7 +1460,7 @@ impl H2FlareAt {
         values: Option<&FunctionValues>,
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         onset: f32,
         occlusion: [f32; 2],
@@ -1605,8 +1604,8 @@ mod tests {
         assert!(!has_specular(&light([0.0; 3])));
     }
 
-    fn view() -> CeFlareView {
-        CeFlareView {
+    fn view() -> ViewFrame {
+        ViewFrame {
             eye: [0.0, 0.0, 0.0],
             forward: [1.0, 0.0, 0.0],
             right: [0.0, -1.0, 0.0],
@@ -1893,8 +1892,8 @@ mod tests {
     }
 
     /// Looking at the antenna from +X, a little above.
-    fn side_view() -> CeFlareView {
-        CeFlareView { eye: [2.0, 0.0, 0.2], forward: [-1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] }
+    fn side_view() -> ViewFrame {
+        ViewFrame { eye: [2.0, 0.0, 0.2], forward: [-1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] }
     }
 
 

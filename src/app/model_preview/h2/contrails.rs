@@ -8,7 +8,8 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
-use super::super::ce::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::super::ce::lights::CeAntennaQuad;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::lights::attachment_value;
 use super::super::dx9::passes::H2Image;
@@ -378,7 +379,7 @@ impl H2ContrailField {
     }
 
     /// `contrail_vertex_builder`, a quad between each two points.
-    pub(crate) fn quads(&self, index: usize, contrail: &H2ContrailAt, view: &CeFlareView) -> Vec<CeAntennaQuad> {
+    pub(crate) fn quads(&self, index: usize, contrail: &H2ContrailAt, view: &ViewFrame) -> Vec<CeAntennaQuad> {
         let Some(running) = self.running.get(index).filter(|running| running.points.len() >= 2) else {
             return Vec::new();
         };

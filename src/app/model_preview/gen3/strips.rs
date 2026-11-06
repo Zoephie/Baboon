@@ -9,7 +9,7 @@ use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::ce::lights::{CeFlareView, posed_on};
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, read_part_placement};
@@ -605,7 +605,7 @@ struct Profile {
 fn strip_vertices(
     look: &StripLook,
     profiles: &[Profile],
-    view: &CeFlareView,
+    view: &ViewFrame,
     time: f32,
     uv_offset: [f32; 2],
     origin_fade: impl Fn(&Profile, [f32; 3]) -> f32,
@@ -921,7 +921,7 @@ impl H3StripAt {
         beam: &BeamDefinition,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         time: f32,
         onset: f32,
         stops: f32,
@@ -989,7 +989,7 @@ impl H3StripAt {
         contrail: &ContrailDefinition,
         running: &RunningContrail,
         values: Option<&FunctionValues>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         lighting: &[[f32; 4]; 10],
         time: f32,
         onset: f32,
@@ -1132,7 +1132,7 @@ impl H3StripField {
         strip: &H3StripAt,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         lighting: &[[f32; 4]; 10],
         time: f32,
         onset: f32,
@@ -1342,7 +1342,7 @@ mod tests {
         let strips = [Arc::clone(&strip)];
         let mut field = H3StripField::default();
         let mut onsets = H3EffectOnsets::default();
-        let view = CeFlareView { eye: [0.0, -5.0, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] };
+        let view = ViewFrame { eye: [0.0, -5.0, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] };
         let lighting = [[0.0; 4]; 10];
         let mut advance = |field: &mut H3StripField, place: Option<[f32; 3]>, time: f32| {
             let tracks = |_: &Arc<H3StripAt>| place.map(|place| (7, place)).into_iter().collect();

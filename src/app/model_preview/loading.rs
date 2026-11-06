@@ -4418,7 +4418,7 @@ pub(super) mod kit_object_tests {
         // The marker leans a little off up, so gravity bends the tip a hair.
         assert!((0..3).all(|axis| (tip[axis] - rest[axis]).abs() < 1e-3), "{tip:?} against {rest:?}, {forward:?}");
         assert!(tip[0] < rest[0], "toward where it leans: {tip:?} against {rest:?}, {forward:?}");
-        let view = super::super::ce::lights::CeFlareView {
+        let view = super::super::common::view::ViewFrame {
             eye: [0.0, -3.0, 1.0],
             forward: [0.0, 1.0, 0.0],
             right: [1.0, 0.0, 0.0],

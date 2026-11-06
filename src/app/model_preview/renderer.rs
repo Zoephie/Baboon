@@ -2964,7 +2964,7 @@ const CE_SORT_BIAS: f32 = 0.25;
 
 /// `z_sort`: how far in front of the eye the point lies along the view,
 /// negated, so the farthest sorts first; `sort bias` brings it nearer.
-fn ce_z_sort(view: &ce::lights::CeFlareView, point: [f32; 3], sort_bias: bool) -> f32 {
+fn ce_z_sort(view: &common::view::ViewFrame, point: [f32; 3], sort_bias: bool) -> f32 {
     let along: f32 = (0..3).map(|axis| (point[axis] - view.eye[axis]) * view.forward[axis]).sum();
     if sort_bias { CE_SORT_BIAS - along } else { -along }
 }
@@ -3021,7 +3021,7 @@ impl CeSpriteGroups {
         self.groups[at].2.push(sprite);
     }
 
-    fn sorted_by(self, view: &ce::lights::CeFlareView) -> impl Iterator<Item = CeGroup> {
+    fn sorted_by(self, view: &common::view::ViewFrame) -> impl Iterator<Item = CeGroup> {
         self.groups.into_iter().map(move |(sort_bias, by_bounds, sprites)| {
             let corners = sprites.iter().map(|sprite| &sprite.4);
             let centroid = if by_bounds { bounds_middle(corners) } else { mean_corner(corners) };
@@ -3040,7 +3040,7 @@ fn ce_groups(
     uploaded: &mut ModelGpuSlot,
     frame: &ModelGpuFrame,
     bones: Option<&[[f32; 4]]>,
-    view: &ce::lights::CeFlareView,
+    view: &common::view::ViewFrame,
 ) -> Vec<CeGroup> {
     let camera = &frame.camera;
     let effects = &frame.preview.ce_effects;
@@ -4618,7 +4618,7 @@ impl ModelGlRenderer {
             let parts = frame.visible_batches.iter().map(|&index| {
                 let place = frame.preview.batches.get(index).and_then(|batch| batch.sort_position);
                 let point = match place {
-                    Some((point, node)) => ce::lights::posed_on(node, point, [0.0; 3], bones).0,
+                    Some((point, node)) => common::view::posed_on(node, point, [0.0; 3], bones).0,
                     None => points.get(index).copied().unwrap_or(frame.camera.center),
                 };
                 (ce_z_sort(&view, point, false), Transparent::Part(index))
@@ -6173,8 +6173,8 @@ mod tests {
     use blam_tags::render_model::{GeometryPartType, RenderMeshPart, RenderVertex};
 
     /// An eye at the origin looking along +X.
-    fn looking_along_x() -> ce::lights::CeFlareView {
-        ce::lights::CeFlareView { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, 1.0, 0.0], up: [0.0, 0.0, 1.0] }
+    fn looking_along_x() -> common::view::ViewFrame {
+        common::view::ViewFrame { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, 1.0, 0.0], up: [0.0, 0.0, 1.0] }
     }
 
     /// `z_sort` puts the farther first, and `sort bias` a quarter unit nearer.
@@ -7657,7 +7657,7 @@ fn h2_antennas(
     frame: &ModelGpuFrame,
     textures: &[Option<glow::NativeTexture>],
     bones: Option<&[[f32; 4]]>,
-    view: &ce::lights::CeFlareView,
+    view: &common::view::ViewFrame,
     tips: &[Option<[f32; 3]>],
 ) -> Vec<(Vec<ce::lights::CeAntennaQuad>, glow::NativeTexture, bool)> {
     let preview = &frame.preview;
@@ -7694,9 +7694,9 @@ fn ce_sorts_transparents(frame: &ModelGpuFrame) -> bool {
     frame.render_mode.draws_shading() && frame.preview.batches.iter().any(|batch| batch.sort_position.is_some())
 }
 
-fn ce_flare_view(camera: &ModelGpuCamera) -> ce::lights::CeFlareView {
+fn ce_flare_view(camera: &ModelGpuCamera) -> common::view::ViewFrame {
     let along = |vector| unrotate_view_vector(camera.yaw, camera.pitch, vector);
-    ce::lights::CeFlareView {
+    common::view::ViewFrame {
         eye: h2_eye_position(camera),
         forward: along([0.0, 1.0, 0.0]),
         right: along([1.0, 0.0, 0.0]),
@@ -7732,7 +7732,7 @@ fn ce_flare_pixels(camera: &ModelGpuCamera, viewport: [i32; 2], center: [f32; 3]
 /// A sprite's four corners, all at the depth of its center.
 fn ce_flare_quad(
     camera: &ModelGpuCamera,
-    view: &ce::lights::CeFlareView,
+    view: &common::view::ViewFrame,
     sprite: &ce::lights::CeSprite,
 ) -> [[f32; 6]; 4] {
     let (sine, cosine) = sprite.rotation.sin_cos();
@@ -7758,7 +7758,7 @@ unsafe fn ce_flare_occlusion(
     gl: &glow::Context,
     flares: &CeFlareGl,
     camera: &ModelGpuCamera,
-    view: &ce::lights::CeFlareView,
+    view: &common::view::ViewFrame,
     patch: &ce::lights::CeSprite,
 ) -> Option<f32> {
     unsafe {
@@ -7794,7 +7794,7 @@ unsafe fn draw_flare_sprites(
     gl: &glow::Context,
     flares: &CeFlareGl,
     camera: &ModelGpuCamera,
-    view: &ce::lights::CeFlareView,
+    view: &common::view::ViewFrame,
     sprites: &[ce::lights::CeSprite],
     textures: &[Option<glow::NativeTexture>],
 ) {

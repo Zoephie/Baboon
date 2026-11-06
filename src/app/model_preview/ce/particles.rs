@@ -17,7 +17,8 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::perpendicular;
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
-use super::lights::{CeEffectLightDef, CeFlareView, CeLight, posed_on, read_effect_light};
+use super::lights::{CeEffectLightDef, CeLight, read_effect_light};
+use super::super::common::view::{ViewFrame, posed_on};
 use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,
     unattached_quads, update_unattached,
@@ -442,7 +443,7 @@ impl CeSpriteSheet {
         rotation: f32,
         scale: f32,
         mirror: bool,
-        view: &CeFlareView,
+        view: &ViewFrame,
     ) -> Option<(usize, [[f32; 5]; 4])> {
         let frame = usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).and_then(|frames| frames.get(sprite))?;
         let size = self.sizes.get(frame.image).map_or(1.0, |size| size[0]) * scale;
@@ -1478,7 +1479,7 @@ impl CeParticleField {
     pub(crate) fn system_quads(
         &mut self,
         effects: &[CeEffectAt],
-        view: &CeFlareView,
+        view: &ViewFrame,
         pixel: impl Fn([f32; 3]) -> f32,
     ) -> Vec<(usize, usize, CePctlQuad)> {
         let effects = self.all(effects);
@@ -1529,7 +1530,7 @@ impl CeParticleField {
         &mut self,
         effects: &[CeEffectAt],
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         pixels: impl Fn([f32; 3], f32) -> f32,
     ) -> Vec<CeParticleQuad> {
         let effects = self.all(effects);
@@ -1849,7 +1850,7 @@ fn generate_systems(
 /// across it, square to world up, or to world left (which the game calls
 /// `viewer_space_world_forward`) where it is near vertical, turned a quarter
 /// about it.
-fn sprite_basis(orientation: i32, direction: [f32; 3], to_particle: [f32; 3], view: &CeFlareView) -> ([f32; 3], [f32; 3]) {
+fn sprite_basis(orientation: i32, direction: [f32; 3], to_particle: [f32; 3], view: &ViewFrame) -> ([f32; 3], [f32; 3]) {
     match orientation {
         1 => {
             let along = unit_or_unchanged(direction);
@@ -2377,7 +2378,7 @@ mod tests {
 
     #[test]
     fn a_sprite_turns_as_build_sprite_compute_basis_turns_it() {
-        let view = CeFlareView { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] };
+        let view = ViewFrame { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] };
         // Parallel: across along the way it goes, up square to it and the eye.
         let (across, up) = sprite_basis(1, [0.0, 2.0, 0.0], [1.0, 0.0, 0.0], &view);
         assert_eq!(across, [0.0, 1.0, 0.0]);

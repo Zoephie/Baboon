@@ -8,7 +8,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, has_flag_labelled};
-use super::super::ce::lights::{CeFlareView, posed_on};
+use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::dx9::passes::tag_function_at;
 use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part};
@@ -599,7 +599,7 @@ pub(crate) fn h3_screen_settings<'a>(
     values: impl Fn(u8) -> Option<&'a FunctionValues>,
     onsets: &mut H3EffectOnsets,
     bones: Option<&[[f32; 4]]>,
-    view: &CeFlareView,
+    view: &ViewFrame,
     time: f32,
 ) -> (H3ScreenSettings, Vec<H3ScreenShader>) {
     let mut settings = H3ScreenSettings::default();

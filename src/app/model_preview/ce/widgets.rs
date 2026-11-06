@@ -8,7 +8,8 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, function_slot, function_slot_of, has_flag, object_block};
-use super::lights::{CeAntennaQuad, CeFlareView, posed_on};
+use super::lights::CeAntennaQuad;
+use super::super::common::view::{ViewFrame, posed_on};
 use super::passes::{FramebufferBlend, argb};
 use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_h2_image;
@@ -175,7 +176,7 @@ impl CeLightVolume {
 
     /// `light_volume_submit` and `light_volume_render`: sprites along the
     /// marker, brighter as it faces the camera the way the tag says.
-    pub(crate) fn quads(&self, outputs: &[f32; 4], active: &[bool; 4], bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> Vec<CeAntennaQuad> {
+    pub(crate) fn quads(&self, outputs: &[f32; 4], active: &[bool; 4], bones: Option<&[[f32; 4]]>, view: &ViewFrame) -> Vec<CeAntennaQuad> {
         let (origin, forward) = posed_on(self.node, self.position, self.forward, bones);
         let length = dot(forward, forward).sqrt().max(0.0001);
         let forward = forward.map(|axis| axis / length);
@@ -397,7 +398,7 @@ impl CeLightning {
         outputs: &[f32; 4],
         change_colors: &[[f32; 3]; 4],
         bones: Option<&[[f32; 4]]>,
-        view: &CeFlareView,
+        view: &ViewFrame,
         seed: u32,
     ) -> Vec<CeLightningQuad> {
         let mut random = Lcg(seed | 1);
@@ -470,7 +471,7 @@ impl CeLightning {
         thickness_scale: f32,
         brightness_scale: f32,
         tint: [f32; 3],
-        view: &CeFlareView,
+        view: &ViewFrame,
         start_u: f32,
         quads: &mut Vec<CeLightningQuad>,
     ) {
@@ -1143,7 +1144,7 @@ impl CeGlowField {
     /// sprite of the first sequence, through `global_shader_effect_additive`.
     /// A size of zero is drawn a texel to a pixel, as `build_sprite` does,
     /// which `pixel` gives the world size of at a place.
-    pub(crate) fn quads(&self, glows: &[CeGlow], view: &CeFlareView, pixel: impl Fn([f32; 3]) -> f32) -> Vec<(usize, CeLightningQuad)> {
+    pub(crate) fn quads(&self, glows: &[CeGlow], view: &ViewFrame, pixel: impl Fn([f32; 3]) -> f32) -> Vec<(usize, CeLightningQuad)> {
         let mut quads = Vec::new();
         for (index, (glow, running)) in glows.iter().zip(&self.running).enumerate() {
             let [left, right, top, bottom] = glow.rect;
