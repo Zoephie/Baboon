@@ -619,10 +619,17 @@ struct OptionRow {
     name: &'static str,
     /// A control, which must disagree, so the gate shows it can fail.
     control: bool,
+    /// The option is the one after `name`, for one whose own name another
+    /// option shares (`... forward/backward` after each kind of loop).
+    after: bool,
 }
 
 const fn row(kit: &'static str, game: GameId, extension: &'static str, path: &'static str, old: Old, name: &'static str) -> OptionRow {
-    OptionRow { kit, game, extension, path, old, name, control: false }
+    OptionRow { kit, game, extension, path, old, name, control: false, after: false }
+}
+
+const fn after(kit: &'static str, game: GameId, extension: &'static str, path: &'static str, old: Old, name: &'static str) -> OptionRow {
+    OptionRow { after: true, ..row(kit, game, extension, path, old, name) }
 }
 
 const HCE: (&str, GameId) = ("BLAM_TEST_HCEEK", GameId::HaloCe);
@@ -661,6 +668,31 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(HCE.0, HCE.1, "particle", "anchor", Old::Value(0), "with primary"),
     row(HCE.0, HCE.1, "particle", "anchor", Old::Value(1), "with screen space"),
     row(HCE.0, HCE.1, "particle", "anchor", Old::Value(2), "zsprite"),
+    // ce::particle_systems
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x1), "type states loop"),
+    after(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x2), "type states loop"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x4), "particle states loop"),
+    after(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x8), "particle states loop"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x20), "particles die in air"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x40), "particles die on ground"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x80), "rotational sprites animate sideways"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x100), "disabled"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x200), "tint by effect color"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x400), "initial count scales with effect"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x800), "minimum count scales with effect"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x1000), "creation rate scales with effect"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x2000), "scale scales with effect"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x4000), "animation rate scales with effect"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/flags", Old::Bit(0x8000), "rotation rate scales with effect"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/particle states/shader flags", Old::Bit(0x2), "nonlinear tint"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/complex sprite render modes", Old::Value(0), "simple"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/complex sprite render modes", Old::Value(1), "rotational"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/particle creation physics", Old::Value(0), "default"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/particle creation physics", Old::Value(1), "explosion"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/particle creation physics", Old::Value(2), "jet"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/states/particle creation physics", Old::Value(0), "default"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/states/particle creation physics", Old::Value(1), "explosion"),
+    row(HCE.0, HCE.1, "particle_system", "particle types/states/particle creation physics", Old::Value(2), "jet"),
     row(HCE.0, HCE.1, "effect", "events/particles/flags", Old::Bit(0x1), "stay attached to marker"),
     row(HCE.0, HCE.1, "effect", "events/particles/flags", Old::Bit(0x2), "random initial angle"),
     row(HCE.0, HCE.1, "effect", "events/particles/flags", Old::Bit(0x4), "tint from object color"),
@@ -702,9 +734,19 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(HCE.0, HCE.1, "effect", "events/parts/B scales values", Old::Bit(0x20), "type-specific scale"),
 ];
 
-/// Every `(old, by name)` pair `path` reaches under `holder`; `None` by name
-/// where the field's list has no such option.
-fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out: &mut Vec<(bool, Option<bool>)>) {
+/// How a row's name reads in one tag's field.
+enum Named {
+    /// The option the row's number is, and whether it holds.
+    Read(bool),
+    /// The field's list has no such option.
+    Missing,
+    /// The name is another option, with this index: two options share it,
+    /// or the row has the wrong name.
+    Elsewhere(u32),
+}
+
+/// Every `(old, by name)` pair `path` reaches under `holder`.
+fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out: &mut Vec<(bool, Named)>) {
     match path.split_once('/') {
         Some((block, rest)) => {
             let Some(block) = holder.field(block).and_then(|field| field.as_block()) else {
@@ -725,10 +767,25 @@ fn read_both(holder: blam_tags::TagStruct<'_>, path: &str, row: &OptionRow, out:
                 Old::Bit(bit) => value & bit != 0,
                 Old::Value(number) => value == number,
             };
-            let named = field.flag(row.name).map(|option| match row.old {
-                Old::Bit(_) => option.is_set(),
-                Old::Value(_) => field.enum_is(row.name),
-            });
+            let found = field.flag(row.name).map(|option| option.bit() + u32::from(row.after));
+            let set = |index: u32| match field.options() {
+                Some(blam_tags::TagOptions::Flags(options)) => options.get(index as usize).is_some_and(|option| option.is_set),
+                _ => false,
+            };
+            let named = match found {
+                None => Named::Missing,
+                Some(index) => {
+                    let expected = match row.old {
+                        Old::Bit(bit) => bit == 1 << index,
+                        Old::Value(number) => number == i128::from(index),
+                    };
+                    match (expected, row.old) {
+                        (false, _) => Named::Elsewhere(index),
+                        (true, Old::Bit(_)) => Named::Read(set(index)),
+                        (true, Old::Value(_)) => Named::Read(field.enum_is(row.name)),
+                    }
+                }
+            };
             out.push((old, named));
         }
     }
@@ -752,8 +809,10 @@ fn gate_options() {
         };
         let rows: Vec<&OptionRow> =
             OPTION_ROWS.iter().filter(|row| row.kit == kit && row.extension == extension).collect();
-        // Per row: tags, elements, disagreeing tags, tags missing the name.
-        let mut tallies = vec![(0usize, 0usize, Vec::<String>::new(), Vec::<String>::new()); rows.len()];
+        // Per row: tags, elements, disagreeing tags, tags missing the name,
+        // and the other options the name resolves to.
+        let mut tallies =
+            vec![(0usize, 0usize, Vec::<String>::new(), Vec::<String>::new(), Vec::<u32>::new()); rows.len()];
         let suffix = format!(".{extension}");
         for entry in walkdir::WalkDir::new(&root).into_iter().filter_map(Result::ok) {
             let path = entry.path();
@@ -777,26 +836,32 @@ fn gate_options() {
                 }
                 tally.0 += 1;
                 tally.1 += read.len();
-                if read.iter().any(|(_, named)| named.is_none()) {
-                    tally.3.push(name.clone());
-                } else if read.iter().any(|(old, named)| Some(*old) != *named) {
-                    tally.2.push(name.clone());
+                for (old, named) in &read {
+                    match named {
+                        Named::Missing => tally.3.push(name.clone()),
+                        Named::Elsewhere(index) if !tally.4.contains(index) => tally.4.push(*index),
+                        Named::Elsewhere(_) => {}
+                        Named::Read(named) if named != old => tally.2.push(name.clone()),
+                        Named::Read(_) => {}
+                    }
                 }
+                tally.2.dedup();
+                tally.3.dedup();
             }
         }
-        for (row, (tags, elements, disagree, missing)) in rows.iter().zip(&tallies) {
+        for (row, (tags, elements, disagree, missing, elsewhere)) in rows.iter().zip(&tallies) {
             eprintln!(
-                "{game:?} {extension} {} {:?} {:?}: {tags} tags, {elements} reads, {} disagree, {} missing",
+                "{game:?} {extension} {} {:?} {:?}: {tags} tags, {elements} reads, {} disagree, {} missing, elsewhere {elsewhere:?}",
                 row.path, row.old, row.name, disagree.len(), missing.len()
             );
             let first = |list: &Vec<String>| list.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
             if row.control {
-                if disagree.is_empty() {
+                if disagree.is_empty() && elsewhere.is_empty() {
                     failures.push(format!("control {} {:?} never disagreed", row.name, row.old));
                 }
-            } else if !disagree.is_empty() || !missing.is_empty() || *tags == 0 {
+            } else if !disagree.is_empty() || !missing.is_empty() || !elsewhere.is_empty() || *tags == 0 {
                 failures.push(format!(
-                    "{game:?} {extension} {} {:?} {:?}: {tags} tags; disagree {} ({}); missing {} ({})",
+                    "{game:?} {extension} {} {:?} {:?}: {tags} tags; disagree {} ({}); missing {} ({}); resolves to {elsewhere:?}",
                     row.path, row.old, row.name, disagree.len(), first(disagree), missing.len(), first(missing)
                 ));
             }
