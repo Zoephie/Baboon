@@ -113,7 +113,7 @@ impl H4EffectGl {
                 };
                 upload_array(gl, &layers, texture.texels, texture.sampler)
             } else {
-                super::super::renderer::h3_draw::upload_h2_image_linear(
+                super::super::gen3::pipeline::upload_h2_image_linear(
                     gl,
                     &texture.image,
                     texture.texels,
@@ -241,7 +241,7 @@ impl H4EffectGl {
         let pass = &*material.pass;
         unsafe {
             let location = self.location(gl, pass, name);
-            if let Some(matrix) = super::super::renderer::h3_draw::h4_matrix(frame, name) {
+            if let Some(matrix) = super::super::gen3::pipeline::h4_matrix(frame, name) {
                 match matrix.len() {
                     9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
                     _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
@@ -256,7 +256,7 @@ impl H4EffectGl {
                 (ty, &value),
                 (Type::Vector(Scalar::Uint, _), H3Value::Floats(_))
             ) {
-                super::super::renderer::h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                super::super::gen3::pipeline::set_uniform_value(gl, location.as_ref(), ty, &value);
             }
             true
         }
@@ -331,7 +331,7 @@ fn shared_value(
             eye,
         ]),
         super::shield::WORLD_SCALE => floats([camera.scale; 4]),
-        other => super::super::renderer::h3_draw::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
+        other => super::super::gen3::pipeline::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
             .or_else(|| functions.get(other).cloned())
             .or_else(|| material.values.get(other).cloned()),
     }
@@ -398,7 +398,7 @@ unsafe fn upload_array(
             glow::LINEAR as i32,
         );
         if let Some(sampler) = sampler {
-            super::super::renderer::h3_draw::h3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
+            super::super::gen3::pipeline::h3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
         }
         gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
         Some(texture)

@@ -7,7 +7,7 @@ use eframe::glow::{self, HasContext};
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::gen3::shaders::H3Sampler;
 use super::super::renderer::FrameCx;
-use super::super::renderer::h3_draw::{HALF_LENS, screen_program, upload_h2_image_linear};
+use super::super::gen3::pipeline::{HALF_LENS, screen_program, upload_h2_image_linear};
 use super::lighting::{
     REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_composite_gamma, reach_noise_offset, reach_noise_params,
 };

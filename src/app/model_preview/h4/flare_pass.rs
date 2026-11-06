@@ -52,7 +52,7 @@ pub(in crate::app::model_preview) unsafe fn h4_flare_images(
                 .images
                 .iter()
                 .map(|(image, texels, mips)| unsafe {
-                    super::super::renderer::h3_draw::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
+                    super::super::gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
                 })
                 .collect()
         })
@@ -244,7 +244,7 @@ impl H4Game {
                                 "tintColor" => floats(draw.tint),
                                 // `c_surface::get_alpha_multiplier`: 1 here.
                                 "ps_scale" => floats([1.0; 4]),
-                                other => super::super::renderer::h3_draw::frame_value(
+                                other => super::super::gen3::pipeline::frame_value(
                                     frame,
                                     super::super::gen3::shaders::H3Dialect::Halo4,
                                     other,
@@ -253,7 +253,7 @@ impl H4Game {
                                 ),
                             };
                             if let Some(value) = value {
-                                super::super::renderer::h3_draw::set_uniform_value(gl, location.as_ref(), ty, &value);
+                                super::super::gen3::pipeline::set_uniform_value(gl, location.as_ref(), ty, &value);
                             }
                         }
                         for (unit, (name, _)) in pass.textures.iter().enumerate() {

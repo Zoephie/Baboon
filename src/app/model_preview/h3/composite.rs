@@ -5,7 +5,7 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::renderer::FrameCx;
-use super::super::renderer::h3_draw::{HALF_LENS, screen_program};
+use super::super::gen3::pipeline::{HALF_LENS, screen_program};
 use super::render::H3Game;
 
 /// `final_composite`'s `tone_curve_constants` at a white point of one: the

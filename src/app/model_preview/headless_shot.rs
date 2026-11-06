@@ -626,7 +626,7 @@ fn shot() {
 #[test]
 fn reach_shadow_apply_links() {
     let gl = headless_gl();
-    let program = unsafe { super::h3_draw::screen_program(&gl, super::super::reach::shadow_pass::APPLY_FRAGMENT) }
+    let program = unsafe { super::super::gen3::pipeline::screen_program(&gl, super::super::reach::shadow_pass::APPLY_FRAGMENT) }
         .expect("the apply compiles and links");
     for name in ["scene_depth", "normals", "shadow_map", "screen_to_world", "shadow_view_projection", "hull_planes"] {
         assert!(unsafe { gl.get_uniform_location(program, name) }.is_some(), "{name} is read");

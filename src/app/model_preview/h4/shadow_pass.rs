@@ -9,8 +9,8 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::render::Gen3Batch;
 use super::super::gl::target::{Made, Sampling, Texels};
-use super::super::renderer::gen3_shadow::shadow_casters;
-use super::super::renderer::h3_draw::{h4_matrix, screen_program};
+use super::super::gen3::shadow::shadow_casters;
+use super::super::gen3::pipeline::{h4_matrix, screen_program};
 use super::super::renderer::{FrameCx, RenderCore};
 use super::render::H4Game;
 use super::shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};

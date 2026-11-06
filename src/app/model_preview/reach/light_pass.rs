@@ -5,8 +5,8 @@
 
 use eframe::glow::{self, HasContext};
 
-use super::super::renderer::gen3_screen_lights::screen_to_relative_world;
-use super::super::renderer::h3_draw::{set_uniform_value, view_projection};
+use super::super::gen3::screen_lights::screen_to_relative_world;
+use super::super::gen3::pipeline::{set_uniform_value, view_projection};
 use super::super::renderer::{FrameCx, RenderCore, h2_eye_position};
 use super::lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
 use super::lights::{CHEAP_ALBEDO_BLEND, ReachLightMethod, ReachLitLight};

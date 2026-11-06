@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use eframe::glow::{self, HasContext};
 
-use super::super::renderer::h3_draw::{frame_value, h3_set_cull, set_value, upload_h2_image_linear};
+use super::super::gen3::pipeline::{frame_value, h3_set_cull, set_value, upload_h2_image_linear};
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value};
 use super::bloom::H4BloomSettings;
@@ -338,7 +338,7 @@ impl H4Game {
                 let blends = material.blend != super::super::gen3::shaders::H3Blend::Opaque;
                 if blends {
                     gl.enable(glow::BLEND);
-                    super::super::renderer::h3_draw::h3_set_blend(gl, material.blend);
+                    super::super::gen3::pipeline::h3_set_blend(gl, material.blend);
                 } else {
                     gl.disable(glow::BLEND);
                 }

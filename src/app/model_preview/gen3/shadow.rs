@@ -2,8 +2,10 @@
 //! and applies: the casters, `render_shadow_generate`'s biased depth, the
 //! scene's depth, and an apply blended by its least into the mask.
 
-use super::*;
-use gen3::shaders::{H3Material, H3Pass};
+use eframe::glow::{self, HasContext as _};
+use super::super::renderer::*;
+use super::super::*;
+use super::shaders::{H3Material, H3Pass};
 
 /// A batch that casts, its material, and that material's `shadow_generate`.
 pub(in crate::app::model_preview) type ShadowCaster<'a> = (&'a RenderModelPreviewBatch, &'a Arc<H3Material>, Arc<H3Pass>);
@@ -46,7 +48,7 @@ impl RenderCore {
             gl.clear(glow::DEPTH_BUFFER_BIT);
             gl.enable(glow::POLYGON_OFFSET_FILL);
             gl.polygon_offset(slope, depth * (1 << 24) as f32);
-            h3_draw::h3_set_cull(gl, frame);
+            super::pipeline::h3_set_cull(gl, frame);
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             self.gen3.shadow_view_projection = Some(view_projection);
             for (batch, material, pass) in casters {
@@ -103,7 +105,7 @@ impl RenderCore {
             }
             gl.active_texture(glow::TEXTURE0);
             let screen_to_world =
-                gen3_screen_lights::screen_to_relative_world(&h3_draw::view_projection(&frame.camera), size, [0.0; 3])?;
+                super::screen_lights::screen_to_relative_world(&super::pipeline::view_projection(&frame.camera), size, [0.0; 3])?;
             gl.uniform_matrix_4_f32_slice(at("screen_to_world").as_ref(), true, screen_to_world.as_flattened());
             gl.uniform_matrix_4_f32_slice(at("shadow_view_projection").as_ref(), false, view_projection);
             Some(())

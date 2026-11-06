@@ -7,7 +7,7 @@ use super::super::gl::chain::ScreenChain;
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
-use super::super::renderer::h3_draw::screen_program;
+use super::super::gen3::pipeline::screen_program;
 
 /// `globals\default.camera_fx_settings`.
 const BLOOM_POINT: f32 = 1.2;

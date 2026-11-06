@@ -13,7 +13,7 @@ use super::super::gl::chain::ScreenChain;
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
-use super::super::renderer::h3_draw::screen_program;
+use super::super::gen3::pipeline::screen_program;
 
 /// What a chain runs on: a camera fx's bloom fields.
 #[derive(Debug, Clone, Copy, PartialEq)]

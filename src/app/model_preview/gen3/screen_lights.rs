@@ -2,9 +2,10 @@
 //! own constants: the scene's depth to read, the additive state they draw
 //! under, and the scene textures each pass names.
 
-use super::*;
-use gen3::shaders::H3Pass;
-use h3_draw::H3Program;
+use eframe::glow::{self, HasContext as _};
+use super::super::renderer::*;
+use super::shaders::H3Pass;
+use super::pipeline::H3Program;
 
 impl RenderCore {
     /// Ready the screen lights over `accumulation`, `size` of it: its depth

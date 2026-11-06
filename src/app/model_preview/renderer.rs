@@ -1071,7 +1071,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(H2Layer::ShieldDamaged));
     let reach_shield = object == 0 && (data.preview.reach_shield.is_some() || data.preview.h4_shield.is_some());
     let gate = (shield || h3_shield || reach_shield).then_some("current_shield_damage");
-    let gate = gate.into_iter().chain(h3_shield.then_some(h3_draw::H3_OVERSHIELD));
+    let gate = gate.into_iter().chain(h3_shield.then_some(gen3::pipeline::H3_OVERSHIELD));
     for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares).chain(gate) {
         if !names.iter().any(|known| known == name) {
             names.push(name.to_owned());
@@ -1159,14 +1159,14 @@ pub(super) fn object_moves(
         || !data.preview.ce_flags.is_empty()
         || !data.preview.h3_leaves.is_empty()
         || data.preview.reach_shield.as_ref().is_some_and(|shield| {
-            let damage = function_values.and_then(|values| values.get(h3_draw::H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
+            let damage = function_values.and_then(|values| values.get(gen3::pipeline::H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
             shield.settings.showing(damage)
         })
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
                     || material.h4.as_ref().is_some_and(|submit| submit.moves())
-                    || (material.shield.is_some() && h3_draw::h3_shield_showing(function_values))
+                    || (material.shield.is_some() && gen3::pipeline::h3_shield_showing(function_values))
             })
         })
 }
@@ -1506,17 +1506,11 @@ fn paint_model_gl(
 #[cfg(all(test, target_os = "macos"))]
 #[path = "headless_shot.rs"]
 pub(super) mod headless_shot;
-pub(super) use h3_draw::EXPOSURE as H3_EXPOSURE;
-#[path = "h3_draw.rs"]
-pub(super) mod h3_draw;
+pub(super) use gen3::pipeline::EXPOSURE as H3_EXPOSURE;
 pub(super) use super::reach::lighting::{
     REACH_DARK_MULTIPLIER, REACH_SCREEN_NOISE_BITMAP, reach_alt_exposure, reach_exposure, reach_lightmap_tint,
     reach_particle_light,
 };
-#[path = "gen3_shadow.rs"]
-pub(super) mod gen3_shadow;
-#[path = "gen3_screen_lights.rs"]
-pub(super) mod gen3_screen_lights;
 
 /// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
 /// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
@@ -2005,7 +1999,7 @@ impl ModelSlotLru {
 /// A slot's simulations: what each carries from frame to frame, restarted
 /// together when the slot takes another model.
 #[derive(Default)]
-struct SlotSimulations {
+pub(in crate::app::model_preview) struct SlotSimulations {
     h2_contrails: h2::contrails::H2ContrailField,
     /// Halo 2's and the gen3 games' particle systems.
     particles: particles::H3ParticleField,
@@ -2018,9 +2012,9 @@ struct SlotSimulations {
     /// Halo 4's trailing tracers between frames.
     h4_trails: h4::tracers::H4TracerField,
     /// When each effect began, for Halo 2's and the gen3 games' effect parts.
-    effect_onsets: gen3::effects::H3EffectOnsets,
+    pub(in crate::app::model_preview) effect_onsets: gen3::effects::H3EffectOnsets,
     /// Halo 2's and the gen3 games' cloth.
-    cloth: cloth::H3ClothField,
+    pub(in crate::app::model_preview) cloth: cloth::H3ClothField,
     /// Every antenna's spring.
     antennas: antennas::spring::ReachAntennaField,
     h3_leaves: h3::leaves::H3LeafField,
@@ -2028,7 +2022,7 @@ struct SlotSimulations {
     ce_particles: ce::particles::CeParticleField,
     ce_pctl: ce::particle_systems::CeParticleSystemField,
     /// How long VISR has been on, as of when.
-    h3_vision_clock: Option<(f32, f32)>,
+    pub(in crate::app::model_preview) h3_vision_clock: Option<(f32, f32)>,
 }
 
 impl SlotSimulations {
@@ -2074,7 +2068,7 @@ impl SlotSimulations {
 /// One model's buffers, ground grid and textures on the GPU.
 pub(super) struct ModelGpuSlot {
     /// What runs from frame to frame, restarted together.
-    simulations: SlotSimulations,
+    pub(in crate::app::model_preview) simulations: SlotSimulations,
     pub(in crate::app::model_preview) vertex_array: glow::NativeVertexArray,
     vertex_buffer: glow::NativeBuffer,
     /// Halo 2 per-vertex PRT, unused by every other model.
@@ -2105,7 +2099,7 @@ pub(super) struct ModelGpuSlot {
     /// Each of `h2_gel_lights`' gels, of `gel_geometry`.
     gel_textures: Vec<Option<glow::NativeTexture>>,
     gel_geometry: Option<u64>,
-    h3_textures: h3_draw::H3SlotTextures,
+    pub(in crate::app::model_preview) h3_textures: gen3::pipeline::H3SlotTextures,
     flare_geometry: Option<u64>,
     antenna_textures: Vec<Option<glow::NativeTexture>>,
     volume_textures: Vec<Option<glow::NativeTexture>>,
@@ -2206,7 +2200,7 @@ impl ModelGpuSlot {
     /// uploaded vertices from `first` on, the rest of each vertex as loaded.
     /// A range the preview does not have (a simulation left from another
     /// model) writes nothing.
-    unsafe fn rewrite_vertices(
+    pub(in crate::app::model_preview) unsafe fn rewrite_vertices(
         &self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -2287,7 +2281,7 @@ impl ModelGpuSlot {
                     gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
                     gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&prt.vertices), glow::STATIC_DRAW);
                     let stride = std::mem::size_of::<[f32; gen3::prt::COEFFICIENTS]>() as i32;
-                    for (index, attribute) in h3_draw::PRT_ATTRIBUTES.into_iter().enumerate() {
+                    for (index, attribute) in gen3::pipeline::PRT_ATTRIBUTES.into_iter().enumerate() {
                         gl.enable_vertex_attrib_array(attribute);
                         // The first holds a fourth for the linear shader, in the
                         // second's first place.
@@ -2296,7 +2290,7 @@ impl ModelGpuSlot {
                     }
                 }
                 None => {
-                    for attribute in h3_draw::PRT_ATTRIBUTES {
+                    for attribute in gen3::pipeline::PRT_ATTRIBUTES {
                         gl.disable_vertex_attrib_array(attribute);
                     }
                 }
@@ -2332,7 +2326,7 @@ impl ModelGpuSlot {
                 ]
                 .map(|(map, sampler)| {
                     map.as_ref().and_then(|(image, texels, mips)| {
-                        h3_draw::upload_h2_image_linear(gl, image, *texels, mips, sampler)
+                        gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, sampler)
                     })
                 })
             };
@@ -2361,7 +2355,7 @@ impl ModelGpuSlot {
                 }))
                 .chain(frame.preview.h3_flares.iter().map(|at| {
                     let (image, texels, mips) = at.bitmap();
-                    vec![h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)]
+                    vec![gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, None)]
                 }))
                 .chain(h4::flare_pass::h4_flare_images(gl, frame))
                 .collect();
@@ -2395,7 +2389,7 @@ impl ModelGpuSlot {
                         let filter =
                             if antenna.is_reach() { BitmapFilterMode::Trilinear } else { BitmapFilterMode::Bilinear };
                         let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter };
-                        h3_draw::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
+                        gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
                     }
                     None => upload_h2_image(gl, &antenna.image),
                 }))
@@ -2506,7 +2500,7 @@ impl ModelGpuSlot {
                 .iter()
                 .map(|at| {
                     let (image, texels, mips) = at.bitmap()?;
-                    h3_draw::upload_h2_image_linear(gl, image, *texels, mips, at.sampler())
+                    gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, at.sampler())
                 })
                 .collect();
             self.flare_geometry = Some(frame.geometry_id);
@@ -2607,11 +2601,11 @@ impl ModelGpuSlot {
 /// game shaders are on, because the environment layer blends by destination
 /// alpha, which the window's framebuffer need not keep. The other is texaccum,
 /// for lightmap passes to read back at each pixel's screen position.
-struct H2Target {
-    framebuffer: glow::NativeFramebuffer,
+pub(in crate::app::model_preview) struct H2Target {
+    pub(in crate::app::model_preview) framebuffer: glow::NativeFramebuffer,
     color: glow::NativeTexture,
-    depth: glow::NativeRenderbuffer,
-    size: [i32; 2],
+    pub(in crate::app::model_preview) depth: glow::NativeRenderbuffer,
+    pub(in crate::app::model_preview) size: [i32; 2],
 }
 
 impl H2Target {
@@ -2796,7 +2790,7 @@ pub(super) fn h2_eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
 }
 
 /// Polygon offset units in one whole of window depth, on a 24 bit buffer.
-const DEPTH_UNITS: f32 = (1 << 24) as f32;
+pub(in crate::app::model_preview) const DEPTH_UNITS: f32 = (1 << 24) as f32;
 
 /// The vertex stream of Halo CE's lens flares: clip position, then texcoord.
 const CE_FLARE_STRIDE: i32 = 6 * 4;
@@ -3746,7 +3740,7 @@ impl H3ParticleGl {
                 gl.blend_equation(glow::FUNC_ADD);
                 gl.blend_func(glow::ONE, glow::ONE);
             } else {
-                h3_draw::h3_set_blend(gl, look.blend);
+                gen3::pipeline::h3_set_blend(gl, look.blend);
             }
             // What covers the background has to say so, as an antenna does.
             let covers = matches!(look.blend, H3Blend::AlphaBlend | H3Blend::PreMultiplied);
@@ -3820,7 +3814,7 @@ impl ReachCheapGl {
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(false);
-            h3_draw::h3_set_blend(gl, H3Blend::PreMultiplied);
+            gen3::pipeline::h3_set_blend(gl, H3Blend::PreMultiplied);
             gl.draw_arrays(glow::TRIANGLES, 0, vertices.len() as i32);
             gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
             gl.color_mask(true, true, true, false);
@@ -4084,12 +4078,12 @@ pub(super) struct RenderCore {
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.
     h2_programs: HashMap<(H2VertexStage, String), Option<Rc<Linked>>>,
-    black_cube: Option<glow::NativeTexture>,
-    black_volume: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) black_cube: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) black_volume: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) white_volume: Option<glow::NativeTexture>,
     h2_normalization_cube: Option<glow::NativeTexture>,
     h2_target: Option<H2Target>,
-    scene: Option<H2Target>,
+    pub(in crate::app::model_preview) scene: Option<H2Target>,
     h2_frame_copy: Option<H2Target>,
     /// The gel and `H2GelRows` of the frustum light drawing now.
     h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
@@ -4643,7 +4637,7 @@ impl RenderCore {
     }
 
     /// Whether a frame has flares or antennas to draw.
-    fn draws_object_sprites(&self, frame: &ModelGpuFrame) -> bool {
+    pub(in crate::app::model_preview) fn draws_object_sprites(&self, frame: &ModelGpuFrame) -> bool {
         let preview = &frame.preview;
         frame.game_shaders
             && self.shaders_supported
@@ -4826,7 +4820,7 @@ impl RenderCore {
                             continue;
                         };
                         gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                        h3_draw::h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
+                        gen3::pipeline::h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
                         let colors = frame.change_colors_of_object(at.object);
                         for quad in at.quads(volume, values, &colors, bones, &view, frame.time, onset) {
                             let vertices = quad.corners.map(|[x, y, z, u, v]| {
@@ -4851,7 +4845,7 @@ impl RenderCore {
                             continue;
                         };
                         gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                        h3_draw::h3_set_blend(gl, H3Blend::PreMultiplied);
+                        gen3::pipeline::h3_set_blend(gl, H3Blend::PreMultiplied);
                         for quad in at.quads(arc, values, bones, &view, frame.time) {
                             let vertices = quad.corners.map(|[x, y, z, u, v]| {
                                 let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
@@ -4875,7 +4869,7 @@ impl RenderCore {
                         continue;
                     };
                     gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                    h3_draw::h3_set_blend(gl, at.blend());
+                    gen3::pipeline::h3_set_blend(gl, at.blend());
                     for quad in uploaded.simulations.h2_contrails.quads(index, at, &view) {
                         let vertices = quad.corners.map(|[x, y, z, u, v]| {
                             let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
@@ -4912,7 +4906,7 @@ impl RenderCore {
                     // brings up by `REACH_DARK_MULTIPLIER`; that it shows at
                     // eight times the tag's color follows the code, and is
                     // not checked against a capture. [inferred]
-                    h3_draw::h3_set_blend(gl, H3Blend::AlphaBlend);
+                    gen3::pipeline::h3_set_blend(gl, H3Blend::AlphaBlend);
                 }
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                 for quad in quads {
@@ -4981,7 +4975,7 @@ impl RenderCore {
             let eye_distance = |origin: [f32; 3]| {
                 (0..3).map(|axis| (origin[axis] - view.eye[axis]) * view.forward[axis]).sum::<f32>()
             };
-            let layered = h3_draw::h3_layered_distance;
+            let layered = gen3::pipeline::h3_layered_distance;
             let volumes = frame.preview.h3_light_volumes.iter().enumerate();
             let volumes = volumes
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
@@ -5093,7 +5087,7 @@ impl RenderCore {
                         gl.bind_vertex_array(Some(flares.vertex_array));
                         gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
                         gl.active_texture(glow::TEXTURE0);
-                        h3_draw::h3_set_blend(gl, at.blend());
+                        gen3::pipeline::h3_set_blend(gl, at.blend());
                         gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder));
                         let [center, falloff] = circular.unwrap_or([0.0; 2]);
                         gl.uniform_2_f32(flares.circular.as_ref(), center, falloff);
@@ -5159,7 +5153,7 @@ impl RenderCore {
                             continue;
                         };
                         let values = frame.function_values_of_object(system.object);
-                        let lighting = h3_draw::h3_lighting_constants(frame);
+                        let lighting = gen3::pipeline::h3_lighting_constants(frame);
                         let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
                         let drawn =
                             uploaded.simulations.particles.vertices(index, system, values, bones, &view, &lighting, frame.time, onset, stops);
@@ -5180,7 +5174,7 @@ impl RenderCore {
                         let Some(particles) = particle_gl.as_ref() else {
                             continue;
                         };
-                        let lighting = h3_draw::h3_lighting_constants(frame);
+                        let lighting = gen3::pipeline::h3_lighting_constants(frame);
                         let drawn = uploaded.simulations.h3_leaves.vertices(index, leaves, &lighting);
                         if drawn.is_empty() {
                             continue;
@@ -5199,7 +5193,7 @@ impl RenderCore {
                         };
                         let values = frame.function_values_of_object(strip.object);
                         let onset = uploaded.simulations.effect_onsets.of(strip.object, strip.scale_name(), values, frame.time);
-                        let lighting = h3_draw::h3_lighting_constants(frame);
+                        let lighting = gen3::pipeline::h3_lighting_constants(frame);
                         let drawn = uploaded.simulations.h3_strips.vertices(index, strip, values, bones, &view, &lighting, frame.time, onset, stops);
                         if drawn.is_empty() {
                             continue;
@@ -5701,7 +5695,7 @@ impl RenderCore {
 
     /// Draw Halo 2 materials through their passes, in `order`. Leaves the GL
     /// state the wireframe pass and the UI expect.
-    unsafe fn draw_h2_passes(
+    pub(in crate::app::model_preview) unsafe fn draw_h2_passes(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -5881,7 +5875,7 @@ impl RenderCore {
             if matches!(pass.stage, H2VertexStage::ShadowCaster | H2VertexStage::ShadowMask) {
                 let location = program.location(gl, "u_shadow_matrix");
                 let (toward, shadow_alpha) = if self.h3_draws(frame) {
-                    h3_draw::h3_shadow_light(frame)
+                    gen3::pipeline::h3_shadow_light(frame)
                 } else if frame.default_lights {
                     (h2_prt_lights()[0].direction, 1.0)
                 } else {
@@ -6167,7 +6161,7 @@ impl RenderCore {
     }
 }
 
-fn model_draw_range(
+pub(in crate::app::model_preview) fn model_draw_range(
     index_start: u32,
     index_count: u32,
     total_indices: usize,
@@ -7154,7 +7148,7 @@ fn preview_center_radius(preview: &RenderModelPreview) -> ([f32; 3], f32) {
 
 /// World → view: yaw about Z, then pitch about X — the one rotation this
 /// preview uses, mirrored in the vertex shader's `rotate_view`.
-fn rotate_view_vector(yaw: f32, pitch: f32, vector: [f32; 3]) -> [f32; 3] {
+pub(in crate::app::model_preview) fn rotate_view_vector(yaw: f32, pitch: f32, vector: [f32; 3]) -> [f32; 3] {
     let (sy, cy) = yaw.sin_cos();
     let x = vector[0] * cy - vector[1] * sy;
     let y = vector[0] * sy + vector[1] * cy;

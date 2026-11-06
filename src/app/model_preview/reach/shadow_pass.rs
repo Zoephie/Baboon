@@ -7,8 +7,8 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::render::Gen3Batch;
 use super::super::gl::target::{Made, Sampling, Texels};
-use super::super::renderer::gen3_shadow::shadow_casters;
-use super::super::renderer::h3_draw::screen_program;
+use super::super::gen3::shadow::shadow_casters;
+use super::super::gen3::pipeline::screen_program;
 use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore};
 use super::super::unrotate_view_vector;
 use super::render::ReachGame;

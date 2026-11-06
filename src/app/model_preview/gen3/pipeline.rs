@@ -2,18 +2,21 @@
 //! albedo and normal into targets, a lit pass reading them back into an HDR
 //! accumulation target, and the final composite's tone curve onto the scene.
 
-use super::gen3::render::Gen3Game;
-use super::gl::program::Linked;
-use super::gl::target::{Made, Sampling, Texels};
-use super::gen3::prt::{H3PrtKind, second_order_rotation};
+use super::render::Gen3Game;
+use super::super::gl::program::Linked;
+use super::super::gl::target::{Made, Sampling, Texels};
+use super::prt::{H3PrtKind, second_order_rotation};
 use std::borrow::Cow;
 
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::gen3::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
+use super::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
 use super::super::reach::lighting::reach_frame_value;
 use super::super::reach::lights::{ReachLitLight, inline_rows};
-use super::*;
+use eframe::glow::{self, HasContext as _};
+use super::super::renderer::*;
+use super::super::dx9::passes::{H2Image, H2Layer};
+use super::super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
 /// `c_geometry_sampler::m_default_lightprobe_sample`, the first nine terms of
@@ -26,7 +29,7 @@ const DEFAULT_PROBE: [[f32; 9]; 3] = [
 
 /// The object function values behind the shield's two quantities.
 pub(in crate::app::model_preview) const H3_SHIELD_DAMAGE: &str = "current_shield_damage";
-pub(super) const H3_OVERSHIELD: &str = "object_overshield_amount";
+pub(in crate::app::model_preview) const H3_OVERSHIELD: &str = "object_overshield_amount";
 
 /// `g_decal_slope_depth_bias` and `g_decal_depth_bias`.
 const DECAL_SLOPE_BIAS: f32 = -0.5;
@@ -52,7 +55,7 @@ const ATTRIBUTES: [(&str, &str); 7] = [
 ];
 
 /// Where `static_prt_*`'s coefficients arrive, past the preview's own.
-pub(super) const PRT_ATTRIBUTES: [u32; 3] = [11, 12, 13];
+pub(in crate::app::model_preview) const PRT_ATTRIBUTES: [u32; 3] = [11, 12, 13];
 const PRT_NAMES: [&str; 3] = ["a_BLENDWEIGHT1", "a_BLENDWEIGHT2", "a_BLENDWEIGHT3"];
 
 const COMPOSITE_VERTEX: &str = "#version 410 core
@@ -238,7 +241,7 @@ pub(in crate::app::model_preview) unsafe fn screen_program(gl: &glow::Context, f
     };
     unsafe {
         let stages = [(glow::VERTEX_SHADER, COMPOSITE_VERTEX), (glow::FRAGMENT_SHADER, fragment)];
-        match super::gl::link::link(gl, &stages, &[]) {
+        match super::super::gl::link::link(gl, &stages, &[]) {
             Ok(program) => Some(program),
             Err(log) => fail(log),
         }
@@ -331,7 +334,7 @@ impl std::ops::Deref for H3Program {
 
 /// Uploaded textures of a geometry, by material then name.
 #[derive(Default)]
-pub(super) struct H3SlotTextures {
+pub(in crate::app::model_preview) struct H3SlotTextures {
     id: Option<u64>,
     materials: Vec<HashMap<String, glow::NativeTexture>>,
     /// The shield's noise, by uniform.
@@ -387,7 +390,7 @@ fn lighting_constants(probe: &[[f32; 9]; 3]) -> [[f32; 4]; 10] {
 }
 
 /// Whether the shield is showing, whose plasma scrolls with game time.
-pub(super) fn h3_shield_showing(values: Option<&functions::FunctionValues>) -> bool {
+pub(in crate::app::model_preview) fn h3_shield_showing(values: Option<&functions::FunctionValues>) -> bool {
     let reading = |name| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
     reading(H3_SHIELD_DAMAGE) > 0.0 || reading(H3_OVERSHIELD) > 0.0
 }
@@ -435,7 +438,7 @@ fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4], f32) {
 
 /// Which way an object's shadow falls from and how dark it is: the dominant
 /// light, whose shadow fades out as the probe grows even.
-pub(super) fn h3_shadow_light(frame: &ModelGpuFrame) -> ([f32; 3], f32) {
+pub(in crate::app::model_preview) fn h3_shadow_light(frame: &ModelGpuFrame) -> ([f32; 3], f32) {
     let ([x, y, z, _], _, contrast) = dominant_light(&frame_probe(frame));
     ([x, y, z], h3_shadow_alpha(contrast))
 }
@@ -502,7 +505,7 @@ fn h4_hologram_node(frame: &ModelGpuFrame) -> [[f32; 4]; 3] {
 }
 
 /// What a particle's `lighting` option reads.
-pub(super) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
+pub(in crate::app::model_preview) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
     lighting_constants(&frame_probe(frame))
 }
 
@@ -516,9 +519,9 @@ pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, dialect:
         if name == "ps_lighting_constants" && frame.light_follows_camera {
             let camera = camera_to_world(frame);
             let backward = [camera[2], camera[6], camera[10]];
-            return Some(H3Value::FloatArray(super::h4::lighting::h4_turned_vmf(backward).to_vec()));
+            return Some(H3Value::FloatArray(super::super::h4::lighting::h4_turned_vmf(backward).to_vec()));
         }
-        return super::h4::lighting::h4_frame_value(name);
+        return super::super::h4::lighting::h4_frame_value(name);
     }
     if dialect == H3Dialect::Reach {
         if let Some(value) = reach_frame_value(frame, name, stops) {
@@ -598,7 +601,7 @@ fn view_matrix(frame: &ModelGpuFrame) -> [f32; 16] {
 /// Reach's `Camera_To_World`: right, up, backward and the eye in its
 /// columns, rowed for HLSL, which reads `Camera_Position` and the camera's
 /// axes out of it (`hlsl_constant_global_list`).
-pub(super) fn camera_to_world(frame: &ModelGpuFrame) -> [f32; 16] {
+pub(in crate::app::model_preview) fn camera_to_world(frame: &ModelGpuFrame) -> [f32; 16] {
     let (yaw, pitch) = (frame.camera.yaw, frame.camera.pitch);
     let right = unrotate_view_vector(yaw, pitch, [1.0, 0.0, 0.0]);
     let up = unrotate_view_vector(yaw, pitch, [0.0, 0.0, 1.0]);
@@ -675,7 +678,7 @@ impl RenderCore {
     }
 
     /// The normals the albedo pass laid down, for the shadow pass to read.
-    pub(super) fn h3_normal_target(&self) -> Option<glow::NativeTexture> {
+    pub(in crate::app::model_preview) fn h3_normal_target(&self) -> Option<glow::NativeTexture> {
         self.gen3.targets.as_ref().map(|targets| targets.normal)
     }
 
@@ -717,7 +720,7 @@ impl RenderCore {
                 }
             }
             attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
-            match super::gl::link::link(gl, &stages, &attributes) {
+            match super::super::gl::link::link(gl, &stages, &attributes) {
                 Ok(program) => {
                     let program = Rc::new(H3Program { _pass: Arc::clone(pass), linked: Linked::new(program) });
                     self.gen3.programs.insert(key, Ok(Rc::clone(&program)));
@@ -805,7 +808,7 @@ impl RenderCore {
         let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
         // Halo 4: the sampler's frame-index function, on the object's values.
         if let Some(submit) = material.h4.as_ref().filter(|_| count > 0) {
-            let drawn = super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
+            let drawn = super::super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
             if let Some(index) = submit.frame(uniform, &drawn) {
                 return frame_key(uniform, index);
             }
@@ -842,20 +845,20 @@ impl RenderCore {
                     let object = batch.material_index as usize;
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                     let drawn =
-                        super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
+                        super::super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
                     let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
                     let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
                     let draw = match this.gen3.submit_draw {
                         Some(draw) => draw,
-                        None if albedo => super::h4::submit::H4Draw::Albedo,
-                        None if fringe => super::h4::submit::H4Draw::Fringe,
-                        None => super::h4::submit::H4Draw::Lit,
+                        None if albedo => super::super::h4::submit::H4Draw::Albedo,
+                        None if fringe => super::super::h4::submit::H4Draw::Fringe,
+                        None => super::super::h4::submit::H4Draw::Lit,
                     };
                     let mut values = submit.draw_values(draw, &drawn, h4_hologram_node(frame));
                     // Only the opened object's count is read; attached Halo 4
                     // objects bring geometry alone.
                     let count = if owner == 0 { frame.preview.h4_change_color_count } else { 0 };
-                    let colors = super::h4::submit::object_parameters(frame.change_colors_of(object), count);
+                    let colors = super::super::h4::submit::object_parameters(frame.change_colors_of(object), count);
                     values.insert("ps_material_object_parameters".to_owned(), H3Value::FloatArray(colors));
                     values
                 });
@@ -1070,7 +1073,7 @@ impl RenderCore {
     }
 
     /// `cloth_render_opaque` builds its mesh from where the sheet is now.
-    pub(super) unsafe fn move_cloth(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn move_cloth(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         if frame.preview.h3_cloth.is_empty() {
             return;
         }
@@ -1397,7 +1400,7 @@ impl RenderCore {
     }
 
     /// `simple_lights` and `simple_light_count` for a Reach static pass.
-    pub(super) fn reach_simple_light(&self, name: &str) -> Option<H3Value> {
+    pub(in crate::app::model_preview) fn reach_simple_light(&self, name: &str) -> Option<H3Value> {
         match name {
             "simple_light_count" => Some(H3Value::Integer(self.gen3.inline_lights.len() as i32)),
             _ => None,
@@ -1442,7 +1445,7 @@ impl RenderCore {
                 let index = batch.material_index as usize;
                 let material = self.h3_material(frame, index)?;
                 let textures = frame.textures.as_ref()?.get(index)?;
-                super::reach::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
+                super::super::reach::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
                     .then(|| (batch.clone(), Arc::clone(material)))
             })
             .collect();
@@ -1456,10 +1459,10 @@ impl RenderCore {
         let camera = &frame.camera;
         let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
         values.insert(
-            super::reach::shield::DEPTH_DECODE,
+            super::super::reach::shield::DEPTH_DECODE,
             [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye],
         );
-        values.insert(super::reach::shield::WORLD_SCALE, [camera.scale; 4]);
+        values.insert(super::super::reach::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
             // What the pass fades against: everything drawn so far.
             if let Some(targets) = self.gen3.targets.as_ref() {

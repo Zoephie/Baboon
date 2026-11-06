@@ -6,7 +6,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use super::super::dx9::passes::H2Image;
 use super::super::gen3::shaders::{H3Material, H3Sampler, H3Texels};
 use super::super::RenderModelPreviewBatch;
-use super::super::renderer::h3_draw::{H3_SHIELD_DAMAGE, HALF_LENS, h3_set_cull, screen_program, upload_h2_image_linear};
+use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS, h3_set_cull, screen_program, upload_h2_image_linear};
 use eframe::glow::{self, HasContext};
 use std::sync::Arc;
 use super::render::H4Game;

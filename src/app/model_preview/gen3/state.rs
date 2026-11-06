@@ -14,10 +14,10 @@ pub(in crate::app::model_preview) struct Gen3State {
     pub(in crate::app::model_preview) supported: bool,
     /// The frame's targets: albedo and normals, the lit scene, what lies
     /// behind camo, the depth copy and the distortion.
-    pub(in crate::app::model_preview) targets: Option<super::super::renderer::h3_draw::H3Targets>,
+    pub(in crate::app::model_preview) targets: Option<super::super::gen3::pipeline::H3Targets>,
     /// Linked passes by their address, or the pass that failed to link: each
     /// holds its pass, so no other pass can come to have its address.
-    pub(in crate::app::model_preview) programs: HashMap<usize, Result<Rc<super::super::renderer::h3_draw::H3Program>, Arc<super::shaders::H3Pass>>>,
+    pub(in crate::app::model_preview) programs: HashMap<usize, Result<Rc<super::super::gen3::pipeline::H3Program>, Arc<super::shaders::H3Pass>>>,
     /// The light drawing now, and its gel.
     pub(in crate::app::model_preview) light: Option<(super::super::h3::lights::H3LitLight, Option<glow::NativeTexture>)>,
     /// Whether this frame's particles drew any distortion to apply.

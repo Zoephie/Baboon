@@ -6,7 +6,7 @@ use eframe::glow::{self, HasContext};
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore};
-use super::super::renderer::h3_draw::{h3_layered_distance, h3_set_cull};
+use super::super::gen3::pipeline::{h3_layered_distance, h3_set_cull};
 use super::holograms::{HologramPicture, draws_as_hologram};
 use super::camo::H4CamoDraw;
 
