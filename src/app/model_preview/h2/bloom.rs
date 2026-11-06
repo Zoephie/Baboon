@@ -123,30 +123,11 @@ pub(in crate::app::model_preview) struct H2Bloom {
 impl H2Bloom {
     pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context, version: &str) -> Option<Self> {
         unsafe {
-            let program = gl.create_program().ok()?;
-            let mut shaders = Vec::new();
-            for (kind, source) in
-                [(glow::VERTEX_SHADER, VERTEX), (glow::FRAGMENT_SHADER, FRAGMENT)]
-            {
-                let shader = gl.create_shader(kind).ok()?;
-                gl.shader_source(shader, &format!("{version}{source}"));
-                gl.compile_shader(shader);
-                if !gl.get_shader_compile_status(shader) {
-                    eprintln!("model preview: bloom: {}", gl.get_shader_info_log(shader));
-                    return None;
-                }
-                gl.attach_shader(program, shader);
-                shaders.push(shader);
-            }
-            gl.link_program(program);
-            for shader in shaders {
-                gl.detach_shader(program, shader);
-                gl.delete_shader(shader);
-            }
-            if !gl.get_program_link_status(program) {
-                eprintln!("model preview: bloom: {}", gl.get_program_info_log(program));
-                return None;
-            }
+            let (vertex, fragment) = (format!("{version}{VERTEX}"), format!("{version}{FRAGMENT}"));
+            let stages = [(glow::VERTEX_SHADER, vertex.as_str()), (glow::FRAGMENT_SHADER, fragment.as_str())];
+            let program = super::super::gl::link::link(gl, &stages, &[])
+                .map_err(|error| eprintln!("model preview: bloom: {error}"))
+                .ok()?;
             let vertex_array = gl.create_vertex_array().ok()?;
             Some(Self { program, vertex_array, surfaces: None })
         }

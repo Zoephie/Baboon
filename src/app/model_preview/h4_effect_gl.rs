@@ -47,37 +47,10 @@ impl H4EffectGl {
         if let Some(known) = self.programs.get(&key) {
             return known.as_ref().map(|(program, _)| *program);
         }
-        let linked = unsafe {
-            (|| {
-                let program = gl.create_program().ok()?;
-                for (kind, text) in [
-                    (glow::VERTEX_SHADER, &pass.vertex),
-                    (glow::FRAGMENT_SHADER, &pass.pixel),
-                ] {
-                    let shader = gl.create_shader(kind).ok()?;
-                    gl.shader_source(shader, text);
-                    gl.compile_shader(shader);
-                    if !gl.get_shader_compile_status(shader) {
-                        eprintln!(
-                            "h4 effect shader failed: {}",
-                            gl.get_shader_info_log(shader)
-                        );
-                    }
-                    gl.attach_shader(program, shader);
-                    gl.delete_shader(shader);
-                }
-                gl.link_program(program);
-                if !gl.get_program_link_status(program) {
-                    eprintln!(
-                        "h4 effect program failed: {}",
-                        gl.get_program_info_log(program)
-                    );
-                    gl.delete_program(program);
-                    return None;
-                }
-                Some(program)
-            })()
-        };
+        let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
+        let linked = unsafe { super::gl::link::link(gl, &stages, &[]) }
+            .map_err(|error| eprintln!("h4 effect program: {error}"))
+            .ok();
         self.programs
             .insert(key, linked.map(|program| (program, HashMap::new())));
         linked

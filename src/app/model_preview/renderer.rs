@@ -1,6 +1,7 @@
 //! Depth-tested Glow rendering, markers, and preview geometry conversion.
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
+use super::gl::link::link;
 use super::*;
 use super::dx9::passes::{
     H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
@@ -2773,11 +2774,7 @@ unsafe fn link_h2_program(
     fragment_source: &str,
 ) -> Result<glow::NativeProgram, String> {
     unsafe {
-        let vertex = compile_model_shader(gl, glow::VERTEX_SHADER, vertex_source)?;
-        let fragment = compile_model_shader(gl, glow::FRAGMENT_SHADER, fragment_source)?;
-        let program = gl.create_program().map_err(|error| error.to_string())?;
-        gl.attach_shader(program, vertex);
-        gl.attach_shader(program, fragment);
+        let mut attributes = Vec::new();
         for name in [
             "a_position",
             "a_normal",
@@ -2788,23 +2785,13 @@ unsafe fn link_h2_program(
             "a_node_weights",
         ] {
             if let Some(location) = gl.get_attrib_location(main, name) {
-                gl.bind_attrib_location(program, location, name);
+                attributes.push((location, name));
             }
         }
-        gl.bind_attrib_location(program, PRT_CLUSTER_ATTRIBUTE, "a_prt_cluster");
-        gl.bind_attrib_location(program, PRT_WEIGHTS_ATTRIBUTE, "a_prt_weights");
-        gl.link_program(program);
-        gl.detach_shader(program, vertex);
-        gl.detach_shader(program, fragment);
-        gl.delete_shader(vertex);
-        gl.delete_shader(fragment);
-        if gl.get_program_link_status(program) {
-            Ok(program)
-        } else {
-            let error = gl.get_program_info_log(program);
-            gl.delete_program(program);
-            Err(format!("Halo 2 pass failed to link: {error}"))
-        }
+        attributes.push((PRT_CLUSTER_ATTRIBUTE, "a_prt_cluster"));
+        attributes.push((PRT_WEIGHTS_ATTRIBUTE, "a_prt_weights"));
+        let stages = [(glow::VERTEX_SHADER, vertex_source), (glow::FRAGMENT_SHADER, fragment_source)];
+        link(gl, &stages, &attributes).map_err(|error| format!("Halo 2 pass: {error}"))
     }
 }
 
@@ -4274,21 +4261,8 @@ impl ModelGlRenderer {
             model_shader_sources(shader_version.version_declaration(), modern, precision);
 
         unsafe {
-            let vertex = compile_model_shader(gl, glow::VERTEX_SHADER, &vertex_source)?;
-            let fragment = compile_model_shader(gl, glow::FRAGMENT_SHADER, &fragment_source)?;
-            let program = gl.create_program().map_err(|error| error.to_string())?;
-            gl.attach_shader(program, vertex);
-            gl.attach_shader(program, fragment);
-            gl.link_program(program);
-            gl.detach_shader(program, vertex);
-            gl.detach_shader(program, fragment);
-            gl.delete_shader(vertex);
-            gl.delete_shader(fragment);
-            if !gl.get_program_link_status(program) {
-                let error = gl.get_program_info_log(program);
-                gl.delete_program(program);
-                return Err(format!("model preview shader link failed: {error}"));
-            }
+            let stages = [(glow::VERTEX_SHADER, vertex_source.as_str()), (glow::FRAGMENT_SHADER, fragment_source.as_str())];
+            let program = link(gl, &stages, &[]).map_err(|error| format!("model preview shader: {error}"))?;
 
             let uniform = |name| {
                 gl.get_uniform_location(program, name)
@@ -6225,25 +6199,6 @@ impl ModelGlRenderer {
                     byte_offset,
                 );
             }
-        }
-    }
-}
-
-unsafe fn compile_model_shader(
-    gl: &glow::Context,
-    kind: u32,
-    source: &str,
-) -> Result<glow::NativeShader, String> {
-    unsafe {
-        let shader = gl.create_shader(kind).map_err(|error| error.to_string())?;
-        gl.shader_source(shader, source);
-        gl.compile_shader(shader);
-        if gl.get_shader_compile_status(shader) {
-            Ok(shader)
-        } else {
-            let error = gl.get_shader_info_log(shader);
-            gl.delete_shader(shader);
-            Err(format!("model preview shader compile failed: {error}"))
         }
     }
 }

@@ -721,16 +721,8 @@ fn reach_shield_passes_link() {
         assert!(!pass.pixel.contains("depth_constants.z - "), "Reach's own depth read is gone");
         assert!(!pass.vertex.contains("GlobalTexture_shield_impact_noise_texture"), "the vertex stage reads oscillation");
         unsafe {
-            let program = gl.create_program().unwrap();
-            for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
-                let shader = gl.create_shader(kind).unwrap();
-                gl.shader_source(shader, text);
-                gl.compile_shader(shader);
-                assert!(gl.get_shader_compile_status(shader), "{}", gl.get_shader_info_log(shader));
-                gl.attach_shader(program, shader);
-            }
-            gl.link_program(program);
-            assert!(gl.get_program_link_status(program), "{}", gl.get_program_info_log(program));
+            let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
+            let program = link(&gl, &stages, &[]).unwrap_or_else(|error| panic!("{error}"));
             for (name, _) in &pass.textures {
                 let location = gl.get_uniform_location(program, name);
                 eprintln!("NOTE shield TEXTURE {name} {}", location.is_some());
@@ -762,16 +754,8 @@ fn reach_light_passes_link() {
             eprintln!("NOTE {file} TEXTURE {name}");
         }
         unsafe {
-            let program = gl.create_program().unwrap();
-            for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
-                let shader = gl.create_shader(kind).unwrap();
-                gl.shader_source(shader, text);
-                gl.compile_shader(shader);
-                assert!(gl.get_shader_compile_status(shader), "{file}: {}", gl.get_shader_info_log(shader));
-                gl.attach_shader(program, shader);
-            }
-            gl.link_program(program);
-            assert!(gl.get_program_link_status(program), "{file}: {}", gl.get_program_info_log(program));
+            let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
+            link(&gl, &stages, &[]).unwrap_or_else(|error| panic!("{file}: {error}"));
         }
     }
 }
@@ -794,16 +778,8 @@ fn h4_light_passes_link() {
         for technique in 0..16 {
             let pass = super::h4::lights::h4_light_pass(&program, technique).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));
             unsafe {
-                let linked = gl.create_program().unwrap();
-                for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
-                    let shader = gl.create_shader(kind).unwrap();
-                    gl.shader_source(shader, text);
-                    gl.compile_shader(shader);
-                    assert!(gl.get_shader_compile_status(shader), "{physical} {technique}: {}", gl.get_shader_info_log(shader));
-                    gl.attach_shader(linked, shader);
-                }
-                gl.link_program(linked);
-                assert!(gl.get_program_link_status(linked), "{physical} {technique}: {}", gl.get_program_info_log(linked));
+                let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
+                link(&gl, &stages, &[]).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));
             }
         }
     }
@@ -828,16 +804,8 @@ fn h4_flare_pass_links() {
     }
     assert!(pass.vertex.contains("in vec2 a_POSITION;") && pass.vertex.contains("a_TEXCOORD0"), "{}", pass.vertex);
     unsafe {
-        let linked = gl.create_program().unwrap();
-        for (kind, text) in [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)] {
-            let shader = gl.create_shader(kind).unwrap();
-            gl.shader_source(shader, text);
-            gl.compile_shader(shader);
-            assert!(gl.get_shader_compile_status(shader), "{}", gl.get_shader_info_log(shader));
-            gl.attach_shader(linked, shader);
-        }
-        gl.link_program(linked);
-        assert!(gl.get_program_link_status(linked), "{}", gl.get_program_info_log(linked));
+        let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
+        link(&gl, &stages, &[]).unwrap_or_else(|error| panic!("{error}"));
     }
 }
 

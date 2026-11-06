@@ -276,30 +276,11 @@ pub(super) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Optio
         None
     };
     unsafe {
-        let program = gl.create_program().ok()?;
-        for (kind, source) in [(glow::VERTEX_SHADER, COMPOSITE_VERTEX), (glow::FRAGMENT_SHADER, fragment)] {
-            let Ok(shader) = gl.create_shader(kind) else {
-                gl.delete_program(program);
-                return None;
-            };
-            gl.shader_source(shader, source);
-            gl.compile_shader(shader);
-            if !gl.get_shader_compile_status(shader) {
-                let log = gl.get_shader_info_log(shader);
-                gl.delete_shader(shader);
-                gl.delete_program(program);
-                return fail(log);
-            }
-            gl.attach_shader(program, shader);
-            gl.delete_shader(shader);
+        let stages = [(glow::VERTEX_SHADER, COMPOSITE_VERTEX), (glow::FRAGMENT_SHADER, fragment)];
+        match super::gl::link::link(gl, &stages, &[]) {
+            Ok(program) => Some(program),
+            Err(log) => fail(log),
         }
-        gl.link_program(program);
-        if !gl.get_program_link_status(program) {
-            let log = gl.get_program_info_log(program);
-            gl.delete_program(program);
-            return fail(log);
-        }
-        Some(program)
     }
 }
 
@@ -853,39 +834,22 @@ impl ModelGlRenderer {
             None => {}
         }
         unsafe {
-            let stages = [(glow::VERTEX_SHADER, &pass.vertex), (glow::FRAGMENT_SHADER, &pass.pixel)];
-            let program = gl.create_program().ok()?;
-            let mut shaders = Vec::new();
-            for (kind, source) in stages {
-                let shader = gl.create_shader(kind).ok()?;
-                gl.shader_source(shader, source);
-                gl.compile_shader(shader);
-                if !gl.get_shader_compile_status(shader) {
-                    eprintln!("h3 shader failed: {}", gl.get_shader_info_log(shader));
-                }
-                gl.attach_shader(program, shader);
-                shaders.push(shader);
-            }
+            let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
+            let mut attributes = Vec::new();
             for (name, preview) in ATTRIBUTES {
                 if let Some(location) = gl.get_attrib_location(self.program, preview) {
-                    gl.bind_attrib_location(program, location, name);
+                    attributes.push((location, name));
                 }
             }
-            for (name, location) in PRT_NAMES.into_iter().zip(PRT_ATTRIBUTES) {
-                gl.bind_attrib_location(program, location, name);
+            attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
+            match super::gl::link::link(gl, &stages, &attributes) {
+                Ok(program) => Some(H3Program { _pass: Arc::clone(pass), program, locations: HashMap::new() }),
+                Err(error) => {
+                    eprintln!("h3 program: {error}");
+                    self.h3_programs.insert(key, Err(Arc::clone(pass)));
+                    None
+                }
             }
-            gl.link_program(program);
-            for shader in shaders {
-                gl.detach_shader(program, shader);
-                gl.delete_shader(shader);
-            }
-            if !gl.get_program_link_status(program) {
-                eprintln!("h3 program failed: {}", gl.get_program_info_log(program));
-                gl.delete_program(program);
-                self.h3_programs.insert(key, Err(Arc::clone(pass)));
-                return None;
-            }
-            Some(H3Program { _pass: Arc::clone(pass), program, locations: HashMap::new() })
         }
     }
 
