@@ -325,7 +325,7 @@ pub(crate) enum H3Dialect {
     Halo3,
     Reach,
     /// Halo 4's materials: translated from their own sources
-    /// (`h4_shaders`), never through `H3Sources`.
+    /// (`h4::shaders`), never through `H3Sources`.
     Halo4,
 }
 

@@ -2,7 +2,7 @@
 //! `contrail_new`, points let go by `contrail_add_points` that step through the
 //! tag's `point states` (`contrail_update_points`), drawn as a ribbon by
 //! `render_contrail` through the `effect` shader. Read from the Xbox 360
-//! build's symbols. Halo 2's are its descendant, in `h2_contrails`.
+//! build's symbols. Halo 2's are its descendant, in `h2::contrails`.
 
 use std::sync::Arc;
 

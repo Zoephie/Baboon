@@ -1,6 +1,6 @@
 //! Halo 2's lens flares on objects: `render_submit`'s attachments, then
 //! `rasterizer_lens_flares.cpp`. The shape is Halo CE's, in
-//! [`super::super::ce_lights`], but the sums are not: brightness, color and rotation
+//! [`super::super::ce::lights`], but the sums are not: brightness, color and rotation
 //! animate, occlusion comes in two sizes, and the pixel shader adds a highlight.
 
 use std::sync::Arc;

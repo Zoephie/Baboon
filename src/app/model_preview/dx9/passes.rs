@@ -665,7 +665,7 @@ fn h2_laid_out_function(mapping: TagStruct<'_>) -> Option<TagFunction> {
 /// condition, and otherwise the zero the game falls back on when nothing
 /// exports the name, which leaves boosts, hits and open doors off. A guess,
 /// for what has no object to ask: a Halo 2 object's functions answer from its
-/// type's exporters (`h2_functions`), which Halo 3 and ODST's are not yet.
+/// type's exporters (`h2::functions`), which Halo 3 and ODST's are not yet.
 pub(in crate::app::model_preview) fn object_input(name: &str) -> f32 {
     match name {
         "alive" | "body_vitality" | "device_power" | "electrical_power" | "health" | "one"
