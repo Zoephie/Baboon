@@ -393,7 +393,8 @@ fn gate_load() {
 
 /// What G-px shoots of each game: a biped, a vehicle, and something that
 /// moves at rest (the phantom does for Halo 3 and ODST), each in every
-/// [`LOOKS`]; Reach and Halo 4 each have a Warthog for their screen lights.
+/// [`LOOKS`]; Reach and Halo 4 each have a Warthog for their screen lights,
+/// and Halo 2 a cigar for its particles.
 #[cfg(target_os = "macos")]
 const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
     (
@@ -415,6 +416,8 @@ const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
                 "objects\\weapons\\rifle\\plasma_rifle\\plasma_rifle",
                 "weapon",
             ),
+            // Its constant smoke: the only Halo 2 particles drawn at rest.
+            ("objects\\cinematics\\cigar\\cigar", "scenery"),
         ],
     ),
     (
