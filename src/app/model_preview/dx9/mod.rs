@@ -2,4 +2,5 @@
 //! the vertex stages that feed them.
 
 pub(in crate::app) mod passes;
+pub(in crate::app::model_preview) mod sprites;
 pub(in crate::app) mod stage;

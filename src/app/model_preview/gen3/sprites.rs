@@ -1,0 +1,358 @@
+//! The gen3 games' sprites, which the pipeline enters by stage from inside
+//! its blended sort: light volumes, Halo 4's tracers, particle systems,
+//! strips and leaves far to near, then the antennas, Reach's and Halo 4's
+//! cheap particles and the lens flares.
+
+use eframe::glow::{self, HasContext as _};
+
+use super::super::common::sprites::{
+    ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system, draw_sprite_quad,
+};
+use super::super::renderer::*;
+use super::super::*;
+use super::pipeline::{h3_layered_distance, h3_lighting_constants, h3_set_blend};
+
+/// Which part of the object's sprites a call draws.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::app::model_preview) enum SpriteStage {
+    /// Volumes and particles not yet drawn, down to this far away.
+    FartherThan(f32),
+    /// Antennas and lens flares, and any left of those.
+    Rest,
+    /// What bends the scene, to its own target.
+    Distortions,
+}
+
+impl RenderCore {
+    /// The part of the frame's sprites `stage` names.
+    pub(in crate::app::model_preview) unsafe fn draw_gen3_sprites(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        stage: SpriteStage,
+    ) {
+        unsafe {
+            let Some(h3) = self.begin_sprites(gl, frame, slot) else {
+                return;
+            };
+            let Some(flares) = self.sprite_gl.as_ref().and_then(Option::as_ref) else {
+                return;
+            };
+            let particle_gl = self.particle_gl.as_ref().and_then(Option::as_ref);
+            let no_map = self.gen3.no_bloom;
+            // What Reach's area screen effects do to the sprites' exposure.
+            let stops = self.gen3.stops;
+            let uploaded = &mut self.slots[slot];
+            let camera = &frame.camera;
+            let view = ce_flare_view(camera);
+            let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+            if matches!(stage, SpriteStage::Rest) {
+                draw_antennas(gl, flares, uploaded, frame, bones, &view, h3);
+            }
+            gl.color_mask(true, true, true, false);
+            // `render_effects`, among the transparents: every profile is its own quad.
+            advance_sprite_simulations(uploaded, frame, bones, &view, &mut self.sprites_advanced);
+            let cursor = &mut self.gen3.sprite_cursor;
+            // `c_transparency_renderer` sorts far to near, each from its location.
+            enum Sprites {
+                Volume(usize),
+                Tracer(usize),
+                System(usize),
+                Strip(usize),
+                Leaves(usize),
+            }
+            let eye_distance = |origin: [f32; 3]| {
+                (0..3).map(|axis| (origin[axis] - view.eye[axis]) * view.forward[axis]).sum::<f32>()
+            };
+            let layered = h3_layered_distance;
+            let volumes = frame.preview.h3_light_volumes.iter().enumerate();
+            let volumes = volumes
+                .filter(|_| !matches!(stage, SpriteStage::Distortions))
+                .map(|(at, volume)| (layered(volume.sort_layer(), eye_distance(volume.origin(bones))), Sprites::Volume(at)));
+            let tracers = frame.preview.h4_tracers.iter().enumerate();
+            let tracers = tracers.filter(|_| !matches!(stage, SpriteStage::Distortions)).map(|(at, tracer)| {
+                let distance = eye_distance(tracer.origin(bones)) - tracer.sort_bias();
+                (layered(tracer.sort_layer(), distance), Sprites::Tracer(at))
+            });
+            let systems = frame.preview.h3_particles.iter().enumerate();
+            let distorting = matches!(stage, SpriteStage::Distortions);
+            let systems = systems
+                .filter(|(_, system)| system.look.shader.distortion.is_some() == distorting)
+                .map(|(at, system)| (layered(system.look.shader.sort_layer, uploaded.simulations.particles.distance(at, system, bones, &view)), Sprites::System(at)));
+            let strips = frame.preview.h3_strips.iter().enumerate();
+            let strips = strips
+                .filter(|_| !matches!(stage, SpriteStage::Distortions))
+                .map(|(at, strip)| {
+                    let distance = eye_distance(strip.origin(bones)) - strip.sort_bias();
+                    (layered(strip.shader().sort_layer, distance), Sprites::Strip(at))
+                });
+            let leaves = frame.preview.h3_leaves.iter().enumerate();
+            let leaves = leaves
+                .filter(|_| !matches!(stage, SpriteStage::Distortions))
+                .map(|(at, leaves)| (layered(2, eye_distance(leaves.origin())), Sprites::Leaves(at)));
+            let mut sorted: Vec<_> = volumes.chain(tracers).chain(systems).chain(strips).chain(leaves).collect();
+            sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
+            let limit = match stage {
+                SpriteStage::FartherThan(limit) => limit,
+                SpriteStage::Rest => f32::INFINITY,
+                SpriteStage::Distortions => f32::NEG_INFINITY,
+            };
+            let mut distorted = 0;
+            let skip = if distorting { 0 } else { *cursor };
+            for (distance, sprites) in sorted.into_iter().skip(skip) {
+                if distance < limit {
+                    break;
+                }
+                if distorting {
+                    distorted += 1;
+                } else {
+                    *cursor += 1;
+                }
+                match sprites {
+                    Sprites::Tracer(index) => {
+                        let at = &frame.preview.h4_tracers[index];
+                        if !frame.h4_tracers_shown.get(index).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        let values = frame.function_values_of_object(at.object);
+                        let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
+                        let draw = if at.trails() {
+                            uploaded.simulations.h4_trails.draw(index, at, values, bones, view.eye, frame.time, onset)
+                        } else {
+                            at.draw(values, bones, view.eye, frame.time, onset)
+                        };
+                        if let Some(draw) = draw {
+                            let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
+                            h4::tracer_pass::draw_h4_tracer(
+                                gl,
+                                &mut uploaded.h4_effects,
+                                frame,
+                                &at.definition.material,
+                                &draw,
+                                self.gen3.depth_copy,
+                                size,
+                                self.placeholder,
+                                at.object,
+                            );
+                            gl.use_program(Some(flares.program));
+                            gl.bind_vertex_array(Some(flares.vertex_array));
+                            gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                        }
+                    }
+                    Sprites::Volume(index) => {
+                        let at = &frame.preview.h3_light_volumes[index];
+                        if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        // Halo 4's: through their material, from packed state.
+                        if let Some(material) = at.h4_material() {
+                            let values = frame.function_values_of_object(at.object);
+                            let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
+                            if let Some(draw) = at.h4_draw(values, bones, &view, frame.time, onset) {
+                                let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
+                                h4::light_volume_pass::draw_h4_light_volume(
+                                    gl,
+                                    &mut uploaded.h4_effects,
+                                    frame,
+                                    material,
+                                    &draw,
+                                    self.gen3.depth_copy,
+                                    size,
+                                    self.placeholder,
+                                    at.object,
+                                );
+                                gl.use_program(Some(flares.program));
+                                gl.bind_vertex_array(Some(flares.vertex_array));
+                                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                            }
+                            continue;
+                        }
+                        let texture = uploaded.volume_textures.get(index).copied().flatten();
+                        let circular = at.circular();
+                        if texture.is_none() && circular.is_none() {
+                            continue;
+                        }
+                        gl.use_program(Some(flares.program));
+                        gl.bind_vertex_array(Some(flares.vertex_array));
+                        gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                        gl.active_texture(glow::TEXTURE0);
+                        h3_set_blend(gl, at.blend());
+                        gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder));
+                        let [center, falloff] = circular.unwrap_or([0.0; 2]);
+                        gl.uniform_2_f32(flares.circular.as_ref(), center, falloff);
+                        // With no depth copy, no fade to read one.
+                        let fade = at.depth_fade().filter(|_| self.gen3.depth_copy.is_some());
+                        if let Some(range) = fade {
+                            gl.active_texture(glow::TEXTURE1);
+                            gl.bind_texture(glow::TEXTURE_2D, self.gen3.depth_copy);
+                            gl.active_texture(glow::TEXTURE0);
+                            gl.uniform_1_i32(flares.scene_depth.as_ref(), 1);
+                            gl.uniform_4_f32_slice(flares.depth.as_ref(), &scene_depth_terms(camera));
+                            gl.uniform_1_f32(flares.fade.as_ref(), range);
+                        }
+                        let values = frame.function_values_of_object(at.object);
+                        let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
+                        for quad in at.quads(values, bones, &view, frame.time, onset, stops) {
+                            draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
+                        }
+                        // The flare program's other users draw maps, unfaded.
+                        gl.uniform_2_f32(flares.circular.as_ref(), 0.0, 0.0);
+                        if fade.is_some() {
+                            gl.uniform_1_f32(flares.fade.as_ref(), 0.0);
+                            gl.uniform_1_i32(flares.scene_depth.as_ref(), 0);
+                        }
+                    }
+                    Sprites::System(index) => {
+                        let system = &frame.preview.h3_particles[index];
+                        if !frame.h3_systems_shown.get(index).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        // Halo 4's: through their material, from packed state.
+                        if let Some(render) = system.look.h4.as_ref() {
+                            let values = frame.function_values_of_object(system.object);
+                            let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
+                            let draws = uploaded.simulations.particles.h4_draws(index, system, values, bones, &view, frame.time, onset);
+                            if !draws.is_empty() {
+                                let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
+                                h4::particle_pass::draw_h4_particles(
+                                    gl,
+                                    &mut uploaded.h4_effects,
+                                    frame,
+                                    render,
+                                    &draws,
+                                    self.gen3.depth_copy,
+                                    size,
+                                    self.placeholder,
+                                    system.object,
+                                );
+                                gl.use_program(Some(flares.program));
+                                gl.bind_vertex_array(Some(flares.vertex_array));
+                                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                            }
+                            continue;
+                        }
+                        let Some(particles) = particle_gl.as_ref() else {
+                            continue;
+                        };
+                        let targets = ParticleTargets {
+                            no_map,
+                            depth_copy: self.gen3.depth_copy,
+                            distortion_copy: &mut self.h2_distortion_copy,
+                            stops,
+                        };
+                        draw_particle_system(gl, particles, uploaded, frame, index, &view, targets);
+                    }
+                    Sprites::Leaves(index) => {
+                        let leaves = &frame.preview.h3_leaves[index];
+                        let Some(particles) = particle_gl.as_ref() else {
+                            continue;
+                        };
+                        let lighting = h3_lighting_constants(frame);
+                        let drawn = uploaded.simulations.h3_leaves.vertices(index, leaves, &lighting);
+                        if drawn.is_empty() {
+                            continue;
+                        }
+                        let vertices = particle_floats(camera, &drawn);
+                        let textures = uploaded.leaf_textures.get(index).copied().unwrap_or_default();
+                        particles.draw(gl, leaves.shader(), &vertices, textures, no_map, self.gen3.depth_copy, camera, &lighting, stops);
+                    }
+                    Sprites::Strip(index) => {
+                        let strip = &frame.preview.h3_strips[index];
+                        if !frame.h3_strips_shown.get(index).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        let Some(particles) = particle_gl.as_ref() else {
+                            continue;
+                        };
+                        let values = frame.function_values_of_object(strip.object);
+                        let onset = uploaded.simulations.effect_onsets.of(strip.object, strip.scale_name(), values, frame.time);
+                        let lighting = h3_lighting_constants(frame);
+                        let drawn = uploaded.simulations.h3_strips.vertices(index, strip, values, bones, &view, &lighting, frame.time, onset, stops);
+                        if drawn.is_empty() {
+                            continue;
+                        }
+                        let vertices = particle_floats(camera, &drawn);
+                        let textures = uploaded.strip_textures.get(index).copied().unwrap_or_default();
+                        particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.gen3.depth_copy, camera, &lighting, stops);
+                    }
+                }
+            }
+            if distorting {
+                self.gen3.distorted = distorted > 0;
+            }
+            // `s_cheap_particle_system::render`: after every other
+            // transparent, in one batch, in ring-slot order.
+            if matches!(stage, SpriteStage::Rest)
+                && let (Some(first), Some(texture)) = (frame.preview.reach_cheap_emitters.first(), uploaded.reach_cheap_texture)
+            {
+                let drawn = uploaded.simulations.reach_cheap.vertices(first.library(), &view);
+                if !drawn.is_empty()
+                    && let Some(cheap) = self.reach_cheap_gl.get_or_insert_with(|| reach_cheap_gl(gl, self.program)).as_ref()
+                {
+                    let vertices: Vec<[f32; CHEAP_FLOATS]> = drawn
+                        .iter()
+                        .map(|vertex| {
+                            let [a, b, c, d] = ce_flare_clip(camera, vertex.place);
+                            let ([e, f, g], [h, i, j, k]) = (vertex.texcoord, vertex.color);
+                            [a, b, c, d, e, f, g, h, i, j, k]
+                        })
+                        .collect();
+                    // `cheap_particles_render.fx`: `lerp(ps_view_exposure.x,
+                    // ps_view_self_illum_exposure.y, alpha)`.
+                    let exposures = if first.library().halo4() {
+                        let channel = |name: &str, at: usize| match h4::lighting::h4_frame_value(name) {
+                            Some(gen3::shaders::H3Value::Floats(value)) => value[at],
+                            _ => 1.0,
+                        };
+                        [channel("ps_view_exposure", 0), channel("ps_view_self_illum_exposure", 1)]
+                    } else {
+                        let exposure = reach_exposure(stops)[0];
+                        [exposure, exposure]
+                    };
+                    cheap.draw(gl, &vertices, texture, exposures);
+                }
+            }
+            if matches!(stage, SpriteStage::FartherThan(_) | SpriteStage::Distortions) {
+                gl.blend_equation(glow::FUNC_ADD);
+                gl.color_mask(true, true, true, true);
+                gl.use_program(Some(self.program));
+                return;
+            }
+            begin_flares(gl, flares, self.placeholder);
+            // The slot's flare maps run CE's lights, Halo 2's flares, then
+            // these.
+            let first_h3 = frame.preview.ce_lights.len() + frame.preview.h2_flares.len();
+            let viewport = self.scene.as_ref().map_or([1, 1], |scene| scene.size);
+            let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
+            for (index, at) in frame.preview.h3_flares.iter().enumerate() {
+                if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
+                    continue;
+                }
+                let values = frame.function_values_of_object(at.object);
+                let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
+                let event_time = at.event_time(frame.time, onset);
+                // A light's own flare goes out with its light.
+                let colors = frame.change_colors_of_object(at.object);
+                let light = match at.light().map(|light| light.state(values, &colors, frame.time, onset)) {
+                    Some(None) => continue,
+                    state => state.flatten(),
+                };
+                let occlusion = match at.occlusion_patch(light, values, bones, &view, event_time, &pixels) {
+                    None => Some(1.0),
+                    Some(patch) => ce_flare_occlusion(gl, flares, camera, &view, &patch),
+                };
+                let Some(occlusion) = occlusion else {
+                    continue;
+                };
+                if let Some(sprite) = at.sprite(light, values, bones, &view, event_time, occlusion, 0)
+                    && let Some(textures) = uploaded.flare_textures.get(first_h3 + index)
+                {
+                    draw_flare_sprites(gl, flares, camera, &view, &[sprite], textures);
+                }
+            }
+            self.gen3.sprite_cursor = 0;
+            self.end_sprites(gl, frame, slot);
+        }
+    }
+}

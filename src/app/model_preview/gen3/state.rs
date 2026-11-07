@@ -51,6 +51,9 @@ pub(in crate::app::model_preview) struct Gen3State {
     /// The exposure stops Reach's area screen effects come to this frame,
     /// set before its scene draws; 0 outside a Reach picture.
     pub(in crate::app::model_preview) stops: f32,
+    /// How far through the frame's sorted sprites the staged sprite draws
+    /// have got.
+    pub(in crate::app::model_preview) sprite_cursor: usize,
     /// The light's view a self shadow's depth draws through in place of the
     /// camera, while it draws: Reach's and Halo 4's.
     pub(in crate::app::model_preview) shadow_view_projection: Option<[f32; 16]>,

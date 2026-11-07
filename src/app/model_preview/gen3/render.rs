@@ -136,7 +136,14 @@ impl GameRender for Gen3Render {
 
     unsafe fn finish(&mut self, cx: &mut FrameCx<'_>) {
         if !cx.core.h3_draws(cx.frame) {
-            unsafe { self.fallback.finish(cx) }
+            unsafe {
+                if cx.core.draws_object_sprites(cx.frame) {
+                    use super::sprites::SpriteStage;
+                    cx.core.draw_gen3_sprites(cx.gl, cx.frame, cx.slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                    cx.core.draw_gen3_sprites(cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
+                }
+                self.fallback.bloom(cx);
+            }
         }
     }
 }
