@@ -3243,6 +3243,26 @@ mod tests {
         h.app.model.loaded_tags_root().expect("a loose kit is loaded")
     }
 
+    fn halo2_bitmap_kit(h: &mut Harness) {
+        let root = temp_dir("frame-smoke-h2-bitmap").join("tags");
+        let path = root.join(tag_path::to_relative("bitmaps\\smoke.bitmap"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fixture::new_tag_for("halo2_mcc", "bitmap").write(&path).unwrap();
+        let mut source = crate::core::source::load_editing_kit_layout(
+            root.clone(),
+            "Halo 2 Smoke Kit".to_owned(),
+            GameId::Halo2,
+            &h.app.model.default_names,
+            &locate_definitions_root(),
+        ).expect("the synthetic Halo 2 kit loads");
+        source.entries = crate::core::source::scan_folder_subtree_entries(
+            &root, std::path::Path::new(""), &source.names,
+        ).unwrap();
+        source.all_entries = source.entries.clone();
+        source.complete_scan = true;
+        h.app.install_loaded_source(source);
+    }
+
     const CE_TAG: &str = "objects\\weapons\\rifle\\rifle.weapon";
 
     /// A Campaign Evolved container workspace with no containers on disk: its
@@ -3387,6 +3407,17 @@ mod tests {
 
     fn cases() -> Vec<Case> {
         let mut cases = vec![
+            case(
+                "bitmap_reimport_confirm",
+                &["dialog:BitmapReimportConfirm"],
+                &[],
+                halo2_bitmap_kit,
+                |h| {
+                    let key = h.app.model.source().unwrap().entries[0].key.clone();
+                    h.app.begin_reimport_bitmap(key, h.ctx.clone());
+                },
+                &["Reimport Bitmap Folder?", "Reimport Folder", "Cancel"],
+            ),
             case(
                 "home_welcome_with_loaded_kit",
                 &["shell.home_open"],
@@ -5727,7 +5758,7 @@ mod tests {
     }
 
     #[test]
-    fn tag_content_scrolls_to_the_page_bottom_border() {
+    fn tag_content_keeps_the_shared_bottom_gutter() {
         let (mut h, keys) = three_tabs();
         let mut output = None;
         for _ in 0..2 {
@@ -5745,8 +5776,9 @@ mod tests {
             egui::Shape::Text(text) if text.galley.text().starts_with("OBJECT") => Some(shape.clip_rect),
             _ => None,
         }).expect("the actual field group was painted");
-        assert!((clip.bottom() - page.bottom()).abs() < 1.0,
-            "scrolling content reaches the page border: clip={clip:?}, page={page:?}");
+        let gutter = f32::from(crate::app::ui_kit::style::pane_content_margin().bottom);
+        assert!((page.bottom() - clip.bottom() - gutter).abs() < 1.0,
+            "scrolling content keeps the {gutter}px bottom gutter: clip={clip:?}, page={page:?}");
     }
 
     fn home_group(h: &Harness) -> egui_tiles::TileId {
