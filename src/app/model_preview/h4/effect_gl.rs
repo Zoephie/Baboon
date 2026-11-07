@@ -17,6 +17,20 @@ use super::super::common::image::H2Image;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
 
+/// What a Halo 4 effect pass (a tracer, a light volume, a particle system)
+/// draws with: the slot's effect GL, the frame, the scene's depth for the
+/// soft fade, the targets' size, the map a missing sampler reads, and the
+/// object the effect hangs on.
+pub(in crate::app::model_preview) struct H4EffectCx<'a> {
+    pub(in crate::app::model_preview) gl: &'a glow::Context,
+    pub(in crate::app::model_preview) state: &'a mut H4EffectGl,
+    pub(in crate::app::model_preview) frame: &'a ModelGpuFrame,
+    pub(in crate::app::model_preview) depth: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) size: [i32; 2],
+    pub(in crate::app::model_preview) placeholder: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) object: u8,
+}
+
 /// The GL a slot keeps for its Halo 4 effects: programs by pass, textures
 /// by material and sampler, and the buffer the states go through.
 #[derive(Default)]

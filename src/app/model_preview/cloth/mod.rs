@@ -9,7 +9,6 @@ use super::common::fields::{elements, has_flag, object_block};
 use super::common::view::posed_on;
 use super::effects::marker_name;
 use super::*;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, minus, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high_bits, lcg_step};
 
@@ -745,17 +744,13 @@ fn cloth_region_name(path: &str, game: ClothGame) -> String {
 /// tag's shader from the first active permutation of a region of its own.
 /// `center` is the middle of the object's bounding sphere, in its own space,
 /// where Reach starts a sheet; the other games start one at its first pin.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn read_cloth(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
+pub(super) fn read_cloth<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+    cx: &super::load::LoadCx<'_, F>,
     preview: &mut RenderModelPreview,
     game: ClothGame,
     center: [f32; 3],
 ) {
+    let super::load::LoadCx { source, object, owner, markers, frame, .. } = *cx;
     for path in cloth_tags(object) {
         let Ok(tag) = load_referenced_tag_from_source(source, &path, "cloth", b"clwd") else {
             continue;

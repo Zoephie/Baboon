@@ -465,7 +465,8 @@ fn load_tag_preview(
             let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
             let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
             feature_into(&mut notes, "its antennas and cloth", preview, |preview| {
-                super::h4::attached::read_h4_attached_features(source, model_tag, 0, &markers, &frame, None, center, preview);
+                let cx = LoadCx { source, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
+                super::h4::attached::read_h4_attached_features(&cx, center, preview);
             });
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
@@ -735,6 +736,26 @@ fn load_tag_preview(
     }
     Ok(data)
 }
+
+/// What a feature reader reads an object with: the kit, the object's tag, the
+/// owner its features hang on, its markers and where `frame` places each, and
+/// the name an attached object goes by (none for the previewed object).
+pub(in crate::app::model_preview) struct LoadCx<'a, F> {
+    pub(in crate::app::model_preview) source: &'a TagSource,
+    pub(in crate::app::model_preview) object: &'a TagFile,
+    pub(in crate::app::model_preview) owner: u8,
+    pub(in crate::app::model_preview) markers: &'a [RenderModelPreviewMarker],
+    pub(in crate::app::model_preview) frame: &'a F,
+    pub(in crate::app::model_preview) name: Option<&'a str>,
+}
+
+impl<F> Clone for LoadCx<'_, F> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<F> Copy for LoadCx<'_, F> {}
 
 /// Where a marker of the opened object puts what is attached to it.
 pub(in crate::app::model_preview) fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::MarkerFrame, usize) {

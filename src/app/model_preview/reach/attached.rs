@@ -1,11 +1,10 @@
 //! What hangs on a Reach object attached to another.
 
 use std::sync::Arc;
-use blam_tags::TagFile;
 use super::super::attachment::MarkerFrame;
 use super::super::cloth::ClothGame;
 use super::super::*;
-use crate::core::source::TagSource;
+use super::super::load::LoadCx;
 use crate::app::model_preview::common::attached::named;
 
 /// What hangs on a Reach object brought into the preview, or on the one
@@ -14,17 +13,12 @@ use crate::app::model_preview::common::attached::named;
 /// particles, cheap particles, strips and screen effects, and its antennas
 /// and cloth. `center` is the middle of its bounding sphere, in its own
 /// space.
-#[allow(clippy::too_many_arguments)]
 pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-    name: Option<&str>,
+    cx: &LoadCx<'_, F>,
     center: [f32; 3],
     preview: &mut RenderModelPreview,
 ) {
+    let LoadCx { source, object, owner, markers, frame, name } = *cx;
     let flares = super::super::gen3::flares::read_h3_flares(source, object, owner, markers, frame);
     preview.gen3.flares.extend(named(flares, name));
     let (lights, cheap) = super::super::reach::lights::read_reach_lights(source, object, owner, markers, frame);
@@ -45,7 +39,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     preview.gen3.screen_effects.extend(screens);
     super::super::gen3::screen_effects::add_screen_shader_materials(preview);
     preview.antennas.extend(super::super::antennas::read_reach_antennas(source, object, markers, frame, name));
-    super::super::cloth::read_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
+    super::super::cloth::read_cloth(cx, preview, ClothGame::Reach, center);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
     let lit = !(preview.reach.lights.is_empty() && preview.reach.cheap_lights.is_empty());
     if lit && preview.reach.light_passes.is_empty() {

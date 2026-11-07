@@ -6,9 +6,8 @@
 
 use eframe::glow::{self, HasContext};
 use super::super::gen3::light_volumes::H4VolumeDraw;
-use super::effect_gl::{H4EffectGl, material_functions};
+use super::effect_gl::{H4EffectCx, material_functions};
 use super::super::h4::materials::H4EffectMaterial;
-use super::super::renderer::*;
 use crate::core::hlsl::parse::Type;
 
 /// `k_maxRowsPerStrip`.
@@ -52,18 +51,12 @@ fn overall_members(draw: &H4VolumeDraw) -> Vec<(String, Vec<f32>)> {
 
 /// Draw one volume, through `material`, into the bound light target.
 /// `depth` is a copy of the scene's depth for the fade.
-#[allow(clippy::too_many_arguments)]
 pub(in crate::app::model_preview) unsafe fn draw_h4_light_volume(
-    gl: &glow::Context,
-    state: &mut H4EffectGl,
-    frame: &ModelGpuFrame,
+    cx: &mut H4EffectCx<'_>,
     material: &H4EffectMaterial,
     draw: &H4VolumeDraw,
-    depth: Option<glow::NativeTexture>,
-    size: [i32; 2],
-    placeholder: Option<glow::NativeTexture>,
-    object: u8,
 ) {
+    let H4EffectCx { gl, ref mut state, frame, depth, size, placeholder, object } = *cx;
     let pass = &*material.pass;
     // `profile_layout` holds a volume to a strip's 128.
     let count = draw.states.len();

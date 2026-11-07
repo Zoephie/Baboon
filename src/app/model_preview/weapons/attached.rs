@@ -9,6 +9,7 @@ use super::super::common::fields::{elements, has_flag};
 use super::super::dx9::passes::{h2_change_colors_for, read_h2_change_colors};
 use super::super::*;
 use crate::core::source::TagSource;
+use super::super::load::LoadCx;
 use super::super::h3::attached::read_h3_attached_features;
 use super::super::h4::attached::read_h4_attached_features;
 use super::super::reach::attached::read_reach_attached_features;
@@ -32,20 +33,21 @@ pub(in crate::app::model_preview) fn fold_attached(
     let frame = |marker: &RenderModelPreviewMarker| {
         (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
     };
+    let cx = LoadCx { source, object, owner, markers: &attached.markers, frame: &frame, name: Some(name) };
     // `Game::of` calls Reach `Halo3` too; its attachments, lights and held
     // weapons read differently, and wait on their own readers.
     if source.game() == Some(GameId::Halo4) {
         // Halo 4's own readers, never Halo 3's readings of it.
         let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
-        read_h4_attached_features(source, object, owner, &attached.markers, &frame, Some(name), center, preview);
+        read_h4_attached_features(&cx, center, preview);
     } else if source.game() == Some(GameId::HaloReach) {
         let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
-        read_reach_attached_features(source, object, owner, &attached.markers, &frame, Some(name), center, preview);
+        read_reach_attached_features(&cx, center, preview);
     } else if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
-        read_h3_attached_features(source, object, owner, &attached.markers, &frame, Some(name), preview);
-        read_extension_weapons(source, object, owner, &attached.markers, &frame, preview, Some(name));
+        read_h3_attached_features(&cx, preview);
+        read_extension_weapons(&cx, preview);
     } else {
-        super::super::h2::attached::read_h2_attached_features(source, object, owner, &attached.markers, &frame, name, preview);
+        super::super::h2::attached::read_h2_attached_features(&cx, preview);
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
     if let Some(prt) = preview.h2.prt.as_mut() {
@@ -70,14 +72,10 @@ pub(in crate::app::model_preview) fn fold_attached(
 /// their effects play at the unit's markers. On a child object they take its
 /// name, as its own effects do.
 pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
+    cx: &LoadCx<'_, F>,
     preview: &mut RenderModelPreview,
-    within: Option<&str>,
 ) {
+    let LoadCx { source, object, owner, markers, frame, name: within } = *cx;
     let Some(holder) = super::super::common::fields::object_block(object, "weapons") else {
         return;
     };
@@ -93,7 +91,7 @@ pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPr
             continue;
         }
         if blam_tags::game::Game::of(&weapon) == blam_tags::game::Game::Halo3 {
-            read_h3_attached_features(source, &weapon, owner, markers, frame, within, preview);
+            read_h3_attached_features(&LoadCx { object: &weapon, ..*cx }, preview);
             continue;
         }
         let particles = super::super::particles::read_h3_particles(source, &weapon, owner, markers, frame);

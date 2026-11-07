@@ -8,9 +8,8 @@
 use eframe::glow::{self, HasContext};
 use super::super::particles::H4EmitterDraw;
 use super::super::gen3::shaders::{H3Pass, H3Value};
-use super::effect_gl::{H4EffectGl, material_functions};
+use super::effect_gl::{H4EffectCx, H4EffectGl, material_functions};
 use super::particles::{H4ParticleRender, custom_vert_registers};
-use super::super::renderer::*;
 use crate::core::hlsl::parse::Type;
 
 /// `effect_lightprobe_setup_lighting_constants` with the default probe
@@ -28,18 +27,12 @@ const NO_FAR_FADE: [f32; 2] = [1e-4, 10_000.0];
 
 /// Draw `draws` of one particle system, whose look is `render`, into the
 /// bound light target. `depth` is a copy of the scene's depth for the fade.
-#[allow(clippy::too_many_arguments)]
 pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
-    gl: &glow::Context,
-    state: &mut H4EffectGl,
-    frame: &ModelGpuFrame,
+    cx: &mut H4EffectCx<'_>,
     render: &H4ParticleRender,
     draws: &[H4EmitterDraw],
-    depth: Option<glow::NativeTexture>,
-    size: [i32; 2],
-    placeholder: Option<glow::NativeTexture>,
-    object: u8,
 ) {
+    let H4EffectCx { gl, ref mut state, frame, depth, size, placeholder, object } = *cx;
     let material = &render.material;
     let pass = &*material.pass;
     unsafe {

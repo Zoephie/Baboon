@@ -16,5 +16,6 @@ pub(in crate::app::model_preview) fn read_reach_object_features(source: &TagSour
     let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
     // `object_get_bounding_sphere`'s middle, as the leaves take it.
     let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
-    super::super::reach::attached::read_reach_attached_features(source, model_tag, 0, &markers, &frame, None, center, preview);
+    let cx = super::super::load::LoadCx { source, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
+    super::super::reach::attached::read_reach_attached_features(&cx, center, preview);
 }

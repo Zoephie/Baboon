@@ -1,25 +1,22 @@
 //! What hangs on a Halo 2 object attached to another.
 
 use std::sync::Arc;
-use blam_tags::TagFile;
 use super::super::attachment::MarkerFrame;
 use super::super::cloth::ClothGame;
 use super::super::*;
-use crate::core::source::TagSource;
+use super::super::load::LoadCx;
 use crate::app::model_preview::common::attached::Attached;
 
 /// What hangs on a Halo 2 object brought into the preview: its flares and
 /// lights, particle systems, light volumes, contrails, liquids, cloth and
 /// extension weapons, at `markers` as `frame` places them, named `name`.
 pub(in crate::app::model_preview) fn read_h2_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-    name: &str,
+    cx: &LoadCx<'_, F>,
     preview: &mut RenderModelPreview,
 ) {
+    let LoadCx { source, object, owner, markers, frame, name } = *cx;
+    // Only `fold_attached` reads a Halo 2 object's attachments, always by name.
+    let name = name.unwrap_or_default();
     let (flares, lights, gels) =
         super::lights::read_h2_flares(source, object, owner, markers, frame);
     preview.h2.flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
@@ -36,6 +33,6 @@ pub(in crate::app::model_preview) fn read_h2_attached_features<F: Fn(&RenderMode
     preview.h2.contrails.extend(contrails.into_iter().map(|contrail| contrail.on_attached(name)));
     let liquids = super::liquid::read_h2_liquids(source, object, owner, markers, frame);
     preview.h2.liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
-    super::super::cloth::read_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
-    super::super::weapons::attached::read_extension_weapons(source, object, owner, markers, frame, preview, Some(name));
+    super::super::cloth::read_cloth(cx, preview, ClothGame::Halo2, [0.0; 3]);
+    super::super::weapons::attached::read_extension_weapons(cx, preview);
 }

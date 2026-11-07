@@ -1,11 +1,10 @@
 //! What hangs on a Halo 4 object attached to another.
 
 use std::sync::Arc;
-use blam_tags::TagFile;
 use super::super::attachment::MarkerFrame;
 use super::super::cloth::ClothGame;
 use super::super::*;
-use crate::core::source::TagSource;
+use super::super::load::LoadCx;
 use crate::app::model_preview::common::attached::named;
 
 /// What a Halo 4 object brings of its own so far: its lights, cheap lights
@@ -14,17 +13,12 @@ use crate::app::model_preview::common::attached::named;
 /// tracers, which draw through their materials (`particles.md`,
 /// `tracers.md`), its cheap particles, and antennas and cloth, whose
 /// definitions are Reach's (`objects.md` §3.10).
-#[allow(clippy::too_many_arguments)]
 pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-    name: Option<&str>,
+    cx: &LoadCx<'_, F>,
     center: [f32; 3],
     preview: &mut RenderModelPreview,
 ) {
+    let LoadCx { source, object, owner, markers, frame, name } = *cx;
     // A weapon opened on its own has no parent to hold it.
     let lone_weapon = name.is_none() && object.group().tag == u32::from_be_bytes(*b"weap");
     let (lights, cheap) = super::super::h4::lights::read_h4_lights(source, object, owner, markers, frame, lone_weapon);
@@ -45,5 +39,5 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderMode
         preview.h4.flare_pass = super::super::h4::flares::h4_flare_pass(source).ok().map(Arc::new);
     }
     preview.antennas.extend(super::super::antennas::read_reach_antennas(source, object, markers, frame, name));
-    super::super::cloth::read_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
+    super::super::cloth::read_cloth(cx, preview, ClothGame::Reach, center);
 }
