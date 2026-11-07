@@ -296,6 +296,69 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
     caches: &mut ResolveCaches,
 ) -> Result<H3Material, String> {
     let method = values.method;
+    let compiled = compile_passes(source, method, caches)?;
+    let mut material = H3Material {
+        dialect: compiled.dialect.into(),
+        albedo: compiled.albedo,
+        lit: compiled.lit,
+        screen_maps: screen_maps(method),
+        decal: compiled.decal,
+        decal_modulates_specular: compiled.decal_modulates_specular,
+        after_lighting: compiled.after_lighting,
+        sort_layer: values.sort_layer,
+        prt: compiled.prt,
+        camo: compiled.camo,
+        shadow_generate: compiled.shadow_generate,
+        dynamic_light: compiled.dynamic_light,
+        blend: compiled.blend,
+        values: Default::default(),
+        textures: Vec::new(),
+        change_colors: Vec::new(),
+        animations: Vec::new(),
+        shield: None,
+        fringe: None,
+    };
+    if compiled.blend == H3Blend::Opaque {
+        material.shield = h3_shield(source, caches);
+    }
+    let passes = material_passes(&material);
+    let clock = animation_clock(source, compiled.screen);
+    material.animations = parameter_animations(method, clock);
+    for pass in &passes {
+        bind_pass_values(values, pass, &mut material);
+        bind_pass_textures(source, values, pass, &mut material, caches);
+        if compiled.dialect == RenderMethodDialect::Reach {
+            reach_environment_maps(source, pass, &mut material, caches);
+        }
+    }
+    Ok(material)
+}
+
+/// What a render method's definition compiles to for its options: its
+/// passes, and the flags its blend and family set.
+struct CompiledPasses {
+    dialect: RenderMethodDialect,
+    blend: H3Blend,
+    decal: bool,
+    decal_modulates_specular: bool,
+    after_lighting: bool,
+    /// Whether the definition is `screen`'s, which its clock follows.
+    screen: bool,
+    lit: Arc<H3Pass>,
+    albedo: Option<Arc<H3Pass>>,
+    camo: Option<Arc<H3Pass>>,
+    shadow_generate: Option<Arc<H3Pass>>,
+    dynamic_light: Option<Arc<H3Pass>>,
+    prt: [Option<Arc<H3Pass>>; 3],
+}
+
+/// The method's definition read, and each entry point it draws through
+/// compiled for its options.
+fn compile_passes(
+    source: &TagSource,
+    method: &RenderMethod,
+    caches: &mut ResolveCaches,
+) -> Result<CompiledPasses, String> {
     let sources = caches.h3_sources.get_or_insert_with(|| H3Sources::new(source));
     let definition = sources
         .definition(&method.definition_path)
@@ -357,37 +420,35 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
     if let Some((_, ambient)) = single_pass_entries.filter(|(_, ambient)| has(ambient)) {
         prt[0] = Some(sources.pass(&definition, &options, ambient, own_albedo)?);
     }
-    let screen_maps = method
+    Ok(CompiledPasses {
+        dialect,
+        blend,
+        decal,
+        decal_modulates_specular: decal && definition.decal_modulates_specular(&options),
+        after_lighting: definition.after_lighting(&options),
+        screen: definition.name == "screen",
+        lit,
+        albedo,
+        camo,
+        shadow_generate,
+        dynamic_light,
+        prt,
+    })
+}
+
+/// The parameters whose bitmaps the screen supplies.
+fn screen_maps(method: &RenderMethod) -> Vec<String> {
+    method
         .parameters
         .iter()
         .filter(|parameter| parameter.bitmap_extern_mode == Some(RenderMethodBitmapExternMode::Screen))
         .map(|parameter| parameter.parameter_name.clone())
-        .collect();
-    let mut material = H3Material {
-        dialect: dialect.into(),
-        albedo,
-        lit,
-        screen_maps,
-        decal,
-        decal_modulates_specular: decal && definition.decal_modulates_specular(&options),
-        after_lighting: definition.after_lighting(&options),
-        sort_layer: values.sort_layer,
-        prt,
-        camo,
-        shadow_generate,
-        dynamic_light,
-        blend,
-        values: Default::default(),
-        textures: Vec::new(),
-        change_colors: Vec::new(),
-        animations: Vec::new(),
-        shield: None,
-        fringe: None,
-    };
-    if opaque {
-        material.shield = h3_shield(source, caches);
-    }
-    let passes: Vec<Arc<H3Pass>> = material
+        .collect()
+}
+
+/// Every pass the material draws through, the lit pass last.
+fn material_passes(material: &H3Material) -> Vec<Arc<H3Pass>> {
+    material
         .albedo
         .iter()
         .chain(&material.camo)
@@ -396,13 +457,22 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
         .chain(material.prt.iter().flatten())
         .cloned()
         .chain([Arc::clone(&material.lit)])
-        .collect();
-    let clock = match (source.game(), definition.name == "screen") {
+        .collect()
+}
+
+/// Which clock the material's animated parameters run by.
+fn animation_clock(source: &TagSource, screen: bool) -> H3Clock {
+    match (source.game(), screen) {
         (Some(GameId::Halo3Odst), true) => H3Clock::OdstScreen,
         (Some(GameId::Halo3Odst), false) => H3Clock::Odst,
         (Some(GameId::HaloReach), _) => H3Clock::Reach,
         _ => H3Clock::Halo3,
-    };
+    }
+}
+
+/// Each animated parameter that moves, as the uniform it writes.
+fn parameter_animations(method: &RenderMethod, clock: H3Clock) -> Vec<H3Animation> {
+    let mut animations = Vec::new();
     for parameter in &method.parameters {
         let uniform = match parameter.parameter_type.map(|kind| kind.get()) {
             Some(RenderMethodParameterType::Bitmap) => {
@@ -433,7 +503,7 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
                 H3Animated::Frame => format!("UserParameterTexture_{}", parameter.parameter_name),
                 _ => uniform.clone(),
             };
-            material.animations.push(H3Animation {
+            animations.push(H3Animation {
                 uniform,
                 writes,
                 function: function.clone(),
@@ -449,85 +519,96 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
             });
         }
     }
-    for pass in &passes {
-        for (uniform, _) in &pass.uniforms {
-            let Some(name) = uniform.strip_prefix("UserParameter_") else {
-                continue;
-            };
-            if let Some(ParameterSource::Extern(source)) =
-                values.resolved.and_then(|resolved| resolved.find(name)).map(|found| &found.source)
-            {
-                let source: &'static str = source.into();
-                if let Some(channel) = h3_extern_change_color(source) {
-                    material.change_colors.push((uniform.clone(), channel));
-                } else if source == "debug tint" {
-                    material.values.insert(uniform.clone(), H3Value::Floats([1.0, 1.0, 1.0, 0.0]));
-                }
-                continue;
+    animations
+}
+
+/// The values `pass`'s user parameters take: an extern's change color or
+/// debug tint, a bitmap's transform, or the parameter's own value.
+fn bind_pass_values(values: &Values<'_>, pass: &H3Pass, material: &mut H3Material) {
+    for (uniform, _) in &pass.uniforms {
+        let Some(name) = uniform.strip_prefix("UserParameter_") else {
+            continue;
+        };
+        if let Some(ParameterSource::Extern(source)) =
+            values.resolved.and_then(|resolved| resolved.find(name)).map(|found| &found.source)
+        {
+            let source: &'static str = source.into();
+            if let Some(channel) = h3_extern_change_color(source) {
+                material.change_colors.push((uniform.clone(), channel));
+            } else if source == "debug tint" {
+                material.values.insert(uniform.clone(), H3Value::Floats([1.0, 1.0, 1.0, 0.0]));
             }
-            let value = match name.strip_suffix("_xform") {
-                Some(map) => Some(H3Value::Floats(h3_xform(values, map))),
-                None => h3_parameter_value(values, name),
-            };
-            if let Some(value) = value {
-                material.values.insert(uniform.clone(), value);
-            }
+            continue;
         }
-        for (uniform, kind) in &pass.textures {
-            let Some(name) = uniform.strip_prefix("UserParameterTexture_") else {
-                continue;
-            };
-            if material.textures.iter().any(|known| known.uniform == *uniform) {
-                continue;
-            }
-            let found = values.resolved.and_then(|resolved| resolved.find(name));
-            let (path, index, sampler) = match found.map(|found| &found.source) {
-                // With no render target live behind an extern mode, as here,
-                // the bitmap binds: `render_method_submit_volatile_per_shader`.
-                Some(ParameterSource::Inline(ResolvedValue::Bitmap(binding))) => (
-                    binding.bitmap_path.clone(),
-                    binding.bitmap_index,
-                    Some(H3Sampler {
-                        address: [binding.address_mode_x, binding.address_mode_y],
-                        filter: binding.filter_mode,
-                    }),
-                ),
-                Some(ParameterSource::Extern(extern_source)) => {
-                    match h3_extern_bitmap(extern_source.into()) {
-                        Some(path) => (path.to_owned(), 0, None),
-                        None => continue,
-                    }
-                }
-                _ => continue,
-            };
-            let kind = match kind {
-                TextureKind::Cube => SamplerKind::Cube,
-                TextureKind::Volume => SamplerKind::Volume,
-                _ => SamplerKind::Texture2D,
-            };
-            let Some((image, texels, mips)) = h3_image(source, &path, index, kind, caches) else {
-                continue;
-            };
-            let animated = material.animations.iter().any(|animation| {
-                animation.writes == H3Animated::Frame && animation.uniform == *uniform
-            });
-            let frames = if animated {
-                let tag = load_referenced_tag_from_source(source, &path, "bitmap", b"bitm").ok();
-                let count = tag.as_ref().map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
-                (0..count)
-                    .filter_map(|at| h3_image(source, &path, at as i16, kind, caches))
-                    .map(|(image, _, _)| image)
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            material.textures.push(H3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
-        }
-        if dialect == RenderMethodDialect::Reach {
-            reach_environment_maps(source, pass, &mut material, caches);
+        let value = match name.strip_suffix("_xform") {
+            Some(map) => Some(H3Value::Floats(h3_xform(values, map))),
+            None => h3_parameter_value(values, name),
+        };
+        if let Some(value) = value {
+            material.values.insert(uniform.clone(), value);
         }
     }
-    Ok(material)
+}
+
+/// The bitmaps `pass`'s user textures bind, each once, with an animated one's
+/// frames.
+fn bind_pass_textures(
+    source: &TagSource,
+    values: &Values<'_>,
+    pass: &H3Pass,
+    material: &mut H3Material,
+    caches: &mut ResolveCaches,
+) {
+    for (uniform, kind) in &pass.textures {
+        let Some(name) = uniform.strip_prefix("UserParameterTexture_") else {
+            continue;
+        };
+        if material.textures.iter().any(|known| known.uniform == *uniform) {
+            continue;
+        }
+        let found = values.resolved.and_then(|resolved| resolved.find(name));
+        let (path, index, sampler) = match found.map(|found| &found.source) {
+            // With no render target live behind an extern mode, as here,
+            // the bitmap binds: `render_method_submit_volatile_per_shader`.
+            Some(ParameterSource::Inline(ResolvedValue::Bitmap(binding))) => (
+                binding.bitmap_path.clone(),
+                binding.bitmap_index,
+                Some(H3Sampler {
+                    address: [binding.address_mode_x, binding.address_mode_y],
+                    filter: binding.filter_mode,
+                }),
+            ),
+            Some(ParameterSource::Extern(extern_source)) => {
+                match h3_extern_bitmap(extern_source.into()) {
+                    Some(path) => (path.to_owned(), 0, None),
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+        let kind = match kind {
+            TextureKind::Cube => SamplerKind::Cube,
+            TextureKind::Volume => SamplerKind::Volume,
+            _ => SamplerKind::Texture2D,
+        };
+        let Some((image, texels, mips)) = h3_image(source, &path, index, kind, caches) else {
+            continue;
+        };
+        let animated = material.animations.iter().any(|animation| {
+            animation.writes == H3Animated::Frame && animation.uniform == *uniform
+        });
+        let frames = if animated {
+            let tag = load_referenced_tag_from_source(source, &path, "bitmap", b"bitm").ok();
+            let count = tag.as_ref().map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
+            (0..count)
+                .filter_map(|at| h3_image(source, &path, at as i16, kind, caches))
+                .map(|(image, _, _)| image)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        material.textures.push(H3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
+    }
 }
 
 /// Reach's cube maps are the rasterizer's own, not a shader's externs. With no
