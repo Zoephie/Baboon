@@ -5,6 +5,11 @@ use super::*;
 use crate::app::kits::terminal::trim_terminal_lines;
 use crate::app::tag_ops::refactor::send_folder_refactor_progress;
 
+#[cfg(test)]
+thread_local! {
+    pub(in crate::app) static DEPENDENCY_READS: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
 impl Baboon {
     pub(in crate::app) fn fix_current_tag_dependencies(&mut self) {
         if self.refuse_read_only_edit(self.model.active) {
@@ -570,6 +575,10 @@ pub(in crate::app) fn read_entry_dependencies(
     source: &TagSource,
     entry: &TagEntry,
 ) -> Result<Vec<DependencyRef>, String> {
+    #[cfg(test)]
+    DEPENDENCY_READS.with(|reads| {
+        if let Some(reads) = reads.borrow_mut().as_mut() { reads.push(entry.key.clone()); }
+    });
     match &entry.location {
         // A loose tag usually carries a `want` (dependency-list) stream, which
         // is far cheaper to read than the whole tag.
@@ -1032,7 +1041,7 @@ mod tests {
         let new_shader = entry("zoeph_test\\jackal\\jackal.shader", shader);
         let outside_model = entry("objects\\characters\\shared\\shared.model", model);
         let unrelated = entry("objects\\characters\\brute\\brute.model", model);
-        let all_entries = vec![old_shader.clone(), outside_model.clone(), unrelated];
+        let all_entries = vec![old_shader.clone(), outside_model.clone(), unrelated.clone()];
         let old_entries = vec![old_shader.clone()];
         let new_entries = vec![new_shader.clone()];
         let mut rewrites = HashMap::new();
@@ -1055,6 +1064,7 @@ mod tests {
                 rel_path: "objects\\characters\\jackal\\jackal".to_owned(),
             }],
         );
+        reverse.set_tag_dependencies(unrelated.key.clone(), Vec::new());
 
         let affected = affected_move_rewrite_entries(
             &all_entries,
@@ -1071,6 +1081,10 @@ mod tests {
         assert_eq!(affected_keys.len(), 2);
         assert!(affected_keys.contains(&new_shader.key));
         assert!(affected_keys.contains(&outside_model.key));
+        reverse.clear_tag(&unrelated.key);
+        let uncertain = affected_move_rewrite_entries(&all_entries, &old_entries, &new_entries, &rewrites, Some(&reverse));
+        assert_eq!(uncertain.len(), 3, "a tag with unknown dependencies must still be checked");
+        assert!(uncertain.iter().any(|entry| entry.key == unrelated.key));
     }
 
     fn loose(root: &Path, all_entries: Vec<TagEntry>) -> LoadedSourceData {

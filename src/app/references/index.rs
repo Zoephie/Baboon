@@ -142,22 +142,8 @@ impl Baboon {
             source.tree = done.tree;
             source.group_tree = crate::core::source::build_group_tree(&source.all_entries);
             source.reverse_dependencies = done.reverse_dependencies;
-            if let TagSource::LooseFolder { root, .. } = &source.source {
-                if !source.all_entries.is_empty()
-                    && let Some(game) = source.game.map(GameId::as_str)
-                {
-                    let _ = crate::core::source::save_entry_index(game, root, &source.all_entries);
-                }
-                if let (Some(game), Some(reverse_dependencies)) =
-                    (source.game.map(GameId::as_str), source.reverse_dependencies.as_ref())
-                {
-                    let _ = crate::core::source::save_reverse_dependency_index(
-                        game,
-                        root,
-                        reverse_dependencies,
-                    );
-                }
-            }
+            // The worker already persisted changed rows. Saving full indexes
+            // here would repeat O(all tags) work while blocking the UI.
         }
         if done.moved {
             let moved_folder = done

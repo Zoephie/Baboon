@@ -241,12 +241,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
     let (bitmap_library, model_library) = (&mut view.bitmap_browser, &mut view.model_browser);
 
     Frame::NONE
-        .inner_margin(egui::Margin {
-            left: 10,
-            right: 10,
-            top: 8,
-            bottom: 8,
-        })
+        .inner_margin(pane_content_margin())
         .show(ui, |ui| {
             set_browser_modified_tags(ui, modified_tags);
             set_browser_favorite_folders(ui, is_loose.then_some(pane_favorite_folders));
@@ -1167,21 +1162,17 @@ fn edit_browser_prefs(cx: &Ctx, show_prefixes: bool, folders_before_tags: bool) 
     }
 }
 
-fn browser_toolbar_controls(
-    ui: &mut Ui,
-    mode: &mut BrowserMode,
-    sort: &mut BrowserSort,
-    show_prefixes: &mut bool,
-    folders_before_tags: &mut bool,
-    search_scope: &mut BrowserSearchScope,
-    mut table_layout: Option<&mut FolderTableLayout>,
-    show_modes: bool,
-) -> bool {
+fn style_browser_toolbar(ui: &mut Ui) {
     ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
     ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
     ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
 
-    let mut groups_clicked = false;
+}
+
+fn browser_sort_control(
+    ui: &mut Ui, sort: &mut BrowserSort, folders_before_tags: &mut bool,
+    mut table_layout: Option<&mut FolderTableLayout>,
+) {
     icon_text_dropdown_button(ui, ButtonIcon::Sort, "Sort", |ui| {
         style_list_menu(ui);
         for option in BrowserSort::ALL {
@@ -1206,6 +1197,29 @@ fn browser_toolbar_controls(
         ui.separator();
         ui.baboon_checkbox(folders_before_tags, "Folders before tags");
     });
+}
+
+fn browser_other_control(ui: &mut Ui, search_scope: &mut BrowserSearchScope) {
+    icon_menu_button(ui, ButtonIcon::Other, "Other browser options", |ui| {
+        style_list_menu(ui);
+        search_scope_controls(ui, search_scope);
+    });
+}
+
+fn browser_toolbar_controls(
+    ui: &mut Ui,
+    mode: &mut BrowserMode,
+    sort: &mut BrowserSort,
+    show_prefixes: &mut bool,
+    folders_before_tags: &mut bool,
+    search_scope: &mut BrowserSearchScope,
+    table_layout: Option<&mut FolderTableLayout>,
+    show_modes: bool,
+) -> bool {
+    style_browser_toolbar(ui);
+
+    let mut groups_clicked = false;
+    browser_sort_control(ui, sort, folders_before_tags, table_layout);
     if show_modes {
         icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
             style_list_menu(ui);
@@ -1222,14 +1236,11 @@ fn browser_toolbar_controls(
             ui.baboon_checkbox(show_prefixes, "Show prefixes");
         });
     }
-    icon_menu_button(ui, ButtonIcon::Other, "Other browser options", |ui| {
-        style_list_menu(ui);
-        search_scope_controls(ui, search_scope);
-    });
+    browser_other_control(ui, search_scope);
     groups_clicked
 }
 
-/// Folder-page wrapper for the shared controls. Keeping all four controls in
+/// Folder-page wrapper for the shared controls. Keeping the controls in
 /// this single helper means the wide row and wrapped narrow row cannot drift
 /// into different button sets or spacing.
 fn draw_folder_browser_controls(
@@ -1241,35 +1252,38 @@ fn draw_folder_browser_controls(
     action: &mut Option<BrowserAction>,
 ) {
     ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
-    ui.add_enabled_ui(can_create, |ui| {
-        icon_text_dropdown_button(ui, ButtonIcon::Add, "New", |ui| {
-            style_list_menu(ui);
-            let folder = tag_path::relative_tag_path(&pane.rel_path);
-            let folder_rel = (!folder.is_empty()).then_some(folder);
-            if icon_text_button(ui, ButtonIcon::NewTag, "New Tag...", true).clicked() {
-                *action = Some(BrowserAction::NewTagInFolder { folder_rel: folder_rel.clone() });
-                close_menu(ui);
-            }
-            if icon_text_button(ui, ButtonIcon::FolderOpen, "New Folder...", true).clicked() {
-                *action = Some(BrowserAction::NewContainerFolder { parent_rel: folder_rel });
-                close_menu(ui);
-            }
+    if !pane.assets_view {
+        ui.add_enabled_ui(can_create, |ui| {
+            icon_text_dropdown_button(ui, ButtonIcon::Add, "New", |ui| {
+                style_list_menu(ui);
+                let folder = tag_path::relative_tag_path(&pane.rel_path);
+                let folder_rel = (!folder.is_empty()).then_some(folder);
+                if icon_text_button(ui, ButtonIcon::NewTag, "New Tag...", true).clicked() {
+                    *action = Some(BrowserAction::NewTagInFolder { folder_rel: folder_rel.clone() });
+                    close_menu(ui);
+                }
+                if icon_text_button(ui, ButtonIcon::FolderOpen, "New Folder...", true).clicked() {
+                    *action = Some(BrowserAction::NewContainerFolder { parent_rel: folder_rel });
+                    close_menu(ui);
+                }
+            });
         });
-    });
+    }
     if pane.assets_view {
+        style_browser_toolbar(ui);
+        browser_sort_control(ui, &mut pane.sort, folders_before_tags, Some(&mut pane.table_layout));
+        icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
+            ui.label("Thumbnail size");
+            ui.add(egui::Slider::new(&mut pane.asset_cell_size, MIN_CELL..=MAX_CELL));
+        });
         icon_menu_button(ui, ButtonIcon::Filter, "Filter asset types", |ui| {
             style_list_menu(ui);
             ui.label("Asset types");
             ui.baboon_checkbox(&mut pane.asset_bitmaps, "Bitmaps");
             ui.baboon_checkbox(&mut pane.asset_models, "Models");
         });
-        icon_menu_button(ui, ButtonIcon::View, "Thumbnail size", |ui| {
-            ui.label("Thumbnail size");
-            ui.add(egui::Slider::new(
-                &mut pane.asset_cell_size,
-                MIN_CELL..=MAX_CELL,
-            ));
-        });
+        browser_other_control(ui, &mut pane.search_scope);
+        return;
     }
     browser_toolbar_controls(
         ui,
@@ -1279,7 +1293,7 @@ fn draw_folder_browser_controls(
         folders_before_tags,
         &mut pane.search_scope,
         Some(&mut pane.table_layout),
-        !pane.assets_view,
+        true,
     );
 }
 

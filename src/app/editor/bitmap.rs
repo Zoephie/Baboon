@@ -41,6 +41,34 @@ pub(in crate::app) fn draw_bitmap_tag(
     }
 }
 
+/// Extraction stays available for read-only and packed bitmap tags too.
+/// Classic games additionally retain the source color plate used by Tool.
+pub(in crate::app) fn draw_bitmap_extract_button(
+    ui: &mut Ui,
+    entry: &TagEntry,
+    game: Option<GameId>,
+) -> Option<crate::app::browser::BrowserAction> {
+    use crate::app::browser::{BrowserAction, bitmaps_keep_source_images, BITMAP_SOURCE_HOVER};
+    let mut action = None;
+    if game.is_some_and(bitmaps_keep_source_images) {
+        icon_text_dropdown_button(ui, ButtonIcon::Export, "Extract", |ui| {
+            if icon_text_button(ui, ButtonIcon::Export, "Bitmap Images…", true).clicked() {
+                action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
+                close_menu(ui);
+            }
+            if icon_text_button(ui, ButtonIcon::Export, "Source Image…", true)
+                .on_hover_text(BITMAP_SOURCE_HOVER).clicked()
+            {
+                action = Some(BrowserAction::ExtractBitmapSource(entry.key.clone()));
+                close_menu(ui);
+            }
+        });
+    } else if icon_text_button(ui, ButtonIcon::Export, "Extract", true).clicked() {
+        action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
+    }
+    action
+}
+
 pub(in crate::app) fn bitmap_reimport_data_path(
     entry: &TagEntry,
     tags_root: Option<&Path>,
@@ -1034,6 +1062,65 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn bitmap_header_extract_dispatches_the_engines_available_options() {
+        use crate::app::browser::BrowserAction;
+        for (game, option) in [
+            (Some(GameId::HaloCe), Some("Bitmap Images…")),
+            (Some(GameId::HaloCe), Some("Source Image…")),
+            (Some(GameId::Halo2), Some("Bitmap Images…")),
+            (Some(GameId::Halo2), Some("Source Image…")),
+            (Some(GameId::Halo3), None),
+            (Some(GameId::HaloReach), None),
+            (None, None),
+        ] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let entry = TagEntry {
+                key: "bitmap_header_test".to_owned(), display_path: "ui/test.bitmap".to_owned(),
+                group_tag: u32::from_be_bytes(*b"bitm"), group_name: Some("bitmap".to_owned()),
+                location: TagEntryLocation::LooseFile(PathBuf::from("ui/test.bitmap")),
+            };
+            let mut actions = Vec::new();
+            let mut frame = |events| crate::app::run_ui_test(&ctx,
+                egui::RawInput { events, ..Default::default() }, |ui| {
+                    if let Some(action) = draw_bitmap_extract_button(ui, &entry, game) {
+                        actions.push(action);
+                    }
+                });
+            let center = |output: &egui::FullOutput, label: &str| output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text().trim() == label =>
+                    Some(text.pos + text.galley.rect.center().to_vec2()),
+                _ => None,
+            }).expect(label);
+            let output = frame(vec![]);
+            let trigger = center(&output, "Extract");
+            let click = |pos, pressed| vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton {
+                pos, pressed, button: egui::PointerButton::Primary, modifiers: Default::default(),
+            }];
+            frame(click(trigger, true));
+            frame(click(trigger, false));
+            if let Some(option) = option {
+                let output = frame(vec![]);
+                let pos = center(&output, option);
+                frame(click(pos, true));
+                frame(click(pos, false));
+            }
+            assert_eq!(actions.len(), 1, "{game:?}, {option:?}");
+            match &actions[0] {
+                BrowserAction::ExtractBitmap(key) => {
+                    assert_ne!(option, Some("Source Image…"));
+                    assert_eq!(key, &entry.key);
+                }
+                BrowserAction::ExtractBitmapSource(key) => {
+                    assert_eq!(option, Some("Source Image…"));
+                    assert_eq!(key, &entry.key);
+                }
+                _ => panic!("unexpected bitmap header action"),
+            }
+        }
+    }
+
+    #[test]
     fn soloing_a_channel_enables_it_and_disables_the_rest() {
         let mut preview = BitmapPreviewState::default();
         apply_bitmap_channel_action(
@@ -1246,6 +1333,9 @@ mod tests {
         let mut preview = BitmapPreviewState::default();
         assert!(preview.show_checkerboard);
         assert!(preview.show_border);
+        assert_eq!(filtered_bitmap_rgba(&data, &preview), [10, 20, 30, 255]);
+        apply_bitmap_channel_action(&mut preview, ButtonIcon::ChannelAlpha, BitmapChannelAction::Toggle);
+        assert_eq!(filtered_bitmap_rgba(&data, &preview), [10, 20, 30, 40]);
         preview.show_green = false;
         preview.show_alpha = false;
         assert_eq!(filtered_bitmap_rgba(&data, &preview), [10, 0, 30, 255]);

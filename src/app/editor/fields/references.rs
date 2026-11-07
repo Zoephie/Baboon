@@ -821,16 +821,9 @@ pub(in crate::app) fn draw_foundation_flags_row(
     let label_height = if stacked { 26.0 } else { 0.0 };
     let panel_width = if stacked { (row_width - FOUNDATION_LABEL_INSET).max(1.0) }
         else { (row_width - FOUNDATION_LABEL_WIDTH - 40.0).clamp(360.0, 760.0) };
-    let flag_row_height = 21.0;
-    let panel_height = if display_flags.is_empty() {
-        32.0
-    } else {
-        12.0 + flag_row_height * display_flags.len() as f32
-            + if edit.expert_mode { 24.0 } else { 0.0 }
-    };
+    let panel_height = flag_panel_height(display_flags.len(), edit.expert_mode);
     let total_height = panel_height.max(32.0) + label_height;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(row_width, total_height), Sense::hover());
-    let painter = ui.painter().clone();
 
     // The label cell every other row uses (help cue, gutter, hover docs), level
     // with the first flag; the panel starts where other rows' values do.
@@ -853,13 +846,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
             else { FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x }, label_height),
         Vec2::new(panel_width, panel_height),
     );
-    painter.rect_filled(flags_rect, INPUT_CORNER_RADIUS, foundation_input());
-    painter.rect_stroke(
-        flags_rect,
-        INPUT_CORNER_RADIUS,
-        Stroke::new(1.0_f32, foundation_input_edge()),
-        egui::StrokeKind::Middle,
-    );
+    paint_flag_panel(ui, flags_rect);
 
     if display_flags.is_empty() {
         paint_findable_text(
@@ -874,48 +861,9 @@ pub(in crate::app) fn draw_foundation_flags_row(
     } else {
         let mut next_mask = raw;
         for (index, (bit, option, is_set)) in display_flags.iter().enumerate() {
-            let label = &option.label;
-            let row_top = flags_rect.top() + 6.0 + index as f32 * flag_row_height;
-            let row_rect = egui::Rect::from_min_size(
-                egui::pos2(flags_rect.left() + 8.0, row_top),
-                Vec2::new(flags_rect.width() - 16.0, flag_row_height),
-            );
-            let checkbox_rect = egui::Rect::from_min_size(
-                row_rect.left_top() + Vec2::new(0.0, 2.5),
-                Vec2::splat(16.0),
-            );
-            let enabled = edit.can_edit(meta);
-            let response = ui.interact(
-                row_rect,
-                ui.make_persistent_id((edit.view_scope, edit.tag_key, path, "flag", *bit)),
-                if enabled {
-                    Sense::click()
-                } else {
-                    Sense::hover()
-                },
-            );
-            if response.hovered() {
-                painter.rect_filled(row_rect, 0.0, foundation_flag_hover());
-                response.clone().on_hover_text(match &option.help {
-                    Some(help) => format!("{label}\n\n{help}"),
-                    None => label.clone(),
-                });
-            }
-
-            let mut checkbox_ui = ui.new_child(egui::UiBuilder::new().max_rect(checkbox_rect));
-            if !enabled { checkbox_ui.disable(); }
-            paint_checkbox_at(&checkbox_ui, checkbox_rect, *is_set,
-                response.hovered() || response.has_focus());
-
-            paint_findable_text(
-                ui,
-                row_rect.left_center() + Vec2::new(20.0, 0.0),
-                Align2::LEFT_CENTER,
-                &truncate_for_cell(label, row_rect.width() - 24.0),
-                FontId::proportional(12.5),
-                text_dark(),
-                FindTargetKind::Value,
-            );
+            let id = ui.make_persistent_id((edit.view_scope, edit.tag_key, path, "flag", *bit));
+            let response = draw_flag_option(ui, flags_rect, index, id,
+                &option.label, option.help.as_deref(), *is_set, edit.can_edit(meta));
 
             if response.clicked() {
                 if let Some(bit_mask) = 1u64.checked_shl(*bit) {

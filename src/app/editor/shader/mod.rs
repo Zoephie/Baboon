@@ -974,8 +974,9 @@ mod tests {
             assert_eq!(grid.count(section), 1, "{section}");
         }
         assert_eq!(grid.count("grid.render_method_definition"), 1);
+        // 24px controls + 4px clear padding on each side + a 1px separator.
         for (previous, next) in [("p0_2", "p0_3"), ("p0_3", "p0_4")] {
-            assert!((grid.find(next, 0).center().y - grid.find(previous, 0).center().y - 32.0).abs() < 0.1,
+            assert!((grid.find(next, 0).center().y - grid.find(previous, 0).center().y - 33.0).abs() < 0.1,
                 "field rows must retain their allocated height");
         }
         assert!(grid.ops.is_empty(), "drawing alone raised an edit");
@@ -1498,7 +1499,7 @@ mod tests {
         assert!(TagFunctionEditor::from_function(function).is_ranged());
         assert_eq!(grid.count("start:"), 1);
         assert_eq!(grid.count("end:"), 1);
-        assert!((grid.find("p0_3", 0).center().y - grid.find("p0_2", 0).center().y - 64.0).abs() < 0.1);
+        assert!((grid.find("p0_3", 0).center().y - grid.find("p0_2", 0).center().y - 65.0).abs() < 0.1);
         let end = grid.find("end:", 0);
         grid.click_at(egui::pos2(end.right() + 40.0, end.center().y));
         grid.type_text("8.0");
@@ -1515,7 +1516,7 @@ mod tests {
         grid.click_at(rightmost_on_row(&grid, "p0_2", "range:").center());
         grid.apply();
         assert_eq!(grid.count("end:"), 0);
-        assert!((grid.find("p0_3", 0).center().y - grid.find("p0_2", 0).center().y - 32.0).abs() < 0.1);
+        assert!((grid.find("p0_3", 0).center().y - grid.find("p0_2", 0).center().y - 33.0).abs() < 0.1);
     }
 
     #[test]

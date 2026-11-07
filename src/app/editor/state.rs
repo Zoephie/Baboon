@@ -327,7 +327,9 @@ pub(in crate::app) struct BlockClipboard {
     /// Gates paste so a different struct version can't be pasted (and corrupt
     /// the tag) until upgrade/downgrade exists.
     pub(in crate::app) element_size: Option<usize>,
-    /// One element (Copy element) or every element (Copy entire block).
+    /// Preserve Copy Entire Block even when the collection contains one entry.
+    pub(in crate::app) whole_block: bool,
+    /// One entry (Copy Entry) or every entry (Copy Entire Block).
     pub(in crate::app) elements: Vec<blam_tags::TagBlockElement>,
 }
 

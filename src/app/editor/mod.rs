@@ -282,7 +282,9 @@ fn draw_tag_fields_scroll(
         let scope = (edit.view_scope, edit.tag_key);
         let mut contents = |ui: &mut Ui| {
             scroll_during_drag(ui);
-                ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
+                if !is_shader {
+                    ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
+                }
                 draw_material_tag(
                     ui,
                     tag,
@@ -298,7 +300,6 @@ fn draw_tag_fields_scroll(
                     expert_mode,
                     edit,
                 );
-                add_tag_content_bottom_padding(ui);
         };
         if is_shader {
             draw_shader_scroll_area(ui, scope, &mut contents);
@@ -322,15 +323,7 @@ fn draw_tag_fields_scroll(
             } else {
                 draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
             }
-            add_tag_content_bottom_padding(ui);
         });
-}
-
-fn add_tag_content_bottom_padding(ui: &mut Ui) {
-    // Include the inset in the scrolling content so it is revealed at the end,
-    // while unfinished content still runs right down to the page's border.
-    let existing_gap = (ui.cursor().top() - ui.min_rect().bottom()).max(0.0);
-    ui.add_space((16.0 - existing_gap).max(0.0));
 }
 
 const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;
@@ -338,6 +331,45 @@ const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;
 #[cfg(test)]
 mod responsive_page_tests {
     use super::*;
+
+    #[test]
+    fn shader_page_wrapper_fits_split_panes() {
+        let mut tag = TagFile::new(locate_definitions_root().join("halo2_mcc/shader.json")).unwrap();
+        tag.container = blam_tags::file::TagContainer::Classic {
+            engine: blam_tags::classic::ClassicEngine::Halo2V4,
+            header: vec![0; 64],
+        };
+        let entry = TagEntry {
+            key: "responsive.shader".into(), display_path: "responsive.shader".into(),
+            group_tag: tag.header.group_tag, group_name: Some("shader".into()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("responsive.shader")),
+        };
+        for width in [480.0, 700.0, 1000.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            for _ in 0..3 {
+                let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 800.0))),
+                    ..Default::default()
+                }, |ui| {
+                    fields::with_test_edit_context(|edit| {
+                        edit.game = GameId::from_id("halo2_mcc");
+                        draw_tag_fields_scroll(ui, &tag, (0, 0, 0, 0), &entry,
+                            &TagNameIndex::default(), None, &mut HashMap::new(), &mut HashMap::new(),
+                            &mut H2TemplateCache::default(), &mut None, &mut None, false, edit, false, true);
+                    });
+                });
+                let lines: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::LineSegment { points, .. } if points[0].y == points[1].y =>
+                        Some((points[1].x - points[0].x).abs()),
+                    _ => None,
+                }).collect();
+                assert!(!lines.is_empty(), "the actual shader page must render rows");
+                assert!(lines.iter().all(|length| *length <= width),
+                    "Shader row widths {lines:?} must fit the {width}px page");
+            }
+        }
+    }
 
     #[test]
     fn regression_breakpoints_reach_the_scrolling_tag_fields_page() {

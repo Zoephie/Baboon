@@ -306,13 +306,27 @@ pub(in crate::app) fn foundation_value_cell_with_error(
     editable: bool,
     invalid: bool,
 ) -> egui::Response {
+    foundation_value_cell_with_error_and_corners(
+        ui, text, width, id, editable, invalid, crate::app::ui_kit::INPUT_CORNER_RADIUS,
+    )
+}
+
+pub(in crate::app) fn foundation_value_cell_with_error_and_corners(
+    ui: &mut Ui,
+    text: &mut String,
+    width: f32,
+    id: egui::Id,
+    editable: bool,
+    invalid: bool,
+    corners: egui::CornerRadius,
+) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
     let fill = invalid.then(invalid_value_fill);
     let color = if invalid { invalid_value_text() } else { text_dark() };
     if editable {
-        foundation_value_text_filled(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None)
+        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, false, corners)
     } else {
-        foundation_value_text_filled(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None)
+        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, false, corners)
     }
 }
 
@@ -325,9 +339,9 @@ pub(in crate::app) fn foundation_string_id_value_cell(
     let color = if invalid { invalid_value_text() } else { text_dark() };
     let fill = invalid.then(invalid_value_fill);
     if editable {
-        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, true)
+        foundation_value_text_filled_with_placeholder(ui, rect, text, Some(id), color, VALUE_PADDING, fill, None, true, crate::app::ui_kit::INPUT_CORNER_RADIUS)
     } else {
-        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, true)
+        foundation_value_text_filled_with_placeholder(ui, rect, &mut text.as_str(), Some(id), color, VALUE_PADDING, fill, None, true, crate::app::ui_kit::INPUT_CORNER_RADIUS)
     }
 }
 
@@ -359,7 +373,7 @@ fn foundation_value_text_filled(
     fill: Option<Color32>,
     status: Option<&str>,
 ) -> egui::Response {
-    foundation_value_text_filled_with_placeholder(ui, rect, text, id, color, left_padding, fill, status, false)
+    foundation_value_text_filled_with_placeholder(ui, rect, text, id, color, left_padding, fill, status, false, crate::app::ui_kit::INPUT_CORNER_RADIUS)
 }
 
 fn foundation_value_text_filled_with_placeholder(
@@ -372,10 +386,10 @@ fn foundation_value_text_filled_with_placeholder(
     fill: Option<Color32>,
     status: Option<&str>,
     string_id_placeholder: bool,
+    corners: egui::CornerRadius,
 ) -> egui::Response {
-    // A box whose text can't change is greyed, as Foundation greys a
-    // read-only field's: a dimmer fill and dimmer text (a missing reference
-    // keeps its red). It still takes focus, so its text can be copied.
+    // Read-only boxes use the same neutral fill with dimmer text (a missing
+    // reference keeps its red). They still take focus so text can be copied.
     let read_only = !text.is_mutable();
     let invalid = fill == Some(invalid_value_fill());
     let unapplied = fill == Some(unapplied_value_fill());
@@ -384,7 +398,7 @@ fn foundation_value_text_filled_with_placeholder(
     let appearance = input_appearance(ui, state, read_only, false);
     let fill = fill.unwrap_or(appearance.fill);
     let color = if read_only && color == text_dark() { subtle_dark() } else { color };
-    ui.painter().rect_filled(rect, appearance.corners, fill);
+    ui.painter().rect_filled(rect, corners, fill);
     let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
     let status = status.map(|status| ui.painter().layout_no_wrap(status.to_owned(), FontId::proportional(11.0), status_color));
     let right_padding = 4.0 + status.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
@@ -417,7 +431,7 @@ fn foundation_value_text_filled_with_placeholder(
     let response = ui.put(rect, edit);
     if showing_placeholder { ui.visuals_mut().weak_text_color = previous_weak; }
     let appearance = input_appearance(ui, state, read_only, response.has_focus());
-    ui.painter().rect_stroke(rect, appearance.corners, appearance.stroke, egui::StrokeKind::Middle);
+    ui.painter().rect_stroke(rect, corners, appearance.stroke, egui::StrokeKind::Inside);
     if let Some(status) = status {
         ui.painter().with_clip_rect(rect.shrink(1.0)).galley(
             egui::pos2(rect.right() - 4.0 - status.size().x, rect.center().y - status.size().y * 0.5),
@@ -1001,17 +1015,14 @@ pub(in crate::app) fn picker_button(
     foreground: Color32,
     enabled: bool,
 ) -> egui::Response {
-    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     let response = ui
         .scope(|ui| {
             if !enabled {
                 ui.disable();
             }
-            if open {
-                ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                    ui.visuals().widgets.open.weak_bg_fill;
-            }
-            ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
+            crate::app::ui_kit::with_open_dropdown_visuals(ui, Some(popup_id), |ui| {
+                ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
+            })
         })
         .inner;
     let foreground = if !enabled || !ui.is_enabled() {
@@ -1165,6 +1176,7 @@ mod tests {
                     for rect in [standard_rect, tag_rect] {
                         assert_eq!(border(rect).corner_radius, egui::CornerRadius::same(2));
                         assert_eq!(border(rect).stroke, expected_stroke, "validation border survives focus");
+                        assert_eq!(border(rect).stroke_kind, egui::StrokeKind::Inside, "every input state keeps its border within the field");
                     }
                     let fill = |rect| output.shapes.iter().find_map(|shape| match &shape.shape {
                         egui::Shape::Rect(shape) if shape.rect == rect && shape.fill != Color32::TRANSPARENT => Some(shape.fill),
@@ -1831,4 +1843,46 @@ mod tests {
         assert_eq!(wheel_while_dragging(false), 0.0, "control: egui ignores the wheel mid-drag");
         assert!(wheel_while_dragging(true) > 0.0, "the editor takes it");
     }
+}
+
+/// Shared flags-list geometry; the containing editor chooses the panel width.
+pub(in crate::app) const FLAG_OPTION_HEIGHT: f32 = 21.0;
+
+pub(in crate::app) fn flag_panel_height(options: usize, show_raw: bool) -> f32 {
+    if options == 0 { 32.0 }
+    else { 12.0 + FLAG_OPTION_HEIGHT * options as f32 + if show_raw { 24.0 } else { 0.0 } }
+}
+
+pub(in crate::app) fn paint_flag_panel(ui: &Ui, rect: egui::Rect) {
+    ui.painter().rect_filled(rect, INPUT_CORNER_RADIUS, foundation_input());
+    ui.painter().rect_stroke(rect, INPUT_CORNER_RADIUS,
+        Stroke::new(1.0, foundation_input_edge()), egui::StrokeKind::Inside);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_flag_option(
+    ui: &mut Ui, panel: egui::Rect, index: usize, id: egui::Id,
+    label: &str, help: Option<&str>, checked: bool, enabled: bool,
+) -> egui::Response {
+    let row = egui::Rect::from_min_size(
+        panel.left_top() + Vec2::new(8.0, 6.0 + index as f32 * FLAG_OPTION_HEIGHT),
+        Vec2::new((panel.width() - 16.0).max(0.0), FLAG_OPTION_HEIGHT),
+    );
+    let enabled = enabled && ui.is_enabled();
+    let response = ui.interact(row, id, if enabled { Sense::click() } else { Sense::hover() });
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, checked, label));
+    if response.hovered() {
+        ui.painter().rect_filled(row, 0.0, foundation_flag_hover());
+        response.clone().on_hover_text(match help {
+            Some(help) => format!("{label}\n\n{help}"),
+            None => label.to_owned(),
+        });
+    }
+    let checkbox = egui::Rect::from_min_size(row.left_top() + Vec2::new(0.0, 2.5), Vec2::splat(16.0));
+    let mut checkbox_ui = ui.new_child(egui::UiBuilder::new().max_rect(checkbox));
+    if !enabled { checkbox_ui.disable(); }
+    paint_checkbox_at(&checkbox_ui, checkbox, checked, response.hovered() || response.has_focus());
+    paint_findable_text(ui, row.left_center() + Vec2::new(20.0, 0.0), Align2::LEFT_CENTER,
+        &truncate_for_cell(label, row.width() - 24.0), FontId::proportional(12.5), text_dark(), FindTargetKind::Value);
+    response
 }

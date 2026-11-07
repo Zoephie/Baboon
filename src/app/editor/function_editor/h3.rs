@@ -782,11 +782,11 @@ fn draw_foundation_right_rail(
     let mut draw_rail = |ui: &mut Ui| {
         if let Some((mut min, mut max)) = editor.clamp_range() {
             align_function_rail_row(ui, plot_bounds, 0, 2, ui.spacing().interact_size.y);
-            if labeled_drag(ui, "Max", &mut max, editable) {
+            if labeled_function_bound(ui, "Max", &mut max, editable) {
                 changed |= editor.set_clamp_range(min, max).is_ok();
             }
             align_function_rail_row(ui, plot_bounds, 1, 2, ui.spacing().interact_size.y);
-            if labeled_drag(ui, "Min", &mut min, editable) {
+            if labeled_function_bound(ui, "Min", &mut min, editable) {
                 changed |= editor.set_clamp_range(min, max).is_ok();
             }
         } else {
@@ -905,7 +905,7 @@ pub(super) fn set_editor_flag(editor: &mut TagFunctionEditor, flag: u8, value: b
     }
 }
 
-fn labeled_drag(ui: &mut Ui, label: &str, value: &mut f32, editable: bool) -> bool {
+fn labeled_function_bound(ui: &mut Ui, label: &str, value: &mut f32, editable: bool) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
         ui.label(
@@ -913,21 +913,71 @@ fn labeled_drag(ui: &mut Ui, label: &str, value: &mut f32, editable: bool) -> bo
                 .color(text_dark())
                 .small(),
         );
-        changed = ui
-            .add_enabled_ui(editable, |ui| {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width(), 24.0),
-                    egui::Layout::left_to_right(egui::Align::Center)
-                        .with_main_align(egui::Align::Min)
-                        .with_main_justify(true),
-                    |ui| ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(5)),
-                )
-                .inner
-                .changed()
-            })
-            .inner;
+        let id = ui.make_persistent_id(("function_output_bound", label));
+        let draft_id = id.with("draft");
+        let mut text = ui.data(|data| data.get_temp::<String>(draft_id))
+            .unwrap_or_else(|| value.to_string());
+        let invalid = text.trim().parse::<f32>().ok().filter(|v| v.is_finite()).is_none();
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let field_width = (ui.available_width() - 20.0 - ui.spacing().item_spacing.x).max(24.0);
+        let response = crate::app::editor::fields::foundation_value_cell_with_error_and_corners(
+            ui, &mut text, field_width, id, editable, invalid,
+            egui::CornerRadius { nw: 2, sw: 2, ne: 0, se: 0 },
+        );
+        let cancelled = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
+        if cancelled {
+            response.surrender_focus();
+        } else if editable && crate::app::editor::fields::lost_focus_once(&response)
+            && let Ok(parsed) = text.trim().parse::<f32>()
+            && parsed.is_finite() && parsed != *value
+        {
+            *value = parsed;
+            changed = true;
+        }
+        let step = function_bound_stepper(ui, id, editable);
+        if step != 0.0 {
+            let base = text.trim().parse::<f32>().ok().filter(|v| v.is_finite()).unwrap_or(*value);
+            let next = base + step;
+            if next.is_finite() && next != *value {
+                *value = next;
+                changed = true;
+            }
+            response.surrender_focus();
+        }
+        // Preserve partial numbers (e.g. a minus sign) until the edit ends.
+        if editable && response.has_focus() && !cancelled && step == 0.0 {
+            ui.data_mut(|data| data.insert_temp(draft_id, text));
+        } else {
+            ui.data_mut(|data| data.remove::<String>(draft_id));
+        }
     });
     changed
+}
+
+fn function_bound_stepper(ui: &mut Ui, id: egui::Id, editable: bool) -> f32 {
+    ui.add_enabled_ui(editable, |ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 24.0), Sense::hover());
+        let mut step = 0.0;
+        for (up, delta, tooltip) in [(true, 1.0, "Increase by 1"), (false, -1.0, "Decrease by 1")] {
+            let button = egui::Rect::from_min_size(
+                rect.min + Vec2::new(0.0, if up { 0.0 } else { 13.0 }), Vec2::new(20.0, 11.0),
+            );
+            let response = ui.interact(button, id.with(up), Sense::click()).on_hover_text(tooltip);
+            let visuals = ui.style().interact(&response);
+            let corners = egui::CornerRadius { nw: 0, sw: 0, ne: if up { 2 } else { 0 }, se: if up { 0 } else { 2 } };
+            ui.painter().rect(button, corners, visuals.bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+            let center = button.center();
+            let direction = if up { -1.0 } else { 1.0 };
+            ui.painter().add(egui::Shape::convex_polygon(vec![
+                center + Vec2::new(-3.5, -2.0 * direction),
+                center + Vec2::new(3.5, -2.0 * direction),
+                center + Vec2::new(0.0, 2.0 * direction),
+            ], visuals.fg_stroke.color, Stroke::NONE));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip));
+            if response.clicked() { step = delta; }
+        }
+        step
+    }).inner
 }
 
 #[cfg(test)]
@@ -1294,6 +1344,95 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inline_graph_output_bounds_accept_typed_values() {
+        check_inline_graph_output_bounds(GameId::Halo2, *b"bipd", "functions[0]/default function/data", h2_editor(FunctionType::Spline));
+        check_inline_graph_output_bounds(GameId::Halo2, *b"nhdt", "bitmap widgets[0]/effect[0]/function/data", h2_editor(FunctionType::Spline));
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        check_inline_graph_output_bounds(GameId::Halo3, *b"bipd", "functions[0]/default function/data", editor);
+    }
+
+    fn check_inline_graph_output_bounds(game: GameId, group: [u8; 4], path: &str, editor: TagFunctionEditor) {
+        let ctx = egui::Context::default();
+        let view = std::cell::RefCell::new(FunctionView::from_function(editor.into_function()));
+        let frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
+            events,
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(900.0, 900.0))),
+            ..Default::default()
+        }, |ui| {
+            ui.set_width(623.0);
+            crate::app::editor::fields::with_test_edit_context(|edit| {
+                edit.game = Some(game);
+                edit.group_tag = u32::from_be_bytes(group);
+                crate::app::editor::fields::draw_foundation_inline_function_row(
+                    ui, "Default Function".into(), view.borrow().clone(), 0,
+                    path, edit,
+                );
+                for op in edit.h2_shader_param_ops.iter() {
+                    if let H2ShaderParamOp::EditFunctionData { data, .. } = op {
+                        view.borrow_mut().function = h2_tag_function(data).unwrap();
+                    }
+                }
+                for op in edit.pending.iter() {
+                    let bytes = crate::core::document::value::decode_hex(&op.input).unwrap();
+                    view.borrow_mut().function = TagFunction::parse(&bytes).unwrap();
+                }
+            });
+        });
+        for (label, value, expected) in [("Max:", "2.75", 2.75), ("Min:", "-1.25", -1.25), ("Min:", "invalid", -1.25)] {
+            let before = view.borrow().function.to_bytes();
+            frame(vec![]);
+            let output = frame(vec![]);
+            let label_rect = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label =>
+                    Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
+                _ => None,
+            }).unwrap();
+            let pos = egui::pos2(label_rect.right() + 45.0, label_rect.center().y);
+            frame(vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]);
+                if pressed {
+                    assert!(ctx.text_edit_focused(), "{label} should take text focus immediately on click");
+                }
+            }
+            frame(vec![]);
+            frame(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false,
+                modifiers: egui::Modifiers { ctrl: true, command: true, ..Default::default() } }]);
+            frame(vec![egui::Event::Text(value[..1].into())]);
+            frame(vec![]);
+            frame(vec![egui::Event::Text(value[1..].into())]);
+            assert_eq!(view.borrow().function.to_bytes(), before, "typing should remain a draft until committed");
+            frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
+            let range = TagFunctionEditor::from_function(view.borrow().function.clone()).clamp_range().unwrap();
+            frame(vec![]);
+            assert_eq!(if label == "Max:" { range.1 } else { range.0 }, expected, "typing {value} into {label} for {game:?}");
+            let mut stepped = expected;
+            for (up, delta) in [(true, 1.0), (false, -1.0)] {
+                let output = frame(vec![]);
+                let pos = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Path(path) if path.closed && path.points.len() == 3 => {
+                        let rect = egui::Rect::from_points(&path.points);
+                        (rect.center().x > label_rect.right()
+                            && (rect.center().y - label_rect.center().y).abs() < 13.0
+                            && (rect.center().y < label_rect.center().y) == up)
+                            .then_some(rect.center())
+                    }
+                    _ => None,
+                }).expect("a stacked arrow beside the bound");
+                frame(vec![egui::Event::PointerMoved(pos)]);
+                for pressed in [true, false] {
+                    frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]);
+                }
+                frame(vec![]);
+                stepped += delta;
+                let range = TagFunctionEditor::from_function(view.borrow().function.clone()).clamp_range().unwrap();
+                assert_eq!(if label == "Max:" { range.1 } else { range.0 }, stepped, "each arrow click changes {label} by exactly one");
+            }
+        }
+    }
+
+    #[test]
     fn curve_menu_has_a_heading_and_flags_without_segment_controls() {
         let ctx = egui::Context::default();
         let mut editor = constant_editor();
@@ -1468,43 +1607,49 @@ mod tests {
     #[test]
     fn input_and_range_search_built_in_functions_and_write_exact_ids() {
         let defs = crate::core::bundled::locate_definitions_root();
-        let menu = crate::app::editor::fields::string_editors::string_editors(Some(&defs), Some(GameId::Halo4))
-            .unwrap().built_in_function_menu().unwrap();
-        for id in ["foundation_fn_input", "foundation_fn_range"] {
-            let ctx = egui::Context::default();
-            let origin = std::cell::Cell::new(egui::Pos2::ZERO);
-            let mut value = "my_custom_export".to_owned();
-            let mut changed = false;
-            let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
-                ui.set_width(280.0);
-                ui.horizontal(|ui| {
-                    origin.set(ui.cursor().min);
-                    changed |= function_name_input(ui, id, &mut value, true, Some(&menu));
+        for (game, query, expected) in [
+            (GameId::Halo4, "ENGINE_TURBO", "engine_turbo"),
+            (GameId::Halo2, "ENGINE_POWER", "engine_power"),
+            (GameId::Halo2, "HUD_INPUT4", "hud_input4"),
+        ] {
+            let menu = crate::app::editor::fields::string_editors::string_editors(Some(&defs), Some(game))
+                .unwrap().built_in_function_menu().unwrap();
+            for id in ["foundation_fn_input", "foundation_fn_range"] {
+                let ctx = egui::Context::default();
+                let origin = std::cell::Cell::new(egui::Pos2::ZERO);
+                let mut value = "my_custom_export".to_owned();
+                let mut changed = false;
+                let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+                    ui.set_width(280.0);
+                    ui.horizontal(|ui| {
+                        origin.set(ui.cursor().min);
+                        changed |= function_name_input(ui, id, &mut value, true, Some(&menu));
+                    });
                 });
-            });
-            let click = |pos| vec![
-                egui::Event::PointerMoved(pos),
-                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
-                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
-            ];
-            frame(vec![]);frame(vec![]);
-            frame(click(origin.get() + Vec2::new(256.0, 12.0)));
-            let output = frame(vec![]);
-            assert!(output.shapes.iter().any(|shape| matches!(
-                &shape.shape, egui::Shape::Text(text) if text.galley.text() == "Search Functions")));
-            // The shared search field receives focus on opening. Search a
-            // vehicle-only input from a shader with no owning object tag.
-            frame(vec![egui::Event::Text("ENGINE_TURBO".into())]);
-            let output = frame(vec![]);
-            let target = output.shapes.iter().find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "engine_turbo" => Some(text.pos + text.galley.size() * 0.5),
-                _ => None,
-            }).expect("search reaches built-ins inside object type groups");
-            frame(click(target));
-            frame(vec![]);
-            drop(frame);
-            assert_eq!(value, "engine_turbo", "write the exact ID rather than the search query or heading");
-            assert!(changed);
+                let click = |pos| vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+                ];
+                frame(vec![]);frame(vec![]);
+                frame(click(origin.get() + Vec2::new(256.0, 12.0)));
+                let output = frame(vec![]);
+                assert!(output.shapes.iter().any(|shape| matches!(
+                    &shape.shape, egui::Shape::Text(text) if text.galley.text() == "Search Functions")));
+                // Shader input and range pickers retain the full catalog,
+                // including the HUD functions alongside vehicle functions.
+                frame(vec![egui::Event::Text(query.into())]);
+                let output = frame(vec![]);
+                let target = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == expected => Some(text.pos + text.galley.size() * 0.5),
+                    _ => None,
+                }).unwrap_or_else(|| panic!("{game:?}: search should find {expected} in the built-in function groups"));
+                frame(click(target));
+                frame(vec![]);
+                drop(frame);
+                assert_eq!(value, expected, "write the exact ID rather than the search query or heading");
+                assert!(changed);
+            }
         }
     }
 

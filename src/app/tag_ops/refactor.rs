@@ -623,28 +623,18 @@ pub(in crate::app) fn run_tag_rename_job(
     let mut rewrites = HashMap::new();
     rewrites.insert((entry.group_tag, old_ref.to_ascii_lowercase()), new_ref);
 
-    // Ensure a reverse-dependency index so we only rewrite actual referrers.
-    let mut reverse_dependencies = existing_reverse_dependencies.or_else(|| {
-        game.and_then(|game| crate::core::source::load_reverse_dependency_index(game.as_str(), &root))
-    });
-    if let Some(index) = reverse_dependencies.as_ref()
-        && index.len() != all_entries_before.len()
-    {
-        reverse_dependencies = None; // stale → rebuild below
-    }
     let dependency_source = TagSource::LooseFolder {
         root: root.clone(),
         game: game.clone(),
         definitions_root: locate_definitions_root(),
     };
-    if reverse_dependencies.is_none() {
-        reverse_dependencies = Some(build_reverse_dependency_index(
-            &root,
-            &dependency_source,
-            &all_entries_before,
-            &label,
-            tx,
-        ));
+    let (all_entries_before, index, mut index_changes) = prepare_tag_refactor_index(
+        &root, &dependency_source, game, &names, &all_entries_before,
+        existing_reverse_dependencies, &label, tx,
+    )?;
+    let mut reverse_dependencies = Some(index);
+    if !all_entries_before.iter().any(|current| current.key == entry.key && current.group_tag == entry.group_tag) {
+        return Err("The source tag changed or disappeared; refresh the browser and try again".into());
     }
     let dependency_schema_path = game
         .map(|game| {
@@ -722,6 +712,10 @@ pub(in crate::app) fn run_tag_rename_job(
             &all_entries,
         );
     }
+    index_changes.removed.push(entry.key.clone());
+    index_changes.touched.insert(new_entry.key.clone());
+    index_changes.touched.extend(rewrite_result.changed_keys.iter().cloned());
+    persist_refactor_indexes(&root, game, &all_entries, reverse_dependencies.as_ref(), &index_changes, tx);
 
     let verb = if label.starts_with("Moving") {
         "Moved"
@@ -754,6 +748,106 @@ pub(in crate::app) fn run_tag_rename_job(
         moved: true,
         moved_folder: None,
     })
+}
+
+#[derive(Default)]
+struct RefactorIndexChanges {
+    removed: Vec<String>,
+    touched: HashSet<String>,
+}
+
+/// Verify file fingerprints, then read only changed or missing dependency
+/// records. Without a saved fingerprint baseline every tag is checked once.
+fn prepare_tag_refactor_index(
+    root: &Path,
+    source: &TagSource,
+    game: Option<GameId>,
+    names: &TagNameIndex,
+    previous_entries: &[TagEntry],
+    existing: Option<ReverseDependencyIndex>,
+    label: &str,
+    tx: &Sender<WorkerMessage>,
+) -> Result<(Vec<TagEntry>, ReverseDependencyIndex, RefactorIndexChanges), String> {
+    send_folder_refactor_progress(tx, label, "Checking tag index for changes", None);
+    let mut index = existing.or_else(|| game.and_then(|game|
+        crate::core::source::load_reverse_dependency_index(game.as_str(), root))).unwrap_or_default();
+    let mut changes = RefactorIndexChanges::default();
+    let mut entries = if let Some(game) = game {
+        let refresh = crate::core::source::refresh_entry_index(game.as_str(), root, names)
+            .map_err(|error| format!("Could not verify the tag index: {error}"))?;
+        changes.touched.extend(refresh.touched.iter().map(|entry| entry.key.clone()));
+        changes.removed = refresh.removed_keys;
+        refresh.entries
+    } else {
+        let entries = scan_folder_subtree_entries(root, Path::new(""), names).map_err(|error| error.to_string())?;
+        changes.touched.extend(entries.iter().map(|entry| entry.key.clone()));
+        entries
+    };
+    // Refresh skips locked files. A previously known tag that still exists
+    // must remain a rewrite candidate, rather than looking safely deleted.
+    let current_keys: HashSet<_> = entries.iter().map(|entry| entry.key.clone()).collect();
+    for entry in previous_entries.iter().filter(|entry| !current_keys.contains(&entry.key)) {
+        if let TagEntryLocation::LooseFile(path) = &entry.location
+            && path.try_exists().unwrap_or(true)
+        {
+            entries.push(entry.clone());
+            changes.touched.insert(entry.key.clone());
+        }
+    }
+    entries.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
+    let keys: HashSet<&str> = entries.iter().map(|entry| entry.key.as_str()).collect();
+    changes.removed.retain(|key| !keys.contains(key.as_str()));
+    changes.removed.extend(previous_entries.iter().filter(|entry| !keys.contains(entry.key.as_str())).map(|entry| entry.key.clone()));
+    changes.removed.extend(index.tag_keys().filter(|key| !keys.contains(key)).map(str::to_owned));
+    changes.removed.sort();
+    changes.removed.dedup();
+    for key in &changes.removed { index.clear_tag(key); }
+    for entry in &entries {
+        if !index.contains_tag(&entry.key) { changes.touched.insert(entry.key.clone()); }
+    }
+    let touched: Vec<_> = entries.iter().filter(|entry| changes.touched.contains(&entry.key)).collect();
+    for (number, entry) in touched.iter().enumerate() {
+        if number % 50 == 0 {
+            send_folder_refactor_progress(tx, label, &format!("Refreshing dependency records {}/{}", number + 1, touched.len()), None);
+        }
+        match read_entry_dependencies(source, entry) {
+            Ok(deps) => index.set_tag_dependencies(entry.key.clone(), deps),
+            Err(error) => {
+                index.clear_tag(&entry.key);
+                let _ = tx.send(WorkerMessage::TerminalLine(format!(
+                    "Warning: could not refresh references for {}: {error}; checking this tag during the rewrite", entry.display_path,
+                )));
+            }
+        }
+    }
+    Ok((entries, index, changes))
+}
+
+/// Persistence belongs to the refactor worker. Existing caches receive one
+/// atomic batch of changed rows; only a missing cache needs a full snapshot.
+fn persist_refactor_indexes(
+    root: &Path,
+    game: Option<GameId>,
+    entries: &[TagEntry],
+    index: Option<&ReverseDependencyIndex>,
+    changes: &RefactorIndexChanges,
+    tx: &Sender<WorkerMessage>,
+) {
+    let Some(game) = game else { return; };
+    let changed: Vec<_> = entries.iter().filter(|entry| changes.touched.contains(&entry.key)).cloned().collect();
+    let result = (|| -> anyhow::Result<()> {
+        if let Some(index) = index
+            && crate::core::source::patch_refactor_indexes(game.as_str(), root, &changes.removed, &changed, index)?
+        { return Ok(()); }
+        crate::core::source::save_entry_index(game.as_str(), root, entries)?;
+        if let Some(index) = index {
+            crate::core::source::save_reverse_dependency_index(game.as_str(), root, index)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = tx.send(WorkerMessage::TerminalLine(format!("Warning: could not save refactor indexes: {error:#}")));
+    }
 }
 
 pub(in crate::app) fn run_folder_refactor_job(
@@ -949,6 +1043,12 @@ pub(in crate::app) fn run_folder_refactor_job(
             &all_entries,
         );
     }
+
+    let changes = RefactorIndexChanges {
+        removed: if move_folder { old_entries.iter().map(|entry| entry.key.clone()).collect() } else { Vec::new() },
+        touched: new_entries.iter().map(|entry| entry.key.clone()).chain(rewrite_result.changed_keys.iter().cloned()).collect(),
+    };
+    persist_refactor_indexes(&root, game, &all_entries, reverse_dependencies.as_ref(), &changes, tx);
 
     let action = match (move_folder, new_name.is_some()) {
         (true, true) => "Renamed",
@@ -1195,6 +1295,11 @@ pub(in crate::app) fn affected_move_rewrite_entries(
         .map(|entry| entry.key.clone())
         .collect::<HashSet<_>>();
     if let Some(index) = reverse_dependencies {
+        // A dependency reader can fail for one tag. Keep checking that tag
+        // during the rewrite without rereading every healthy indexed tag.
+        affected.extend(all_entries.iter().filter(|entry|
+            !old_keys.contains(entry.key.as_str()) && !index.contains_tag(&entry.key)
+        ).map(|entry| entry.key.clone()));
         for ((group_tag, old_ref), _) in rewrites {
             for dependent_key in index.dependents_for(*group_tag, old_ref) {
                 if !old_keys.contains(dependent_key.as_str()) {
@@ -1337,6 +1442,9 @@ pub(in crate::app) fn refresh_reverse_dependency_index_after_refactor(
         let Some(entry) = entries_by_key.get(key.as_str()) else {
             continue;
         };
+        // A failed reread must remain unknown. Keeping the old references
+        // here would let persistence mark stale data with a fresh fingerprint.
+        index.clear_tag(&key);
         if let Ok(deps) = read_entry_dependencies(source, entry) {
             index.set_tag_dependencies(entry.key.clone(), deps);
         }
@@ -1565,6 +1673,138 @@ mod tests {
         assert_eq!(dependents, expected);
         assert!(terminal(&app).contains(&format!("Renamed: {RENDER} -> {new_rel}")));
         assert!(terminal(&app).contains(&"Updated 2 reference(s) in 2 tag(s)".to_owned()));
+    }
+
+    #[test]
+    fn single_tag_rename_repairs_only_missing_dependency_records() {
+        let kit = kit("refactor-incremental-index");
+        for i in 0..40 { kit.write_mcc(&format!("unrelated/tag_{i:03}"), "model", |_| {}); }
+        let entries = kit.entries();
+        let mut index = kit.index();
+        crate::core::source::save_entry_index(kit.game, &kit.root, &entries).unwrap();
+        let mut saved_index = index.clone();
+        saved_index.set_tag_dependencies("cache-only-obsolete".into(), Vec::new());
+        crate::core::source::save_reverse_dependency_index(kit.game, &kit.root, &saved_index).unwrap();
+        index.clear_tag(&kit.key(BARREL));
+        let entry = entries.iter().find(|entry| entry.key == kit.key(RENDER)).unwrap().clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        crate::app::references::DEPENDENCY_READS.with(|reads| *reads.borrow_mut() = Some(Vec::new()));
+        crate::core::source::ENTRY_INDEX_WRITES.with(|writes| *writes.borrow_mut() = Some(Vec::new()));
+        let start = std::time::Instant::now();
+        let result = run_tag_rename_job(kit.root.clone(), entry, "objects\\props\\renamed".into(),
+            "Renaming tag".into(), kit.source().names, GameId::from_id(kit.game), entries, Some(index), &tx);
+        let done = result.unwrap();
+        assert_eq!(done.status, "Renamed tag, updated 2 reference(s) in 2 tag(s)");
+        let mut app = app();
+        kit.install(&mut app);
+        let stamp = app.model.kit_stamp();
+        app.handle_folder_refactor_finished(stamp, Ok(done));
+        let reads = crate::app::references::DEPENDENCY_READS.with(|reads| reads.borrow_mut().take().unwrap());
+        let writes = crate::core::source::ENTRY_INDEX_WRITES.with(|writes| writes.borrow_mut().take().unwrap());
+        let messages: Vec<_> = rx.try_iter().collect();
+        let save_errors: Vec<_> = messages.iter().filter_map(|message| match message {
+            WorkerMessage::TerminalLine(line) if line.starts_with("Warning: could not save refactor indexes") => Some(line),
+            _ => None,
+        }).collect();
+        assert!(save_errors.is_empty(), "cache persistence failed: {save_errors:?}");
+        let saved = crate::core::source::load_reverse_dependency_index(kit.game, &kit.root).unwrap();
+        assert!(!saved.contains_tag("cache-only-obsolete"));
+        crate::core::source::remove_test_index_source(kit.game, &kit.root);
+        eprintln!("rename: {} dependency reads, {} entry writes in {:?}", reads.len(), writes.len(), start.elapsed());
+        assert!(reads.len() <= 4, "only the missing record, moved tag, and two rewritten referrers should be read: {} reads", reads.len());
+        assert!(writes.len() <= 4, "only affected entry rows should be saved: {} writes", writes.len());
+        assert!(!messages.into_iter().any(|message| matches!(message, WorkerMessage::TerminalLine(line) if line.starts_with("Built dependency index"))));
+        for referrer in [MODEL, USER] { assert_eq!(render_reference(&kit, referrer).as_deref(), Some("objects\\props\\renamed")); }
+    }
+
+    #[test]
+    fn indexed_single_tag_refactors_touch_only_affected_rows_and_survive_reopening() {
+        for moving in [false, true] {
+            for referrers in 0..=2 {
+                let kit = kit(&format!("incremental-refactor-{moving}-{referrers}"));
+                if referrers < 2 { fs::remove_file(kit.path(USER)).unwrap(); }
+                if referrers < 1 {
+                    fs::remove_file(kit.path(MODEL)).unwrap();
+                    fs::remove_file(kit.path(BARREL)).unwrap();
+                }
+                let mut entries = kit.entries();
+                let mut index = kit.index();
+                crate::core::source::save_entry_index(kit.game, &kit.root, &entries).unwrap();
+                crate::core::source::save_reverse_dependency_index(kit.game, &kit.root, &index).unwrap();
+                let mut old_key = kit.key(RENDER);
+                // Repeat using only the indexes loaded back from disk.
+                for step in 0..2 {
+                    let new_rel = if moving { format!("moved_{step}\\crate") } else { format!("objects\\props\\renamed_{step}") };
+                    let entry = entries.iter().find(|entry| entry.key == old_key).unwrap().clone();
+                    let (tx, _rx) = std::sync::mpsc::channel();
+                    crate::app::references::DEPENDENCY_READS.with(|reads| *reads.borrow_mut() = Some(Vec::new()));
+                    crate::core::source::ENTRY_INDEX_WRITES.with(|writes| *writes.borrow_mut() = Some(Vec::new()));
+                    let done = run_tag_rename_job(kit.root.clone(), entry, new_rel.clone(),
+                        if moving { "Moving tag" } else { "Renaming tag" }.into(), kit.names(), Some(GameId::Halo3), entries, Some(index), &tx).unwrap();
+                    let reads = crate::app::references::DEPENDENCY_READS.with(|reads| reads.borrow_mut().take().unwrap());
+                    let writes = crate::core::source::ENTRY_INDEX_WRITES.with(|writes| writes.borrow_mut().take().unwrap());
+                    assert_eq!(reads.len(), referrers + 1, "only moved and rewritten tags are reread");
+                    assert_eq!(writes.len(), referrers + 1, "only affected rows are written");
+                    assert!(done.status.contains(&format!("updated {referrers} reference(s) in {referrers} tag(s)")), "{}", done.status);
+                    entries = crate::core::source::load_entry_index(kit.game, &kit.root).unwrap();
+                    index = crate::core::source::load_reverse_dependency_index(kit.game, &kit.root).unwrap();
+                    let new_key = kit.key(&format!("{new_rel}.render_model"));
+                    assert!(!entries.iter().any(|entry| entry.key == old_key));
+                    assert!(!index.contains_tag(&old_key));
+                    assert!(entries.iter().any(|entry| entry.key == new_key));
+                    assert!(index.contains_tag(&new_key));
+                    assert_eq!(index.len(), entries.len());
+                    assert_eq!(index.dependents_for(group_tag("halo3_mcc", "render_model"), &new_rel).len(), referrers);
+                    if referrers >= 1 { assert_eq!(render_reference(&kit, MODEL).as_deref(), Some(new_rel.as_str())); }
+                    if referrers >= 2 { assert_eq!(render_reference(&kit, USER).as_deref(), Some(new_rel.as_str())); }
+                    old_key = new_key;
+                }
+                crate::core::source::remove_test_index_source(kit.game, &kit.root);
+            }
+        }
+    }
+
+    #[test]
+    fn single_tag_refactor_refreshes_external_changes_and_same_count_index_gaps() {
+        let kit = kit("incremental-refactor-external");
+        let entries = kit.entries();
+        let removed_key = kit.key(USER);
+        let mut index = kit.index();
+        crate::core::source::save_entry_index(kit.game, &kit.root, &entries).unwrap();
+        crate::core::source::save_reverse_dependency_index(kit.game, &kit.root, &index).unwrap();
+        // Equal counts do not prove coverage: one real record is missing and
+        // one obsolete record is present.
+        index.clear_tag(&kit.key(MODEL));
+        index.set_tag_dependencies("obsolete-key".into(), Vec::new());
+        let mode = group_tag("halo3_mcc", "render_model");
+        for rel in ["objects\\props\\barrel", "external\\new_parent"] {
+            kit.write_mcc(rel, "model", |tag| set_reference(tag, "render model", mode, "objects\\props\\crate"));
+        }
+        fs::remove_file(kit.path(USER)).unwrap();
+        let entry = entries.iter().find(|entry| entry.key == kit.key(RENDER)).unwrap().clone();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let done = run_tag_rename_job(kit.root.clone(), entry, "moved\\crate".into(), "Moving tag".into(), kit.names(), Some(GameId::Halo3), entries, Some(index), &tx).unwrap();
+        assert_eq!(done.status, "Moved tag, updated 3 reference(s) in 3 tag(s)");
+        for rel in [MODEL, BARREL, "external\\new_parent.model"] {
+            assert_eq!(render_reference(&kit, rel).as_deref(), Some("moved\\crate"));
+        }
+        let saved = crate::core::source::load_reverse_dependency_index(kit.game, &kit.root).unwrap();
+        assert!(!saved.contains_tag("obsolete-key"));
+        assert!(!saved.contains_tag(&removed_key));
+        assert_eq!(saved.dependents_for(mode, "moved\\crate").len(), 3);
+        crate::core::source::remove_test_index_source(kit.game, &kit.root);
+    }
+
+    #[test]
+    fn a_failed_post_refactor_dependency_read_does_not_keep_stale_references() {
+        let kit = kit("refactor-index-read-failure");
+        let entries = kit.entries();
+        let mut index = kit.index();
+        let key = kit.key(MODEL);
+        fs::remove_file(kit.path(MODEL)).unwrap();
+        refresh_reverse_dependency_index_after_refactor(&mut index, &kit.source().source,
+            false, &[], &[], &[key.clone()], &entries);
+        assert!(!index.contains_tag(&key), "failed reads must be retried rather than recorded as current");
     }
 
     #[test]
