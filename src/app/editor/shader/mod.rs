@@ -49,8 +49,8 @@ pub(in crate::app) struct ShaderGridRow {
     /// When present, the value cell is rendered as an editable widget that
     /// writes back to this tag field path (instead of a read-only label).
     edit: Option<ShaderRowEdit>,
-    /// Right-click context menu for adding optional animated parameters
-    /// (bitmap transform sub-rows). Only shown when the tag is editable.
+    /// Actions shared by the row's options button and right-click menu for
+    /// adding optional parameters. Only shown when the tag is editable.
     context_menu: Option<ShaderContextMenu>,
     /// When the row represents a function-backed channel but no animated
     /// parameter exists yet, show an "f()+" button that pushes this
@@ -63,7 +63,7 @@ pub(in crate::app) struct ShaderGridRow {
     constant_function_view: Option<FunctionView>,
 }
 
-/// Items shown in a right-click context menu on a shader grid row.
+/// Items shown in the options and right-click menus on a shader grid row.
 pub(in crate::app) struct ShaderContextMenu {
     items: Vec<ShaderContextItem>,
 }
@@ -72,6 +72,9 @@ pub(in crate::app) struct ShaderContextMenu {
 pub(in crate::app) struct ShaderContextItem {
     label: String,
     action: ShaderContextAction,
+    /// Present when enabled; disabling either clears a flag or removes backing.
+    disable: Option<ShaderContextAction>,
+    confirm_disable: bool,
 }
 
 #[derive(Clone)]
@@ -80,6 +83,7 @@ pub(in crate::app) struct ShaderContextItem {
 pub(in crate::app) enum ShaderContextAction {
     AnimatedParameter(ShaderOp),
     FieldEdits(Vec<PendingFieldEdit>),
+    BlockOps(Vec<BlockOp>),
     ParameterOp(ShaderParamOp),
     H2ParameterOp(H2ShaderParamOp),
 }
@@ -724,6 +728,7 @@ mod tests {
         /// Draw one frame of the grid with `events`, collecting what it raised.
         fn frame(&mut self, events: Vec<egui::Event>) -> &Painted {
             self.ctx.data_mut(|d| d.remove::<Vec<egui::Rect>>(egui::Id::new("shader_clear_test_rects")));
+            self.ctx.data_mut(|d| d.remove::<Vec<(String, egui::Rect)>>(egui::Id::new("shader_options_test_rects")));
             self.time += 1.0 / 60.0;
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -800,6 +805,10 @@ mod tests {
                 .collect();
             let clear_rects = self.ctx.data(|d| d.get_temp::<Vec<egui::Rect>>(egui::Id::new("shader_clear_test_rects"))).unwrap_or_default();
             self.painted.extend(clear_rects.into_iter().map(|rect| ("×".to_owned(), rect)));
+            let menu_rects = self.ctx.data(|d| d.get_temp::<Vec<(String, egui::Rect)>>(
+                egui::Id::new("shader_options_test_rects"),
+            )).unwrap_or_default();
+            self.painted.extend(menu_rects.into_iter().map(|(label, rect)| (format!("Options:{label}"), rect)));
             &self.painted
         }
 
@@ -875,6 +884,12 @@ mod tests {
         fn click(&mut self, text: &str, nth: usize) {
             let pos = self.find(text, nth).center();
             self.click_at(pos);
+        }
+
+        fn open_optional_arguments(&mut self, row: &str) {
+            if self.count("Optional Arguments") == 0 {
+                self.click(&format!("Options:{row}"), 0);
+            }
         }
 
         fn type_text(&mut self, text: &str) {
@@ -1341,6 +1356,116 @@ mod tests {
         assert_eq!(constant_color(&grid.doc.tag, 0, 0).unwrap().map(float_channel_to_u8), [0x80, 0x40, 0x20, 0xff]);
         assert_eq!(grid.doc.tag.root().descend(path).unwrap().read_string_id("input name").as_deref(), Some("time"));
         assert_eq!(grid.count("p0_1"), 1);
+        assert!(rightmost_on_row(&grid, "p0_1", "Override Default").width() > 0.0,
+            "restoring a main color parameter must offer Override Default again");
+    }
+
+    #[test]
+    fn bitmap_optional_arguments_can_be_added_from_the_row_options_button() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click("Override Default", 0);
+        grid.apply();
+        let options = grid.find("Options:p0_0", 0);
+        assert!(options.right() < grid.find("p0_0", 0).left(), "the options button precedes the row label");
+        grid.open_optional_arguments("p0_0");
+        assert_eq!(grid.count("Optional Arguments"), 1);
+        assert_eq!(grid.count("scale uniform"), 1);
+        assert!(grid.ops.is_empty(), "opening the options menu edits nothing");
+        grid.click("scale uniform", 0);
+        grid.apply();
+        assert_eq!(grid.count("Optional Arguments"), 1, "checkbox changes keep the menu open");
+        let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+        assert_eq!(render_method.parameters[0].animated_parameters.len(), 1);
+        assert_eq!(render_method.parameters[0].animated_parameters[0].function.as_ref().unwrap().as_constant(), Some(1.0));
+        assert_eq!(grid.count("p0_0_scale_uniform"), 1);
+        // An enabled argument remains checked in the same menu. At its
+        // unmodified default it can be removed without a warning.
+        grid.open_optional_arguments("p0_0");
+        grid.click("scale uniform", 0);
+        assert_eq!(grid.count("Disable Optional Argument?"), 0);
+        grid.apply();
+        assert!(RenderMethod::from_tag(&grid.doc.tag).unwrap().parameters[0].animated_parameters.is_empty());
+        assert_eq!(grid.count("p0_0_scale_uniform"), 0);
+        // Enable several arguments through a single opening of the menu.
+        assert_eq!(grid.count("Optional Arguments"), 1);
+        grid.click("scale uniform", 0);
+        grid.apply();
+        grid.click("translation x", 0);
+        grid.apply();
+        assert_eq!(grid.count("Optional Arguments"), 1);
+        assert_eq!(grid.count("p0_0_scale_uniform"), 1);
+        assert_eq!(grid.count("p0_0_translation_x"), 1);
+    }
+
+    #[test]
+    fn removing_a_custom_bitmap_argument_can_be_cancelled_and_preserves_other_arguments() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click("Override Default", 0);
+        grid.apply();
+        grid.right_click_at(grid.find("p0_0", 0).center());
+        grid.click("scale uniform", 0);
+        grid.apply();
+        grid.ops.pending.push(PendingFieldEdit {
+            path: "render_method/parameters[0]/animated parameters[0]/function/data".to_owned(),
+            input: constant_function_hex(7.0),
+        });
+        grid.apply();
+        grid.right_click_at(grid.find("p0_0", 0).center());
+        grid.click("translation x", 0);
+        grid.apply();
+
+        grid.open_optional_arguments("p0_0");
+        grid.click("scale uniform", 0);
+        assert_eq!(grid.count("Disable Optional Argument?"), 1);
+        assert!(grid.ops.is_empty(), "the warning must precede any deletion");
+        grid.click("Cancel", 0);
+        assert!(grid.ops.is_empty());
+        assert_eq!(RenderMethod::from_tag(&grid.doc.tag).unwrap().parameters[0].animated_parameters[0].function.as_ref().unwrap().as_constant(), Some(7.0));
+
+        // Confirm through the right-click menu too: both entry points toggle
+        // the same backing, and deleting one channel keeps the others intact.
+        grid.right_click_at(grid.find("p0_0", 0).center());
+        grid.click("scale uniform", 0);
+        grid.click("Disable Argument", 0);
+        grid.apply();
+        let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+        assert_eq!(render_method.parameters.len(), 1);
+        assert_eq!(render_method.parameters[0].animated_parameters.len(), 1);
+        assert_eq!(grid.count("p0_0_scale_uniform"), 0);
+        assert_eq!(grid.count("p0_0_translation_x"), 1);
+    }
+
+    #[test]
+    fn bitmap_sampler_checkbox_disables_without_losing_the_saved_mode() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click("Override Default", 0);
+        grid.apply();
+        grid.right_click_at(grid.find("p0_0", 0).center());
+        grid.click("filter mode", 0);
+        grid.apply();
+        grid.ops.pending.push(PendingFieldEdit {
+            path: "render_method/parameters[0]/bitmap filter mode".to_owned(),
+            input: "2".to_owned(),
+        });
+        grid.apply();
+        grid.right_click_at(grid.find("p0_0", 0).center());
+        grid.click("filter mode", 0);
+        assert_eq!(grid.count("Disable Optional Argument?"), 0);
+        grid.apply();
+        let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+        assert_eq!(render_method.parameters[0].bitmap_flags & 1, 0);
+        assert_eq!(render_method.parameters[0].bitmap_filter_mode as i16, 2);
+        assert_eq!(grid.count("p0_0_filter_mode"), 0);
+        grid.right_click_at(grid.find("p0_0", 0).center());
+        grid.click("filter mode", 0);
+        grid.apply();
+        let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+        assert_eq!(render_method.parameters[0].bitmap_flags & 1, 1);
+        assert_eq!(render_method.parameters[0].bitmap_filter_mode as i16, 2);
+        assert_eq!(grid.count("p0_0_filter_mode"), 1);
     }
 
     #[test]
@@ -1365,6 +1490,12 @@ mod tests {
         assert_eq!(render_method.parameters[0].animated_parameters[0].function.as_ref().unwrap().as_constant(), Some(1.0));
         assert_eq!(grid.count("p0_0_scale_uniform"), 1);
         let bitmap_clear = rightmost_on_row(&grid, "p0_0", "×");
+        assert!(rightmost_on_row(&grid, "p0_0_scale_uniform", "Override Default").width() > 0.0,
+            "restoring an optional transform must offer Override Default again");
+        grid.click_at(rightmost_on_row(&grid, "p0_0_scale_uniform", "Override Default").center());
+        grid.apply();
+        assert_eq!(RenderMethod::from_tag(&grid.doc.tag).unwrap().parameters[0].animated_parameters.len(), 1,
+            "editing the restored default must not duplicate its backing");
         let transform_clear = rightmost_on_row(&grid, "p0_0_scale_uniform", "×");
         assert_eq!(bitmap_clear.right(), transform_clear.right(), "last buttons share right padding");
     }

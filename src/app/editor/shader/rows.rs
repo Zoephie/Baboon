@@ -402,13 +402,8 @@ pub(in crate::app) fn shader_bitmap_row(
     let bitmap_input = display.clone();
     let parameter_type_index = shader_parameter_type_index(parameter);
 
-    // Build right-click context menu: offer transform types not yet present.
+    // Every optional argument stays in the menu so it can be toggled off again.
     let context_menu = {
-        let existing_types: std::collections::HashSet<RenderMethodAnimatedParameterType> = instance
-            .iter()
-            .flat_map(|inst| &inst.animated_parameters)
-            .filter_map(|ap| ap.parameter_type.map(|t| t.get()))
-            .collect();
         let mut items = Vec::new();
         if let Some(pidx) = param_index {
             let animated_block_path = append_field_path(
@@ -416,11 +411,25 @@ pub(in crate::app) fn shader_bitmap_row(
                 &format!("parameters[{pidx}]/animated parameters"),
             );
             for (kind, suffix, hex) in BITMAP_TRANSFORM_TYPES {
-                if existing_types.contains(kind) {
-                    continue;
-                }
+                let existing: Vec<_> = instance.iter()
+                    .flat_map(|inst| inst.animated_parameters.iter().enumerate())
+                    .filter(|(_, animated)| animated.parameter_type.map(|ty| ty.get()) == Some(*kind))
+                    .collect();
+                let default_bytes = decode_hex(hex).expect("built-in default function hex");
+                let confirm_disable = existing.iter().any(|(_, animated)| {
+                    !animated.input_name.is_empty() || !animated.range_name.is_empty()
+                        || animated.time_period_in_seconds != 0.0
+                        || animated.function.as_ref().is_none_or(|function| function.to_bytes() != default_bytes)
+                });
                 items.push(ShaderContextItem {
                     label: suffix.replace('_', " "),
+                    disable: (!existing.is_empty()).then(|| ShaderContextAction::BlockOps(
+                        existing.iter().rev().map(|(index, _)| BlockOp {
+                            path: animated_block_path.clone(),
+                            kind: BlockOpKind::Delete(*index),
+                        }).collect(),
+                    )),
+                    confirm_disable,
                     action: ShaderContextAction::AnimatedParameter(ShaderOp {
                         animated_block_path: animated_block_path.clone(),
                         output_type_index: *kind as i32,
@@ -433,6 +442,8 @@ pub(in crate::app) fn shader_bitmap_row(
             for (kind, suffix, hex) in BITMAP_TRANSFORM_TYPES {
                 items.push(ShaderContextItem {
                     label: suffix.replace('_', " "),
+                    disable: None,
+                    confirm_disable: false,
                     action: ShaderContextAction::ParameterOp(ShaderParamOp {
                         parameters_block_path: parameters_block_path.clone(),
                         parameter_name: parameter.parameter_name.clone(),
@@ -453,16 +464,16 @@ pub(in crate::app) fn shader_bitmap_row(
         }
         let current_flags = instance.map(|inst| inst.bitmap_flags).unwrap_or(0);
         for sampler in BITMAP_SAMPLER_OVERRIDES {
-            if current_flags & sampler.flag_bit != 0 {
-                continue;
-            }
             // The field is a plain short: it takes the mode's index. Its name
             // ("trilinear") does not parse as one.
-            let initial_value = if sampler.flag_bit == BITMAP_FLAG_FILTER {
+            let initial_value = instance.map(|instance| match sampler.flag_bit {
+                BITMAP_FLAG_FILTER => instance.bitmap_filter_mode as i16,
+                BITMAP_FLAG_ADDRESS => instance.bitmap_address_mode as i16,
+                BITMAP_FLAG_ADDRESS_X => instance.bitmap_address_mode_x as i16,
+                _ => instance.bitmap_address_mode_y as i16,
+            }).unwrap_or_else(|| if sampler.flag_bit == BITMAP_FLAG_FILTER {
                 parameter.default_filter_mode_index
-            } else {
-                parameter.default_address_mode_index
-            }
+            } else { parameter.default_address_mode_index })
             .to_string();
             if let Some(pidx) = param_index {
                 let flag_path =
@@ -473,6 +484,15 @@ pub(in crate::app) fn shader_bitmap_row(
                 );
                 items.push(ShaderContextItem {
                     label: sampler.menu_label.to_owned(),
+                    // The enable bit is independent of the stored mode. Keep
+                    // that mode intact so re-enabling restores the same value.
+                    disable: (current_flags & sampler.flag_bit != 0).then(||
+                        ShaderContextAction::FieldEdits(vec![PendingFieldEdit {
+                            path: flag_path.clone(),
+                            input: (current_flags & !sampler.flag_bit).to_string(),
+                        }])
+                    ),
+                    confirm_disable: false,
                     action: ShaderContextAction::FieldEdits(vec![
                         PendingFieldEdit {
                             path: flag_path,
@@ -487,6 +507,8 @@ pub(in crate::app) fn shader_bitmap_row(
             } else {
                 items.push(ShaderContextItem {
                     label: sampler.menu_label.to_owned(),
+                    disable: None,
+                    confirm_disable: false,
                     action: ShaderContextAction::ParameterOp(ShaderParamOp {
                         parameters_block_path: append_field_path(edit_prefix, "parameters"),
                         parameter_name: parameter.parameter_name.clone(),
@@ -510,7 +532,7 @@ pub(in crate::app) fn shader_bitmap_row(
                 });
             }
         }
-        if instance.and_then(|inst| inst.bitmap_extern_mode).is_none() {
+        {
             if let Some(pidx) = param_index {
                 let field_path = append_field_path(
                     edit_prefix,
@@ -518,6 +540,12 @@ pub(in crate::app) fn shader_bitmap_row(
                 );
                 items.push(ShaderContextItem {
                     label: "extern mode".to_owned(),
+                    disable: instance.and_then(|inst| inst.bitmap_extern_mode).map(|_| {
+                        ShaderContextAction::FieldEdits(vec![PendingFieldEdit {
+                            path: field_path.clone(), input: "0".to_owned(),
+                        }])
+                    }),
+                    confirm_disable: true,
                     action: ShaderContextAction::FieldEdits(vec![PendingFieldEdit {
                         path: field_path,
                         input: "1".to_owned(),
@@ -526,6 +554,8 @@ pub(in crate::app) fn shader_bitmap_row(
             } else {
                 items.push(ShaderContextItem {
                     label: "extern mode".to_owned(),
+                    disable: None,
+                    confirm_disable: false,
                     action: ShaderContextAction::ParameterOp(ShaderParamOp {
                         parameters_block_path: append_field_path(edit_prefix, "parameters"),
                         parameter_name: parameter.parameter_name.clone(),
@@ -1770,6 +1800,7 @@ mod tests {
             ("bitmap flags", "3"),
             ("bitmap filter mode", "9"),
             ("bitmap address mode", "4"),
+            ("bitmap address mode x", "3"),
         ] {
             set(&mut shader, &format!("{parameters}[0]/{field}"), value);
         }
@@ -1804,8 +1835,8 @@ mod tests {
             .collect();
         assert_eq!(
             inputs,
-            ["4"],
-            "the x override starts at the default's index"
+            ["3"],
+            "enabling the x override preserves its stored index"
         );
     }
 

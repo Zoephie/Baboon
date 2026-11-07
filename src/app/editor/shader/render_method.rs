@@ -257,6 +257,7 @@ pub(in crate::app) fn shader_context_action_ops(action: &ShaderContextAction) ->
     match action {
         ShaderContextAction::AnimatedParameter(op) => ops.shader_ops.push(op.clone()),
         ShaderContextAction::FieldEdits(edits) => ops.pending.extend(edits.iter().cloned()),
+        ShaderContextAction::BlockOps(edits) => ops.block_ops.extend(edits.iter().cloned()),
         ShaderContextAction::ParameterOp(op) => ops.shader_param_ops.push(op.clone()),
         ShaderContextAction::H2ParameterOp(op) => ops.h2_shader_param_ops.push(op.clone()),
     }

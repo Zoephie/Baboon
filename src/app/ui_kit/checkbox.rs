@@ -31,6 +31,7 @@ impl<'a> ThemedCheckbox<'a> {
     }
 }
 impl ThemedCheckbox<'_> {
+    #[allow(clippy::disallowed_methods, reason = "native interaction and accessibility under the themed artwork")]
     fn show(self, ui: &mut Ui) -> egui::Response {
         let response = native_selection_response(ui, |ui| {
             ui.add(
@@ -114,6 +115,7 @@ mod tests {
 
     #[test]
     fn svg_checkbox_retains_native_layout_click_keyboard_and_disabled_behaviour() {
+        #[allow(clippy::disallowed_methods, reason = "compare the themed wrapper with native checkbox behavior")]
         fn frame(
             ctx: &egui::Context,
             value: &mut bool,
