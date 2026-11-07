@@ -395,7 +395,8 @@ fn gate_load() {
 /// moves at rest (the phantom does for Halo 3 and ODST), each in every
 /// [`LOOKS`]. Reach and Halo 4 each have a Warthog for their screen lights,
 /// Halo 2 a cigar for its particles, a flag for its cloth and a Banshee for
-/// its contrail, and Halo CE a flag for its flag widget.
+/// its contrail, Halo 4 a plasma turret and a power core for its effects'
+/// volumes and tracers, and Halo CE a flag for its flag widget.
 #[cfg(target_os = "macos")]
 const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
     (
@@ -469,6 +470,16 @@ const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
                 "vehicle",
             ),
             ("objects\\characters\\storm_cortana\\storm_cortana", "biped"),
+            // Its light volume, through its material.
+            (
+                "objects\\vehicles\\covenant\\turrets\\plasma_turret\\plasma_turret_mounted",
+                "vehicle",
+            ),
+            // Its tracers, from core to arms.
+            (
+                "environments\\shared\\crates\\cov\\cov_power_core\\cov_power_core",
+                "crate",
+            ),
         ],
     ),
 ];
