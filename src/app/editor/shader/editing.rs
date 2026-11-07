@@ -183,7 +183,17 @@ pub(in crate::app) fn shader_function_default_edit(
     }
 }
 
-pub(super) const SHADER_ROW_RIGHT_PADDING: f32 = 14.0;
+pub(super) const SHADER_ROW_RIGHT_PADDING: f32 = 4.0;
+pub(super) const SHADER_ROW_BORDER_WIDTH: f32 = 1.0;
+
+/// Keep four clear points above and below the content, excluding the separator.
+pub(super) fn shader_row_height(content_height: f32) -> f32 {
+    content_height + 2.0 * SHADER_ROW_RIGHT_PADDING + SHADER_ROW_BORDER_WIDTH
+}
+
+pub(super) fn shader_row_inner_height(height: f32) -> f32 {
+    height - 2.0 * SHADER_ROW_RIGHT_PADDING - SHADER_ROW_BORDER_WIDTH
+}
 
 pub(super) fn shader_label_top_padding(ui: &Ui) -> f32 {
     let font = FontId::proportional(12.5);
@@ -362,24 +372,35 @@ fn shader_label_width_id() -> egui::Id {
     egui::Id::new("shader_grid_label_width")
 }
 
-/// Session-persisted width of the shader grid's label column (Phase 4.3 resizable
-/// columns); dragged via the per-row splitter, read by every row.
-pub(super) fn shader_label_width(ui: &Ui) -> f32 {
-    ui.data(|d| d.get_temp::<f32>(shader_label_width_id()))
-        .unwrap_or(230.0)
-        .clamp(120.0, 600.0)
+/// Preferred shader-column widths, compressed together in narrow panes.
+pub(super) const SHADER_GRID_MIN_WIDTH: f32 = 420.0;
+const SHADER_FUNCTION_INPUT_MIN_WIDTH: f32 = 40.0;
+
+fn shader_column_widths(ui: &Ui) -> (f32, f32) {
+    let (label, default, manually_sized) = ui.data(|data| {
+        let label = data.get_temp::<f32>(shader_label_width_id());
+        let default = data.get_temp::<f32>(egui::Id::new("shader_grid_default_width"));
+        (label.unwrap_or(230.0).clamp(120.0, 600.0),
+         default.unwrap_or(150.0).clamp(60.0, 600.0), label.is_some() || default.is_some())
+    });
+    let available = ui.available_width().max(SHADER_GRID_MIN_WIDTH);
+    // Reserve room for two equally sized function inputs, their range toggle,
+    // action buttons and gaps. Compress the leading columns in narrow panes.
+    let budget = if manually_sized { available - 240.0 }
+        else { (available - 240.0).min(available * 0.45) }.max(180.0);
+    if label + default <= budget { return (label, default); }
+    let extra = budget - 180.0;
+    let preferred_extra = label + default - 180.0;
+    if preferred_extra <= 0.0 { return (120.0, 60.0); }
+    (120.0 + extra * (label - 120.0) / preferred_extra,
+     60.0 + extra * (default - 60.0) / preferred_extra)
 }
 
-pub(super) fn shader_default_width(ui: &Ui) -> f32 {
-    ui.data(|d| d.get_temp::<f32>(egui::Id::new("shader_grid_default_width")))
-        .unwrap_or(150.0)
-        .clamp(60.0, 600.0)
-}
+pub(super) fn shader_label_width(ui: &Ui) -> f32 { shader_column_widths(ui).0 }
+pub(super) fn shader_default_width(ui: &Ui) -> f32 { shader_column_widths(ui).1 }
 
 pub(super) fn shader_grid_width(ui: &Ui) -> f32 {
-    ui.data(|d| d.get_temp::<f32>(egui::Id::new("shader_grid_value_width")))
-        .map(|value| shader_label_width(ui) + shader_default_width(ui) + value + 16.0)
-        .unwrap_or_else(|| ui.available_width().max(780.0))
+    ui.available_width().max(SHADER_GRID_MIN_WIDTH)
 }
 
 pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
@@ -422,13 +443,6 @@ pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
             60.0,
             600.0,
         ),
-        (
-            "shader_grid_value_width",
-            width - 1.0,
-            width - label - default - 16.0,
-            240.0,
-            2400.0,
-        ),
     ] {
         let x = rect.left() + x;
         let handle = egui::Rect::from_center_size(
@@ -446,7 +460,14 @@ pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
             .vline(x, rect.y_range(), Stroke::new(1.0, foundation_block_edge()));
         let start_id = egui::Id::new(("shader_column_drag_start", name));
         if response.drag_started() {
-            ui.data_mut(|d| d.insert_temp(start_id, current));
+            ui.data_mut(|d| {
+                d.insert_temp(start_id, current);
+                if name == "shader_grid_label_width" {
+                    d.insert_temp(egui::Id::new("shader_grid_default_width"), default);
+                } else {
+                    d.insert_temp(shader_label_width_id(), label);
+                }
+            });
         }
         if response.dragged() {
             let start = ui.data(|d| d.get_temp::<f32>(start_id)).unwrap_or(current);
@@ -457,18 +478,6 @@ pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
             ui.data_mut(|d| d.remove::<f32>(egui::Id::new(name)));
         }
     }
-}
-
-pub(super) fn shader_input_box(ui: &mut Ui, rect: egui::Rect) {
-    let visuals = &ui.visuals().widgets.inactive;
-    ui.painter()
-        .rect_filled(rect, visuals.corner_radius, material_input());
-    ui.painter().rect_stroke(
-        rect,
-        visuals.corner_radius,
-        visuals.bg_stroke,
-        egui::StrokeKind::Inside,
-    );
 }
 
 pub(super) fn shader_cell_scope<R>(
@@ -487,8 +496,8 @@ pub(super) fn shader_cell_scope<R>(
 pub(super) fn shader_row_separator(ui: &Ui, rect: egui::Rect) {
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom() - 0.5,
-        Stroke::new(1.0, foundation_block_edge()),
+        rect.bottom() - SHADER_ROW_BORDER_WIDTH * 0.5,
+        Stroke::new(SHADER_ROW_BORDER_WIDTH, foundation_block_edge()),
     );
 }
 
@@ -618,9 +627,9 @@ fn draw_shader_grid_row_inner(
     let tag_key = edit.tag_key;
     let editable = edit.editable;
     let available = shader_grid_width(ui);
-    let indent = depth as f32 * 10.0;
     let base_label_width = shader_label_width(ui);
-    let label_width = (base_label_width - indent).max(110.0);
+    let indent = (depth as f32 * 10.0).min((base_label_width - 110.0).max(0.0));
+    let label_width = base_label_width - indent;
     let default_width = shader_default_width(ui);
     let show_override = editable
         && !row.is_overridden
@@ -694,8 +703,8 @@ fn draw_shader_grid_row_inner(
             | ShaderRowEditKind::H2CreateTemplateColor { .. }
         ) && parse_shader_rgba(&edit.current).is_some()
     });
-    let has_preview = !show_override && (graph_preview.is_some() || color_preview);
-    let show_range_values = ranged && !has_preview;
+    let preview_candidate = !show_override && (graph_preview.is_some() || color_preview);
+    let show_range_values = ranged && !preview_candidate;
     const PREVIEW_WIDTH: f32 = 96.0;
     let right_controls_width = if show_override {
         SHADER_ROW_RIGHT_PADDING
@@ -708,10 +717,21 @@ fn draw_shader_grid_row_inner(
     };
     let value_width =
         (available - label_width - indent - default_width - 16.0 - right_controls_width).max(40.0);
+    let minimum_inputs = if has_range_input {
+        2.0 * SHADER_FUNCTION_INPUT_MIN_WIDTH + H2_RANGE_CONTROL_WIDTH + 12.0
+    } else { SHADER_FUNCTION_INPUT_MIN_WIDTH };
+    let preview_budget = (value_width - minimum_inputs - 6.0)
+        .min(value_width * 0.25).min(PREVIEW_WIDTH);
+    // A shared preview slot keeps Input/Range columns aligned across related
+    // rows, including alpha rows before their own function is materialized.
+    let preview_minimum = if !has_range_input && color_preview { 16.0 } else { 32.0 };
+    let preview_width = if !show_override && (function_capable || color_preview)
+        && preview_budget >= preview_minimum { preview_budget } else { 0.0 };
+    let has_preview = preview_candidate && preview_width > 0.0;
     let height = if show_range_values {
-        64.0
-    } else if graph_preview.is_some() && !show_override {
-        shader_grid_row_height(ui, row, value_width).max(48.0)
+        shader_row_height(56.0)
+    } else if graph_preview.is_some() && has_preview && !show_override {
+        shader_grid_row_height(ui, row, value_width).max(shader_row_height(40.0))
     } else {
         shader_grid_row_height(ui, row, value_width)
     };
@@ -758,7 +778,7 @@ fn draw_shader_grid_row_inner(
 
     let label_rect = egui::Rect::from_min_size(
         rect.left_top() + Vec2::new(4.0 + indent, 0.0),
-        Vec2::new(label_width, height),
+        Vec2::new(label_width, height - SHADER_ROW_BORDER_WIDTH),
     );
     if function_capable && !nonconstant_function {
         ui.painter().rect_filled(
@@ -840,6 +860,9 @@ fn draw_shader_grid_row_inner(
             Stroke::new(1.0_f32, row_text),
         );
     }
+    if split_resp.drag_started() {
+        ui.data_mut(|data| data.insert_temp(egui::Id::new("shader_grid_default_width"), default_width));
+    }
     if split_resp.dragged() {
         let new_width = (base_label_width + split_resp.drag_delta().x).clamp(120.0, 600.0);
         ui.data_mut(|d| d.insert_temp(shader_label_width_id(), new_width));
@@ -847,7 +870,7 @@ fn draw_shader_grid_row_inner(
 
     let default_rect = egui::Rect::from_min_size(
         label_rect.right_top() + Vec2::new(2.0, 4.0),
-        Vec2::new(default_width, height - 8.0),
+        Vec2::new(default_width, shader_row_inner_height(height)),
     );
     if let Some(ShaderRowEdit {
         kind: ShaderRowEditKind::Flags(options),
@@ -866,14 +889,12 @@ fn draw_shader_grid_row_inner(
         );
         defaults.multiply_opacity(0.5);
         defaults.visuals_mut().disabled_alpha = 1.0;
-        shader_input_box(&mut defaults, default_rect);
-        shader_cell_scope(&mut defaults, default_rect.shrink(4.0), |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for (bit, option) in options.iter().enumerate() {
-                let mut checked = mask & (1 << bit) != 0;
-                ui.add_enabled(false, ThemedCheckbox::new(&mut checked, option));
-            }
-        });
+        paint_flag_panel(&defaults, default_rect);
+        for (bit, option) in options.iter().enumerate() {
+            let id = defaults.make_persistent_id(("shader_default_flag", bit));
+            draw_flag_option(&mut defaults, default_rect, bit, id, option, None,
+                mask & 1u64.checked_shl(bit as u32).unwrap_or(0) != 0, false);
+        }
     } else {
         draw_shader_grid_cell_with_icon(
             ui,
@@ -900,15 +921,14 @@ fn draw_shader_grid_row_inner(
         egui::pos2(value_right, default_rect.bottom()),
     );
     let mut content_value_rect = full_value_rect;
-    if has_preview {
-        content_value_rect.min.x += PREVIEW_WIDTH + 6.0;
+    if preview_width > 0.0 {
+        content_value_rect.min.x += preview_width + 6.0;
     }
     let mut value_rect = content_value_rect;
     let range_input_rect = if has_range_input {
-        // Split the full column consistently. A preview consumes space from
-        // the Input field, rather than shifting the Range controls to the right.
-        let field_width = (full_value_rect.width() - H2_RANGE_CONTROL_WIDTH - 12.0) / 2.0;
-        value_rect.max.x = full_value_rect.left() + field_width;
+        // Previews have their own space; Input and Range always share the rest equally.
+        let field_width = (content_value_rect.width() - H2_RANGE_CONTROL_WIDTH - 12.0) / 2.0;
+        value_rect.max.x = content_value_rect.left() + field_width;
         Some(egui::Rect::from_min_max(
             egui::pos2(value_rect.right() + 8.0, full_value_rect.top()),
             full_value_rect.right_bottom(),
@@ -920,7 +940,7 @@ fn draw_shader_grid_row_inner(
     // writable; otherwise the read-only painted cell.
     if !show_override && graph_preview.is_some() {
         draw_shader_function_name(ui, value_rect, row, edit, false);
-    } else if color_preview {
+    } else if color_preview && has_preview {
         ui.painter().text(
             value_rect.left_center() + Vec2::new(4.0, 0.0),
             Align2::LEFT_CENTER,
@@ -942,7 +962,11 @@ fn draw_shader_grid_row_inner(
             }
         });
     } else if let (true, Some(row_edit)) = (editable, row.edit.as_ref()) {
-        draw_shader_editable_value(ui, value_rect, &row.label, row_edit, edit, color_popup);
+        if color_preview && !has_preview {
+            draw_shader_editable_value_with_color_preview(ui, value_rect, &row.label, row_edit, edit, color_popup, true);
+        } else {
+            draw_shader_editable_value(ui, value_rect, &row.label, row_edit, edit, color_popup);
+        }
     } else {
         draw_shader_grid_cell_with_icon(
             ui,
@@ -978,10 +1002,10 @@ fn draw_shader_grid_row_inner(
         draw_shader_range_name(ui, input_rect, row, edit);
     }
 
-    if !show_override && let Some(function) = graph_preview {
+    if !show_override && has_preview && let Some(function) = graph_preview {
         let preview_rect = egui::Rect::from_min_size(
             egui::pos2(full_value_rect.left(), rect.top() + 4.0),
-            Vec2::new(PREVIEW_WIDTH, rect.height() - 8.0),
+            Vec2::new(preview_width, shader_row_inner_height(rect.height())),
         );
         let preview_response = function_graph_preview_button(
             ui, preview_rect, &function.function,
@@ -993,10 +1017,10 @@ fn draw_shader_grid_row_inner(
                 editable && function.edit.is_some(),
             ));
         }
-    } else if color_preview && let Some(row_edit) = row.edit.as_ref() {
+    } else if has_preview && color_preview && let Some(row_edit) = row.edit.as_ref() {
         let preview_rect = egui::Rect::from_min_size(
             egui::pos2(full_value_rect.left(), value_rect.top()),
-            Vec2::new(PREVIEW_WIDTH, BUTTON_HEIGHT),
+            Vec2::new(preview_width, BUTTON_HEIGHT),
         );
         // Reuse the color cell's popup/write targets, with a separate widget
         // scope so the value cell and preview remain independently clickable.
@@ -1175,31 +1199,15 @@ fn is_h2_function_view(function: &FunctionView) -> bool {
         .is_some_and(|edit| matches!(edit.data, FunctionDataStorage::Halo2ByteBlock(_)))
 }
 
-fn shader_grid_row_height(ui: &mut Ui, row: &ShaderGridRow, value_width: f32) -> f32 {
+fn shader_grid_row_height(_ui: &mut Ui, row: &ShaderGridRow, _value_width: f32) -> f32 {
     if let Some(ShaderRowEdit {
         kind: ShaderRowEditKind::Flags(options),
         ..
     }) = row.edit.as_ref()
     {
-        // Measure the same checkbox layout used by the value cell. Its height
-        // depends on control styling, flag count, and wrapping at this width.
-        let mut measure = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt(("shader_flags_measure", &row.label))
-                .max_rect(egui::Rect::from_min_size(
-                    ui.cursor().min,
-                    Vec2::new(value_width, 0.0),
-                ))
-                .layout(egui::Layout::top_down(egui::Align::Min))
-                .invisible(),
-        );
-        measure.spacing_mut().item_spacing.y = 0.0;
-        for option in options {
-            measure.baboon_checkbox(&mut false, option);
-        }
-        (measure.min_rect().height() + 16.0).max(BUTTON_HEIGHT + 8.0)
+        shader_row_height(flag_panel_height(options.len(), false))
     } else {
-        BUTTON_HEIGHT + 8.0
+        shader_row_height(BUTTON_HEIGHT)
     }
 }
 
@@ -1568,7 +1576,8 @@ fn draw_shader_function_name(
     let id = edit.widget_id((name, &row.label));
     let draft = edit.buffers.draft_mut(&key, current);
     shader_cell_scope(ui, rect, |ui| {
-        ui.visuals_mut().extreme_bg_color = material_input();
+        ui.visuals_mut().disabled_alpha = 1.0;
+        ui.visuals_mut().extreme_bg_color = foundation_input();
         let response = ui.add_enabled(
             edit.editable && path.is_some(),
             crate::app::ui_kit::singleline_text_edit(&mut draft.text)
@@ -1645,7 +1654,7 @@ fn draw_shader_range_values(
         let current = format_shader_float(*value);
         let draft = edit.buffers.draft_mut(&key, &current);
         shader_cell_scope(ui, input, |ui| {
-            ui.visuals_mut().extreme_bg_color = material_input();
+            ui.visuals_mut().extreme_bg_color = foundation_input();
             let response = ui.add_enabled(
                 edit.editable,
                 crate::app::ui_kit::singleline_text_edit(&mut draft.text)
@@ -1847,31 +1856,18 @@ fn draw_shader_editable_value_with_color_preview(
 
         ShaderRowEditKind::Flags(options) => {
             let current_mask = row_edit.current.trim().parse::<u64>().unwrap_or(0);
-            shader_input_box(ui, rect);
-            shader_cell_scope(ui, rect.shrink(4.0), |ui| {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    for (bit, option) in options.iter().enumerate() {
-                        let mut checked = current_mask & (1u64 << bit) != 0;
-                        let response = ui.add_enabled(
-                            edit.editable,
-                            ThemedCheckbox::new(&mut checked, option.as_str()),
-                        );
-                        if response.changed() {
-                            let mut next_mask = current_mask;
-                            if checked {
-                                next_mask |= 1u64 << bit;
-                            } else {
-                                next_mask &= !(1u64 << bit);
-                            }
-                            edit.pending.push(PendingFieldEdit {
-                                path: row_edit.path.clone(),
-                                input: next_mask.to_string(),
-                            });
-                        }
-                    }
-                });
-            });
+            paint_flag_panel(ui, rect);
+            let mut next_mask = current_mask;
+            for (bit, option) in options.iter().enumerate() {
+                let bit_mask = 1u64.checked_shl(bit as u32).unwrap_or(0);
+                let id = ui.make_persistent_id((edit.view_scope, edit.tag_key, &row_edit.path, "shader_flag", bit));
+                if draw_flag_option(ui, rect, bit, id, option, None,
+                    current_mask & bit_mask != 0, edit.editable).clicked()
+                {
+                    next_mask ^= bit_mask;
+                    edit.pending.push(PendingFieldEdit { path: row_edit.path.clone(), input: next_mask.to_string() });
+                }
+            }
         }
 
         // Constant animated-parameter scalar input.
@@ -1884,7 +1880,7 @@ fn draw_shader_editable_value_with_color_preview(
             let draft = edit.buffers.draft_mut(&buffer_key, &current);
             let mut commit = None;
             shader_cell_scope(ui, text_rect, |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
+                ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = ui.add(
                     crate::app::ui_kit::singleline_text_edit(&mut draft.text)
                         .id(id)
@@ -2160,7 +2156,7 @@ fn draw_shader_editable_value_with_color_preview(
             let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
             shader_cell_scope(ui, rect, |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
+                ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = ui.add(
                     crate::app::ui_kit::singleline_text_edit(&mut draft.text)
                         .id(id)
@@ -2279,7 +2275,7 @@ fn draw_shader_editable_value_with_color_preview(
             let draft = edit.buffers.draft_mut(&buffer_key, &current);
             let mut commit = None;
             shader_cell_scope(ui, rect, |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
+                ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -2310,7 +2306,7 @@ fn draw_shader_editable_value_with_color_preview(
             let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
             shader_cell_scope(ui, rect, |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
+                ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -2342,7 +2338,7 @@ fn draw_shader_editable_value_with_color_preview(
             let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
             shader_cell_scope(ui, rect, |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
+                ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = ui.add(
                     crate::app::ui_kit::singleline_text_edit(&mut draft.text)
                         .id(id)
@@ -2391,7 +2387,7 @@ fn draw_shader_editable_value_with_color_preview(
             let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
             shader_cell_scope(ui, rect, |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
+                ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -2476,7 +2472,7 @@ fn draw_shader_editable_value_with_color_preview(
             let draft = edit.buffers.draft_mut(&buffer_key, &current);
             let mut commit = None;
             shader_cell_scope(ui, rect, |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
+                ui.visuals_mut().extreme_bg_color = foundation_input();
                 let resp = ui.add(
                     crate::app::ui_kit::singleline_text_edit(&mut draft.text)
                         .id(id)
@@ -2623,7 +2619,7 @@ fn draw_shader_reference_cell(
     };
     let mut commit = None;
     shader_cell_scope(ui, text_rect, |ui| {
-        ui.visuals_mut().extreme_bg_color = material_input();
+        ui.visuals_mut().extreme_bg_color = foundation_input();
         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _width: f32| {
             let display = if ui.memory(|m| m.has_focus(id)) {
                 text.as_str()
@@ -2646,7 +2642,7 @@ fn draw_shader_reference_cell(
                     bottom: 2,
                 })
                 .desired_width(text_rect.width())
-                .background_color(if missing { invalid_value_fill() } else { material_input() })
+                .background_color(if missing { invalid_value_fill() } else { foundation_input() })
                 .layouter(&mut layouter)
                 .hint_text(placeholder_text("(no reference)"))
                 .text_color(text_color)
@@ -2924,7 +2920,7 @@ fn draw_shader_color_value(
 
 pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, color: Color32) {
     let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
-    ui.painter().rect_filled(rect, 0.0, material_input());
+    ui.painter().rect_filled(rect, 0.0, foundation_input());
     ui.painter().rect_stroke(
         rect,
         0.0,
@@ -3122,6 +3118,34 @@ mod tests {
     use super::*;
     use crate::app::browser::draw_entry;
     use crate::app::editor::fields::with_test_edit_context;
+
+    #[test]
+    fn shader_function_inputs_match_and_fit_in_split_views() {
+        for width in [440.0, 500.0, 700.0, 1100.0] {
+            let ctx = egui::Context::default();
+            Baboon::configure_context(&ctx);
+            let mut row = empty_shader_grid_row();
+            row.label = "split_function".to_owned();
+            row.is_overridden = true;
+            let mut editor = TagFunctionEditor::from_function(
+                h2_tag_function(&h2_constant_scalar_function_data(1.0, None)).unwrap());
+            editor.set_function_type(FunctionType::Spline).unwrap();
+            row.function = Some(FunctionView::from_function(editor.function().clone()));
+            let _ = crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width, 400.0))),
+                ..Default::default()
+            }, |ui| with_test_edit_context(|edit| {
+                let input = edit.widget_id(("shader_input_name", &row.label));
+                let range = edit.widget_id(("shader_range_name", &row.label));
+                draw_shader_grid_row(ui, &row, 0, &mut None, &mut None, edit);
+                let input = ctx.read_response(input).unwrap().rect;
+                let range = ctx.read_response(range).unwrap().rect;
+                assert!((input.width() - range.width()).abs() <= 1.0, "Input {input:?} and Range {range:?} must match at {width}px");
+                assert!(input.width() >= 39.0);
+                assert!(range.right() <= width - 4.0, "Function inputs must stay inside a split pane");
+            }));
+        }
+    }
 
     #[test]
     fn shader_graph_and_color_previews_open_their_editors() {
@@ -3468,7 +3492,82 @@ mod tests {
     }
 
     #[test]
-    fn shader_column_header_resizes_each_column_by_dragging() {
+    fn shader_function_row_right_padding_matches_vertical_padding() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let mut row = pending_h2_scalar_row();
+        row.is_overridden = true;
+        let delete = BlockOp { path: "parameters".to_owned(), kind: BlockOpKind::Delete(0) };
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 400.0))),
+            ..Default::default()
+        }, |ui| {
+            with_test_edit_context(|edit| {
+                draw_unused_shader_grid_row(ui, &row, &mut None, &mut None, edit, &delete);
+            });
+        });
+        let panels = output.shapes.iter().filter_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) => Some(rect.rect), _ => None,
+        }).collect::<Vec<_>>();
+        let row_rect = panels.iter().find(|rect| rect.width() == 1000.0).unwrap();
+        let last_button = panels.iter().filter(|rect| rect.size() == ICON_BUTTON_SIZE)
+            .max_by(|a, b| a.right().total_cmp(&b.right())).unwrap();
+        let right = row_rect.right() - last_button.right();
+        assert_eq!(right, last_button.top() - row_rect.top());
+        let separator_top = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::LineSegment { points, stroke }
+                if stroke.color == foundation_block_edge()
+                    && (points[0].y - (row_rect.bottom() - 0.5)).abs() < 0.01 =>
+                Some(points[0].y - stroke.width * 0.5),
+            _ => None,
+        }).expect("the painted row separator");
+        assert_eq!(right, separator_top - last_button.bottom(),
+            "Padding must be measured to the visible border, not the row's outer edge");
+    }
+
+    #[test]
+    fn shader_override_column_fills_window_and_has_no_outer_resize_handle() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("shader_grid_value_width"), 2000.0f32));
+        for width in [900.0, 1250.0, 1000.0] {
+            let _ = crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width, 500.0))),
+                ..Default::default()
+            }, |ui| {
+                assert_eq!(shader_grid_width(ui), ui.available_width(), "The override column must follow the window, including shrinking");
+                let handle = ui.make_persistent_id(("shader_column_resize", "shader_grid_value_width"));
+                draw_shader_columns_header(ui);
+                assert!(ui.ctx().read_response(handle).is_none(), "The outer edge must not resize the override column");
+            });
+        }
+    }
+
+    #[test]
+    fn shader_painted_inputs_keep_borders_for_default_and_override_values() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let rect = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), Vec2::new(150.0, 24.0));
+        for id in ["default:scalar", "category_default:method", "override:scalar"] {
+            let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                draw_shader_grid_cell(ui, rect, Some(&ShaderGridCell {
+                    text: "0.5".to_owned(), value_kind: "real", color: None,
+                }), id, &mut None);
+            });
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Rect(frame) if frame.rect == rect && frame.stroke.width > 0.0)),
+                "{id} must retain a visible input border");
+            let expected_fill = if id.starts_with("default:") || id.starts_with("category_default:") {
+                foundation_input().gamma_multiply(0.5)
+            } else { foundation_input() };
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Rect(frame) if frame.rect == rect && frame.fill == expected_fill)),
+                "{id} must use the standard fill, with defaults faded to 50%");
+        }
+    }
+
+    #[test]
+    fn shader_column_header_resizes_field_and_default_columns_by_dragging() {
         let ctx = egui::Context::default();
         let point = std::cell::Cell::new(egui::Pos2::ZERO);
         let frame = |events: Vec<egui::Event>, column: usize| {
@@ -3498,22 +3597,9 @@ mod tests {
         for (column, key, initial) in [
             (0, "shader_grid_label_width", 230.0),
             (1, "shader_grid_default_width", 150.0),
-            (2, "shader_grid_value_width", 0.0),
         ] {
             frame(Vec::new(), column);
             let start = point.get();
-            let initial = if column == 2 {
-                start.x
-                    - ctx
-                        .data(|d| d.get_temp::<f32>(shader_label_width_id()))
-                        .unwrap()
-                    - ctx
-                        .data(|d| d.get_temp::<f32>(egui::Id::new("shader_grid_default_width")))
-                        .unwrap()
-                    - 15.0
-            } else {
-                initial
-            };
             frame(
                 vec![
                     egui::Event::PointerMoved(start),
@@ -3543,7 +3629,48 @@ mod tests {
     }
 
     #[test]
-    fn shader_flags_row_contains_all_checkboxes_at_larger_control_sizes() {
+    fn shader_flags_fill_the_column_and_keep_hidden_bits_when_clicked() {
+        for width in [220.0, 640.0] {
+            for editable in [false, true] {
+                let ctx = egui::Context::default();
+                Baboon::configure_context(&ctx);
+                let rect = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), Vec2::new(width, 60.0));
+                let row_edit = ShaderRowEdit {
+                    path: "flags".to_owned(), current: "128".to_owned(),
+                    kind: ShaderRowEditKind::Flags(vec!["First flag".to_owned(), "Second flag".to_owned()]),
+                };
+                let mut commits = Vec::new();
+                let mut frame = |events| crate::app::run_ui_test(&ctx,
+                    egui::RawInput { events, ..Default::default() }, |ui| {
+                        with_test_edit_context(|edit| {
+                            edit.editable = editable;
+                            draw_shader_editable_value(ui, rect, "flags", &row_edit, edit, &mut None);
+                            commits.extend(edit.pending.iter().map(|edit| edit.input.clone()));
+                        });
+                    });
+                let output = frame(vec![]);
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Rect(panel) if panel.rect == rect && panel.fill == foundation_input())),
+                    "The flags panel must stretch across the supplied shader column");
+                let y = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "First flag" =>
+                        Some(text.pos.y + text.galley.rect.center().y),
+                    _ => None,
+                }).unwrap();
+                // Click beyond the label, as tag flags allow across their row.
+                let pos = egui::pos2(rect.right() - 10.0, y);
+                for pressed in [true, false] {
+                    frame(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton {
+                        pos, pressed, button: egui::PointerButton::Primary, modifiers: Default::default(),
+                    }]);
+                }
+                assert_eq!(commits, if editable { vec!["129".to_owned()] } else { vec![] });
+            }
+        }
+    }
+
+    #[test]
+    fn shader_flags_row_keeps_tag_spacing_at_larger_control_sizes() {
         let ctx = egui::Context::default();
         let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             ui.spacing_mut().interact_size.y = 32.0;
@@ -3558,10 +3685,10 @@ mod tests {
                     ),
                 });
                 let height = shader_grid_row_height(ui, &row, 300.0);
-                assert!(height >= count as f32 * 32.0 + 8.0);
+                assert_eq!(height, count as f32 * FLAG_OPTION_HEIGHT + 21.0);
                 let rect = egui::Rect::from_min_size(
                     ui.cursor().min + Vec2::new(0.0, 4.0),
-                    Vec2::new(300.0, height - 8.0),
+                    Vec2::new(300.0, shader_row_inner_height(height)),
                 );
                 let mut value_ui =
                     ui.new_child(egui::UiBuilder::new().id_salt(count).max_rect(rect));

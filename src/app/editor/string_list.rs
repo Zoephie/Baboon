@@ -1633,7 +1633,7 @@ fn draw_group_rename(ui: &mut Ui, count: usize, edit: &FieldEditContext<'_>, ren
     let count_width=ui.painter().layout_no_wrap(count.clone(),font.clone(),text_dark()).size().x;
     let frame=egui::Frame::new().fill(foundation_input())
         .corner_radius(ui.visuals().widgets.inactive.corner_radius)
-        .stroke(if rename.error.is_some() {invalid_value_stroke()}else{ui.visuals().widgets.inactive.bg_stroke})
+        .stroke(if rename.error.is_some() {invalid_value_stroke()}else{Stroke::new(1.0, foundation_input_edge())})
         .inner_margin(egui::Margin {left:4,right:(count_width+12.0).ceil() as i8,top:2,bottom:2});
     let response=ui.add_sized(Vec2::new(ui.available_width(),BUTTON_HEIGHT),
         egui::TextEdit::singleline(&mut rename.text).id(id).font(TextStyle::Monospace)
@@ -2600,7 +2600,7 @@ fn cell_box_output<R: CellOutput>(ui: &mut Ui, rect: egui::Rect, contents: impl 
     let stroke = if output.focused() {
         ui.visuals().selection.stroke
     } else {
-        ui.visuals().widgets.inactive.bg_stroke
+        Stroke::new(1.0, foundation_input_edge())
     };
     ui.painter().rect_stroke(rect, ui.visuals().widgets.inactive.corner_radius, stroke, egui::StrokeKind::Inside);
     output

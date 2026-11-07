@@ -388,9 +388,8 @@ fn foundation_value_text_filled_with_placeholder(
     string_id_placeholder: bool,
     corners: egui::CornerRadius,
 ) -> egui::Response {
-    // A box whose text can't change is greyed, as Foundation greys a
-    // read-only field's: a dimmer fill and dimmer text (a missing reference
-    // keeps its red). It still takes focus, so its text can be copied.
+    // Read-only boxes use the same neutral fill with dimmer text (a missing
+    // reference keeps its red). They still take focus so text can be copied.
     let read_only = !text.is_mutable();
     let invalid = fill == Some(invalid_value_fill());
     let unapplied = fill == Some(unapplied_value_fill());
@@ -1844,4 +1843,46 @@ mod tests {
         assert_eq!(wheel_while_dragging(false), 0.0, "control: egui ignores the wheel mid-drag");
         assert!(wheel_while_dragging(true) > 0.0, "the editor takes it");
     }
+}
+
+/// Shared flags-list geometry; the containing editor chooses the panel width.
+pub(in crate::app) const FLAG_OPTION_HEIGHT: f32 = 21.0;
+
+pub(in crate::app) fn flag_panel_height(options: usize, show_raw: bool) -> f32 {
+    if options == 0 { 32.0 }
+    else { 12.0 + FLAG_OPTION_HEIGHT * options as f32 + if show_raw { 24.0 } else { 0.0 } }
+}
+
+pub(in crate::app) fn paint_flag_panel(ui: &Ui, rect: egui::Rect) {
+    ui.painter().rect_filled(rect, INPUT_CORNER_RADIUS, foundation_input());
+    ui.painter().rect_stroke(rect, INPUT_CORNER_RADIUS,
+        Stroke::new(1.0, foundation_input_edge()), egui::StrokeKind::Inside);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_flag_option(
+    ui: &mut Ui, panel: egui::Rect, index: usize, id: egui::Id,
+    label: &str, help: Option<&str>, checked: bool, enabled: bool,
+) -> egui::Response {
+    let row = egui::Rect::from_min_size(
+        panel.left_top() + Vec2::new(8.0, 6.0 + index as f32 * FLAG_OPTION_HEIGHT),
+        Vec2::new((panel.width() - 16.0).max(0.0), FLAG_OPTION_HEIGHT),
+    );
+    let enabled = enabled && ui.is_enabled();
+    let response = ui.interact(row, id, if enabled { Sense::click() } else { Sense::hover() });
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, checked, label));
+    if response.hovered() {
+        ui.painter().rect_filled(row, 0.0, foundation_flag_hover());
+        response.clone().on_hover_text(match help {
+            Some(help) => format!("{label}\n\n{help}"),
+            None => label.to_owned(),
+        });
+    }
+    let checkbox = egui::Rect::from_min_size(row.left_top() + Vec2::new(0.0, 2.5), Vec2::splat(16.0));
+    let mut checkbox_ui = ui.new_child(egui::UiBuilder::new().max_rect(checkbox));
+    if !enabled { checkbox_ui.disable(); }
+    paint_checkbox_at(&checkbox_ui, checkbox, checked, response.hovered() || response.has_focus());
+    paint_findable_text(ui, row.left_center() + Vec2::new(20.0, 0.0), Align2::LEFT_CENTER,
+        &truncate_for_cell(label, row.width() - 24.0), FontId::proportional(12.5), text_dark(), FindTargetKind::Value);
+    response
 }
