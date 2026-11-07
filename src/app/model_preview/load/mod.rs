@@ -295,6 +295,11 @@ pub(super) fn load_model_preview(
     Ok(data)
 }
 
+/// The preview of `model_tag`, by its group: a particle model or a render
+/// tag is its own geometry; an object reads its model and then its own
+/// features; collision, physics and structure BSPs derive theirs; a scenario
+/// composes the BSPs chosen; a Campaign Evolved model reads its Unreal meshes;
+/// and any other `.model` previews the render model it names.
 fn load_tag_preview(
     model_tag: &TagFile,
     entry: &TagEntry,
@@ -302,325 +307,456 @@ fn load_tag_preview(
     source: Option<&TagSource>,
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
-    let high_detail = settings.high_detail;
-    // `particle_model` carries its geometry inline with no wrapper, but
-    // it is not a render_model: no regions, no permutations, no
-    // materials, no nodes. Its objects are the entries of the JMI the
-    // artist imported, so each becomes a preview region and gets its own
-    // toggle in the region list.
     if blam_tags::is_particle_model_group(model_tag.header.group_tag) {
-        let stem = preview_tag_stem(entry);
-        let preview = build_particle_model_preview(model_tag, &stem)?;
-        if preview.batches.is_empty() {
-            return Err("This particle_model has no previewable geometry.".to_owned());
-        }
-        return Ok(model_preview_data(
-            entry.key.clone(),
-            entry.display_path.clone(),
-            preview,
-            Vec::new(),
-        ));
+        return load_particle_model(model_tag, entry);
     }
-
-    // Halo CE `gbxmodel` (mod2) and a bare `render_model` (mode) ARE the
-    // render geometry — there is no `.model` (hlmt) wrapper carrying a
-    // "render model" reference, so preview the tag itself.
     let group = model_tag.header.group_tag.to_be_bytes();
     if matches!(&group, b"mode" | b"mod2") {
-        let preview = build_render_preview(model_tag)?;
-        if preview.batches.is_empty() {
-            return Err("This render tag has no previewable draw batches.".to_owned());
-        }
-        return Ok(model_preview_data(
-            entry.key.clone(),
-            entry.display_path.clone(),
-            preview,
-            Vec::new(),
-        ));
+        return load_render_tag(model_tag, entry);
     }
-
-    // Halo CE object-family tags are the equivalent of later engines' model
-    // wrapper: the object directly names its gbxmodel, collision, animation,
-    // and legacy physics tags. Start with the render reference here; collision
-    // is added by the background overlay path.
     if blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1
         && is_object_family_group(model_tag.header.group_tag, source.and_then(TagSource::game))
     {
-        let Some(source) = source else {
-            return Err("Halo CE object preview requires a loaded source.".to_owned());
-        };
-        let reference = object_reference(model_tag, "model")
-            .ok_or("This object references no gbxmodel.")?;
-        let render = load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2")
-            .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;
-        let mut preview = build_render_preview(&render)?;
-        if preview.batches.is_empty() {
-            return Err("Referenced gbxmodel has no previewable draw batches.".to_owned());
-        }
-        if let Some((shader_group, shader_path)) =
-            super::ce::functions::read_ce_modifier_shader(model_tag)
-        {
-            preview.materials.push(RenderModelPreviewMaterial {
-                shader_path,
-                shader_group,
-                overlay: true, shield: None,
-                permutation: 0,
-                object: 0,
-            });
-        }
-        // `render_model_parts`: an object's own index wins over each shader's.
-        let forced = super::ce::functions::read_ce_forced_permutation(model_tag);
-        if forced != 0 {
-            preview.materials.iter_mut().for_each(|material| material.permutation = forced);
-        }
-        let mut notes = Vec::new();
-        // A vehicle's guns are part of it. A biped holds what it is handed.
-        let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
-        let chosen = settings.weapon.as_deref();
-        let weapons = feature(&mut notes, "the biped's weapons", || {
-            let known = settings.ce_equippable.as_deref();
-            is_biped.then(|| super::ce::attachments::biped_weapons(source, model_tag, chosen, known))
-        });
-        let held = match &weapons {
-            Some(weapons) => chosen
-                .filter(|path| weapons.equippable.iter().any(|weapon| weapon.path == *path))
-                .map(str::to_owned),
-            None => super::ce::attachments::first_weapon(model_tag),
-        };
-        let attached = held.and_then(|path| {
-            let attach = |preview: &mut RenderModelPreview| {
-                super::ce::attachments::attach_ce_weapon(source, model_tag, &path, preview)
-            };
-            let attached = feature_into(&mut notes, "the held weapon", &mut preview, attach);
-            if attached.is_none() {
-                notes.push(format!("the weapon {path} could not be attached"));
-            }
-            attached
-        });
-        feature_into(&mut notes, "its lights and effects", &mut preview, |preview| {
-            super::ce::object::read_ce_object_features(source, model_tag, attached.as_ref(), preview);
-        });
-        let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
-        data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-        data.ce_object_functions =
-            feature(&mut notes, "its functions", || super::ce::functions::read_ce_object_functions(model_tag));
-        data.ce_attached.extend(attached);
-        data.ce_weapons = weapons;
-        data.notes = notes;
-        return Ok(data);
+        return load_ce_object(model_tag, entry, source, settings);
     }
-
-    // Every later object names a `.model`, which previews as itself. The
-    // object has the change colors, so nothing needs to go looking for it.
     if is_object_family_group(model_tag.header.group_tag, source.and_then(TagSource::game)) {
-        let Some(source) = source else {
-            return Err("Object preview requires a loaded source.".to_owned());
+        return load_object(model_tag, entry, names, source, settings);
+    }
+    if matches!(&group, b"coll" | b"phmo") {
+        return load_collision_or_physics(model_tag, entry, source);
+    }
+    if &group == b"sbsp" {
+        return load_structure_bsp(model_tag, entry);
+    }
+    if &group == b"scnr" {
+        return load_scenario(model_tag, entry, source, settings);
+    }
+    // Halo: Campaign Evolved — the `.model` (hlmt) has no `render model` ref;
+    // geometry lives in UE5 SkeletalMeshes reached via `DA_MeshSynchronization`.
+    // Reconstruct the cross-game RenderModel and feed the standard pipeline.
+    if let Some(result) = load_campaign_evolved_preview(model_tag, entry, source, settings.high_detail) {
+        return result;
+    }
+    load_model(model_tag, entry, names, source)
+}
+
+/// `particle_model` carries its geometry inline with no wrapper, but
+/// it is not a render_model: no regions, no permutations, no
+/// materials, no nodes. Its objects are the entries of the JMI the
+/// artist imported, so each becomes a preview region and gets its own
+/// toggle in the region list.
+fn load_particle_model(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPreviewData, String> {
+    let stem = preview_tag_stem(entry);
+    let preview = build_particle_model_preview(model_tag, &stem)?;
+    if preview.batches.is_empty() {
+        return Err("This particle_model has no previewable geometry.".to_owned());
+    }
+    Ok(model_preview_data(
+        entry.key.clone(),
+        entry.display_path.clone(),
+        preview,
+        Vec::new(),
+    ))
+}
+
+/// Halo CE `gbxmodel` (mod2) and a bare `render_model` (mode) ARE the
+/// render geometry — there is no `.model` (hlmt) wrapper carrying a
+/// "render model" reference, so preview the tag itself.
+fn load_render_tag(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPreviewData, String> {
+    let preview = build_render_preview(model_tag)?;
+    if preview.batches.is_empty() {
+        return Err("This render tag has no previewable draw batches.".to_owned());
+    }
+    Ok(model_preview_data(
+        entry.key.clone(),
+        entry.display_path.clone(),
+        preview,
+        Vec::new(),
+    ))
+}
+
+/// Halo CE object-family tags are the equivalent of later engines' model
+/// wrapper: the object directly names its gbxmodel, collision, animation,
+/// and legacy physics tags. Start with the render reference here; collision
+/// is added by the background overlay path.
+fn load_ce_object(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    source: Option<&TagSource>,
+    settings: &PreviewLoadSettings,
+) -> Result<ModelPreviewData, String> {
+    let Some(source) = source else {
+        return Err("Halo CE object preview requires a loaded source.".to_owned());
+    };
+    let reference = object_reference(model_tag, "model")
+        .ok_or("This object references no gbxmodel.")?;
+    let render = load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2")
+        .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;
+    let mut preview = build_render_preview(&render)?;
+    if preview.batches.is_empty() {
+        return Err("Referenced gbxmodel has no previewable draw batches.".to_owned());
+    }
+    if let Some((shader_group, shader_path)) =
+        super::ce::functions::read_ce_modifier_shader(model_tag)
+    {
+        preview.materials.push(RenderModelPreviewMaterial {
+            shader_path,
+            shader_group,
+            overlay: true, shield: None,
+            permutation: 0,
+            object: 0,
+        });
+    }
+    // `render_model_parts`: an object's own index wins over each shader's.
+    let forced = super::ce::functions::read_ce_forced_permutation(model_tag);
+    if forced != 0 {
+        preview.materials.iter_mut().for_each(|material| material.permutation = forced);
+    }
+    let mut notes = Vec::new();
+    // A vehicle's guns are part of it. A biped holds what it is handed.
+    let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
+    let chosen = settings.weapon.as_deref();
+    let weapons = feature(&mut notes, "the biped's weapons", || {
+        let known = settings.ce_equippable.as_deref();
+        is_biped.then(|| super::ce::attachments::biped_weapons(source, model_tag, chosen, known))
+    });
+    let held = match &weapons {
+        Some(weapons) => chosen
+            .filter(|path| weapons.equippable.iter().any(|weapon| weapon.path == *path))
+            .map(str::to_owned),
+        None => super::ce::attachments::first_weapon(model_tag),
+    };
+    let attached = held.and_then(|path| {
+        let attach = |preview: &mut RenderModelPreview| {
+            super::ce::attachments::attach_ce_weapon(source, model_tag, &path, preview)
         };
-        // Previewing the object itself again would come straight back here.
-        let Some(model) = preview_model_tag(source, model_tag)? else {
-            return Err("This object has no model to preview.".to_owned());
+        let attached = feature_into(&mut notes, "the held weapon", &mut preview, attach);
+        if attached.is_none() {
+            notes.push(format!("the weapon {path} could not be attached"));
+        }
+        attached
+    });
+    feature_into(&mut notes, "its lights and effects", &mut preview, |preview| {
+        super::ce::object::read_ce_object_features(source, model_tag, attached.as_ref(), preview);
+    });
+    let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
+    data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+    data.ce_object_functions =
+        feature(&mut notes, "its functions", || super::ce::functions::read_ce_object_functions(model_tag));
+    data.ce_attached.extend(attached);
+    data.ce_weapons = weapons;
+    data.notes = notes;
+    Ok(data)
+}
+
+/// Every later object names a `.model`, which previews as itself. The
+/// object has the change colors, so nothing needs to go looking for it: its
+/// own features, then what its unit holds, then what its variants attach.
+fn load_object(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    names: &TagNameIndex,
+    source: Option<&TagSource>,
+    settings: &PreviewLoadSettings,
+) -> Result<ModelPreviewData, String> {
+    let Some(source) = source else {
+        return Err("Object preview requires a loaded source.".to_owned());
+    };
+    // Previewing the object itself again would come straight back here.
+    let Some(model) = preview_model_tag(source, model_tag)? else {
+        return Err("This object has no model to preview.".to_owned());
+    };
+    let model = &model;
+    // `load_tag_preview`, not `load_model_preview`: the object's own load
+    // already adds what that adds (the H4 colour grading, read once).
+    let mut data = load_tag_preview(model, entry, names, Some(source), settings)?;
+    data.default_variant = object_default_variant(model_tag);
+    let mut notes = std::mem::take(&mut data.notes);
+    let object = ObjectLoad { source, object: model_tag, model };
+    object.read_features(&mut data, &mut notes);
+    let weapons_family = matches!(
+        source,
+        TagSource::LooseFolder {
+            game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
+            ..
+        }
+    );
+    if weapons_family {
+        object.attach_unit_weapons(&mut data, &mut notes, settings);
+    }
+    if weapons_family {
+        let preview = std::sync::Arc::make_mut(&mut data.preview);
+        let variants = &mut data.variants;
+        let attach = |preview: &mut RenderModelPreview| {
+            super::weapons::variants::attach_variant_objects(source, model, variants, preview)
         };
-        let model = &model;
-        // `load_tag_preview`, not `load_model_preview`: the object's own load
-        // already adds what that adds (the H4 colour grading, read once).
-        let mut data = load_tag_preview(model, entry, names, Some(source), settings)?;
-        data.default_variant = object_default_variant(model_tag);
-        let mut notes = std::mem::take(&mut data.notes);
+        data.attached.extend(feature_into(&mut notes, "the variants' children", preview, attach));
+    }
+    data.notes = notes;
+    Ok(data)
+}
+
+/// A later object being previewed: the kit, the object's own tag, and the
+/// `.model` it names.
+struct ObjectLoad<'a> {
+    source: &'a TagSource,
+    object: &'a TagFile,
+    model: &'a TagFile,
+}
+
+impl ObjectLoad<'_> {
+    /// The object's change colors, functions and its game's own features,
+    /// each noted if its reader crashes.
+    fn read_features(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>) {
+        let Self { source, object: model_tag, model } = *self;
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
-            data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::functions::read_object_functions(model_tag, Some(model));
-            data.object_functions = feature(&mut notes, "its functions", functions);
+            self.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
-            feature_into(&mut notes, "its lights and effects", preview, |preview| {
+            feature_into(notes, "its lights and effects", preview, |preview| {
                 super::h3::object::read_h3_object_features(source, model_tag, model, preview);
             });
         }
         // Reach's attachments, lights and effects read differently, and wait
         // on their own readers; what the object's shaders read does not.
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::HaloReach), .. }) {
-            data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::functions::read_object_functions(model_tag, Some(model));
-            data.object_functions = feature(&mut notes, "its functions", functions);
+            self.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
-            feature_into(&mut notes, "its flares and lights", preview, |preview| {
+            feature_into(notes, "its flares and lights", preview, |preview| {
                 super::reach::object::read_reach_object_features(source, model_tag, model, preview);
             });
         }
         // Halo 4's functions and switches feed its materials' functions; its
         // attachments, lights and effects wait on their own readers.
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo4), .. }) {
-            data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::functions::read_object_functions(model_tag, Some(model));
-            data.object_functions = feature(&mut notes, "its functions", functions);
-            let preview = std::sync::Arc::make_mut(&mut data.preview);
-            preview.h4.bounding_sphere = super::h4::object::read_h4_bounding_sphere(model_tag);
-            preview.h4.change_color_count = super::h4::object::read_h4_change_color_count(model_tag);
-            preview.h4.camo = super::h4::camo::H4Camo::read(source).map(std::sync::Arc::new);
-            preview.h4.shield = super::h4::shield::read_h4_shield(source, model);
-            preview.h4.shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
-            // The unit's markers its IK sets and chains place.
-            let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
-            preview.gen3.ik_markers = super::animation::reach_ik::reach_ik_markers(preview, super::animation::reach_ik::ReachIkHolder::Unit, own, None);
-            let markers = preview.markers.clone();
-            let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
-            let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
-            feature_into(&mut notes, "its antennas and cloth", preview, |preview| {
-                let cx = LoadCx { source, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
-                super::h4::attached::read_h4_attached_features(&cx, center, preview);
-            });
+            self.read_colors_and_functions(data, notes);
+            self.read_h4_features(data, notes);
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
-            data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
-            let functions = || super::functions::read_object_functions(model_tag, Some(model));
-            data.object_functions = feature(&mut notes, "its functions", functions);
+            self.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
-            feature_into(&mut notes, "its lights and effects", preview, |preview| {
+            feature_into(notes, "its lights and effects", preview, |preview| {
                 super::h2::object::read_h2_object_features(source, model_tag, preview);
             });
         }
-        let weapons_family = matches!(
+    }
+
+    /// The object's change colors, then its functions.
+    fn read_colors_and_functions(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>) {
+        let Self { object: model_tag, model, .. } = *self;
+        data.change_colors = feature(notes, "its change colors", || read_h2_change_colors(model_tag));
+        let functions = || super::functions::read_object_functions(model_tag, Some(model));
+        data.object_functions = feature(notes, "its functions", functions);
+    }
+
+    /// Halo 4's object reads: its bounds, change color count, camo, shield,
+    /// shadow caster, IK markers, then its antennas and cloth.
+    fn read_h4_features(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>) {
+        let Self { source, object: model_tag, model } = *self;
+        let preview = std::sync::Arc::make_mut(&mut data.preview);
+        preview.h4.bounding_sphere = super::h4::object::read_h4_bounding_sphere(model_tag);
+        preview.h4.change_color_count = super::h4::object::read_h4_change_color_count(model_tag);
+        preview.h4.camo = super::h4::camo::H4Camo::read(source).map(std::sync::Arc::new);
+        preview.h4.shield = super::h4::shield::read_h4_shield(source, model);
+        preview.h4.shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
+        // The unit's markers its IK sets and chains place.
+        let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
+        preview.gen3.ik_markers = super::animation::reach_ik::reach_ik_markers(preview, super::animation::reach_ik::ReachIkHolder::Unit, own, None);
+        let markers = preview.markers.clone();
+        let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
+        let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
+        feature_into(notes, "its antennas and cloth", preview, |preview| {
+            let cx = LoadCx { source, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
+            super::h4::attached::read_h4_attached_features(&cx, center, preview);
+        });
+    }
+
+    /// What a biped holds: the settings' primary in its right hand and
+    /// secondary in its left, each noted if it will not attach.
+    fn attach_unit_weapons(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>, settings: &PreviewLoadSettings) {
+        let Self { source, object: model_tag, .. } = *self;
+        // Halo 4's kit graphs all use data-driven animation, which places the
+        // hands by IK sets and chains (`biped_postprocess_node_matrices`,
+        // X360 0x84B1A738), never the legacy `weapon ik`.
+        let legacy_weapon_ik = source.game() != Some(GameId::Halo4);
+        let known = settings.h2_equippable.as_deref();
+        let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
+        let weapons = feature(notes, "the unit's weapons", || {
+            is_biped.then(|| super::weapons::unit_weapons(source, model_tag, known))
+        });
+        if let Some(weapons) = weapons {
+            let preview = std::sync::Arc::make_mut(&mut data.preview);
+            let primary = settings.weapon.as_deref();
+            let secondary = settings.secondary_weapon.as_deref();
+            for (path, left, owner) in [(primary, false, 1), (secondary, true, 2)] {
+                let Some(path) = path else {
+                    continue;
+                };
+                // `unit_apply_ik` leaves two weapons in their own hands.
+                let ik = (secondary.is_none() && legacy_weapon_ik).then_some(&weapons);
+                let attach = |preview: &mut RenderModelPreview| {
+                    super::weapons::attach_weapon(source, model_tag, path, left, owner, ik, preview)
+                };
+                let attached = feature_into(notes, "a held weapon", preview, attach);
+                if attached.is_none() {
+                    notes.push(format!("the weapon {path} could not be attached"));
+                }
+                data.attached.extend(attached);
+            }
+            data.weapons = Some(weapons);
+        }
+    }
+}
+
+/// Collision and physics tags carry no render geometry of their own —
+/// their preview is derived: collision BSPs walked into triangles, physics
+/// primitives tessellated. Posed on the owning `.model`'s skeleton when
+/// one is beside them, unposed otherwise.
+fn load_collision_or_physics(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    source: Option<&TagSource>,
+) -> Result<ModelPreviewData, String> {
+    let group = model_tag.header.group_tag.to_be_bytes();
+    let skeleton = source.and_then(|source| owning_model_skeleton(source, entry));
+    let nodes = skeleton.as_ref().map(|skeleton| skeleton.nodes());
+    let preview = if &group == b"coll" {
+        build_collision_preview(model_tag, nodes)?
+    } else {
+        build_physics_preview(model_tag, nodes)?
+    };
+    Ok(model_preview_data(
+        entry.key.clone(),
+        entry.display_path.clone(),
+        preview,
+        Vec::new(),
+    ))
+}
+
+/// A structure BSP previews its own geometry, layered into `render` /
+/// `collision` / `portals` / `weather` regions so each is a toggle.
+fn load_structure_bsp(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPreviewData, String> {
+    let preview = build_sbsp_preview(model_tag, false)?;
+    Ok(model_preview_data(
+        entry.key.clone(),
+        entry.display_path.clone(),
+        preview,
+        Vec::new(),
+    ))
+}
+
+/// A scenario previews a composite of the structure BSPs the user has
+/// checked — each selected BSP loads render-only and lands as one region,
+/// so the region list doubles as the per-BSP toggle. Nothing loads until
+/// something is checked: a campaign scenario's full BSP set is far too
+/// much to parse unasked.
+fn load_scenario(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    source: Option<&TagSource>,
+    settings: &PreviewLoadSettings,
+) -> Result<ModelPreviewData, String> {
+    let bsps = scenario_bsp_paths(model_tag);
+    if bsps.is_empty() {
+        return Err("This scenario lists no structure BSPs.".to_owned());
+    }
+    let mut preview = RenderModelPreview::default();
+    let mut notes = Vec::new();
+    if !settings.scenario_selection.is_empty() {
+        let Some(source) = source else {
+            return Err("Scenario preview requires a loaded source.".to_owned());
+        };
+        preview.bounds_min = [f32::INFINITY; 3];
+        preview.bounds_max = [f32::NEG_INFINITY; 3];
+        for &index in &settings.scenario_selection {
+            let Some(Some(reference)) = bsps.get(index) else {
+                continue;
+            };
+            // One BSP that will not read leaves the rest showing.
+            let read = || {
+                let tag = load_referenced_tag_from_source(source, reference, "scenario_structure_bsp", b"sbsp")
+                    .map_err(|error| format!("Could not load {reference}: {error}"))?;
+                build_sbsp_preview(&tag, true).map_err(|error| format!("{reference}: {error}"))
+            };
+            match feature(&mut notes, reference, || Some(read())) {
+                Some(Ok(mut bsp_preview)) => {
+                    rebrand_preview_region(&mut bsp_preview, &bsp_display_name(reference));
+                    merge_preview_append(&mut preview, &bsp_preview);
+                }
+                Some(Err(error)) => notes.push(error),
+                None => {}
+            }
+        }
+        if !preview.bounds_min.iter().all(|bound| bound.is_finite()) {
+            preview.bounds_min = [0.0; 3];
+            preview.bounds_max = [0.0; 3];
+        }
+    }
+    let mut data = model_preview_data(
+        entry.key.clone(),
+        entry.display_path.clone(),
+        preview,
+        Vec::new(),
+    );
+    data.scenario_bsps = bsps;
+    data.notes = notes;
+    Ok(data)
+}
+
+/// A `.model`: the render model it names, the hologram and shield shaders it
+/// lays over that, its variants' instances, and, when the `.model` itself is
+/// open, what its variants attach.
+fn load_model(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    names: &TagNameIndex,
+    source: Option<&TagSource>,
+) -> Result<ModelPreviewData, String> {
+    let (render_entry, normalized, render_tag) = read_model_render(model_tag, names, source)?;
+    let mut preview = build_render_preview(&render_tag)?;
+    if preview.batches.is_empty() {
+        return Err("Referenced render_model has no previewable draw batches.".to_owned());
+    }
+    add_overlay_shaders(model_tag, &mut preview);
+    // The collision/physics overlays are not built here: walking the
+    // collision BSP and tessellating the physics shapes is slow, and a
+    // toggle would rebuild the merge each time. `maybe_request_model_overlays`
+    // builds them once on a worker after this load lands, and the toggles are
+    // draw-time filters from then on.
+    // Halo 4 shows every instance for a NONE group as Reach does (the 360's
+    // 0x8325C1B8).
+    let reach = source.is_some_and(|source| matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4)));
+    preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names, reach);
+    let mut data = model_preview_data(render_entry.key, normalized, preview, read_model_variants(model_tag));
+    // The `.model` opened itself lists what its variants attach. An object
+    // reaches here for its `.model` and attaches them once it has read its own.
+    let opened = entry.group_tag == u32::from_be_bytes(*b"hlmt");
+    let source = source.filter(|source| {
+        matches!(
             source,
             TagSource::LooseFolder {
                 game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
                 ..
             }
-        );
-        // Halo 4's kit graphs all use data-driven animation, which places the
-        // hands by IK sets and chains (`biped_postprocess_node_matrices`,
-        // X360 0x84B1A738), never the legacy `weapon ik`.
-        let legacy_weapon_ik = source.game() != Some(GameId::Halo4);
-        if weapons_family {
-            let known = settings.h2_equippable.as_deref();
-            let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
-            let weapons = feature(&mut notes, "the unit's weapons", || {
-                is_biped.then(|| super::weapons::unit_weapons(source, model_tag, known))
-            });
-            if let Some(weapons) = weapons {
-                let preview = std::sync::Arc::make_mut(&mut data.preview);
-                let primary = settings.weapon.as_deref();
-                let secondary = settings.secondary_weapon.as_deref();
-                for (path, left, owner) in [(primary, false, 1), (secondary, true, 2)] {
-                    let Some(path) = path else {
-                        continue;
-                    };
-                    // `unit_apply_ik` leaves two weapons in their own hands.
-                    let ik = (secondary.is_none() && legacy_weapon_ik).then_some(&weapons);
-                    let attach = |preview: &mut RenderModelPreview| {
-                        super::weapons::attach_weapon(source, model_tag, path, left, owner, ik, preview)
-                    };
-                    let attached = feature_into(&mut notes, "a held weapon", preview, attach);
-                    if attached.is_none() {
-                        notes.push(format!("the weapon {path} could not be attached"));
-                    }
-                    data.attached.extend(attached);
-                }
-                data.weapons = Some(weapons);
-            }
-        }
-        if weapons_family {
-            let preview = std::sync::Arc::make_mut(&mut data.preview);
-            let variants = &mut data.variants;
-            let attach = |preview: &mut RenderModelPreview| {
-                super::weapons::variants::attach_variant_objects(source, model, variants, preview)
-            };
-            data.attached.extend(feature_into(&mut notes, "the variants' children", preview, attach));
-        }
-        data.notes = notes;
-        return Ok(data);
-    }
-
-    // Collision and physics tags carry no render geometry of their own —
-    // their preview is derived: collision BSPs walked into triangles, physics
-    // primitives tessellated. Posed on the owning `.model`'s skeleton when
-    // one is beside them, unposed otherwise.
-    if matches!(&group, b"coll" | b"phmo") {
-        let skeleton = source.and_then(|source| owning_model_skeleton(source, entry));
-        let nodes = skeleton.as_ref().map(|skeleton| skeleton.nodes());
-        let preview = if &group == b"coll" {
-            build_collision_preview(model_tag, nodes)?
-        } else {
-            build_physics_preview(model_tag, nodes)?
+        )
+    });
+    if let Some(source) = source.filter(|_| opened) {
+        let preview = std::sync::Arc::make_mut(&mut data.preview);
+        let variants = &mut data.variants;
+        let attach = |preview: &mut RenderModelPreview| {
+            super::weapons::variants::attach_variant_objects(source, model_tag, variants, preview)
         };
-        return Ok(model_preview_data(
-            entry.key.clone(),
-            entry.display_path.clone(),
-            preview,
-            Vec::new(),
-        ));
+        data.attached.extend(feature_into(&mut data.notes, "the variants' children", preview, attach));
     }
+    Ok(data)
+}
 
-    // A structure BSP previews its own geometry, layered into `render` /
-    // `collision` / `portals` / `weather` regions so each is a toggle.
-    if &group == b"sbsp" {
-        let preview = build_sbsp_preview(model_tag, false)?;
-        return Ok(model_preview_data(
-            entry.key.clone(),
-            entry.display_path.clone(),
-            preview,
-            Vec::new(),
-        ));
-    }
-
-    // A scenario previews a composite of the structure BSPs the user has
-    // checked — each selected BSP loads render-only and lands as one region,
-    // so the region list doubles as the per-BSP toggle. Nothing loads until
-    // something is checked: a campaign scenario's full BSP set is far too
-    // much to parse unasked.
-    if &group == b"scnr" {
-        let bsps = scenario_bsp_paths(model_tag);
-        if bsps.is_empty() {
-            return Err("This scenario lists no structure BSPs.".to_owned());
-        }
-        let mut preview = RenderModelPreview::default();
-        let mut notes = Vec::new();
-        if !settings.scenario_selection.is_empty() {
-            let Some(source) = source else {
-                return Err("Scenario preview requires a loaded source.".to_owned());
-            };
-            preview.bounds_min = [f32::INFINITY; 3];
-            preview.bounds_max = [f32::NEG_INFINITY; 3];
-            for &index in &settings.scenario_selection {
-                let Some(Some(reference)) = bsps.get(index) else {
-                    continue;
-                };
-                // One BSP that will not read leaves the rest showing.
-                let read = || {
-                    let tag = load_referenced_tag_from_source(source, reference, "scenario_structure_bsp", b"sbsp")
-                        .map_err(|error| format!("Could not load {reference}: {error}"))?;
-                    build_sbsp_preview(&tag, true).map_err(|error| format!("{reference}: {error}"))
-                };
-                match feature(&mut notes, reference, || Some(read())) {
-                    Some(Ok(mut bsp_preview)) => {
-                        rebrand_preview_region(&mut bsp_preview, &bsp_display_name(reference));
-                        merge_preview_append(&mut preview, &bsp_preview);
-                    }
-                    Some(Err(error)) => notes.push(error),
-                    None => {}
-                }
-            }
-            if !preview.bounds_min.iter().all(|bound| bound.is_finite()) {
-                preview.bounds_min = [0.0; 3];
-                preview.bounds_max = [0.0; 3];
-            }
-        }
-        let mut data = model_preview_data(
-            entry.key.clone(),
-            entry.display_path.clone(),
-            preview,
-            Vec::new(),
-        );
-        data.scenario_bsps = bsps;
-        data.notes = notes;
-        return Ok(data);
-    }
-
-    // Halo: Campaign Evolved — the `.model` (hlmt) has no `render model` ref;
-    // geometry lives in UE5 SkeletalMeshes reached via `DA_MeshSynchronization`.
-    // Reconstruct the cross-game RenderModel and feed the standard pipeline.
-    if let Some(result) = load_campaign_evolved_preview(model_tag, entry, source, high_detail) {
-        return result;
-    }
-
+/// The render model a `.model` names, found in the loose-folder kit: its
+/// entry, its path without the extension, and the tag read.
+fn read_model_render(
+    model_tag: &TagFile,
+    names: &TagNameIndex,
+    source: Option<&TagSource>,
+) -> Result<(TagEntry, String, TagFile), String> {
     let Some((group_tag, rel_path)) = model_tag.root().read_tag_ref_with_group("render model")
     else {
         return Err("This model tag has no render model reference.".to_owned());
@@ -655,10 +791,12 @@ fn load_tag_preview(
     };
     let render_tag =
         read_entry(source.unwrap(), &render_entry).map_err(|error| error.to_string())?;
-    let mut preview = build_render_preview(&render_tag)?;
-    if preview.batches.is_empty() {
-        return Err("Referenced render_model has no previewable draw batches.".to_owned());
-    }
+    Ok((render_entry, normalized, render_tag))
+}
+
+/// The shaders a `.model` lays over its render model: its hologram shader
+/// and its shield shaders, each drawn again over every section.
+fn add_overlay_shaders(model_tag: &TagFile, preview: &mut RenderModelPreview) {
     // `sub_6C18F0`: while the model's `hologram control function` is above
     // nothing, `render_hologram_group` draws it again with its hologram shader
     // over every section. That shader's bloom passes join the frame's bloom.
@@ -704,37 +842,6 @@ fn load_tag_preview(
             });
         }
     }
-    // The collision/physics overlays are not built here: walking the
-    // collision BSP and tessellating the physics shapes is slow, and a
-    // toggle would rebuild the merge each time. `maybe_request_model_overlays`
-    // builds them once on a worker after this load lands, and the toggles are
-    // draw-time filters from then on.
-    // Halo 4 shows every instance for a NONE group as Reach does (the 360's
-    // 0x8325C1B8).
-    let reach = source.is_some_and(|source| matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4)));
-    preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names, reach);
-    let mut data = model_preview_data(render_entry.key, normalized, preview, read_model_variants(model_tag));
-    // The `.model` opened itself lists what its variants attach. An object
-    // reaches here for its `.model` and attaches them once it has read its own.
-    let opened = entry.group_tag == u32::from_be_bytes(*b"hlmt");
-    let source = source.filter(|source| {
-        matches!(
-            source,
-            TagSource::LooseFolder {
-                game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
-                ..
-            }
-        )
-    });
-    if let Some(source) = source.filter(|_| opened) {
-        let preview = std::sync::Arc::make_mut(&mut data.preview);
-        let variants = &mut data.variants;
-        let attach = |preview: &mut RenderModelPreview| {
-            super::weapons::variants::attach_variant_objects(source, model_tag, variants, preview)
-        };
-        data.attached.extend(feature_into(&mut data.notes, "the variants' children", preview, attach));
-    }
-    Ok(data)
 }
 
 /// What a feature reader reads an object with: the kit, the object's tag, the
