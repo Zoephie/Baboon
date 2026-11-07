@@ -48,7 +48,7 @@ impl RenderCore {
             let view = ce_flare_view(camera);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             if matches!(stage, SpriteStage::Rest) {
-                draw_antennas(gl, flares, uploaded, frame, bones, &view, h3);
+                draw_antennas(gl, flares, &mut uploaded.simulations.antennas, &uploaded.antenna_textures, frame, bones, &view, h3);
             }
             gl.color_mask(true, true, true, false);
             // `render_effects`, among the transparents: every profile is its own quad.
@@ -320,8 +320,6 @@ impl RenderCore {
                 return;
             }
             begin_flares(gl, flares, self.placeholder);
-            // The slot's flare maps run Halo 2's flares, then these.
-            let first_h3 = frame.preview.h2_flares.len();
             let viewport = self.scene.as_ref().map_or([1, 1], |scene| scene.size);
             let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
             for (index, at) in frame.preview.h3_flares.iter().enumerate() {
@@ -345,7 +343,7 @@ impl RenderCore {
                     continue;
                 };
                 if let Some(sprite) = at.sprite(light, values, bones, &view, event_time, occlusion, 0)
-                    && let Some(textures) = uploaded.flare_textures.get(first_h3 + index)
+                    && let Some(textures) = uploaded.flare_textures.get(index)
                 {
                     draw_flare_sprites(gl, flares, camera, &view, &[sprite], textures);
                 }

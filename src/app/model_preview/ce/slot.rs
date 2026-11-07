@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use eframe::glow::{self, HasContext as _};
 
+use super::super::common::slots::GameSlot;
 use super::super::dx9::passes::H2Image;
 use super::super::renderer::{ModelGpuFrame, upload_h2_image};
 
@@ -126,28 +127,19 @@ impl CeTextures {
 /// Halo CE's state for one of the renderer's slots.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct CeSlot {
-    /// The slot's upload this state is for: another restarts it.
-    upload: Option<u64>,
     /// The geometry the maps are for.
     textures_for: Option<u64>,
     pub(in crate::app::model_preview) simulations: CeSimulations,
     pub(in crate::app::model_preview) textures: CeTextures,
 }
 
+impl GameSlot for CeSlot {
+    fn restart(&mut self) {
+        self.simulations = CeSimulations::default();
+    }
+}
+
 impl CeSlot {
-    /// Whether this state is for the slot's `upload`.
-    pub(in crate::app::model_preview) fn is_for(&self, upload: u64) -> bool {
-        self.upload == Some(upload)
-    }
-
-    /// The simulations started afresh when the slot has taken another upload.
-    pub(in crate::app::model_preview) fn follow(&mut self, upload: u64) {
-        if !self.is_for(upload) {
-            self.simulations = CeSimulations::default();
-            self.upload = Some(upload);
-        }
-    }
-
     /// The maps of what `frame`'s geometry draws, uploaded once per geometry.
     pub(in crate::app::model_preview) unsafe fn sync_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
         if self.textures_for == Some(frame.geometry_id) {

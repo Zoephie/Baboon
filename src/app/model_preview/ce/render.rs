@@ -1,5 +1,6 @@
 //! Halo CE's hooks into the dx9 pipeline, and its state for each slot.
 
+use super::super::common::slots::GameSlots;
 use super::super::common::view::ViewFrame;
 use super::super::dx9::passes::H2Layer;
 use super::super::dx9::pipeline::Dx9Game;
@@ -16,27 +17,16 @@ use eframe::glow::{self, HasContext as _};
 /// its lights' flares.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct CeGame {
-    /// Each of the renderer's slots' state, by slot.
-    slots: Vec<CeSlot>,
+    slots: GameSlots<CeSlot>,
     /// The `effect` shader's program, made on first use.
     effect_gl: Option<Option<CeEffectGl>>,
-}
-
-/// `slot`'s state in `slots`, started afresh for a new model.
-fn slot_in(slots: &mut Vec<CeSlot>, slot: usize, uploads: u64) -> &mut CeSlot {
-    if slots.len() <= slot {
-        slots.resize_with(slot + 1, CeSlot::default);
-    }
-    let state = &mut slots[slot];
-    state.follow(uploads);
-    state
 }
 
 impl Dx9Game for CeGame {
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
             let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
-            let ce = slot_in(&mut self.slots, slot, cx.core.slot_uploads(slot));
+            let ce = self.slots.of(slot, cx.core.slot_uploads(slot));
             if !frame.preview.ce_flags.is_empty() {
                 cx.core.move_ce_flags(gl, frame, slot, ce);
             }
@@ -64,7 +54,7 @@ impl Dx9Game for CeGame {
     unsafe fn transparents(&mut self, cx: &mut FrameCx<'_>, order: &[usize]) {
         unsafe {
             if ce_sorts_transparents(cx.frame) {
-                let ce = slot_in(&mut self.slots, cx.slot, cx.core.slot_uploads(cx.slot));
+                let ce = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
                 cx.core.draw_ce_transparents(cx.gl, cx.frame, cx.slot, ce, &mut self.effect_gl);
             } else {
                 cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None);
@@ -74,11 +64,11 @@ impl Dx9Game for CeGame {
 
     /// The effects' groups, when the transparents did not sort them in.
     unsafe fn draw_own_sprites(&mut self, cx: &mut Dx9Sprites<'_>) {
-        let Dx9Sprites { gl, frame, flares, view, bones, program, slot, uploads } = *cx;
+        let Dx9Sprites { gl, frame, flares, view, bones, program, slot, uploads, .. } = *cx;
         if !ce_has_groups(&frame.preview) || ce_sorts_transparents(frame) {
             return;
         }
-        let ce = slot_in(&mut self.slots, slot, uploads);
+        let ce = self.slots.of(slot, uploads);
         unsafe {
             for group in ce_groups(gl, ce, frame, bones, view) {
                 draw_ce_group(gl, &mut self.effect_gl, program, flares, ce, &frame.camera, group);
@@ -96,7 +86,7 @@ impl Dx9Game for CeGame {
         let Dx9Sprites { gl, frame, flares, view, bones, slot, uploads, .. } = *cx;
         let view: &ViewFrame = view;
         let camera = &frame.camera;
-        let ce = slot_in(&mut self.slots, slot, uploads);
+        let ce = self.slots.of(slot, uploads);
         unsafe {
             for (index, light) in frame.preview.ce_lights.iter().enumerate() {
                 let state = frame.object_states.get(usize::from(light.object));
@@ -135,7 +125,7 @@ impl Dx9Game for CeGame {
 
     #[cfg(test)]
     fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
-        if let Some(ce) = self.slots.get(slot).filter(|ce| ce.is_for(uploads)) {
+        if let Some(ce) = self.slots.current(slot, uploads) {
             ce.simulations.each(visit);
         }
     }

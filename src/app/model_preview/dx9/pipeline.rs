@@ -21,6 +21,15 @@ pub(in crate::app::model_preview) trait Dx9Game {
         unsafe { cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None) }
     }
 
+    /// The gel lights' maps, by `h2_gel_lights`, while the lights draw.
+    unsafe fn gel_maps(&mut self, _cx: &mut FrameCx<'_>) -> Vec<Option<glow::NativeTexture>> {
+        Vec::new()
+    }
+
+    /// In the sprite pass, under the widgets' depth state, before the
+    /// antennas: the game's own sprites.
+    unsafe fn draw_before_antennas(&mut self, _cx: &mut Dx9Sprites<'_>) {}
+
     /// In the sprite pass, after the antennas: the game's own sprites, with
     /// the sprite program bound again after.
     unsafe fn draw_own_sprites(&mut self, _cx: &mut Dx9Sprites<'_>) {}
@@ -113,16 +122,7 @@ impl RenderCore {
                         }
                     }
                 }
-                let uploaded = &mut self.slots[slot];
-                if uploaded.gel_geometry != Some(frame.geometry_id) {
-                    for texture in uploaded.gel_textures.drain(..).flatten() {
-                        gl.delete_texture(texture);
-                    }
-                    let gels = frame.preview.h2_gel_lights.iter().map(|light| light.gel());
-                    uploaded.gel_textures =
-                        gels.map(|gel| gel.and_then(|gel| upload_h2_image(gl, gel))).collect();
-                    uploaded.gel_geometry = Some(frame.geometry_id);
-                }
+                let gels = game.gel_maps(&mut FrameCx { gl, frame, core: self, slot });
                 let mut masked = false;
                 for (index, gel) in frame.preview.h2_gel_lights.iter().enumerate() {
                     if !is_shown(&frame.h2_shown.gels, index) {
@@ -136,7 +136,7 @@ impl RenderCore {
                     };
                     let specular = h2::lights::has_specular(&light);
                     let (light, draws) = h2::lights::overbrighten(&light);
-                    self.h2_gel = Some((self.slots[slot].gel_textures[index], rows.rows));
+                    self.h2_gel = Some((gels.get(index).copied().flatten(), rows.rows));
                     if specular {
                         self.draw_h2_passes(gl, frame, slot, &order, H2Layer::GelMask, Some(&light));
                         masked = true;

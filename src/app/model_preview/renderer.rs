@@ -2000,7 +2000,6 @@ impl ModelSlotLru {
 /// together when the slot takes another model.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct SlotSimulations {
-    pub(in crate::app::model_preview) h2_contrails: h2::contrails::H2ContrailField,
     /// Halo 2's and the gen3 games' particle systems.
     pub(in crate::app::model_preview) particles: particles::H3ParticleField,
     /// Reach's cheap particles.
@@ -2025,7 +2024,6 @@ impl SlotSimulations {
     #[cfg(test)]
     fn each(&self, mut visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
         let Self {
-            h2_contrails,
             particles,
             reach_cheap,
             h3_strips,
@@ -2036,7 +2034,6 @@ impl SlotSimulations {
             h3_leaves,
             h3_vision_clock,
         } = self;
-        visit("h2_contrails", h2_contrails);
         visit("particles", particles);
         visit("reach_cheap", reach_cheap);
         visit("h3_strips", h3_strips);
@@ -2079,19 +2076,13 @@ pub(super) struct ModelGpuSlot {
     /// model, or another model given this slot, re-uploads rather than drawing
     /// the wrong textures.
     uploaded_textures: Option<u64>,
-    /// Halo CE's lens flares: per light, then per image, of `flare_geometry`.
+    /// Halo 3's and Halo 4's lens flares: per flare, then per image, of
+    /// `flare_geometry`.
     pub(in crate::app::model_preview) flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
-    /// Each of `h2_gel_lights`' gels, of `gel_geometry`.
-    pub(in crate::app::model_preview) gel_textures: Vec<Option<glow::NativeTexture>>,
-    pub(in crate::app::model_preview) gel_geometry: Option<u64>,
     pub(in crate::app::model_preview) h3_textures: gen3::pipeline::H3SlotTextures,
     flare_geometry: Option<u64>,
     pub(in crate::app::model_preview) antenna_textures: Vec<Option<glow::NativeTexture>>,
     pub(in crate::app::model_preview) volume_textures: Vec<Option<glow::NativeTexture>>,
-    /// Each of `h2_light_volumes`' bitmaps, by volume.
-    pub(in crate::app::model_preview) h2_volume_textures: Vec<Vec<Option<glow::NativeTexture>>>,
-    pub(in crate::app::model_preview) h2_contrail_textures: Vec<Option<glow::NativeTexture>>,
-    pub(in crate::app::model_preview) h2_liquid_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     /// The cheap particles' library's render texture array.
     pub(in crate::app::model_preview) reach_cheap_texture: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
@@ -2141,16 +2132,11 @@ impl ModelGpuSlot {
                 materials: Vec::new(),
                 uploaded_textures: None,
                 flare_textures: Vec::new(),
-                gel_textures: Vec::new(),
-                gel_geometry: None,
                 h3_textures: Default::default(),
                 flare_geometry: None,
                 simulations: SlotSimulations::default(),
                 antenna_textures: Vec::new(),
                 volume_textures: Vec::new(),
-                h2_volume_textures: Vec::new(),
-                h2_contrail_textures: Vec::new(),
-                h2_liquid_textures: Vec::new(),
                 reach_cheap_texture: None,
                 leaf_textures: Vec::new(),
                 strip_textures: Vec::new(),
@@ -2308,13 +2294,12 @@ impl ModelGpuSlot {
             }
             self.flare_textures = frame
                 .preview
-                .h2_flares
+                .h3_flares
                 .iter()
-                .map(|at| at.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect())
-                .chain(frame.preview.h3_flares.iter().map(|at| {
+                .map(|at| {
                     let (image, texels, mips) = at.bitmap();
                     vec![gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, None)]
-                }))
+                })
                 .chain(h4::flare_pass::h4_flare_images(gl, frame))
                 .collect();
             for texture in self.antenna_textures.drain(..).flatten() {
@@ -2335,36 +2320,6 @@ impl ModelGpuSlot {
                         gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
                     }
                     None => upload_h2_image(gl, &antenna.image),
-                })
-                .collect();
-            for texture in self.h2_liquid_textures.drain(..).flatten().flatten() {
-                gl.delete_texture(texture);
-            }
-            self.h2_liquid_textures = frame
-                .preview
-                .h2_liquids
-                .iter()
-                .map(|at| at.arcs().iter().map(|arc| arc.bitmap().and_then(|image| upload_h2_image(gl, image))).collect())
-                .collect();
-            for texture in self.h2_contrail_textures.drain(..).flatten() {
-                gl.delete_texture(texture);
-            }
-            self.h2_contrail_textures = frame
-                .preview
-                .h2_contrails
-                .iter()
-                .map(|at| at.bitmap().and_then(|image| upload_h2_image(gl, image)))
-                .collect();
-            for texture in self.h2_volume_textures.drain(..).flatten().flatten() {
-                gl.delete_texture(texture);
-            }
-            self.h2_volume_textures = frame
-                .preview
-                .h2_light_volumes
-                .iter()
-                .map(|at| {
-                    let bitmaps = at.volumes().iter().map(|volume| volume.bitmap());
-                    bitmaps.map(|bitmap| bitmap.and_then(|image| upload_h2_image(gl, image))).collect()
                 })
                 .collect();
             for texture in self.volume_textures.drain(..).flatten() {

@@ -1,14 +1,14 @@
 //! Halo CE's and Halo 2's sprites over the shaded model: Halo 2's particle
-//! systems far to near, its light volumes, liquids and contrails, the
-//! antennas, CE's effect groups, and both games' lens flares.
+//! systems far to near, the game's own sprites around the antennas, and its
+//! lens flares.
 
 use eframe::glow::{self, HasContext as _};
 
 use super::super::common::sprites::{
-    ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system, draw_sprite_quad,
+    ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system,
 };
-use super::super::gen3::pipeline::{h3_layered_distance, h3_set_blend};
-use super::super::gen3::shaders::H3Blend;
+use super::super::gen3::effects::H3EffectOnsets;
+use super::super::gen3::pipeline::h3_layered_distance;
 use super::super::common::view::ViewFrame;
 use super::super::renderer::*;
 use super::pipeline::Dx9Game;
@@ -45,88 +45,24 @@ impl RenderCore {
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(false);
-            let volumes = frame.preview.h2_light_volumes.iter().zip(&uploaded.h2_volume_textures);
-            for (index, (at, textures)) in volumes.enumerate() {
-                if !is_shown(&frame.h2_shown.volumes, index) {
-                    continue;
-                }
-                let values = frame.function_values_of_object(at.object);
-                let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
-                for (volume, texture) in at.volumes().iter().zip(textures) {
-                    let Some(texture) = texture else {
-                        continue;
-                    };
-                    gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                    h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
-                    let colors = frame.change_colors_of_object(at.object);
-                    for quad in at.quads(volume, values, &colors, bones, &view, frame.time, onset) {
-                        draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
-                    }
-                }
-            }
-            let liquids = frame.preview.h2_liquids.iter().zip(&uploaded.h2_liquid_textures);
-            for (index, (at, textures)) in liquids.enumerate() {
-                if !is_shown(&frame.h2_shown.liquids, index) {
-                    continue;
-                }
-                let values = frame.function_values_of_object(at.object);
-                for (arc, texture) in at.arcs().iter().zip(textures) {
-                    let Some(texture) = texture else {
-                        continue;
-                    };
-                    gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                    h3_set_blend(gl, H3Blend::PreMultiplied);
-                    for quad in at.quads(arc, values, bones, &view, frame.time) {
-                        draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
-                    }
-                }
-            }
-            let contrails = frame.preview.h2_contrails.iter().zip(&uploaded.h2_contrail_textures);
-            for (index, (at, texture)) in contrails.enumerate() {
-                if !is_shown(&frame.h2_shown.contrails, index) {
-                    continue;
-                }
-                let Some(texture) = texture else {
-                    continue;
-                };
-                gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                h3_set_blend(gl, at.blend());
-                for quad in uploaded.simulations.h2_contrails.quads(index, at, &view) {
-                    draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
-                }
-            }
-            draw_antennas(gl, flares, uploaded, frame, bones, &view, h3);
             let uploads = uploaded.uploads();
-            let mut sprites = Dx9Sprites { gl, frame, flares, view: &view, bones, program: self.program, slot, uploads };
+            let mut sprites = Dx9Sprites {
+                gl,
+                frame,
+                flares,
+                view: &view,
+                bones,
+                program: self.program,
+                slot,
+                uploads,
+                onsets: &mut uploaded.simulations.effect_onsets,
+            };
+            game.draw_before_antennas(&mut sprites);
+            draw_antennas(gl, flares, &mut uploaded.simulations.antennas, &uploaded.antenna_textures, frame, bones, &view, h3);
             game.draw_own_sprites(&mut sprites);
             gl.color_mask(true, true, true, false);
             begin_flares(gl, flares, self.placeholder);
             game.draw_flares(&mut sprites);
-            for (index, at) in frame.preview.h2_flares.iter().enumerate() {
-                if !frame.h2_flares_shown.get(index).copied().unwrap_or(true) {
-                    continue;
-                }
-                let occlusion = match at.occlusion_patches(bones, &view) {
-                    None => [1.0; 2],
-                    Some((outer, inner)) => {
-                        let Some(outer) = ce_flare_occlusion(gl, flares, camera, &view, &outer) else {
-                            continue;
-                        };
-                        let inner = inner.map_or(Some(1.0), |inner| {
-                            ce_flare_occlusion(gl, flares, camera, &view, &inner)
-                        });
-                        [outer * inner.unwrap_or(0.0), outer]
-                    }
-                };
-                let values = frame.function_values_of_object(at.object);
-                let colors = frame.change_colors_of_object(at.object);
-                let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
-                let sprites = at.sprites(values, &colors, bones, &view, frame.time, onset, occlusion);
-                let Some(textures) = uploaded.flare_textures.get(index) else {
-                    continue;
-                };
-                draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
-            }
             self.end_sprites(gl, frame, slot);
         }
     }
@@ -184,4 +120,6 @@ pub(in crate::app::model_preview) struct Dx9Sprites<'a> {
     /// The frame's slot, and how many models it has taken.
     pub(in crate::app::model_preview) slot: usize,
     pub(in crate::app::model_preview) uploads: u64,
+    /// When each effect began.
+    pub(in crate::app::model_preview) onsets: &'a mut H3EffectOnsets,
 }

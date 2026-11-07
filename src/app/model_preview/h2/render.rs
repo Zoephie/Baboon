@@ -1,17 +1,142 @@
-//! Halo 2's hooks into the dx9 pipeline.
+//! Halo 2's hooks into the dx9 pipeline, and its state for each slot.
 
+use eframe::glow::{self, HasContext as _};
+
+use super::super::common::slots::GameSlots;
+use super::super::common::sprites::draw_sprite_quad;
 use super::super::dx9::pipeline::Dx9Game;
-use super::super::renderer::FrameCx;
+use super::super::dx9::sprites::Dx9Sprites;
+use super::super::gen3::pipeline::h3_set_blend;
+use super::super::gen3::shaders::H3Blend;
+use super::super::renderer::{FrameCx, ce_flare_occlusion, draw_flare_sprites, is_shown};
+use super::slot::H2Slot;
 
-/// Halo 2's own part of the dx9 shading: its cloth.
+/// Halo 2's own part of the dx9 shading: its cloth, its gel lights' maps,
+/// its light volumes, liquids and contrails, and its flares.
 #[derive(Default)]
-pub(in crate::app::model_preview) struct H2Game;
+pub(in crate::app::model_preview) struct H2Game {
+    slots: GameSlots<H2Slot>,
+}
 
 impl Dx9Game for H2Game {
-    /// `cloth_update`, before anything draws the cloth's vertices.
+    /// `cloth_update`, before anything draws the cloth's vertices; then the
+    /// sprites' maps.
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
-        if cx.frame.preview.h3_cloth.first().is_some_and(|cloth| cloth.halo2()) {
-            unsafe { cx.core.move_cloth(cx.gl, cx.frame, cx.slot) }
+        unsafe {
+            if cx.frame.preview.h3_cloth.first().is_some_and(|cloth| cloth.halo2()) {
+                cx.core.move_cloth(cx.gl, cx.frame, cx.slot);
+            }
+            let h2 = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
+            if cx.core.draws_object_sprites(cx.frame) {
+                h2.sync_textures(cx.gl, cx.frame);
+            }
+        }
+    }
+
+    unsafe fn gel_maps(&mut self, cx: &mut FrameCx<'_>) -> Vec<Option<glow::NativeTexture>> {
+        let h2 = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
+        unsafe { h2.gels(cx.gl, cx.frame).to_vec() }
+    }
+
+    /// The light volumes, liquids and contrails, under the widgets' depth
+    /// state.
+    unsafe fn draw_before_antennas(&mut self, cx: &mut Dx9Sprites<'_>) {
+        let Dx9Sprites { gl, frame, flares, view, bones, slot, uploads, .. } = *cx;
+        let camera = &frame.camera;
+        let h2 = self.slots.of(slot, uploads);
+        let values = |object: u8| frame.function_values_of_object(object).cloned();
+        h2.contrails.advance(&frame.preview.h2_contrails, values, bones, frame.time);
+        unsafe {
+            let volumes = frame.preview.h2_light_volumes.iter().zip(&h2.textures.light_volumes);
+            for (index, (at, textures)) in volumes.enumerate() {
+                if !is_shown(&frame.h2_shown.volumes, index) {
+                    continue;
+                }
+                let values = frame.function_values_of_object(at.object);
+                let onset = cx.onsets.of(at.object, at.scale_name(), values, frame.time);
+                for (volume, texture) in at.volumes().iter().zip(textures) {
+                    let Some(texture) = texture else {
+                        continue;
+                    };
+                    gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                    h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
+                    let colors = frame.change_colors_of_object(at.object);
+                    for quad in at.quads(volume, values, &colors, bones, view, frame.time, onset) {
+                        draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
+                    }
+                }
+            }
+            let liquids = frame.preview.h2_liquids.iter().zip(&h2.textures.liquids);
+            for (index, (at, textures)) in liquids.enumerate() {
+                if !is_shown(&frame.h2_shown.liquids, index) {
+                    continue;
+                }
+                let values = frame.function_values_of_object(at.object);
+                for (arc, texture) in at.arcs().iter().zip(textures) {
+                    let Some(texture) = texture else {
+                        continue;
+                    };
+                    gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                    h3_set_blend(gl, H3Blend::PreMultiplied);
+                    for quad in at.quads(arc, values, bones, view, frame.time) {
+                        draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
+                    }
+                }
+            }
+            let contrails = frame.preview.h2_contrails.iter().zip(&h2.textures.contrails);
+            for (index, (at, texture)) in contrails.enumerate() {
+                if !is_shown(&frame.h2_shown.contrails, index) {
+                    continue;
+                }
+                let Some(texture) = texture else {
+                    continue;
+                };
+                gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                h3_set_blend(gl, at.blend());
+                for quad in h2.contrails.quads(index, at, view) {
+                    draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
+                }
+            }
+        }
+    }
+
+    unsafe fn draw_flares(&mut self, cx: &mut Dx9Sprites<'_>) {
+        let Dx9Sprites { gl, frame, flares, view, bones, slot, uploads, .. } = *cx;
+        let camera = &frame.camera;
+        let h2 = self.slots.of(slot, uploads);
+        unsafe {
+            for (index, at) in frame.preview.h2_flares.iter().enumerate() {
+                if !frame.h2_flares_shown.get(index).copied().unwrap_or(true) {
+                    continue;
+                }
+                let occlusion = match at.occlusion_patches(bones, view) {
+                    None => [1.0; 2],
+                    Some((outer, inner)) => {
+                        let Some(outer) = ce_flare_occlusion(gl, flares, camera, view, &outer) else {
+                            continue;
+                        };
+                        let inner = inner.map_or(Some(1.0), |inner| {
+                            ce_flare_occlusion(gl, flares, camera, view, &inner)
+                        });
+                        [outer * inner.unwrap_or(0.0), outer]
+                    }
+                };
+                let values = frame.function_values_of_object(at.object);
+                let colors = frame.change_colors_of_object(at.object);
+                let onset = cx.onsets.of(at.object, at.scale_name(), values, frame.time);
+                let sprites = at.sprites(values, &colors, bones, view, frame.time, onset, occlusion);
+                let Some(textures) = h2.textures.flares.get(index) else {
+                    continue;
+                };
+                draw_flare_sprites(gl, flares, camera, view, &sprites, textures);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+        if let Some(h2) = self.slots.current(slot, uploads) {
+            visit("h2_contrails", &h2.contrails);
         }
     }
 }

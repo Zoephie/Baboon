@@ -147,16 +147,16 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
         let tracers = &frame.preview.h4_tracers;
         simulations.h4_trails.advance(tracers, values, &mut simulations.effect_onsets, bones, view.eye, frame.time);
     }
-    let values = |object: u8| frame.function_values_of_object(object).cloned();
-    simulations.h2_contrails.advance(&frame.preview.h2_contrails, values, bones, frame.time);
 }
 
 /// The frame's antennas: Halo 2's and Halo 3's, and Reach's and Halo 4's,
 /// each a strip of quads.
+#[allow(clippy::too_many_arguments)]
 pub(in crate::app::model_preview) unsafe fn draw_antennas(
     gl: &glow::Context,
     flares: &SpriteGl,
-    uploaded: &mut ModelGpuSlot,
+    springs: &mut antennas::spring::ReachAntennaField,
+    textures: &[Option<glow::NativeTexture>],
     frame: &ModelGpuFrame,
     bones: Option<&[[f32; 4]]>,
     view: &ViewFrame,
@@ -171,8 +171,8 @@ pub(in crate::app::model_preview) unsafe fn draw_antennas(
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         }
         gl.color_mask(true, true, true, h3);
-        let tips = uploaded.simulations.antennas.advance(&frame.preview.h2_antennas, bones, frame.time);
-        for (quads, texture, reach) in h2_antennas(frame, &uploaded.antenna_textures, bones, view, &tips) {
+        let tips = springs.advance(&frame.preview.h2_antennas, bones, frame.time);
+        for (quads, texture, reach) in h2_antennas(frame, textures, bones, view, &tips) {
             if reach {
                 // `draw_textured_transparent_quad`'s blend mode 3: source
                 // alpha over its inverse, which Xenon sets for color alone;

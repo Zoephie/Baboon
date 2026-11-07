@@ -9,4 +9,5 @@ pub(super) mod liquid;
 pub(super) mod lights;
 pub(in crate::app) mod prt;
 pub(in crate::app::model_preview) mod render;
+pub(in crate::app::model_preview) mod slot;
 pub(super) mod weapons;

@@ -10,5 +10,6 @@ pub(in crate::app::model_preview) mod math;
 pub(in crate::app::model_preview) mod named_function;
 pub(in crate::app::model_preview) mod plain;
 pub(in crate::app::model_preview) mod random;
+pub(in crate::app::model_preview) mod slots;
 pub(in crate::app::model_preview) mod sprites;
 pub(in crate::app::model_preview) mod view;
