@@ -1,24 +1,28 @@
-//! What a Halo 2 unit can hold, and how it holds it. A weapon names its own
-//! animation class and type, and `unit_can_use_weapon` lets it in when the
-//! unit's graph has an idle for them. Dual wielding is a class of its own,
-//! `dual`, once a second weapon is in the left hand.
+//! What a unit of Halo 2 or a later game can hold, and how it holds it. A
+//! weapon names its own animation class and type, and `unit_can_use_weapon`
+//! lets it in when the unit's graph has an idle for them. Dual wielding is a
+//! class of its own, `dual`, once a second weapon is in the left hand. What
+//! an attached object brings with it is in [`attached`], and a variant's
+//! child objects in [`variants`].
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::super::attachment::{MarkerFrame, WeaponOption, merge_attached};
-use super::super::ce::attachments::{attached_marker_frame, loose_weapon_paths, weapon_ik};
-use super::super::common::fields::{elements, has_flag};
-use super::super::attachment::{attach_point, attach_vector};
-use super::super::loading::build_render_preview;
-use super::super::ce::attachments::CeWeaponIk;
-use super::super::dx9::passes::{h2_change_colors_for, read_h2_change_colors};
-use super::super::cloth::ClothGame;
-use super::super::*;
+use super::attachment::{MarkerFrame, WeaponOption};
+use super::ce::attachments::{loose_weapon_paths, weapon_ik};
+use super::common::fields::{elements, has_flag};
+use super::attachment::{attach_point, attach_vector};
+use super::loading::build_render_preview;
+use super::ce::attachments::CeWeaponIk;
+use super::*;
 use crate::core::source::TagSource;
-use crate::app::model_preview::common::attached::{Attached, named};
+
+pub(in crate::app::model_preview) mod attached;
+pub(in crate::app::model_preview) mod variants;
+
+use attached::{AttachedObject, fold_attached};
+use variants::object_variant;
 
 /// The mode a unit nobody controls is in.
 const RESTING_MODE: &str = "combat";
@@ -89,7 +93,7 @@ const ONLY_DUAL: &str = "can only be dual wielded";
 
 /// A weapon a unit's animations can hold.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct H2Equippable {
+pub(crate) struct Equippable {
     pub(crate) option: WeaponOption,
     kind: String,
     dual: bool,
@@ -112,7 +116,7 @@ struct GraphEntry {
 /// Which nodes an overlay channel reaches: the graph's `left arm member`
 /// nodes, or all the others.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum H2Arm {
+pub(crate) enum Arm {
     Left,
     NotLeft,
 }
@@ -120,9 +124,9 @@ pub(crate) enum H2Arm {
 /// What `unit_preprocess_node_orientations` lays over a clip for what is held.
 /// Aiming and looking are not among it: dead ahead at full weight it skips them.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct H2PoseLayer {
+pub(crate) struct PoseLayer {
     pub(crate) clip: String,
-    pub(crate) arm: Option<H2Arm>,
+    pub(crate) arm: Option<Arm>,
 }
 
 /// One `weapon ik` entry of a graph.
@@ -136,8 +140,8 @@ struct GraphIk {
 
 /// What a Halo 2 unit can hold, and which clips what it holds leaves out.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct H2UnitWeapons {
-    pub(crate) equippable: Vec<H2Equippable>,
+pub(crate) struct UnitWeapons {
+    pub(crate) equippable: Vec<Equippable>,
     graph: Vec<GraphEntry>,
     ik: Vec<GraphIk>,
     /// Clips that set `disable weapon ik`.
@@ -148,7 +152,7 @@ pub(crate) struct H2UnitWeapons {
     pub(crate) hidden_clips: BTreeSet<usize>,
 }
 
-impl H2UnitWeapons {
+impl UnitWeapons {
     pub(crate) fn primaries(&self) -> Vec<WeaponOption> {
         let usable = self.equippable.iter().filter(|weapon| !weapon.only_dual);
         usable.map(|weapon| weapon.option.clone()).collect()
@@ -170,7 +174,7 @@ impl H2UnitWeapons {
         self.graph.iter().any(|entry| entry.class == DUAL && entry.has_idle)
     }
 
-    fn find(&self, path: Option<&str>) -> Option<&H2Equippable> {
+    fn find(&self, path: Option<&str>) -> Option<&Equippable> {
         self.equippable.iter().find(|weapon| Some(weapon.option.path.as_str()) == path)
     }
 
@@ -234,24 +238,24 @@ impl H2UnitWeapons {
         clip: &str,
         primary: Option<&str>,
         secondary: Option<&str>,
-    ) -> Vec<H2PoseLayer> {
+    ) -> Vec<PoseLayer> {
         let name = clip.split('%').next().unwrap_or(clip);
         let mode = name.split(':').next().unwrap_or(name);
         let layer = |class: &str, kind: &str, last: &str, arm| {
             let clip = self.find_clip(clips, mode, class, kind, last)?;
-            Some(H2PoseLayer { clip, arm })
+            Some(PoseLayer { clip, arm })
         };
         match (self.find(primary), self.find(secondary)) {
             (Some(first), Some(second)) => {
-                let right = (first.kind.as_str(), H2Arm::NotLeft);
-                let left = (second.kind.as_str(), H2Arm::Left);
+                let right = (first.kind.as_str(), Arm::NotLeft);
+                let left = (second.kind.as_str(), Arm::Left);
                 [(ARM_OFFSETS, right), (ARM_OFFSETS, left), (GRIP, right), (GRIP, left)]
                     .into_iter()
                     .filter_map(|(last, (kind, arm))| layer(DUAL, kind, last, Some(arm)))
                     .collect()
             }
             (Some(held), None) => {
-                let arm = (!self.ik_runs_through(clip, mode)).then_some(H2Arm::NotLeft);
+                let arm = (!self.ik_runs_through(clip, mode)).then_some(Arm::NotLeft);
                 layer(&held.option.class, &held.kind, GRIP, arm).into_iter().collect()
             }
             _ => Vec::new(),
@@ -485,10 +489,10 @@ fn unit_graph(source: &TagSource, unit: &TagFile) -> Option<TagFile> {
 pub(in crate::app::model_preview) fn unit_weapons(
     source: &TagSource,
     unit: &TagFile,
-    known: Option<&[H2Equippable]>,
-) -> H2UnitWeapons {
+    known: Option<&[Equippable]>,
+) -> UnitWeapons {
     let Some(tag) = unit_graph(source, unit) else {
-        return H2UnitWeapons::default();
+        return UnitWeapons::default();
     };
     let graph = graph_entries(&tag);
     let equippable = known.map_or_else(
@@ -507,7 +511,7 @@ pub(in crate::app::model_preview) fn unit_weapons(
                         // The weapon's own `flags` sit beside its `magazines`.
                         let holder = holder_of(weapon.root(), "magazines");
                         let has = |flag: &str| holder.is_some_and(|holder| has_flag(holder, "flags", flag));
-                        H2Equippable {
+                        Equippable {
                             option: WeaponOption {
                                 name: tag_path::name(&path).to_owned(),
                                 path,
@@ -527,7 +531,7 @@ pub(in crate::app::model_preview) fn unit_weapons(
         },
         <[_]>::to_vec,
     );
-    H2UnitWeapons {
+    UnitWeapons {
         equippable,
         graph,
         ik: graph_ik(&tag),
@@ -556,15 +560,15 @@ fn h4_weapon_specific_marker(source: &TagSource, unit: &TagFile, weapon: &TagFil
 
 /// `sub_88D990`, attaching a readied weapon: the unit's hand, to the unit's
 /// preferred gun marker if the weapon has one, or else its handle node.
-pub(in crate::app::model_preview) fn attach_h2_weapon(
+pub(in crate::app::model_preview) fn attach_weapon(
     source: &TagSource,
     unit: &TagFile,
     path: &str,
     left_hand: bool,
     owner: u8,
-    ik: Option<&H2UnitWeapons>,
+    ik: Option<&UnitWeapons>,
     preview: &mut RenderModelPreview,
-) -> Option<H2AttachedObject> {
+) -> Option<AttachedObject> {
     let weapon = load_referenced_tag_from_source(source, path, "weapon", b"weap").ok()?;
     let model = holder_of(weapon.root(), "model")?.read_tag_ref_path("model")?;
     let model = load_referenced_tag_from_source(source, &model, "model", b"hlmt").ok()?;
@@ -588,9 +592,9 @@ pub(in crate::app::model_preview) fn attach_h2_weapon(
         let place = |frame: &MarkerFrame| {
             (frame.axes.map(|axis| attach_vector(&parent, &child, axis)), attach_point(&parent, &child, frame.position))
         };
-        let holder = super::super::animation::reach_ik::ReachIkHolder::Weapon(owner);
+        let holder = super::animation::reach_ik::ReachIkHolder::Weapon(owner);
         let node = Some(parent.node.max(0) as usize);
-        preview.reach_ik_markers.extend(super::super::animation::reach_ik::reach_ik_markers(&attached, holder, place, node));
+        preview.reach_ik_markers.extend(super::animation::reach_ik::reach_ik_markers(&attached, holder, place, node));
     }
     if let Some(weapons) = ik {
         let class = string_id_in(&weapon, "weapon class");
@@ -613,369 +617,6 @@ pub(in crate::app::model_preview) fn attach_h2_weapon(
     }
     let variant = object_variant(&weapon, &model, "").map(|variant| variant.name).unwrap_or_default();
     fold_attached(source, &weapon, &model, &variant, attached, parent, child, owner, tag_path::name(path), preview)
-}
-
-/// An attached object's lights and flares, then its geometry, into `preview`.
-/// `model` is the object's, built into `attached`, made as `variant`.
-#[allow(clippy::too_many_arguments)]
-fn fold_attached(
-    source: &TagSource,
-    object: &TagFile,
-    model: &TagFile,
-    variant: &str,
-    attached: RenderModelPreview,
-    parent: MarkerFrame,
-    child: MarkerFrame,
-    owner: u8,
-    name: &str,
-    preview: &mut RenderModelPreview,
-) -> Option<H2AttachedObject> {
-    let frame = |marker: &RenderModelPreviewMarker| {
-        (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
-    };
-    // `Game::of` calls Reach `Halo3` too; its attachments, lights and held
-    // weapons read differently, and wait on their own readers.
-    if source.game() == Some(GameId::Halo4) {
-        // Halo 4's own readers, never Halo 3's readings of it.
-        let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
-        read_h4_attached_features(source, object, owner, &attached.markers, &frame, Some(name), center, preview);
-    } else if source.game() == Some(GameId::HaloReach) {
-        let center = std::array::from_fn(|axis| (attached.bounds_min[axis] + attached.bounds_max[axis]) * 0.5);
-        read_reach_attached_features(source, object, owner, &attached.markers, &frame, Some(name), center, preview);
-    } else if blam_tags::game::Game::of(object) == blam_tags::game::Game::Halo3 {
-        read_h3_attached_features(source, object, owner, &attached.markers, &frame, Some(name), preview);
-        read_extension_weapons(source, object, owner, &attached.markers, &frame, preview, Some(name));
-    } else {
-        let (flares, lights, gels) =
-            super::lights::read_h2_flares(source, object, owner, &attached.markers, frame);
-        preview.h2_flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
-        preview.h2_point_lights.extend(lights.into_iter().map(|light| light.on_attached(name)));
-        preview.h2_gel_lights.extend(gels.into_iter().map(|light| light.on_attached(name)));
-        let markers = &attached.markers;
-        // Particle systems carry the held object's event effects (`firing
-        // effect` and the rest), which its owner's panel plays by name.
-        let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
-        let particles: Vec<_> = particles.into_iter().map(|system| Arc::new(system.on_attached(name))).collect();
-        preview.h3_particles.extend(particles);
-        let volumes = super::light_volumes::read_h2_light_volumes(source, object, owner, markers, frame);
-        preview.h2_light_volumes.extend(volumes.into_iter().map(|volume| volume.on_attached(name)));
-        let contrails = super::contrails::read_h2_contrails(source, object, owner, markers, frame);
-        preview.h2_contrails.extend(contrails.into_iter().map(|contrail| contrail.on_attached(name)));
-        let liquids = super::liquid::read_h2_liquids(source, object, owner, markers, frame);
-        preview.h2_liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
-        super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
-        read_extension_weapons(source, object, owner, markers, &frame, preview, Some(name));
-    }
-    // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
-    if let Some(prt) = preview.h2_prt.as_mut() {
-        prt.pad(attached.vertices.len());
-    }
-    if let Some(prt) = preview.h3_prt.as_mut() {
-        match attached.h3_prt.as_ref().filter(|own| own.vertices.len() == attached.vertices.len()) {
-            Some(own) => prt.append(own),
-            None => prt.pad(attached.vertices.len()),
-        }
-    }
-    merge_attached(preview, attached, parent, child, owner, name);
-    let functions = super::super::functions::read_object_functions(object, Some(model))?;
-    // `object_set_initial_change_colors`: each object its own, from its own tag.
-    let change_colors = h2_change_colors_for(&read_h2_change_colors(object), variant);
-    Some(H2AttachedObject { owner, functions, change_colors })
-}
-
-/// What hangs on a Halo 3 or ODST object brought into the preview: its
-/// lights, flares, light volumes, particle systems and the strips they carry,
-/// strips, cloth and screen effects, at `markers` as `frame` places them.
-fn read_h3_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-    name: Option<&str>,
-    preview: &mut RenderModelPreview,
-) {
-    let lights = super::super::h3::lights::read_h3_lights(source, object, owner, markers, frame);
-    let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
-    let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
-    preview.h3_light_volumes.extend(named(volumes, name));
-    let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
-    let particles: Vec<_> = named(particles, name).map(Arc::new).collect();
-    let carried = super::super::particles::carried_strips(&particles);
-    preview.h3_particles.extend(particles);
-    preview.h3_strips.extend(carried);
-    let strips = super::super::gen3::strips::read_h3_strips(source, object, owner, markers, frame);
-    preview.h3_strips.extend(named(strips, name).map(Arc::new));
-    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
-    let screens = super::super::gen3::screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
-    preview.h3_screen_effects.extend(screens);
-    super::super::gen3::screen_effects::add_screen_shader_materials(preview);
-    let lights: Vec<_> = named(lights, name).collect();
-    preview.h3_flares.extend(named(flares, name));
-    preview.h3_flares.extend(super::super::h3::lights::light_flares(&lights));
-    preview.h3_lights.extend(lights);
-}
-
-/// What hangs on a Reach object brought into the preview, or on the one
-/// opened (`name` none): its flares, lights and cheap lights, and the
-/// `light_apply` passes they are drawn with, its effects' volumes,
-/// particles, cheap particles, strips and screen effects, and its antennas
-/// and cloth. `center` is the middle of its bounding sphere, in its own
-/// space.
-#[allow(clippy::too_many_arguments)]
-pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-    name: Option<&str>,
-    center: [f32; 3],
-    preview: &mut RenderModelPreview,
-) {
-    let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
-    preview.h3_flares.extend(named(flares, name));
-    let (lights, cheap) = super::super::reach::lights::read_reach_lights(source, object, owner, markers, frame);
-    preview.reach_lights.extend(named(lights, name));
-    preview.reach_cheap_lights.extend(named(cheap, name));
-    let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
-    preview.h3_light_volumes.extend(named(volumes, name));
-    let cheap = super::super::particles::cheap::read_reach_cheap_emitters(source, object, owner, markers, frame);
-    preview.reach_cheap_emitters.extend(named(cheap, name));
-    let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
-    let particles: Vec<_> = named(particles, name).map(Arc::new).collect();
-    let carried = super::super::particles::carried_strips(&particles);
-    preview.h3_particles.extend(particles);
-    preview.h3_strips.extend(carried);
-    let strips = super::super::gen3::strips::read_h3_strips(source, object, owner, markers, frame);
-    preview.h3_strips.extend(named(strips, name).map(Arc::new));
-    let screens = super::super::gen3::screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
-    preview.h3_screen_effects.extend(screens);
-    super::super::gen3::screen_effects::add_screen_shader_materials(preview);
-    preview.h2_antennas.extend(super::lights::read_reach_antennas(source, object, markers, frame, name));
-    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
-    // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
-    let lit = !(preview.reach_lights.is_empty() && preview.reach_cheap_lights.is_empty());
-    if lit && preview.reach_light_passes.is_empty() {
-        let mut sources = super::super::gen3::shaders::H3Sources::new(source);
-        let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
-        preview.reach_light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
-    }
-}
-
-/// What a Halo 4 object brings of its own so far: its lights, cheap lights
-/// and lens flares and the passes they draw with
-/// (`docs/h4-preview-research/lights.md`), its particles, light volumes and
-/// tracers, which draw through their materials (`particles.md`,
-/// `tracers.md`), its cheap particles, and antennas and cloth, whose
-/// definitions are Reach's (`objects.md` §3.10).
-#[allow(clippy::too_many_arguments)]
-pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-    name: Option<&str>,
-    center: [f32; 3],
-    preview: &mut RenderModelPreview,
-) {
-    // A weapon opened on its own has no parent to hold it.
-    let lone_weapon = name.is_none() && object.group().tag == u32::from_be_bytes(*b"weap");
-    let (lights, cheap) = super::super::h4::lights::read_h4_lights(source, object, owner, markers, frame, lone_weapon);
-    preview.h4_lights.extend(named(lights, name));
-    preview.h4_cheap_lights.extend(named(cheap, name));
-    super::super::h4::lights::read_h4_light_passes(source, preview);
-    let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
-    preview.h3_particles.extend(named(particles, name).map(Arc::new));
-    let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
-    preview.h3_light_volumes.extend(named(volumes, name));
-    let tracers = super::super::h4::tracers::read_h4_tracers(source, object, owner, markers, frame);
-    preview.h4_tracers.extend(named(tracers, name));
-    let cheap = super::super::particles::cheap::read_reach_cheap_emitters(source, object, owner, markers, frame);
-    preview.reach_cheap_emitters.extend(named(cheap, name));
-    let flares = super::super::h4::flares::read_h4_flares(source, object, owner, markers, frame);
-    preview.h4_flares.extend(named(flares, name));
-    if !preview.h4_flares.is_empty() && preview.h4_flare_pass.is_none() {
-        preview.h4_flare_pass = super::super::h4::flares::h4_flare_pass(source).ok().map(Arc::new);
-    }
-    preview.h2_antennas.extend(super::lights::read_reach_antennas(source, object, markers, frame, name));
-    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
-}
-
-/// A unit's own `weapons` that are an `extension of parent` (vehicle and
-/// turret guns): they have no model, and the marker lookup (H2 `sub_86F5B0`,
-/// H3 `sub_180343CCC`, ODST `sub_140ABC7F0`) hands theirs to the unit, so
-/// their effects play at the unit's markers. On a child object they take its
-/// name, as its own effects do.
-pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
-    object: &TagFile,
-    owner: u8,
-    markers: &[RenderModelPreviewMarker],
-    frame: &F,
-    preview: &mut RenderModelPreview,
-    within: Option<&str>,
-) {
-    let Some(holder) = super::super::common::fields::object_block(object, "weapons") else {
-        return;
-    };
-    for entry in elements(holder, "weapons") {
-        let Some(path) = entry.read_tag_ref_path("weapon").filter(|path| !path.is_empty()) else {
-            continue;
-        };
-        let Ok(weapon) = load_referenced_tag_from_source(source, &path, "weapon", b"weap") else {
-            continue;
-        };
-        let object = super::super::common::fields::object_block(&weapon, "bounding radius");
-        if !object.is_some_and(|object| has_flag(object, "flags", "extension of parent")) {
-            continue;
-        }
-        if blam_tags::game::Game::of(&weapon) == blam_tags::game::Game::Halo3 {
-            read_h3_attached_features(source, &weapon, owner, markers, frame, within, preview);
-            continue;
-        }
-        let particles = super::super::particles::read_h3_particles(source, &weapon, owner, markers, frame);
-        preview.h3_particles.extend(named(particles, within).map(Arc::new));
-        let (flares, lights, gels) = super::lights::read_h2_flares(source, &weapon, owner, markers, frame);
-        preview.h2_flares.extend(named(flares, within));
-        preview.h2_point_lights.extend(named(lights, within));
-        preview.h2_gel_lights.extend(named(gels, within));
-        let volumes = super::light_volumes::read_h2_light_volumes(source, &weapon, owner, markers, frame);
-        preview.h2_light_volumes.extend(named(volumes, within));
-        let contrails = super::contrails::read_h2_contrails(source, &weapon, owner, markers, frame);
-        preview.h2_contrails.extend(named(contrails, within));
-    }
-}
-
-/// The first owner a variant's child object takes, after the two hands.
-const FIRST_CHILD_OWNER: u8 = 3;
-
-/// One entry of a variant's `objects`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct VariantObject {
-    parent_marker: String,
-    child_marker: String,
-    child_variant: String,
-    group: u32,
-    path: String,
-}
-
-/// Each variant's `objects`, `model_variant_create_children`'s list.
-fn variant_objects(model: &TagFile) -> Vec<Vec<VariantObject>> {
-    let name = |entry: TagStruct<'_>, field: &str| entry.read_string_id(field).unwrap_or_default();
-    elements(model.root(), "variants")
-        .iter()
-        .map(|variant| {
-            let read = |entry: &TagStruct<'_>| {
-                let (group, path) = entry.read_tag_ref_with_group("child object")?;
-                (!path.is_empty()).then(|| VariantObject {
-                    parent_marker: name(*entry, "parent marker"),
-                    child_marker: name(*entry, "child marker"),
-                    child_variant: name(*entry, "child variant name"),
-                    group,
-                    path,
-                })
-            };
-            elements(*variant, "objects").iter().filter_map(read).collect()
-        })
-        .collect()
-}
-
-/// A child object's `.model`, and its variant by name, else its own default.
-fn child_model(source: &TagSource, entry: &VariantObject) -> Option<(TagFile, TagFile, Option<ModelVariantPreview>)> {
-    let extension = blam_tags::paths::group_tag_to_extension(entry.group)?;
-    let object = load_referenced_tag_from_source(source, &entry.path, extension, &entry.group.to_be_bytes()).ok()?;
-    let model = holder_of(object.root(), "model")?.read_tag_ref_path("model")?;
-    let model = load_referenced_tag_from_source(source, &model, "model", b"hlmt").ok()?;
-    let chosen = object_variant(&object, &model, &entry.child_variant);
-    Some((object, model, chosen))
-}
-
-/// The variant of `model` an object is made as: `wanted`, or with none the
-/// object's default, falling back to `default` and then the first.
-fn object_variant(object: &TagFile, model: &TagFile, wanted: &str) -> Option<ModelVariantPreview> {
-    let variants = super::super::variants::read_model_variants(model);
-    let wanted = match wanted {
-        "" => object_default_variant(object).unwrap_or_default(),
-        name => name.to_owned(),
-    };
-    let chosen = variants.iter().find(|variant| variant.name == wanted);
-    let chosen = chosen.or(variants.iter().find(|variant| variant.name == "default")).or(variants.first());
-    chosen.cloned()
-}
-
-/// What a `.model`'s variants attach, such as the warthog's turret: every one
-/// goes in once, drawn only under the variants that name it.
-pub(in crate::app::model_preview) fn attach_variant_objects(
-    source: &TagSource,
-    model: &TagFile,
-    variants: &mut [ModelVariantPreview],
-    preview: &mut RenderModelPreview,
-) -> Vec<H2AttachedObject> {
-    let per_variant = variant_objects(model);
-    let mut objects: Vec<VariantObject> = Vec::new();
-    for entry in per_variant.iter().flatten() {
-        if !objects.contains(entry) {
-            objects.push(entry.clone());
-        }
-    }
-    let mut attached_objects = Vec::new();
-    let mut names: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (index, entry) in objects.iter().enumerate() {
-        let Ok(owner) = u8::try_from(index + usize::from(FIRST_CHILD_OWNER)) else {
-            break;
-        };
-        let Some((object, child_tag, chosen)) = child_model(source, entry) else {
-            continue;
-        };
-        let render = child_tag.root().read_tag_ref_path("render model");
-        let render = render.and_then(|path| load_referenced_tag_from_source(source, &path, "render_model", b"mode").ok());
-        let Some(attached) = render.and_then(|render| build_render_preview(&render).ok()) else {
-            continue;
-        };
-        let parent = MarkerFrame::find(preview, &entry.parent_marker);
-        let child = MarkerFrame::find(&attached, &entry.child_marker);
-        // Two children of one name (a tag on two markers, or two tags in
-        // different folders) keep their regions and effects apart.
-        let base = tag_path::name(&entry.path);
-        let seen = names.entry(base.to_owned()).or_insert(0);
-        *seen += 1;
-        let name = if *seen == 1 { base.to_owned() } else { format!("{base} {seen}") };
-        let choices: Vec<(String, String)> = attached
-            .regions
-            .iter()
-            .map(|region| {
-                let named = chosen.as_ref().and_then(|variant| variant.regions.get(&region.name));
-                let permutation = named.cloned().or_else(|| region.permutations.first().cloned());
-                (format!("{name}: {}", region.name), permutation.unwrap_or_default())
-            })
-            .collect();
-        let variant = chosen.as_ref().map_or("", |variant| variant.name.as_str());
-        let folded =
-            fold_attached(source, &object, &child_tag, variant, attached, parent, child, owner, &name, preview);
-        attached_objects.extend(folded);
-        for (region, permutation) in choices {
-            // With no variant chosen, no child shows.
-            preview.instances.empty_regions.insert(region.clone());
-            for (variant, listed) in variants.iter_mut().zip(&per_variant) {
-                if listed.contains(entry) {
-                    variant.regions.insert(region.clone(), permutation.clone());
-                }
-            }
-        }
-    }
-    attached_objects
-}
-
-/// An object attached to the opened one, in any game from Halo 2 on: a held
-/// weapon, or what one of its variants attaches.
-#[derive(Debug, Clone)]
-pub(crate) struct H2AttachedObject {
-    /// What its materials carry as `object`.
-    pub(crate) owner: u8,
-    pub(crate) functions: super::super::functions::ObjectFunctions,
-    pub(crate) change_colors: [[f32; 3]; 4],
 }
 
 #[cfg(test)]
@@ -1002,8 +643,8 @@ mod tests {
         GraphEntry { slots, ..entry(mode, class, kind, false) }
     }
 
-    fn weapon(name: &str, class: &str, kind: &str, dual: bool, only_dual: bool) -> H2Equippable {
-        H2Equippable {
+    fn weapon(name: &str, class: &str, kind: &str, dual: bool, only_dual: bool) -> Equippable {
+        Equippable {
             option: WeaponOption { path: name.to_owned(), name: name.to_owned(), class: class.to_owned() },
             kind: kind.to_owned(),
             dual,
@@ -1011,8 +652,8 @@ mod tests {
         }
     }
 
-    fn unit() -> H2UnitWeapons {
-        H2UnitWeapons {
+    fn unit() -> UnitWeapons {
+        UnitWeapons {
             equippable: vec![
                 weapon("magnum", "pistol", "hp", true, false),
                 weapon("rocket", "missile", "rl", false, false),
@@ -1086,9 +727,9 @@ mod tests {
         let unit = unit();
         let clips = ["combat:pistol:hp:grip", "combat:pistol:reload_1"];
         let layers = |clip| unit.pose_layers(&clips, clip, Some("magnum"), None);
-        let grip = |arm| vec![H2PoseLayer { clip: clips[0].to_owned(), arm }];
+        let grip = |arm| vec![PoseLayer { clip: clips[0].to_owned(), arm }];
         assert_eq!(layers("combat:pistol:idle"), grip(None));
-        assert_eq!(layers("combat:pistol:reload_1"), grip(Some(H2Arm::NotLeft)));
+        assert_eq!(layers("combat:pistol:reload_1"), grip(Some(Arm::NotLeft)));
         assert!(unit.pose_layers(&clips, "combat:pistol:idle", None, None).is_empty());
     }
 
@@ -1097,7 +738,7 @@ mod tests {
     /// A slot whose clip lies in another graph still ends it.
     #[test]
     fn a_clip_is_found_along_the_games_search_path() {
-        let unit = H2UnitWeapons {
+        let unit = UnitWeapons {
             graph: vec![
                 slotted("any", "pistol", "hp", &[("grip", "any:pistol:hp:grip")]),
                 slotted("combat", "any", "any", &[("grip", "combat:grip")]),
@@ -1121,14 +762,14 @@ mod tests {
         let unit = unit();
         let clips = ["combat:dual:arm_offsets", "combat:dual:hp:arm_offsets", "combat:dual:grip"];
         let layers = unit.pose_layers(&clips, "combat:dual:idle", Some("magnum"), Some("shield"));
-        let row = |clip: &str, arm| H2PoseLayer { clip: clip.to_owned(), arm: Some(arm) };
+        let row = |clip: &str, arm| PoseLayer { clip: clip.to_owned(), arm: Some(arm) };
         assert_eq!(
             layers,
             [
-                row("combat:dual:hp:arm_offsets", H2Arm::NotLeft),
-                row("combat:dual:arm_offsets", H2Arm::Left),
-                row("combat:dual:grip", H2Arm::NotLeft),
-                row("combat:dual:grip", H2Arm::Left),
+                row("combat:dual:hp:arm_offsets", Arm::NotLeft),
+                row("combat:dual:arm_offsets", Arm::Left),
+                row("combat:dual:grip", Arm::NotLeft),
+                row("combat:dual:grip", Arm::Left),
             ]
         );
     }
@@ -1190,7 +831,7 @@ mod tests {
         assert!(unit.hidden(&clips, "unarmed", &[]).is_empty(), "nothing held, nothing hidden");
     }
 
-    fn graph_of(entries: &[(&str, &str, &str, bool)]) -> H2UnitWeapons {
+    fn graph_of(entries: &[(&str, &str, &str, bool)]) -> UnitWeapons {
         let graph = entries.iter().map(|(mode, class, kind, has_idle)| GraphEntry {
             mode: (*mode).to_owned(),
             class: (*class).to_owned(),
@@ -1198,7 +839,7 @@ mod tests {
             has_idle: *has_idle,
             slots: Vec::new(),
         });
-        H2UnitWeapons { graph: graph.collect(), ..Default::default() }
+        UnitWeapons { graph: graph.collect(), ..Default::default() }
     }
 
     #[test]

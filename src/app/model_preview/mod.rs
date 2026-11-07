@@ -43,6 +43,7 @@ mod renderer;
 #[cfg(test)]
 mod gates;
 mod variants;
+pub(in crate::app) mod weapons;
 
 use animation::*;
 use derived::*;

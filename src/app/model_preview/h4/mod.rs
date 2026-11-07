@@ -2,6 +2,7 @@
 //! and lights, flares, camo, shield, shadow, particles and tracers. Its passes
 //! are the renderer's.
 
+pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;
 pub(super) mod camo;
 pub(in crate::app::model_preview) mod composite;

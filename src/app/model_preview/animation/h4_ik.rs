@@ -10,7 +10,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::attachment::rigid_inverse;
 use super::super::common::fields::elements;
-use super::super::h2::weapons::holder_of;
+use super::super::weapons::holder_of;
 use super::reach_ik::{ReachIkHolder, ReachIkMarker, two_bone_ik};
 use super::super::RenderModelPreviewNode;
 

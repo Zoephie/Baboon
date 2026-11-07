@@ -1,6 +1,7 @@
 //! Reach: object lights, camo, shadow and shield, several of which Halo 4
 //! draws through too. Its lighting, bloom and passes are the renderer's.
 
+pub(in crate::app::model_preview) mod attached;
 pub(super) mod camo;
 pub(in crate::app::model_preview) mod bloom;
 pub(in crate::app::model_preview) mod composite;
