@@ -2011,9 +2011,6 @@ pub(in crate::app::model_preview) struct SlotSimulations {
     pub(in crate::app::model_preview) cloth: cloth::H3ClothField,
     /// Every antenna's spring.
     pub(in crate::app::model_preview) antennas: antennas::spring::ReachAntennaField,
-    pub(in crate::app::model_preview) h3_leaves: h3::leaves::H3LeafField,
-    /// How long VISR has been on, as of when.
-    pub(in crate::app::model_preview) h3_vision_clock: Option<(f32, f32)>,
 }
 
 impl SlotSimulations {
@@ -2028,8 +2025,6 @@ impl SlotSimulations {
             effect_onsets,
             cloth,
             antennas,
-            h3_leaves,
-            h3_vision_clock,
         } = self;
         visit("particles", particles);
         visit("reach_cheap", reach_cheap);
@@ -2037,8 +2032,6 @@ impl SlotSimulations {
         visit("effect_onsets", effect_onsets);
         visit("cloth", cloth);
         visit("antennas", antennas);
-        visit("h3_leaves", h3_leaves);
-        visit("h3_vision_clock", h3_vision_clock);
     }
 }
 
@@ -2081,7 +2074,6 @@ pub(super) struct ModelGpuSlot {
     pub(in crate::app::model_preview) volume_textures: Vec<Option<glow::NativeTexture>>,
     /// The cheap particles' library's render texture array.
     pub(in crate::app::model_preview) reach_cheap_texture: Option<glow::NativeTexture>,
-    pub(in crate::app::model_preview) leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     pub(in crate::app::model_preview) strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     pub(in crate::app::model_preview) particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
 }
@@ -2132,7 +2124,6 @@ impl ModelGpuSlot {
                 antenna_textures: Vec::new(),
                 volume_textures: Vec::new(),
                 reach_cheap_texture: None,
-                leaf_textures: Vec::new(),
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
             })
@@ -2253,29 +2244,14 @@ impl ModelGpuSlot {
             let drained = self
                 .particle_textures
                 .drain(..)
-                .chain(self.strip_textures.drain(..))
-                .chain(self.leaf_textures.drain(..));
+                .chain(self.strip_textures.drain(..));
             for texture in drained.flatten().flatten() {
                 gl.delete_texture(texture);
             }
-            let maps = |look: &particles::H3SpriteShader| {
-                let [base, alpha, palette, second] = look.samplers;
-                [
-                    (&look.base_map, base),
-                    (&look.alpha_map, alpha),
-                    (&look.palette_map, palette),
-                    (&look.second_map, second),
-                ]
-                .map(|(map, sampler)| {
-                    map.as_ref().and_then(|(image, texels, mips)| {
-                        gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, sampler)
-                    })
-                })
-            };
+            let maps = |look: &particles::H3SpriteShader| sprite_maps(gl, look);
             self.particle_textures =
                 frame.preview.h3_particles.iter().map(|system| maps(&system.look.shader)).collect();
             self.strip_textures = frame.preview.h3_strips.iter().map(|strip| maps(strip.shader())).collect();
-            self.leaf_textures = frame.preview.h3_leaves.iter().map(|leaves| maps(leaves.shader())).collect();
             if let Some(texture) = self.reach_cheap_texture.take() {
                 gl.delete_texture(texture);
             }
@@ -3435,6 +3411,22 @@ void main() {
 const PARTICLE_FLOATS: usize = 24;
 
 /// A run of vertices as the particle program takes them.
+/// A gen3 sprite shader's base, alpha, palette and second maps, each with
+/// its own sampler.
+pub(in crate::app::model_preview) unsafe fn sprite_maps(
+    gl: &glow::Context,
+    look: &particles::H3SpriteShader,
+) -> [Option<glow::NativeTexture>; 4] {
+    let [base, alpha, palette, second] = look.samplers;
+    [(&look.base_map, base), (&look.alpha_map, alpha), (&look.palette_map, palette), (&look.second_map, second)].map(
+        |(map, sampler)| {
+            map.as_ref().and_then(|(image, texels, mips)| unsafe {
+                gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, sampler)
+            })
+        },
+    )
+}
+
 pub(in crate::app::model_preview) fn particle_floats(camera: &ModelGpuCamera, drawn: &[particles::H3ParticleVertex]) -> Vec<[f32; PARTICLE_FLOATS]> {
     drawn
         .iter()

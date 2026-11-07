@@ -66,6 +66,9 @@ impl RenderCore {
                         bones,
                         onsets: &mut $uploaded.simulations.effect_onsets,
                         particles: &mut $uploaded.simulations.particles,
+                        particle_gl,
+                        no_map,
+                        stops,
                         depth_copy,
                         size,
                         placeholder,
@@ -208,18 +211,7 @@ impl RenderCore {
                         draw_particle_system(gl, particles, uploaded, frame, index, &view, targets);
                     }
                     Sprites::Leaves(index) => {
-                        let leaves = &frame.preview.h3_leaves[index];
-                        let Some(particles) = particle_gl.as_ref() else {
-                            continue;
-                        };
-                        let lighting = h3_lighting_constants(frame);
-                        let drawn = uploaded.simulations.h3_leaves.vertices(index, leaves, &lighting);
-                        if drawn.is_empty() {
-                            continue;
-                        }
-                        let vertices = particle_floats(camera, &drawn);
-                        let textures = uploaded.leaf_textures.get(index).copied().unwrap_or_default();
-                        particles.draw(gl, leaves.shader(), &vertices, textures, no_map, self.gen3.depth_copy, camera, &lighting, stops);
+                        game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::Leaves(index));
                     }
                     Sprites::Strip(index) => {
                         let strip = &frame.preview.h3_strips[index];
@@ -327,6 +319,8 @@ pub(in crate::app::model_preview) enum Gen3Sprite {
     Volume(usize),
     /// Of `h3_particles`.
     System(usize),
+    /// Of `h3_leaves`.
+    Leaves(usize),
 }
 
 /// What a game's own sprites draw with, inside the gen3 sprite pass: the
@@ -342,6 +336,11 @@ pub(in crate::app::model_preview) struct Gen3Sprites<'a> {
     pub(in crate::app::model_preview) onsets: &'a mut H3EffectOnsets,
     /// Every game's particle systems.
     pub(in crate::app::model_preview) particles: &'a mut H3ParticleField,
+    /// The particle program, the map an unmapped stage samples, and the
+    /// exposure stops.
+    pub(in crate::app::model_preview) particle_gl: Option<&'a H3ParticleGl>,
+    pub(in crate::app::model_preview) no_map: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) stops: f32,
     /// The scene's depth, for the soft fade, and the targets' size.
     pub(in crate::app::model_preview) depth_copy: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) size: [i32; 2],

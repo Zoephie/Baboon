@@ -1388,7 +1388,7 @@ impl RenderCore {
             }
             game.composite(&mut FrameCx { gl, frame, core: self, slot }, framebuffer, accumulation, bloom, screen, size);
             self.gen3.stops = 0.0;
-            self.h3_finish_picture(gl, frame, slot, framebuffer, size, &screen, &shaders);
+            self.h3_finish_picture(game, gl, frame, slot, framebuffer, size, &screen, &shaders);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1540,6 +1540,7 @@ impl RenderCore {
     #[allow(clippy::too_many_arguments)]
     unsafe fn h3_finish_picture(
         &mut self,
+        game: &mut dyn Gen3Game,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -1641,7 +1642,8 @@ impl RenderCore {
             gl.disable(glow::FRAMEBUFFER_SRGB);
             if let Some(vision) = vision {
                 copy_depth(gl);
-                self.h3_draw_vision(gl, frame, slot, &vision, screen.vision(), depth_copy);
+                let on_for = game.vision_on_for(slot, self.slot_uploads(slot), frame.time);
+                self.h3_draw_vision(gl, frame, &vision, screen.vision(), on_for, depth_copy);
             }
             gl.color_mask(true, true, true, true);
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(picture_framebuffer));
@@ -1699,18 +1701,11 @@ impl RenderCore {
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
-        slot: usize,
         vision: &h3::vision::H3Vision,
         amount: f32,
+        on_for: f32,
         depth: glow::NativeTexture,
     ) {
-        let time = frame.time;
-        let clock = &mut self.slots[slot].simulations.h3_vision_clock;
-        let on_for = match *clock {
-            Some((last, seconds)) if time >= last => seconds + (time - last),
-            _ => 0.0,
-        };
-        *clock = Some((time, on_for));
         let constants = vision.constants(amount, on_for);
         let matrix = view_projection(&frame.camera);
         let Some(to_world) = h3::vision::inverted(&matrix) else {

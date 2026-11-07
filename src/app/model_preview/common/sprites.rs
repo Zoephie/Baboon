@@ -128,7 +128,6 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
         let ground = lowest.fold(0.0, f32::min);
         simulations.particles.advance(systems, values, &mut simulations.effect_onsets, bones, view.eye, ground, frame.time);
     }
-    simulations.h3_leaves.advance(&frame.preview.h3_leaves, frame.time);
     if !frame.preview.reach_cheap_emitters.is_empty() {
         let values = |object: u8| frame.function_values_of_object(object).cloned();
         let (emitters, shown) = (&frame.preview.reach_cheap_emitters, &frame.reach_cheap_shown);

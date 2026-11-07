@@ -103,6 +103,12 @@ pub(in crate::app::model_preview) trait Gen3Game {
         false
     }
 
+    /// How long VISR has been on as of `time`, for `slot`'s `uploads`th
+    /// model. Only Halo 3 and ODST read a vision.
+    fn vision_on_for(&mut self, _slot: usize, _uploads: u64, _time: f32) -> f32 {
+        0.0
+    }
+
     /// Each simulation the game keeps for `slot` while it holds its
     /// `uploads`th model, by name.
     #[cfg(test)]

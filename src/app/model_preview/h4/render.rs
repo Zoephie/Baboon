@@ -210,6 +210,7 @@ impl Gen3Game for H4Game {
                         Some(false)
                     }
                 }
+                Gen3Sprite::Leaves(_) => return false,
                 Gen3Sprite::Volume(index) => {
                     let at = &frame.preview.h3_light_volumes[index];
                     let Some(material) = at.h4_material() else {
