@@ -220,6 +220,8 @@ pub(in crate::app) enum EditorCommand {
     SyncOpenTabs { kit: KitId },
     /// Run tool bitmaps for the bitmap at `key` in `kit`, then reload it.
     ReimportBitmap { kit: KitId, key: String },
+    /// Proceed with the folder-wide Halo 2 bitmap reimport held by its dialog.
+    ConfirmBitmapReimport,
     /// Set the reference field at `field_path` of the tag at `tag_key` in
     /// `kit` to the picked `input`.
     PickTagReference {
@@ -256,6 +258,7 @@ impl Baboon {
                     self.begin_reimport_bitmap(key, ctx.clone());
                 }
             }
+            EditorCommand::ConfirmBitmapReimport => self.confirm_reimport_bitmap(ctx),
             EditorCommand::ApplyTsvPaste => self.apply_tsv_paste(),
             EditorCommand::ApplyBlockConfirm => self.apply_block_confirm(),
             EditorCommand::SaveBlockTable => self.save_block_table(ctx),

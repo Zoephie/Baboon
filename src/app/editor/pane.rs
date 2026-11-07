@@ -15,7 +15,7 @@ use crate::app::shell::frame::PANE_HEADER_SECTION_GAP;
 const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
 const TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 1180.0;
 const TAG_HEADER_DYNAMIC_ACTIONS_WIDTH: f32 = 285.0;
-const BITMAP_HEADER_ACTIONS_WIDTH: f32 = 105.0;
+const BITMAP_HEADER_ACTIONS_WIDTH: f32 = 225.0;
 
 /// What a tag pane reads beyond the model and its kit's view: Find's state,
 /// for the filter it may apply; the field a reference jump is heading for;
@@ -860,20 +860,27 @@ fn draw_tag_header_specific_actions(cx: &Ctx, ui: &mut Ui, kit_index: usize, ent
         }
         b"scnr" => draw_scenario_launcher_buttons(cx, ui, kit_index, entry),
         b"bitm" => {
-            let tags_root = cx.model.loaded_tags_root_for(kit_index);
-            let can_reimport = bitmap_reimport_data_path(entry, tags_root.as_deref()).is_some();
-            if icon_text_button(ui, ButtonIcon::Import, "Reimport", can_reimport)
-                .on_disabled_hover_text("Reimport requires a loose editing-kit bitmap tag")
-                .on_hover_text(
-                    "Import this bitmap's source image from the data folder again with tool, then reload the tag. A Halo CE or Halo 2 source image missing from the data folder is recovered from the tag first.",
-                )
-                .clicked()
-            {
-                cx.send(EditorCommand::ReimportBitmap {
-                    kit: cx.model.kits[kit_index].id,
-                    key: entry.key.clone(),
-                });
-            }
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
+                let tags_root = cx.model.loaded_tags_root_for(kit_index);
+                let can_reimport = bitmap_reimport_data_path(entry, tags_root.as_deref()).is_some();
+                if icon_text_button(ui, ButtonIcon::Import, "Reimport", can_reimport)
+                    .on_disabled_hover_text("Reimport requires a loose editing-kit bitmap tag")
+                    .on_hover_text(
+                        "Import this bitmap's source image from the data folder again with tool, then reload the tag. A Halo CE or Halo 2 source image missing from the data folder is recovered from the tag first.",
+                    )
+                    .clicked()
+                {
+                    cx.send(EditorCommand::ReimportBitmap {
+                        kit: cx.model.kits[kit_index].id,
+                        key: entry.key.clone(),
+                    });
+                }
+                let game = cx.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
+                if let Some(action) = draw_bitmap_extract_button(ui, entry, game) {
+                    cx.send(BrowserCommand::Action { kit: cx.model.kits[kit_index].id, action });
+                }
+            });
         }
         _ => {}
     }

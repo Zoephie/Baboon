@@ -3452,7 +3452,7 @@ pub(in crate::app) fn tag_json_relative_path(entry: &TagEntry) -> PathBuf {
 }
 
 /// What "Extract bitmap source" does, where its menu items offer it.
-const BITMAP_SOURCE_HOVER: &str = "Write the source image the bitmap was imported from as a \
+pub(in crate::app) const BITMAP_SOURCE_HOVER: &str = "Write the source image the bitmap was imported from as a \
      .tif that tool bitmaps can import again. Existing files are left alone.";
 
 pub(in crate::app) fn is_bitmap_group(group_tag: u32) -> bool {
