@@ -128,7 +128,7 @@ impl H4Game {
                 gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
             };
             bind(0, glow::TEXTURE_2D, Some(accumulation), "accumulation");
-            bind(1, glow::TEXTURE_2D, bloom.or(core.gen3.no_bloom), "bloom");
+            bind(1, glow::TEXTURE_2D, bloom.or(core.black_flat), "bloom");
             bind(2, glow::TEXTURE_2D, depth, "scene_depth");
             bind(3, glow::TEXTURE_3D, grading.as_ref().map(|grading| grading.texture).or(core.white_volume), "grading");
             gl.active_texture(glow::TEXTURE0);

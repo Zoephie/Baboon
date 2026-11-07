@@ -144,7 +144,7 @@ impl Gen3Game for H4Game {
             let vertices = core.h3_empty_array(gl);
             let grading = self.grading_texture(gl, frame);
             if self.bloom.is_none() {
-                self.bloom = super::bloom::H4Bloom::new(gl, core.gen3.no_bloom, core.white_volume);
+                self.bloom = super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
             }
             let settings = &super::bloom::VIEW_BLOOM;
             self.bloom.as_mut()?.build(gl, vertices, framebuffer, accumulation, size, grading.as_ref(), settings)

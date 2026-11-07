@@ -3899,6 +3899,12 @@ pub(super) struct RenderCore {
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.
     h2_programs: HashMap<(H2VertexStage, String), Option<Rc<Linked>>>,
+    /// Whether this context can draw the gen3 games' shaders: the translated
+    /// shaders want GLSL 4.10.
+    pub(in crate::app::model_preview) gen3_supported: bool,
+    /// What a map nothing fills reads: an unmapped particle stage, a
+    /// composite with no bloom built.
+    pub(in crate::app::model_preview) black_flat: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) black_cube: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) black_volume: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) white_volume: Option<glow::NativeTexture>,
@@ -4020,17 +4026,20 @@ impl RenderCore {
                     .ok_or_else(|| format!("model preview shader has no {name} uniform"))
             };
             let version = gl.version();
+            // Made in this order so every texture keeps the name it had.
+            let black_array = upload_solid_volume(gl, glow::TEXTURE_2D_ARRAY, [0, 0, 0, 255]);
+            let black_flat = upload_black_flat(gl);
             Ok(Self {
+                gen3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
+                black_flat,
                 gen3: gen3::state::Gen3State {
-                    supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                     targets: None,
                     programs: HashMap::new(),
                     light: None,
                     distorted: false,
                     distortion_program: None,
                     depth_copy: None,
-                    black_array: upload_solid_volume(gl, glow::TEXTURE_2D_ARRAY, [0, 0, 0, 255]),
-                    no_bloom: upload_black_flat(gl),
+                    black_array,
                     blur_program: None,
                     vision_program: None,
                     suck_program: None,

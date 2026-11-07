@@ -325,7 +325,7 @@ impl H4Game {
             // Its bloom, by the hologram camera fx.
             let vertices = core.h3_empty_array(gl);
             if self.bloom.is_none() {
-                self.bloom = super::bloom::H4Bloom::new(gl, core.gen3.no_bloom, core.white_volume);
+                self.bloom = super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
             }
             let settings = H4BloomSettings::hologram(screen.bloom_scale);
             let bloom = self.bloom.as_mut()?.build(gl, vertices, framebuffer, color, size, None, &settings);
@@ -360,7 +360,7 @@ impl H4Game {
                 ("ps_material_generic_parameters", H3Value::FloatArray(generic)),
                 ("ps_filmic_tone_curve_params", H3Value::FloatArray(IDENTITY_CURVE.map(|value| [value; 4]).to_vec())),
             ];
-            let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(core.gen3.no_bloom))];
+            let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(core.black_flat))];
             self.screen_pass(core, gl, frame, &post, &post.combine, owner, &engine, &textures, size);
             gl.disable(glow::SCISSOR_TEST);
             gl.depth_mask(true);

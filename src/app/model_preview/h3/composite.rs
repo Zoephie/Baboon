@@ -73,7 +73,7 @@ impl H3Game {
             let location = gl.get_uniform_location(program, "accumulation");
             gl.uniform_1_i32(location.as_ref(), 0);
             gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, bloom.or(core.gen3.no_bloom));
+            gl.bind_texture(glow::TEXTURE_2D, bloom.or(core.black_flat));
             let location = gl.get_uniform_location(program, "bloom");
             gl.uniform_1_i32(location.as_ref(), 1);
             gl.active_texture(glow::TEXTURE0);

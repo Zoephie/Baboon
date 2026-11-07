@@ -672,7 +672,7 @@ pub(in crate::app::model_preview) unsafe fn set_value(gl: &glow::Context, locati
 impl RenderCore {
     /// A material's translated passes, if this context can run them.
     pub(in crate::app::model_preview) fn h3_material<'a>(&self, frame: &'a ModelGpuFrame, material: usize) -> Option<&'a Arc<H3Material>> {
-        if !self.gen3.supported {
+        if !self.gen3_supported {
             return None;
         }
         frame.textures.as_ref()?.get(material)?.h3.as_ref()
@@ -685,7 +685,7 @@ impl RenderCore {
 
     pub(in crate::app::model_preview) fn h3_draws(&self, frame: &ModelGpuFrame) -> bool {
         frame.game_shaders
-            && self.gen3.supported
+            && self.gen3_supported
             && frame.textures.iter().any(|textures| textures.iter().any(|texture| texture.h3.is_some()))
     }
 

@@ -96,7 +96,7 @@ impl Gen3Game for ReachGame {
         unsafe {
             let vertices = cx.core.h3_empty_array(cx.gl);
             if self.bloom.is_none() {
-                self.bloom = super::bloom::ReachBloom::new(cx.gl, cx.core.gen3.no_bloom);
+                self.bloom = super::bloom::ReachBloom::new(cx.gl, cx.core.black_flat);
             }
             self.bloom.as_mut()?.build(cx.gl, vertices, framebuffer, accumulation, size)
         }

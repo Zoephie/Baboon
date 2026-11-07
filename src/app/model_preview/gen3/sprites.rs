@@ -45,7 +45,7 @@ impl RenderCore {
                 return;
             };
             let particle_gl = self.particle_gl.as_ref().and_then(Option::as_ref);
-            let no_map = self.gen3.no_bloom;
+            let no_map = self.black_flat;
             // What Reach's area screen effects do to the sprites' exposure.
             let stops = self.gen3.stops;
             let placeholder = self.placeholder;

@@ -95,10 +95,10 @@ impl RenderCore {
                     continue;
                 };
                 let targets = ParticleTargets {
-                    no_map: self.gen3.no_bloom,
-                    depth_copy: self.gen3.depth_copy,
+                    no_map: self.black_flat,
+                    depth_copy: None,
                     distortion_copy: &mut self.h2_distortion_copy,
-                    stops: self.gen3.stops,
+                    stops: 0.0,
                 };
                 draw_particle_system(gl, particles, uploaded, frame, index, &view, targets);
             }

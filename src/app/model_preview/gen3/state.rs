@@ -10,8 +10,6 @@ use eframe::glow;
 
 /// What the gen3 pipeline keeps between and within frames.
 pub(in crate::app::model_preview) struct Gen3State {
-    /// Whether this context can draw Halo 3's: the translated shaders want GLSL 4.10.
-    pub(in crate::app::model_preview) supported: bool,
     /// The frame's targets: albedo and normals, the lit scene, what lies
     /// behind camo, the depth copy and the distortion.
     pub(in crate::app::model_preview) targets: Option<super::super::gen3::pipeline::H3Targets>,
@@ -29,8 +27,6 @@ pub(in crate::app::model_preview) struct Gen3State {
     pub(in crate::app::model_preview) depth_copy: Option<glow::NativeTexture>,
     /// What an H3 array sampler reads with nothing of its own.
     pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
-    /// What Halo 3's composite reads with no bloom built.
-    pub(in crate::app::model_preview) no_bloom: Option<glow::NativeTexture>,
     /// The screen effects' blur, VISR and motion suck programs, and VISR's mask.
     pub(in crate::app::model_preview) blur_program: Option<glow::NativeProgram>,
     pub(in crate::app::model_preview) vision_program: Option<glow::NativeProgram>,
