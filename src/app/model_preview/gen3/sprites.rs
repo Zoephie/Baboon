@@ -46,230 +46,51 @@ impl Gen3State {
             let Some(flares) = core.sprite_gl.as_ref().and_then(Option::as_ref) else {
                 return;
             };
-            let particle_gl = core.particle_gl.as_ref().and_then(Option::as_ref);
-            let no_map = core.black_flat;
-            // What Reach's area screen effects do to the sprites' exposure.
-            let stops = self.stops;
-            let placeholder = core.placeholder;
-            let size = self.targets.as_ref().map_or([1, 1], |targets| targets.size);
-            let depth_copy = self.depth_copy;
             let uploaded = &mut core.slots[slot];
-            let uploads = uploaded.uploads();
             let camera = &frame.camera;
-            let view = ce_flare_view(camera);
-            let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-            macro_rules! sprites {
-                ($uploaded:expr) => {
-                    Gen3Sprites {
-                        gl,
-                        frame,
-                        flares,
-                        view: &view,
-                        bones,
-                        onsets: &mut $uploaded.simulations.effect_onsets,
-                        particles: &mut $uploaded.simulations.particles,
-                        particle_gl,
-                        no_map,
-                        stops,
-                        depth_copy,
-                        size,
-                        placeholder,
-                        slot,
-                        uploads,
-                    }
-                };
-            }
+            let pass = SpritePass {
+                gl,
+                frame,
+                flares,
+                particle_gl: core.particle_gl.as_ref().and_then(Option::as_ref),
+                no_map: core.black_flat,
+                // What Reach's area screen effects do to the sprites' exposure.
+                stops: self.stops,
+                placeholder: core.placeholder,
+                size: self.targets.as_ref().map_or([1, 1], |targets| targets.size),
+                depth_copy: self.depth_copy,
+                slot,
+                uploads: uploaded.uploads(),
+                camera,
+                view: ce_flare_view(camera),
+                bones: frame.bones.as_ref().map(|bones| bones.as_slice()),
+            };
             if matches!(stage, SpriteStage::Rest) {
-                draw_antennas(gl, flares, &mut uploaded.simulations.antennas, &uploaded.antenna_textures, frame, bones, &view, h3);
+                let (gl, flares, bones, view) = (pass.gl, pass.flares, pass.bones, &pass.view);
+                draw_antennas(gl, flares, &mut uploaded.simulations.antennas, &uploaded.antenna_textures, frame, bones, view, h3);
             }
             gl.color_mask(true, true, true, false);
-            // `render_effects`, among the transparents: every profile is its own quad.
-            let first = !core.sprites_advanced;
-            advance_sprite_simulations(uploaded, frame, bones, &view, &mut core.sprites_advanced);
-            if first {
-                game.advance_own_sprites(&mut sprites!(uploaded));
-            }
-            let cursor = &mut self.sprite_cursor;
-            // `c_transparency_renderer` sorts far to near, each from its location.
-            enum Sprites {
-                Volume(usize),
-                Tracer(usize),
-                System(usize),
-                Strip(usize),
-                Leaves(usize),
-            }
-            let eye_distance = |origin: [f32; 3]| {
-                (0..3).map(|axis| (origin[axis] - view.eye[axis]) * view.forward[axis]).sum::<f32>()
-            };
-            let layered = h3_layered_distance;
-            let volumes = frame.preview.gen3.light_volumes.iter().enumerate();
-            let volumes = volumes
-                .filter(|_| !matches!(stage, SpriteStage::Distortions))
-                .map(|(at, volume)| (layered(volume.sort_layer(), eye_distance(volume.origin(bones))), Sprites::Volume(at)));
-            let tracers = frame.preview.h4.tracers.iter().enumerate();
-            let tracers = tracers.filter(|_| !matches!(stage, SpriteStage::Distortions)).map(|(at, tracer)| {
-                let distance = eye_distance(tracer.origin(bones)) - tracer.sort_bias();
-                (layered(tracer.sort_layer(), distance), Sprites::Tracer(at))
-            });
-            let systems = frame.preview.particles.iter().enumerate();
+            pass.advance(game, uploaded, &mut core.sprites_advanced);
+            let sorted = pass.sorted(stage, uploaded);
             let distorting = matches!(stage, SpriteStage::Distortions);
-            let systems = systems
-                .filter(|(_, system)| system.look.shader.distortion.is_some() == distorting)
-                .map(|(at, system)| (layered(system.look.shader.sort_layer, uploaded.simulations.particles.distance(at, system, bones, &view)), Sprites::System(at)));
-            let strips = frame.preview.gen3.strips.iter().enumerate();
-            let strips = strips
-                .filter(|_| !matches!(stage, SpriteStage::Distortions))
-                .map(|(at, strip)| {
-                    let distance = eye_distance(strip.origin(bones)) - strip.sort_bias();
-                    (layered(strip.shader().sort_layer, distance), Sprites::Strip(at))
-                });
-            let leaves = frame.preview.h3.leaves.iter().enumerate();
-            let leaves = leaves
-                .filter(|_| !matches!(stage, SpriteStage::Distortions))
-                .map(|(at, leaves)| (layered(2, eye_distance(leaves.origin())), Sprites::Leaves(at)));
-            let mut sorted: Vec<_> = volumes.chain(tracers).chain(systems).chain(strips).chain(leaves).collect();
-            sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
-            let limit = match stage {
-                SpriteStage::FartherThan(limit) => limit,
-                SpriteStage::Rest => f32::INFINITY,
-                SpriteStage::Distortions => f32::NEG_INFINITY,
-            };
             let mut distorted = 0;
-            let skip = if distorting { 0 } else { *cursor };
-            for (distance, sprites) in sorted.into_iter().skip(skip) {
-                if distance < limit {
+            let skip = if distorting { 0 } else { self.sprite_cursor };
+            for (distance, sprite) in sorted.into_iter().skip(skip) {
+                if distance < stage_limit(stage) {
                     break;
                 }
                 if distorting {
                     distorted += 1;
                 } else {
-                    *cursor += 1;
+                    self.sprite_cursor += 1;
                 }
-                match sprites {
-                    Sprites::Tracer(index) => {
-                        if frame.h4_tracers_shown.get(index).copied().unwrap_or(true) {
-                            game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::Tracer(index));
-                        }
-                    }
-                    Sprites::Volume(index) => {
-                        let at = &frame.preview.gen3.light_volumes[index];
-                        if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
-                            continue;
-                        }
-                        if game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::Volume(index)) {
-                            continue;
-                        }
-                        let texture = uploaded.volume_textures.get(index).copied().flatten();
-                        let circular = at.circular();
-                        if texture.is_none() && circular.is_none() {
-                            continue;
-                        }
-                        gl.use_program(Some(flares.program));
-                        gl.bind_vertex_array(Some(flares.vertex_array));
-                        gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
-                        gl.active_texture(glow::TEXTURE0);
-                        h3_set_blend(gl, at.blend());
-                        gl.bind_texture(glow::TEXTURE_2D, texture.or(core.placeholder));
-                        let [center, falloff] = circular.unwrap_or([0.0; 2]);
-                        gl.uniform_2_f32(flares.circular.as_ref(), center, falloff);
-                        // With no depth copy, no fade to read one.
-                        let fade = at.depth_fade().filter(|_| self.depth_copy.is_some());
-                        if let Some(range) = fade {
-                            gl.active_texture(glow::TEXTURE1);
-                            gl.bind_texture(glow::TEXTURE_2D, self.depth_copy);
-                            gl.active_texture(glow::TEXTURE0);
-                            gl.uniform_1_i32(flares.scene_depth.as_ref(), 1);
-                            gl.uniform_4_f32_slice(flares.depth.as_ref(), &scene_depth_terms(camera));
-                            gl.uniform_1_f32(flares.fade.as_ref(), range);
-                        }
-                        let values = frame.function_values_of_object(at.object);
-                        let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
-                        for quad in at.quads(values, bones, &view, frame.time, onset, stops) {
-                            draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
-                        }
-                        // The flare program's other users draw maps, unfaded.
-                        gl.uniform_2_f32(flares.circular.as_ref(), 0.0, 0.0);
-                        if fade.is_some() {
-                            gl.uniform_1_f32(flares.fade.as_ref(), 0.0);
-                            gl.uniform_1_i32(flares.scene_depth.as_ref(), 0);
-                        }
-                    }
-                    Sprites::System(index) => {
-                        if !frame.h3_systems_shown.get(index).copied().unwrap_or(true) {
-                            continue;
-                        }
-                        if game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::System(index)) {
-                            continue;
-                        }
-                        let Some(particles) = particle_gl.as_ref() else {
-                            continue;
-                        };
-                        let targets = ParticleTargets {
-                            no_map,
-                            depth_copy: self.depth_copy,
-                            distortion_copy: &mut core.h2_distortion_copy,
-                            stops,
-                        };
-                        draw_particle_system(gl, particles, uploaded, frame, index, &view, targets);
-                    }
-                    Sprites::Leaves(index) => {
-                        game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::Leaves(index));
-                    }
-                    Sprites::Strip(index) => {
-                        let strip = &frame.preview.gen3.strips[index];
-                        if !frame.h3_strips_shown.get(index).copied().unwrap_or(true) {
-                            continue;
-                        }
-                        let Some(particles) = particle_gl.as_ref() else {
-                            continue;
-                        };
-                        let values = frame.function_values_of_object(strip.object);
-                        let onset = uploaded.simulations.effect_onsets.of(strip.object, strip.scale_name(), values, frame.time);
-                        let lighting = h3_lighting_constants(frame);
-                        let drawn = uploaded.simulations.h3_strips.vertices(index, strip, values, bones, &view, &lighting, frame.time, onset, stops);
-                        if drawn.is_empty() {
-                            continue;
-                        }
-                        let vertices = particle_floats(camera, &drawn);
-                        let textures = uploaded.strip_textures.get(index).copied().unwrap_or_default();
-                        particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.depth_copy, camera, &lighting, stops);
-                    }
-                }
+                pass.draw_sorted(game, uploaded, &mut core.h2_distortion_copy, sprite);
             }
             if distorting {
                 self.distorted = distorted > 0;
             }
-            // `s_cheap_particle_system::render`: after every other
-            // transparent, in one batch, in ring-slot order.
-            if matches!(stage, SpriteStage::Rest)
-                && let (Some(first), Some(texture)) = (frame.preview.gen3.cheap_emitters.first(), uploaded.reach_cheap_texture)
-            {
-                let drawn = uploaded.simulations.reach_cheap.vertices(first.library(), &view);
-                if !drawn.is_empty()
-                    && let Some(cheap) = core.reach_cheap_gl.get_or_insert_with(|| reach_cheap_gl(gl, core.program)).as_ref()
-                {
-                    let vertices: Vec<[f32; CHEAP_FLOATS]> = drawn
-                        .iter()
-                        .map(|vertex| {
-                            let [a, b, c, d] = ce_flare_clip(camera, vertex.place);
-                            let ([e, f, g], [h, i, j, k]) = (vertex.texcoord, vertex.color);
-                            [a, b, c, d, e, f, g, h, i, j, k]
-                        })
-                        .collect();
-                    // `cheap_particles_render.fx`: `lerp(ps_view_exposure.x,
-                    // ps_view_self_illum_exposure.y, alpha)`.
-                    let exposures = if first.library().halo4() {
-                        let channel = |name: &str, at: usize| match h4::lighting::h4_frame_value(name) {
-                            Some(gen3::shaders::H3Value::Floats(value)) => value[at],
-                            _ => 1.0,
-                        };
-                        [channel("ps_view_exposure", 0), channel("ps_view_self_illum_exposure", 1)]
-                    } else {
-                        let exposure = reach_exposure(stops)[0];
-                        [exposure, exposure]
-                    };
-                    cheap.draw(gl, &vertices, texture, exposures);
-                }
+            if matches!(stage, SpriteStage::Rest) {
+                pass.draw_cheap_particles(uploaded, &mut core.reach_cheap_gl, core.program);
             }
             if matches!(stage, SpriteStage::FartherThan(_) | SpriteStage::Distortions) {
                 gl.blend_equation(glow::FUNC_ADD);
@@ -279,35 +100,317 @@ impl Gen3State {
             }
             begin_flares(gl, flares, core.placeholder);
             let viewport = core.scene.as_ref().map_or([1, 1], |scene| scene.size);
-            let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
-            for (index, at) in frame.preview.gen3.flares.iter().enumerate() {
-                if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
-                    continue;
-                }
-                let values = frame.function_values_of_object(at.object);
-                let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
-                let event_time = at.event_time(frame.time, onset);
-                // A light's own flare goes out with its light.
-                let colors = frame.change_colors_of_object(at.object);
-                let light = match at.light().map(|light| light.state(values, &colors, frame.time, onset)) {
-                    Some(None) => continue,
-                    state => state.flatten(),
-                };
-                let occlusion = match at.occlusion_patch(light, values, bones, &view, event_time, &pixels) {
-                    None => Some(1.0),
-                    Some(patch) => ce_flare_occlusion(gl, flares, camera, &view, &patch),
-                };
-                let Some(occlusion) = occlusion else {
-                    continue;
-                };
-                if let Some(sprite) = at.sprite(light, values, bones, &view, event_time, occlusion, 0)
-                    && let Some(textures) = uploaded.flare_textures.get(index)
-                {
-                    draw_flare_sprites(gl, flares, camera, &view, &[sprite], textures);
-                }
-            }
+            pass.draw_flares(uploaded, viewport);
             self.sprite_cursor = 0;
             core.end_sprites(gl, frame, slot);
+        }
+    }
+}
+
+/// How near the sorted sprites a stage draws come: `FartherThan`'s limit, all
+/// of them for the rest, and none of what does not bend for the distortions.
+fn stage_limit(stage: SpriteStage) -> f32 {
+    match stage {
+        SpriteStage::FartherThan(limit) => limit,
+        SpriteStage::Rest => f32::INFINITY,
+        SpriteStage::Distortions => f32::NEG_INFINITY,
+    }
+}
+
+/// One of the sorted sprites, by kind and index.
+enum SortedSprite {
+    Volume(usize),
+    Tracer(usize),
+    System(usize),
+    Strip(usize),
+    Leaves(usize),
+}
+
+/// What one call of the sprite pass draws with: the sprite and particle
+/// programs, the frame's view and pose, and the exposure and targets.
+struct SpritePass<'a> {
+    gl: &'a glow::Context,
+    frame: &'a ModelGpuFrame,
+    flares: &'a SpriteGl,
+    particle_gl: Option<&'a H3ParticleGl>,
+    /// The map an unmapped stage samples.
+    no_map: Option<glow::NativeTexture>,
+    stops: f32,
+    placeholder: Option<glow::NativeTexture>,
+    size: [i32; 2],
+    depth_copy: Option<glow::NativeTexture>,
+    slot: usize,
+    uploads: u64,
+    camera: &'a ModelGpuCamera,
+    view: ViewFrame,
+    bones: Option<&'a [[f32; 4]]>,
+}
+
+impl SpritePass<'_> {
+    /// What a game's own sprites draw with, over the slot's shared simulations.
+    fn sprites<'b>(&'b self, uploaded: &'b mut ModelGpuSlot) -> Gen3Sprites<'b> {
+        Gen3Sprites {
+            gl: self.gl,
+            frame: self.frame,
+            flares: self.flares,
+            view: &self.view,
+            bones: self.bones,
+            onsets: &mut uploaded.simulations.effect_onsets,
+            particles: &mut uploaded.simulations.particles,
+            particle_gl: self.particle_gl,
+            no_map: self.no_map,
+            stops: self.stops,
+            depth_copy: self.depth_copy,
+            size: self.size,
+            placeholder: self.placeholder,
+            slot: self.slot,
+            uploads: self.uploads,
+        }
+    }
+
+    /// `render_effects`, among the transparents: every profile is its own
+    /// quad. The shared simulations step once a frame, by whichever call draws
+    /// first, and the game's own with them.
+    unsafe fn advance(&self, game: &mut dyn Gen3Game, uploaded: &mut ModelGpuSlot, advanced: &mut bool) {
+        let first = !*advanced;
+        advance_sprite_simulations(uploaded, self.frame, self.bones, &self.view, advanced);
+        if first {
+            unsafe { game.advance_own_sprites(&mut self.sprites(uploaded)) };
+        }
+    }
+
+    /// `c_transparency_renderer` sorts far to near, each from its location:
+    /// the light volumes, Halo 4's tracers, the particle systems (only those
+    /// that bend the scene for the distortions), strips and leaves.
+    fn sorted(&self, stage: SpriteStage, uploaded: &ModelGpuSlot) -> Vec<(f32, SortedSprite)> {
+        let (frame, bones, view) = (self.frame, self.bones, &self.view);
+        let eye_distance = |origin: [f32; 3]| {
+            (0..3).map(|axis| (origin[axis] - view.eye[axis]) * view.forward[axis]).sum::<f32>()
+        };
+        let layered = h3_layered_distance;
+        let volumes = frame.preview.gen3.light_volumes.iter().enumerate();
+        let volumes = volumes
+            .filter(|_| !matches!(stage, SpriteStage::Distortions))
+            .map(|(at, volume)| (layered(volume.sort_layer(), eye_distance(volume.origin(bones))), SortedSprite::Volume(at)));
+        let tracers = frame.preview.h4.tracers.iter().enumerate();
+        let tracers = tracers.filter(|_| !matches!(stage, SpriteStage::Distortions)).map(|(at, tracer)| {
+            let distance = eye_distance(tracer.origin(bones)) - tracer.sort_bias();
+            (layered(tracer.sort_layer(), distance), SortedSprite::Tracer(at))
+        });
+        let systems = frame.preview.particles.iter().enumerate();
+        let distorting = matches!(stage, SpriteStage::Distortions);
+        let systems = systems
+            .filter(|(_, system)| system.look.shader.distortion.is_some() == distorting)
+            .map(|(at, system)| (layered(system.look.shader.sort_layer, uploaded.simulations.particles.distance(at, system, bones, view)), SortedSprite::System(at)));
+        let strips = frame.preview.gen3.strips.iter().enumerate();
+        let strips = strips
+            .filter(|_| !matches!(stage, SpriteStage::Distortions))
+            .map(|(at, strip)| {
+                let distance = eye_distance(strip.origin(bones)) - strip.sort_bias();
+                (layered(strip.shader().sort_layer, distance), SortedSprite::Strip(at))
+            });
+        let leaves = frame.preview.h3.leaves.iter().enumerate();
+        let leaves = leaves
+            .filter(|_| !matches!(stage, SpriteStage::Distortions))
+            .map(|(at, leaves)| (layered(2, eye_distance(leaves.origin())), SortedSprite::Leaves(at)));
+        let mut sorted: Vec<_> = volumes.chain(tracers).chain(systems).chain(strips).chain(leaves).collect();
+        sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
+        sorted
+    }
+
+    /// One sorted sprite: the game's own first, through its hook, else the
+    /// shared draw for its kind.
+    unsafe fn draw_sorted(
+        &self,
+        game: &mut dyn Gen3Game,
+        uploaded: &mut ModelGpuSlot,
+        distortion_copy: &mut Option<super::super::gl::target::ColorTarget>,
+        sprite: SortedSprite,
+    ) {
+        let frame = self.frame;
+        unsafe {
+            match sprite {
+                SortedSprite::Tracer(index) => {
+                    if frame.h4_tracers_shown.get(index).copied().unwrap_or(true) {
+                        game.draw_own_sprite(&mut self.sprites(uploaded), Gen3Sprite::Tracer(index));
+                    }
+                }
+                SortedSprite::Volume(index) => self.draw_volume(game, uploaded, index),
+                SortedSprite::System(index) => self.draw_system(game, uploaded, distortion_copy, index),
+                SortedSprite::Leaves(index) => {
+                    game.draw_own_sprite(&mut self.sprites(uploaded), Gen3Sprite::Leaves(index));
+                }
+                SortedSprite::Strip(index) => self.draw_strip(uploaded, index),
+            }
+        }
+    }
+
+    /// A light volume, through the sprite program: its map or its circular
+    /// falloff, faded by the scene's depth where it asks.
+    unsafe fn draw_volume(&self, game: &mut dyn Gen3Game, uploaded: &mut ModelGpuSlot, index: usize) {
+        let (gl, frame, flares, camera) = (self.gl, self.frame, self.flares, self.camera);
+        let at = &frame.preview.gen3.light_volumes[index];
+        if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
+            return;
+        }
+        unsafe {
+            if game.draw_own_sprite(&mut self.sprites(uploaded), Gen3Sprite::Volume(index)) {
+                return;
+            }
+            let texture = uploaded.volume_textures.get(index).copied().flatten();
+            let circular = at.circular();
+            if texture.is_none() && circular.is_none() {
+                return;
+            }
+            gl.use_program(Some(flares.program));
+            gl.bind_vertex_array(Some(flares.vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+            gl.active_texture(glow::TEXTURE0);
+            h3_set_blend(gl, at.blend());
+            gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder));
+            let [center, falloff] = circular.unwrap_or([0.0; 2]);
+            gl.uniform_2_f32(flares.circular.as_ref(), center, falloff);
+            // With no depth copy, no fade to read one.
+            let fade = at.depth_fade().filter(|_| self.depth_copy.is_some());
+            if let Some(range) = fade {
+                gl.active_texture(glow::TEXTURE1);
+                gl.bind_texture(glow::TEXTURE_2D, self.depth_copy);
+                gl.active_texture(glow::TEXTURE0);
+                gl.uniform_1_i32(flares.scene_depth.as_ref(), 1);
+                gl.uniform_4_f32_slice(flares.depth.as_ref(), &scene_depth_terms(camera));
+                gl.uniform_1_f32(flares.fade.as_ref(), range);
+            }
+            let values = frame.function_values_of_object(at.object);
+            let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
+            for quad in at.quads(values, self.bones, &self.view, frame.time, onset, self.stops) {
+                draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
+            }
+            // The flare program's other users draw maps, unfaded.
+            gl.uniform_2_f32(flares.circular.as_ref(), 0.0, 0.0);
+            if fade.is_some() {
+                gl.uniform_1_f32(flares.fade.as_ref(), 0.0);
+                gl.uniform_1_i32(flares.scene_depth.as_ref(), 0);
+            }
+        }
+    }
+
+    /// A particle system, the game's own or through the particle program.
+    unsafe fn draw_system(
+        &self,
+        game: &mut dyn Gen3Game,
+        uploaded: &mut ModelGpuSlot,
+        distortion_copy: &mut Option<super::super::gl::target::ColorTarget>,
+        index: usize,
+    ) {
+        if !self.frame.h3_systems_shown.get(index).copied().unwrap_or(true) {
+            return;
+        }
+        unsafe {
+            if game.draw_own_sprite(&mut self.sprites(uploaded), Gen3Sprite::System(index)) {
+                return;
+            }
+            let Some(particles) = self.particle_gl else {
+                return;
+            };
+            let targets = ParticleTargets { no_map: self.no_map, depth_copy: self.depth_copy, distortion_copy, stops: self.stops };
+            draw_particle_system(self.gl, particles, uploaded, self.frame, index, &self.view, targets);
+        }
+    }
+
+    /// A strip, through the particle program, from its simulation.
+    unsafe fn draw_strip(&self, uploaded: &mut ModelGpuSlot, index: usize) {
+        let (frame, camera, stops) = (self.frame, self.camera, self.stops);
+        let strip = &frame.preview.gen3.strips[index];
+        if !frame.h3_strips_shown.get(index).copied().unwrap_or(true) {
+            return;
+        }
+        let Some(particles) = self.particle_gl else {
+            return;
+        };
+        let values = frame.function_values_of_object(strip.object);
+        let onset = uploaded.simulations.effect_onsets.of(strip.object, strip.scale_name(), values, frame.time);
+        let lighting = h3_lighting_constants(frame);
+        let drawn = uploaded.simulations.h3_strips.vertices(index, strip, values, self.bones, &self.view, &lighting, frame.time, onset, stops);
+        if drawn.is_empty() {
+            return;
+        }
+        let vertices = particle_floats(camera, &drawn);
+        let textures = uploaded.strip_textures.get(index).copied().unwrap_or_default();
+        unsafe { particles.draw(self.gl, strip.shader(), &vertices, textures, self.no_map, self.depth_copy, camera, &lighting, stops) };
+    }
+
+    /// `s_cheap_particle_system::render`: after every other transparent, in
+    /// one batch, in ring-slot order.
+    unsafe fn draw_cheap_particles(
+        &self,
+        uploaded: &mut ModelGpuSlot,
+        cheap_gl: &mut Option<Option<ReachCheapGl>>,
+        program: glow::NativeProgram,
+    ) {
+        let (gl, frame, camera) = (self.gl, self.frame, self.camera);
+        let (Some(first), Some(texture)) = (frame.preview.gen3.cheap_emitters.first(), uploaded.reach_cheap_texture) else {
+            return;
+        };
+        let drawn = uploaded.simulations.reach_cheap.vertices(first.library(), &self.view);
+        unsafe {
+            if !drawn.is_empty()
+                && let Some(cheap) = cheap_gl.get_or_insert_with(|| reach_cheap_gl(gl, program)).as_ref()
+            {
+                let vertices: Vec<[f32; CHEAP_FLOATS]> = drawn
+                    .iter()
+                    .map(|vertex| {
+                        let [a, b, c, d] = ce_flare_clip(camera, vertex.place);
+                        let ([e, f, g], [h, i, j, k]) = (vertex.texcoord, vertex.color);
+                        [a, b, c, d, e, f, g, h, i, j, k]
+                    })
+                    .collect();
+                // `cheap_particles_render.fx`: `lerp(ps_view_exposure.x,
+                // ps_view_self_illum_exposure.y, alpha)`.
+                let exposures = if first.library().halo4() {
+                    let channel = |name: &str, at: usize| match h4::lighting::h4_frame_value(name) {
+                        Some(gen3::shaders::H3Value::Floats(value)) => value[at],
+                        _ => 1.0,
+                    };
+                    [channel("ps_view_exposure", 0), channel("ps_view_self_illum_exposure", 1)]
+                } else {
+                    let exposure = reach_exposure(self.stops)[0];
+                    [exposure, exposure]
+                };
+                cheap.draw(gl, &vertices, texture, exposures);
+            }
+        }
+    }
+
+    /// The lens flares, under the flares' added blend: each tested for
+    /// occlusion, and a light's own going out with its light.
+    unsafe fn draw_flares(&self, uploaded: &mut ModelGpuSlot, viewport: [i32; 2]) {
+        let (gl, frame, flares, camera, bones, view) = (self.gl, self.frame, self.flares, self.camera, self.bones, &self.view);
+        let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
+        for (index, at) in frame.preview.gen3.flares.iter().enumerate() {
+            if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
+                continue;
+            }
+            let values = frame.function_values_of_object(at.object);
+            let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
+            let event_time = at.event_time(frame.time, onset);
+            // A light's own flare goes out with its light.
+            let colors = frame.change_colors_of_object(at.object);
+            let light = match at.light().map(|light| light.state(values, &colors, frame.time, onset)) {
+                Some(None) => continue,
+                state => state.flatten(),
+            };
+            let occlusion = match at.occlusion_patch(light, values, bones, view, event_time, &pixels) {
+                None => Some(1.0),
+                Some(patch) => unsafe { ce_flare_occlusion(gl, flares, camera, view, &patch) },
+            };
+            let Some(occlusion) = occlusion else {
+                continue;
+            };
+            if let Some(sprite) = at.sprite(light, values, bones, view, event_time, occlusion, 0)
+                && let Some(textures) = uploaded.flare_textures.get(index)
+            {
+                unsafe { draw_flare_sprites(gl, flares, camera, view, &[sprite], textures) };
+            }
         }
     }
 }
