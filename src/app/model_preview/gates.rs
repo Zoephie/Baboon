@@ -394,8 +394,8 @@ fn gate_load() {
 /// What G-px shoots of each game: a biped, a vehicle, and something that
 /// moves at rest (the phantom does for Halo 3 and ODST), each in every
 /// [`LOOKS`]. Reach and Halo 4 each have a Warthog for their screen lights,
-/// Halo 2 a cigar for its particles and a flag for its cloth, and Halo CE
-/// a flag for its flag widget.
+/// Halo 2 a cigar for its particles, a flag for its cloth and a Banshee for
+/// its contrail, and Halo CE a flag for its flag widget.
 #[cfg(target_os = "macos")]
 const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
     (
@@ -424,6 +424,8 @@ const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
             ("objects\\cinematics\\cigar\\cigar", "scenery"),
             // Its cloth: the only Halo 2 cloth the set has.
             ("objects\\weapons\\multiplayer\\flag\\flag", "weapon"),
+            // Its contrail and flares, drawn in the `powered` look.
+            ("objects\\vehicles\\banshee\\banshee", "vehicle"),
         ],
     ),
     (
@@ -499,6 +501,24 @@ const LOOKS: &[(&str, Look)] = &[
         options.functions = ["driver_seat_power", "brakelights", "illumination"]
             .map(|name| (name.to_owned(), 1.0))
             .to_vec();
+    }),
+    // Halo 2's light volumes, gels, flares and contrails are off at rest:
+    // the Chief's flashlight, the Warthog's headlights and the Banshee's boost
+    // turn them on, and the contrail has had time to trail.
+    ("powered", |options| {
+        options.time = 3.0;
+        options.functions = [
+            "flashlight",
+            "integrated_light_power",
+            "headlights",
+            "flashlights_allowed",
+            "driver_seat_power",
+            "driver_seat_occupied",
+            "speed_blended_boost",
+            "boost",
+        ]
+        .map(|name| (name.to_owned(), 1.0))
+        .to_vec();
     }),
 ];
 
