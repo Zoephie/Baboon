@@ -10,4 +10,5 @@ pub(super) mod lights;
 pub(super) mod particle_systems;
 pub(super) mod particles;
 pub(super) mod passes;
+pub(in crate::app::model_preview) mod render;
 pub(super) mod widgets;

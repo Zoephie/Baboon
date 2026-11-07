@@ -2885,7 +2885,7 @@ pub(super) struct SpriteGl {
 /// `effect_update` for Halo CE's attached effects, up to the frame's time.
 /// Stepping to a time it has reached does nothing, so the model's lights
 /// and the sprites can both ask for it.
-fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones: Option<&[[f32; 4]]>) {
+pub(in crate::app::model_preview) fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones: Option<&[[f32; 4]]>) {
     let states = &frame.object_states;
     let inputs = |object: u8| {
         let state = states.get(object as usize);
@@ -3958,25 +3958,13 @@ pub(super) struct LegacyRender {
     h3: h3::render::H3Game,
 }
 
-/// The legacy route's dx9 hooks: Halo CE's sorted transparents, which no
-/// other game's batches ask for.
-struct LegacyDx9;
-
-impl dx9::pipeline::Dx9Game for LegacyDx9 {
-    unsafe fn transparents(&mut self, cx: &mut FrameCx<'_>, order: &[usize]) {
-        unsafe {
-            if ce_sorts_transparents(cx.frame) {
-                cx.core.draw_ce_transparents(cx.gl, cx.frame, cx.slot);
-            } else {
-                cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None);
-            }
-        }
-    }
-}
-
 impl GameRender for LegacyRender {
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe { cx.core.legacy_prepare(cx.gl, cx.frame, cx.slot) }
+        use dx9::pipeline::Dx9Game as _;
+        unsafe {
+            h2::render::H2Game.prepare(cx);
+            ce::render::CeGame.prepare(cx);
+        }
     }
 
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
@@ -4016,7 +4004,7 @@ impl GameRenders {
     fn of(&mut self, game: Option<GameId>) -> &mut dyn GameRender {
         match game {
             Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4) => &mut self.gen3,
-            Some(GameId::Halo2) => &mut self.dx9,
+            Some(GameId::HaloCe | GameId::Halo2) => &mut self.dx9,
             _ => &mut self.legacy,
         }
     }
@@ -4079,7 +4067,7 @@ pub(super) struct RenderCore {
     pub(in crate::app::model_preview) sprite_gl: Option<Option<SpriteGl>>,
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
-    ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
+    pub(in crate::app::model_preview) ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
     /// As `h2_bloom`.
     pub(in crate::app::model_preview) ce_effect_gl: Option<Option<CeEffectGl>>,
     /// As `h2_bloom`.
@@ -4174,7 +4162,7 @@ impl RenderCore {
     }
 
     /// `flag_render_proper` builds its mesh from where the sheet is now.
-    unsafe fn move_ce_flags(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn move_ce_flags(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         let uploaded = &mut self.slots[slot];
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
@@ -4307,31 +4295,6 @@ impl RenderCore {
         }
     }
 
-    /// Today's game work before the scene target, for every game: Halo 2's
-    /// cloth, Halo CE's flags and effects.
-    unsafe fn legacy_prepare(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
-        unsafe {
-            if frame.preview.h3_cloth.first().is_some_and(|cloth| cloth.halo2()) {
-                self.move_cloth(gl, frame, slot);
-            }
-            if !frame.preview.ce_flags.is_empty() {
-                self.move_ce_flags(gl, frame, slot);
-            }
-            // Halo CE's effects advance once a frame, here, before anything
-            // draws or lights by them.
-            if !frame.preview.ce_effects.is_empty() {
-                let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-                let uploaded = &mut self.slots[slot];
-                advance_ce_effects(uploaded, frame, bones);
-                let made: Vec<ce::lights::CeLight> =
-                    uploaded.simulations.ce_particles.lights(&frame.preview.ce_effects).into_iter().map(|(_, _, light)| light).collect();
-                if !made.is_empty() {
-                    self.ce_points_now = Some(frame.ce_point_lights_with(&made));
-                }
-            }
-        }
-    }
-
     /// The shared program's state, camera and pose, then the ground grid.
     unsafe fn begin_drawing(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         unsafe {
@@ -4451,7 +4414,7 @@ impl RenderCore {
                 // Only a game without hooks of its own lands here: Halo 3's.
                 self.draw_h3(h3, gl, frame, slot, &order);
             }
-            self.draw_dx9_passes(&mut LegacyDx9, gl, frame, slot)
+            self.draw_dx9_passes(&mut ce::render::CeGame, gl, frame, slot)
         }
     }
 
@@ -4547,7 +4510,7 @@ impl RenderCore {
     /// Halo CE's transparents as `rasterizer_transparent_geometry_draw` draws
     /// them: the model's transparent parts and the effects' groups in one sort
     /// by `z_sort`, far to near, each part from its centroid on its node.
-    unsafe fn draw_ce_transparents(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         enum Transparent {
             Part(usize),
             Group(CeGroup),

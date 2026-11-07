@@ -1,35 +1,41 @@
-//! The dx9 games' drawing, as the renderer hands each frame over: Halo 2,
-//! and Halo CE to come.
+//! The dx9 games' drawing, as the renderer hands each frame over: Halo CE
+//! and Halo 2.
 
+use super::super::ce::render::CeGame;
 use super::super::h2::render::H2Game;
 use super::super::renderer::{FrameCx, GameRender};
 use super::pipeline::Dx9Game;
+use crate::core::game::GameId;
 
-/// Halo 2's drawing: the slot's own draw, the dx9 passes with the game's
+/// Halo CE's and Halo 2's drawing: the slot's own draw, the dx9 passes with the game's
 /// hooks, then its sprites and bloom.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct Dx9Render {
+    ce: CeGame,
     h2: H2Game,
     /// What the bloom covers, from the shading to the finish.
     bloom_order: Option<Vec<usize>>,
 }
 
 impl Dx9Render {
-    fn game(&mut self) -> &mut dyn Dx9Game {
-        &mut self.h2
+    fn game(&mut self, game: Option<GameId>) -> &mut dyn Dx9Game {
+        match game {
+            Some(GameId::HaloCe) => &mut self.ce,
+            _ => &mut self.h2,
+        }
     }
 }
 
 impl GameRender for Dx9Render {
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe { self.game().prepare(cx) }
+        unsafe { self.game(cx.frame.preview.game).prepare(cx) }
     }
 
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
             cx.core.prepare_h2_programs(cx.gl, cx.frame);
             cx.core.draw_slot_batches(cx.gl, cx.frame, cx.slot);
-            let game = self.game();
+            let game = self.game(cx.frame.preview.game);
             self.bloom_order = cx.core.draw_dx9_passes(game, cx.gl, cx.frame, cx.slot);
         }
     }
