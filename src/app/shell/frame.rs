@@ -5578,23 +5578,18 @@ mod tests {
         press_at(h, target, button);
     }
 
-    /// [`press`] on the tab titled `text`. The browser tree, which opens down
-    /// to the current tag, paints the same file names; the tab bar is the
-    /// topmost painting to the right of the tree's.
+    /// Press a tag tab, distinguishing its title from matching browser entries
+    /// using the native tab response bounds rather than browser indentation.
     fn press_tab(h: &mut Harness, text: &str, button: egui::PointerButton) {
-        let rects: Vec<egui::Rect> = h
-            .painted_rects
-            .iter()
-            .filter(|(painted, _)| painted == text)
-            .map(|(_, rect)| *rect)
-            .collect();
-        let tree_right = rects.iter().map(|rect| rect.left()).fold(f32::INFINITY, f32::min);
-        let target = rects
-            .iter()
-            .filter(|rect| rect.left() > tree_right)
-            .min_by(|a, b| a.top().total_cmp(&b.top()))
-            .or(rects.first())
-            .map(|rect| rect.center())
+        let kit = h.app.model.kits[h.app.model.active].id;
+        let tree = &h.app.views[kit].tag_tree;
+        let tabs: Vec<_> = tree.tiles.iter().filter_map(|(id, tile)| {
+            matches!(tile, egui_tiles::Tile::Pane(_))
+                .then(|| h.ctx.read_response(id.egui_id(tree.id())).map(|response| response.rect)).flatten()
+        }).collect();
+        let target = h.painted_rects.iter()
+            .find(|(painted, rect)| painted == text && tabs.iter().any(|tab| tab.contains(rect.center())))
+            .map(|(_, rect)| rect.center())
             .unwrap_or_else(|| panic!("no tab {text:?} is painted: {:?}", h.painted));
         press_at(h, target, button);
     }
@@ -5928,6 +5923,24 @@ mod tests {
         assert_eq!(open_tabs(&h), keys);
         press_tab(&mut h, "tag_000.biped", egui::PointerButton::Middle);
         assert_eq!(open_tabs(&h), keys[1..]);
+        assert_eq!(h.app.model.kits[h.app.model.active].selected_key, Some(keys[2].clone()));
+    }
+
+    #[test]
+    fn closing_an_active_tab_from_the_tab_bar_selects_its_neighbour() {
+        for closing in 0..3 {
+            let (mut h, keys) = three_tabs();
+            let label = format!("tag_{closing:03}.biped");
+            let active = h.app.model.active;
+            h.app.kit_and_view(active).open_tag_pane(&keys[closing]);
+            idle(&mut h);
+            press_tab(&mut h, &label, egui::PointerButton::Middle);
+            let expected = if closing == 0 { 1 } else { closing - 1 };
+            let kit = &h.app.model.kits[h.app.model.active];
+            assert!(!kit.open_tabs.contains(&keys[closing]), "tab {closing} did not close: {:?}", kit.open_tabs);
+            assert_eq!(kit.selected_key, Some(keys[expected].clone()), "after closing tab {closing}; remaining {:?}", kit.open_tabs);
+            assert_eq!(kit.current_pane, Some(keys[expected].clone()));
+        }
     }
 
     /// The tab menu's "Close all but this" keeps the tab it was opened on.

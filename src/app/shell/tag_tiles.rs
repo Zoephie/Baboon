@@ -124,12 +124,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         let scope = format!("kit{}_tile{}", self.kit.0, tile_id.0);
         let caches = self.inputs.tags.get(&(self.kit, key));
         Frame::NONE
-            .inner_margin(egui::Margin {
-                left: 10,
-                right: 10,
-                top: 8,
-                bottom: 0,
-            })
+            .inner_margin(pane_content_margin())
             .show(ui, |ui| {
                 crate::app::ScrollArea::vertical()
                     .id_salt(("tag_tile", tile_id.0))
@@ -697,7 +692,9 @@ pub(in crate::app) fn draw_tag_tiles(
         close_all: false,
         close_all_but: None,
     };
-    tree.ui(&mut behavior, ui);
+    if super::tab_selection::with_tab_neighbour_selection(&mut tree, |tree| tree.ui(&mut behavior, ui)) {
+        ui.ctx().request_repaint();
+    }
     // Only panes laid out this frame have rectangles. Paint each visible page
     // separately, so split groups keep their own frame and active-tab opening.
     for (id, tile) in tree.tiles.iter() {

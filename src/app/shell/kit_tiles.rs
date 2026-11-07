@@ -503,7 +503,9 @@ pub(in crate::app) fn draw_kit_tiles(
         inactive_dividers: HashSet::new(),
     };
     ui.style_mut().interaction.resize_grab_radius_side = 7.0;
-    kit_tree.ui(&mut behavior, ui);
+    if super::tab_selection::with_tab_neighbour_selection(kit_tree, |tree| tree.ui(&mut behavior, ui)) {
+        ui.ctx().request_repaint();
+    }
     crate::app::shell::frame::paint_kit_split_grips(ui, kit_tree);
     behavior.parts.shell.home_groups.retain(|id| matches!(kit_tree.tiles.get(*id),
         Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(_))))
@@ -577,7 +579,8 @@ impl Baboon {
             .collect();
         for (tile_id, kit_id) in &laid_out {
             if !live.contains(kit_id) {
-                self.kit_tree.remove_recursively(*tile_id);
+                super::tab_selection::with_tab_neighbour_selection(&mut self.kit_tree,
+                    |tree| { tree.remove_recursively(*tile_id); });
             }
         }
         for kit_id in live {
@@ -623,6 +626,23 @@ mod tests {
     //! the cursor passed over one. Two workspaces side by side, driven headless.
 
     use super::*;
+
+    #[test]
+    fn closing_workspace_tabs_uses_layout_neighbours_and_keeps_inactive_selection() {
+        for closing in 0..4 {
+            for active_close in [false, true] {
+                let (mut app, kits) = tabbed_kits(4);
+                let order = [kits[2], kits[0], kits[3], kits[1]];
+                app.kit_tree = egui_tiles::Tree::new_tabs("workspace_close_neighbours", order.to_vec());
+                let active = if active_close { closing } else { (closing + 2) % 4 };
+                app.focus_kit(app.model.kit_index(order[active]).unwrap());
+                app.remove_kit(order[closing]);
+                let expected = order[if !active_close { active } else if closing == 0 { 1 } else { closing - 1 }];
+                assert_eq!(app.model.kits[app.model.active].id, expected);
+                assert_eq!(visible_kits(&app), vec![expected]);
+            }
+        }
+    }
 
     #[test]
     fn regression_new_kits_join_the_last_active_split() {
@@ -811,7 +831,7 @@ mod tests {
         app.sync_kit_tree();
 
         let active = app.model.kits[app.model.active].id;
-        assert_eq!(active, kits[2], "the kit that slid into the closed one's place");
+        assert_eq!(active, kits[0], "the workspace immediately to the left of the closed tab");
         assert_eq!(visible_kits(&app), vec![active]);
     }
 

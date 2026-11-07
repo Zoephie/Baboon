@@ -241,12 +241,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
     let (bitmap_library, model_library) = (&mut view.bitmap_browser, &mut view.model_browser);
 
     Frame::NONE
-        .inner_margin(egui::Margin {
-            left: 10,
-            right: 10,
-            top: 8,
-            bottom: 8,
-        })
+        .inner_margin(pane_content_margin())
         .show(ui, |ui| {
             set_browser_modified_tags(ui, modified_tags);
             set_browser_favorite_folders(ui, is_loose.then_some(pane_favorite_folders));

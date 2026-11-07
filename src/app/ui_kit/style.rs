@@ -637,6 +637,11 @@ pub(in crate::app) fn foundation_input_read_only() -> Color32 {
     foundation_input()
 }
 
+/// Keep page content equally inset from its side and bottom borders.
+pub(in crate::app) fn pane_content_margin() -> egui::Margin {
+    egui::Margin { left: 10, right: 10, top: 8, bottom: 10 }
+}
+
 pub(in crate::app) fn foundation_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(84, 84, 84)

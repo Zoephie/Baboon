@@ -449,7 +449,8 @@ impl<'a> KitMut<'a> {
         let mut closed_from = None;
         if let Some(tile_id) = self.view.tile_for_key(key) {
             closed_from = self.view.tag_tree.tiles.parent_of(tile_id);
-            self.view.tag_tree.remove_recursively(tile_id);
+            crate::app::shell::tab_selection::with_tab_neighbour_selection(&mut self.view.tag_tree,
+                |tree| { tree.remove_recursively(tile_id); });
         }
         self.view.browser.folder_browsers.remove(key);
         self.sync_open_tabs_after_close(closed_from);
@@ -623,8 +624,28 @@ mod tests {
         }
         both.open_tag_pane(&tag(7));
         both.close_tag_pane(&tag(7));
-        assert_eq!(shown(both.view), vec![tag(0)], "the group falls back to its first tab");
-        assert_eq!(both.kit.selected_key, Some(tag(0)), "and the selection with it");
+        assert_eq!(shown(both.view), vec![tag(6)], "the group selects the tab immediately to the left");
+        assert_eq!(both.kit.selected_key, Some(tag(6)), "and the selection with it");
+    }
+
+    #[test]
+    fn closing_tabs_prefers_the_left_neighbour_and_preserves_inactive_selections() {
+        for closing in [0usize, 1, 3, 4] {
+            for active_close in [false, true] {
+                let mut kit = Kit::empty(KitId(0), Default::default());
+                let mut view = KitView::for_test(&kit);
+                let mut both = KitMut::new(&mut kit, &mut view);
+                for n in 0..5 { both.open_tag_pane(&tag(n)); }
+                both.open_tag_pane_beside(&tag(5));
+                let active = if active_close { closing } else { (closing + 2) % 5 };
+                both.open_tag_pane(&tag(active));
+                both.close_tag_pane(&tag(closing));
+                let expected = if !active_close { active } else if closing == 0 { 1 } else { closing - 1 };
+                assert_eq!(shown(both.view), vec![tag(expected), tag(5)]);
+                assert_eq!(both.kit.current_pane, Some(tag(expected)));
+                assert_eq!(both.kit.selected_key, Some(tag(expected)));
+            }
+        }
     }
 
     #[test]
