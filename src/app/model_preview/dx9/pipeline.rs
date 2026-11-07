@@ -157,8 +157,10 @@ impl RenderCore {
                 }
             }
             // `rasterizer_postprocess_scene` blooms the finished frame,
-            // after every transparent and effect.
-            if frame.game_shaders && frame.bloom && !self.h3_draws(frame) {
+            // after every transparent and effect. Halo 2's own bloom: a gen3
+            // tag's frame has none of its bloom layers, and comes out white.
+            let gen3 = frame.preview.generation == Some(blam_tags::game::Game::Halo3);
+            if frame.game_shaders && frame.bloom && !gen3 && !self.h3_draws(frame) {
                 return Some(order.clone());
             }
             None
