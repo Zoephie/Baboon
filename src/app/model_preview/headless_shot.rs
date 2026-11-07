@@ -111,6 +111,8 @@ pub(in crate::app::model_preview) struct ShotOptions {
     pub(in crate::app::model_preview) play: Option<String>,
     /// `<trigger>@<seconds>`: fires the held weapon's trigger.
     pub(in crate::app::model_preview) fire: Option<String>,
+    /// The preview keeps no game, as one from a source that names none.
+    pub(in crate::app::model_preview) no_game: bool,
 }
 
 impl ShotOptions {
@@ -144,6 +146,7 @@ impl ShotOptions {
             vision: false,
             play: None,
             fire: None,
+            no_game: false,
         }
     }
 
@@ -195,10 +198,12 @@ impl ShotOptions {
             vision: set("H2_SHOT_VISION"),
             play: var("H2_SHOT_PLAY"),
             fire: var("H2_SHOT_FIRE"),
+            no_game: set("H2_SHOT_NO_GAME"),
         }
     }
 }
 
+#[derive(Clone)]
 pub(in crate::app::model_preview) struct Shot {
     pub(in crate::app::model_preview) model: String,
     pub(in crate::app::model_preview) shaders: bool,
@@ -360,6 +365,9 @@ pub(super) fn render(
         ..Default::default()
     };
     let mut data = load_model_preview(&tag, &entry, &names, Some(source), &settings).unwrap();
+    if options.no_game {
+        Arc::make_mut(&mut data.preview).game = None;
+    }
     let textures = materials::resolve_model_textures(source, &data.preview.materials);
     let with_passes = textures.iter().filter(|t| t.h2_layers.iter().any(|l| !l.is_empty())).count();
     eprintln!("{}: {} materials, {with_passes} with passes", shot.model, textures.len());
@@ -1479,4 +1487,33 @@ fn a_linked_program_looks_each_uniform_up_once() {
         assert_eq!(linked.location(&gl, "tint"), tint, "the first answer is kept");
         assert_eq!(linked.location(&gl, "missing"), None);
     }
+}
+
+/// A gen3 tag from a source that names no game draws through Halo 3's
+/// hooks on the legacy route, and so draws as a Halo 3 frame does: its
+/// sprites once, from inside the gen3 pipeline, and not again after it.
+#[test]
+fn a_gen3_frame_with_no_game_draws_as_halo_3s_does() {
+    let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
+        eprintln!("skipping: BLAM_TEST_H3EK is not set");
+        return;
+    };
+    let source = TagSource::LooseFolder {
+        root: root.into(),
+        game: Some(GameId::Halo3),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
+    };
+    let shot = Shot {
+        model: "objects\\vehicles\\warthog\\warthog".to_owned(),
+        shaders: true,
+        lights: true,
+        yaw: 0.6,
+        pitch: 0.25,
+        kind: Some("vehicle".to_owned()),
+    };
+    let options = ShotOptions { time: 3.0, ..ShotOptions::new(GameId::Halo3) };
+    let without = ShotOptions { no_game: true, ..options.clone() };
+    let shown = shoot(&source, &[(shot.clone(), options), (shot, without)]);
+    assert!(shown[0].pixels.iter().any(|byte| *byte != 0), "the warthog drew");
+    assert!(shown[0].pixels == shown[1].pixels, "the frame with no game drew differently");
 }

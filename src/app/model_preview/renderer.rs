@@ -3969,7 +3969,8 @@ impl GameRender for LegacyRender {
 
     unsafe fn finish(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
-            if cx.core.draws_object_sprites(cx.frame) {
+            // A gen3 frame drew its sprites from inside the gen3 pipeline.
+            if !cx.core.h3_draws(cx.frame) && cx.core.draws_object_sprites(cx.frame) {
                 cx.core.draw_dx9_sprites(cx.gl, cx.frame, cx.slot);
             }
             self.bloom(cx);
