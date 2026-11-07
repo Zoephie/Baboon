@@ -566,13 +566,13 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
 
 /// `rasterizer_globals`' default bitmap that Reach's final composite reads
 /// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
-pub(in crate::app::model_preview) fn read_reach_screen_noise(source: &TagSource) -> Option<super::super::materials::H3Bitmap> {
+pub(in crate::app::model_preview) fn read_reach_screen_noise(source: &TagSource) -> Option<super::super::gen3::materials::H3Bitmap> {
     let globals =
         load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let defaults = elements(globals.root(), "default bitmaps");
     let noise = defaults.get(REACH_SCREEN_NOISE_BITMAP)?;
     let path = noise.read_tag_ref_path("default bitmaps").filter(|path| !path.is_empty())?;
-    super::super::materials::read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
+    super::super::gen3::materials::read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
 }
 
 /// Every `shader_screen` these can draw, as materials of no batch, which gives

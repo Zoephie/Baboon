@@ -2,6 +2,7 @@
 //! and lights, flares, camo, shield, shadow, particles and tracers. Its passes
 //! are the renderer's.
 
+pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;
@@ -51,7 +52,7 @@ pub(crate) struct H4Features {
     pub tracers: Vec<super::h4::tracers::H4TracerAt>,
     /// Halo 4's final composite colour grading: the default camera fx
     /// settings' 16-cube lookup.
-    pub color_grading: Option<super::materials::H3Bitmap>,
+    pub color_grading: Option<super::gen3::materials::H3Bitmap>,
     /// A Halo 4 object's `bounding offset` (in its node 0's frame) and
     /// `bounding radius`, which its holograms frame their screen effects by.
     pub bounding_sphere: Option<([f32; 3], f32)>,

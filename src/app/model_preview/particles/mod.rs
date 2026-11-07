@@ -21,7 +21,8 @@ use super::gen3::effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, par
 use super::gen3::strips::{H3StripAt, read_carried_strips};
 use super::gen3::shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::dx9::passes::H2Image;
-use super::materials::{H3Bitmap, TextureImage, decode_h2_image, read_h3_bitmap, read_resolved_map, resolve_embedded_method};
+use super::materials::{TextureImage, decode_h2_image};
+use super::gen3::materials::{H3Bitmap, read_h3_bitmap, read_resolved_map, resolve_embedded_method};
 use super::renderer::{H3_EXPOSURE, reach_alt_exposure, reach_exposure, reach_lightmap_tint, reach_particle_light};
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

@@ -161,11 +161,11 @@ pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<H3Valu
 /// `globals\defaults\default`'s colour grading texture: the camera fx
 /// settings the game falls back on with no cluster to read others from
 /// (`c_player_view::setup_camera_fx_parameters`, X360 0x82B704C8).
-pub(in crate::app::model_preview) fn read_h4_color_grading(source: &TagSource) -> Option<super::super::materials::H3Bitmap> {
+pub(in crate::app::model_preview) fn read_h4_color_grading(source: &TagSource) -> Option<super::super::gen3::materials::H3Bitmap> {
     let settings = load_referenced_tag_from_source(source, "globals\\defaults\\default", "camera_fx_settings", b"cfxs").ok()?;
     let grading = settings.root().descend("color_grading")?;
     let path = grading.read_tag_ref_path("color grading texture").filter(|path| !path.is_empty())?;
-    super::super::materials::read_h3_bitmap(source, &path, 0, crate::core::h2_pixel_shader::SamplerKind::Volume)
+    super::super::gen3::materials::read_h3_bitmap(source, &path, 0, crate::core::h2_pixel_shader::SamplerKind::Volume)
 }
 
 /// The light a white surface takes from the default lobes: `VMFDiffuse` for

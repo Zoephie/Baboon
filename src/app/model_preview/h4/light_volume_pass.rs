@@ -7,7 +7,7 @@
 use eframe::glow::{self, HasContext};
 use super::super::gen3::light_volumes::H4VolumeDraw;
 use super::effect_gl::{H4EffectGl, material_functions};
-use super::super::materials::H4EffectMaterial;
+use super::super::h4::materials::H4EffectMaterial;
 use super::super::renderer::*;
 use crate::core::hlsl::parse::Type;
 

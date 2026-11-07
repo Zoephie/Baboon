@@ -701,7 +701,7 @@ pub(crate) fn h4_light_pass(
         super::shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
     Ok(H3Pass {
         fullscreen: true,
-        vertex: super::super::materials::h4_screen_vertex().to_owned(),
+        vertex: super::super::h4::materials::h4_screen_vertex().to_owned(),
         pixel: pixel.source,
         uniforms: pixel.uniforms,
         textures: pixel.textures,

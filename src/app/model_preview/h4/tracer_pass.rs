@@ -8,7 +8,7 @@
 use eframe::glow::{self, HasContext};
 use super::effect_gl::{H4EffectGl, material_functions};
 use super::tracers::H4TracerDraw;
-use super::super::materials::H4EffectMaterial;
+use super::super::h4::materials::H4EffectMaterial;
 use super::super::renderer::*;
 use crate::core::hlsl::parse::Type;
 

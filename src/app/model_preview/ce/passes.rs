@@ -1843,7 +1843,7 @@ pub(in crate::app::model_preview) fn ce_model_passes(
         [color.red, color.green, color.blue]
     };
     let pass = if group == b"soso" {
-        let detail_mask = option_index(root, "detail mask", &super::super::materials::CE_DETAIL_MASKS);
+        let detail_mask = option_index(root, "detail mask", &super::super::ce::materials::CE_DETAIL_MASKS);
         let decal = has("alpha-blended decal");
         let scale = factor(root.read_real("detail map scale"));
         let base_scale = [

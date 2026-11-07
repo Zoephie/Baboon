@@ -6,7 +6,22 @@
 //! level at all the game picks `static_per_vertex_color`, which no material
 //! shader compiles. What blends draws `single_pass_single_probe`.
 
-use super::*;
+use super::super::*;
+use blam_tags::render_method::{
+    BitmapAddressMode, BitmapFilterMode,
+};
+use super::super::common::fields::elements;
+use super::super::gen3::shaders::{
+    H3Blend, H3Material, H3Pass,
+    H3Dialect, H3Sampler, H3Texture,
+};
+use crate::core::h2_pixel_shader::SamplerKind;
+use crate::core::hlsl::parse::TextureKind;
+use std::sync::Arc;
+use std::collections::HashMap;
+
+use super::super::materials::*;
+use super::super::gen3::materials::*;
 use crate::app::model_preview::h4::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::Program;
@@ -20,7 +35,7 @@ const ENTRY_STATIC_PROBE: usize = 8;
 const ENTRY_SINGLE_PASS_SINGLE_PROBE: usize = 23;
 
 /// A material shader read once: its parameters and its parsed effect.
-pub(super) struct H4Shader {
+pub(in crate::app::model_preview) struct H4Shader {
     shader: MaterialShader,
     program: Program,
     /// Translated passes by technique, kept for every material of the shader.
@@ -31,7 +46,7 @@ pub(super) struct H4Shader {
 /// opaque, alpha_blend, additive, opaque_alpha_blend, pre_multiplied_alpha,
 /// add_src_times_srcalpha, multiply, inv_alpha_blend, alpha_blend_max and
 /// maximum (`materials.md` §2.3).
-pub(super) fn h4_blend(mode: u8) -> H3Blend {
+pub(in crate::app::model_preview) fn h4_blend(mode: u8) -> H3Blend {
     match mode {
         1 | 24 => H3Blend::Additive,
         2 => H3Blend::Multiply,
@@ -203,7 +218,7 @@ fn texture_uniform<'a>(wanted: &'a [(String, TextureKind)], parameter: &str) -> 
     wanted.iter().find(|(name, _)| name.eq_ignore_ascii_case(&lowercase)).map(|(name, kind)| (name.as_str(), kind))
 }
 
-pub(super) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mut ResolveCaches) -> MaterialTextures {
+pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mut ResolveCaches) -> MaterialTextures {
     let material = Material::from_tag(tag);
     if material.shader.is_empty() {
         return MaterialTextures::failed("the material names no material shader");

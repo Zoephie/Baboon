@@ -32,5 +32,5 @@ pub(crate) struct ReachFeatures {
     pub shadow_caster: Option<super::reach::shadow::ReachShadowCaster>,
     /// Reach's final composite noise map, for an object with an area screen
     /// effect that adds bright or dark noise.
-    pub screen_noise: Option<super::materials::H3Bitmap>,
+    pub screen_noise: Option<super::gen3::materials::H3Bitmap>,
 }

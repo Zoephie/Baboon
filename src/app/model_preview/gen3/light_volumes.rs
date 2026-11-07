@@ -21,8 +21,8 @@ use super::super::particles::inline_real;
 use super::shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::strips::EPSILON;
 use super::super::h4::particles::{f32_to_f16, pack_argb8};
-use super::super::materials::{H4EffectMaterial, resolve_h4_effect_material};
-use super::super::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
+use super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
+use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
 use super::super::renderer::{H3_EXPOSURE, reach_alt_exposure};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -518,7 +518,7 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         let map = base.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
         let baked = resolved
             .as_ref()
-            .and_then(|resolved| super::super::materials::read_resolved_map(source, resolved, "base_map"));
+            .and_then(|resolved| super::super::gen3::materials::read_resolved_map(source, resolved, "base_map"));
         match baked {
             Some((bitmap, sampler)) => (Some(bitmap), Some(sampler)),
             None => (Some(read_h3_bitmap(source, &map, 0, SamplerKind::Texture2D)?), None),

@@ -23,7 +23,7 @@ use super::super::gen3::effects::{
 };
 use super::super::particles::{read_ends, slerped};
 use super::particles::{pack_argb8, pack_half2, pack_ushort2n};
-use super::super::materials::{H4EffectMaterial, resolve_h4_effect_material};
+use super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::*;
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::source::TagSource;
