@@ -116,7 +116,7 @@ pub(crate) struct RenderModelPreview {
     pub cloth: Vec<cloth::H3ClothAt>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
-    pub antennas: Vec<h2::lights::H2Antenna>,
+    pub antennas: Vec<antennas::Antenna>,
     /// Halo 2's own features.
     pub h2: h2::H2Features,
     /// What more than one gen3 game shares.

@@ -44,6 +44,6 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderMode
     if !preview.h4.flares.is_empty() && preview.h4.flare_pass.is_none() {
         preview.h4.flare_pass = super::super::h4::flares::h4_flare_pass(source).ok().map(Arc::new);
     }
-    preview.antennas.extend(super::super::h2::lights::read_reach_antennas(source, object, markers, frame, name));
+    preview.antennas.extend(super::super::antennas::read_reach_antennas(source, object, markers, frame, name));
     super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
 }

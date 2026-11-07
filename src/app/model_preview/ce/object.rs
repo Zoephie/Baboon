@@ -26,7 +26,7 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
     // that `attach_ce_weapon` added, as every other feature lists them.
     let held_lights = std::mem::replace(&mut preview.ce.lights, own);
     preview.ce.lights.extend(held_lights);
-    preview.ce.antennas = super::super::ce::lights::read_ce_antennas(source, model_tag, 0, &preview.markers);
+    preview.ce.antennas = super::super::antennas::ce::read_ce_antennas(source, model_tag, 0, &preview.markers);
     preview.ce.effects = super::super::ce::particles::read_ce_effects(source, model_tag, 0, &preview.markers);
     preview.ce.contrails = super::super::ce::contrails::read_ce_contrails(source, model_tag, 0, &preview.markers);
     preview.ce.light_volumes = super::super::ce::widgets::read_ce_light_volumes(source, model_tag, 0, &preview.markers);
@@ -38,7 +38,7 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
         .and_then(|held| load_referenced_tag_from_source(source, &held.path, "weapon", b"weap").ok().map(|tag| (tag, held)));
     if let Some((weapon, held)) = &held_tag {
         let markers = &held.markers;
-        preview.ce.antennas.extend(super::super::ce::lights::read_ce_antennas(source, weapon, 1, markers));
+        preview.ce.antennas.extend(super::super::antennas::ce::read_ce_antennas(source, weapon, 1, markers));
         preview.ce.effects.extend(super::super::ce::particles::read_ce_effects(source, weapon, 1, markers));
         preview.ce.contrails.extend(super::super::ce::contrails::read_ce_contrails(source, weapon, 1, markers));
         preview.ce.light_volumes.extend(super::super::ce::widgets::read_ce_light_volumes(source, weapon, 1, markers));

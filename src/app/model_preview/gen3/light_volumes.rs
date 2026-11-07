@@ -10,7 +10,7 @@ use blam_tags::{TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::ce::lights::CeAntennaQuad;
+use super::super::antennas::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::tag_function_at;
@@ -930,7 +930,7 @@ impl H3LightVolumeAt {
         time: f32,
         onset: f32,
         stops: f32,
-    ) -> Vec<CeAntennaQuad> {
+    ) -> Vec<AntennaQuad> {
         let Some(VolumeLayout { mut state, origin, direction, count, profiles, distance, offset, side_length }) =
             self.layout(values, bones, view, time, onset)
         else {
@@ -961,7 +961,7 @@ impl H3LightVolumeAt {
             };
             let ratio = volume.brightness_ratio + (1.0 - volume.brightness_ratio) * sine;
             let overdrawn = overdraw(profiles, drawn_length, distance * sine);
-            quads.push(CeAntennaQuad {
+            quads.push(AntennaQuad {
                 corners: [corner(0.0, 0.0), corner(1.0, 0.0), corner(0.0, 1.0), corner(1.0, 1.0)],
                 color: volume.profile_color(&state, row.map(|(color, _)| color), [ratio, overdrawn], stops),
             });
@@ -1255,7 +1255,7 @@ mod tests {
         volume.precompiled = Some(rows);
         let quads = at(volume).quads(None, None, &view(10.0), 0.5, 0.0, 0.0);
         assert_eq!(quads.len(), 3, "the max, not the live 4");
-        let middle = |quad: &CeAntennaQuad| quad.corners.iter().map(|corner| corner[0]).sum::<f32>() / 4.0;
+        let middle = |quad: &AntennaQuad| quad.corners.iter().map(|corner| corner[0]).sum::<f32>() / 4.0;
         assert!((middle(&quads[1]) - middle(&quads[0]) - 1.0).abs() < 1e-5, "a unit apart, as live");
     }
 

@@ -1,11 +1,11 @@
 //! Reach's antennas as they move: `antennas_update` (the 360's 0x82C932B0,
 //! MCC's 0x140E52C90) springs each antenna's far end toward the line out of
 //! its marker, once a game tick, under its point physics. The near end is the
-//! marker itself; [`super::super::h2::lights::H2Antenna`] draws the curve between.
+//! marker itself; [`super::Antenna`] draws the curve between.
 
 use super::super::common::view::posed_on;
 use super::super::ce::particles::CePointPhysics;
-use super::super::h2::lights::H2Antenna;
+use super::Antenna;
 use super::super::cloth::REACH_TICK_RATE;
 use crate::app::model_preview::common::math::{minus, plus, scaled};
 
@@ -102,11 +102,11 @@ impl ReachAntennaField {
     /// is; none for one that is not Reach's.
     pub(crate) fn advance(
         &mut self,
-        antennas: &[H2Antenna],
+        antennas: &[Antenna],
         bones: Option<&[[f32; 4]]>,
         time: f32,
     ) -> Vec<Option<[f32; 3]>> {
-        let marker_of = |antenna: &H2Antenna| antenna.marker(bones);
+        let marker_of = |antenna: &Antenna| antenna.marker(bones);
         if self.running.len() != antennas.len() || self.time.is_none_or(|last| time < last) {
             self.running = antennas
                 .iter()

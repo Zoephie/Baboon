@@ -38,7 +38,7 @@ pub(in crate::app::model_preview) fn read_h3_object_features(source: &TagSource,
     if preview.gen3.screen_effects.iter().any(|effect| effect.adds_noise()) {
         preview.reach.screen_noise = super::super::gen3::screen_effects::read_reach_screen_noise(source);
     }
-    preview.antennas = super::super::h2::lights::read_h2_antennas(source, model_tag, &preview.markers);
+    preview.antennas = super::super::antennas::read_antennas(source, model_tag, &preview.markers);
     let markers = preview.markers.clone();
     super::super::cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     super::super::weapons::attached::read_extension_weapons(source, model_tag, 0, &markers, &frame, preview, None);

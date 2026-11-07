@@ -7,7 +7,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
-use super::super::ce::lights::CeAntennaQuad;
+use super::super::antennas::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::lights::H2EffectPart;
@@ -477,7 +477,7 @@ impl H2LightVolume {
         view: &ViewFrame,
         time: f32,
         onset: f32,
-    ) -> Vec<CeAntennaQuad> {
+    ) -> Vec<AntennaQuad> {
         let Some((tint_by, submitted)) = self.submitted(values, change_colors, time, onset) else {
             return Vec::new();
         };
@@ -548,7 +548,7 @@ impl H2LightVolume {
                     });
                     [a, b, c, u, v]
                 };
-                Some(CeAntennaQuad {
+                Some(AntennaQuad {
                     corners: [corner(-1.0, 1.0, 0.0, 0.0), corner(1.0, 1.0, 1.0, 0.0), corner(-1.0, -1.0, 0.0, 1.0), corner(1.0, -1.0, 1.0, 1.0)],
                     // `widget_light_volume`'s pixel shader: colour by its alpha by the
                     // map's colour, and an alpha of 0, so under `ONE, INV_SRC_ALPHA`

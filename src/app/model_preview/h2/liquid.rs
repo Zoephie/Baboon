@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
-use super::super::ce::lights::CeAntennaQuad;
+use super::super::antennas::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::light_volumes::{read_glow, read_h2_bitmap};
@@ -287,7 +287,7 @@ impl H2LiquidAt {
         bones: Option<&[[f32; 4]]>,
         view: &ViewFrame,
         time: f32,
-    ) -> Vec<CeAntennaQuad> {
+    ) -> Vec<AntennaQuad> {
         // `sub_515280`: what an effect's part of no duration asks for is all
         // of it. `rasterizer_liquid_draw` keeps the scale as a byte and dims
         // the whole arc by it.
@@ -368,7 +368,7 @@ impl H2LiquidAt {
                     };
                     let color = core.color.evaluate_color(along, 0.0);
                     let tint = [color.red, color.green, color.blue].map(|channel| channel.clamp(0.0, 1.0) * alpha);
-                    quads.push(CeAntennaQuad {
+                    quads.push(AntennaQuad {
                         corners: [corner(-1.0, 1.0, 0.0, 0.0), corner(1.0, 1.0, 1.0, 0.0), corner(-1.0, -1.0, 0.0, 1.0), corner(1.0, -1.0, 1.0, 1.0)],
                         // `widget_light_volume`'s pixel shader: colour by its alpha by the
                     // map's colour, and an alpha of 0, so under `ONE, INV_SRC_ALPHA`

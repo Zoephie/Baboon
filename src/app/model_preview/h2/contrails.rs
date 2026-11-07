@@ -8,7 +8,7 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
-use super::super::ce::lights::CeAntennaQuad;
+use super::super::antennas::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::lights::attachment_value;
@@ -379,7 +379,7 @@ impl H2ContrailField {
     }
 
     /// `contrail_vertex_builder`, a quad between each two points.
-    pub(crate) fn quads(&self, index: usize, contrail: &H2ContrailAt, view: &ViewFrame) -> Vec<CeAntennaQuad> {
+    pub(crate) fn quads(&self, index: usize, contrail: &H2ContrailAt, view: &ViewFrame) -> Vec<AntennaQuad> {
         let Some(running) = self.running.get(index).filter(|running| running.points.len() >= 2) else {
             return Vec::new();
         };
@@ -418,7 +418,7 @@ impl H2ContrailField {
                 let (top, bottom, near) = vertex(at);
                 let (next_top, next_bottom, far) = vertex(at + 1);
                 let color = std::array::from_fn(|channel| (near[channel] + far[channel]) * 0.5);
-                CeAntennaQuad { corners: [top, next_top, bottom, next_bottom], color }
+                AntennaQuad { corners: [top, next_top, bottom, next_bottom], color }
             })
             .collect()
     }

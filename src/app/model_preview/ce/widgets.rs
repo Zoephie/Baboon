@@ -8,7 +8,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, function_slot, function_slot_of, has_flag, object_block};
-use super::lights::CeAntennaQuad;
+use super::super::antennas::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::passes::{FramebufferBlend, argb};
 use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
@@ -176,7 +176,7 @@ impl CeLightVolume {
 
     /// `light_volume_submit` and `light_volume_render`: sprites along the
     /// marker, brighter as it faces the camera the way the tag says.
-    pub(crate) fn quads(&self, outputs: &[f32; 4], active: &[bool; 4], bones: Option<&[[f32; 4]]>, view: &ViewFrame) -> Vec<CeAntennaQuad> {
+    pub(crate) fn quads(&self, outputs: &[f32; 4], active: &[bool; 4], bones: Option<&[[f32; 4]]>, view: &ViewFrame) -> Vec<AntennaQuad> {
         let (origin, forward) = posed_on(self.node, self.position, self.forward, bones);
         let length = dot(forward, forward).sqrt().max(0.0001);
         let forward = forward.map(|axis| axis / length);
@@ -230,7 +230,7 @@ impl CeLightVolume {
                     });
                     [place[0], place[1], place[2], u, v]
                 };
-                CeAntennaQuad {
+                AntennaQuad {
                     corners: [corner(0.0, 1.0), corner(1.0, 1.0), corner(0.0, 0.0), corner(1.0, 0.0)],
                     color: [rgb[0], rgb[1], rgb[2], alpha.clamp(0.0, 1.0)],
                 }

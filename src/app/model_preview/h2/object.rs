@@ -18,7 +18,7 @@ pub(in crate::app::model_preview) fn read_h2_object_features(source: &TagSource,
         (place, marker.node_index.max(0) as usize)
     });
     (preview.h2.flares, preview.h2.point_lights, preview.h2.gel_lights) = found;
-    preview.antennas = super::super::h2::lights::read_h2_antennas(source, model_tag, &markers);
+    preview.antennas = super::super::antennas::read_antennas(source, model_tag, &markers);
     let systems = super::super::particles::read_h3_particles(source, model_tag, 0, &markers, |marker| {
         let place = super::super::attachment::MarkerFrame {
             axes: marker.axes,

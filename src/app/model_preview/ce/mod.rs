@@ -23,7 +23,7 @@ pub(crate) struct CeFeatures {
     /// Halo CE: the lens flares of the object and what it holds.
     pub lights: Vec<super::ce::lights::CeLight>,
     /// Halo CE: the antennas among the object's widgets.
-    pub antennas: Vec<super::ce::lights::CeAntenna>,
+    pub antennas: Vec<super::antennas::ce::CeAntenna>,
     /// Halo CE effects the object's attachments hang on it, then those it
     /// names for its events.
     pub effects: Vec<super::ce::particles::CeEffectAt>,
