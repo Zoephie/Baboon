@@ -17,8 +17,8 @@ use super::super::common::fields::{elements, has_flag};
 use super::super::common::view::posed_on;
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::tag_function_at;
-use super::super::gen3::effects::{
-    H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame,
+use super::super::effects::{
+    EffectOnsets, EffectTimes, for_each_attached_part, part_frame,
     read_part_placement,
 };
 use super::super::particles::{read_ends, slerped};
@@ -506,7 +506,7 @@ pub(crate) struct H4TracerAt {
     secondary_by: String,
     /// `real_random_range(0, 1)` twice, the tracer's correlations.
     seeds: [f32; 2],
-    times: Arc<H3EffectTimes>,
+    times: Arc<EffectTimes>,
     event: usize,
     lod: TracerLod,
     pub(crate) definition: Arc<H4TracerDefinition>,
@@ -1181,7 +1181,7 @@ impl H4TracerField {
         &mut self,
         tracers: &[H4TracerAt],
         values: impl Fn(u8) -> Option<FunctionValues>,
-        onsets: &mut H3EffectOnsets,
+        onsets: &mut EffectOnsets,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
         time: f32,
@@ -1634,7 +1634,7 @@ mod tests {
             scale_by: String::new(),
             secondary_by: String::new(),
             seeds: seeds_of(0),
-            times: Arc::new(H3EffectTimes::read_nothing()),
+            times: Arc::new(EffectTimes::read_nothing()),
             event: 0,
             lod: TracerLod::read(tag.root()),
             definition: Arc::new(tracer),

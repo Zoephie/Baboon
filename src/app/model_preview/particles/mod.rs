@@ -16,8 +16,8 @@ use super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::common::view::ViewFrame;
 use super::functions::FunctionValues;
 use super::common::named_function::tag_function_at;
-use super::gen3::effects::H3EffectOnsets;
-use super::gen3::effects::{H3EffectTimes, H3ObjectEffect, h3_object_effects, part_runs_by};
+use super::effects::EffectOnsets;
+use super::effects::{EffectTimes, ObjectEffect, object_effects, part_runs_by};
 use super::gen3::strips::{H3StripAt, read_carried_strips};
 use super::gen3::shaders::{H3Blend, H3Sampler, read_h3_definition};
 use super::dx9::passes::H2Image;
@@ -2207,7 +2207,7 @@ pub(crate) struct H3ParticleSystem {
     location_seed: f32,
     near_range: f32,
     near_cutoff: f32,
-    times: Arc<H3EffectTimes>,
+    times: Arc<EffectTimes>,
     event: usize,
     pub(crate) look: Arc<H3ParticleLook>,
     emitters: Vec<Arc<H3Emitter>>,
@@ -2301,13 +2301,13 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
 fn read_attached_parts(
     source: &TagSource,
     look: &H3ParticleLook,
-) -> Vec<(H3ParticleTrigger, H3SystemParts, Arc<H3EffectTimes>, usize)> {
+) -> Vec<(H3ParticleTrigger, H3SystemParts, Arc<EffectTimes>, usize)> {
     let mut parts = Vec::new();
     for (trigger, path) in &look.attachments {
         let Ok(effect) = load_referenced_tag_from_source(source, path, "effect", b"effe") else {
             continue;
         };
-        let times = Arc::new(H3EffectTimes::read(effect.root()));
+        let times = Arc::new(EffectTimes::read(effect.root()));
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for system in elements(event, "particle systems") {
                 if let Some(read) = read_system_parts(source, system) {
@@ -2318,7 +2318,7 @@ fn read_attached_parts(
     }
     let carried = look.carried_systems.as_ref();
     if let Some(tag) = carried.and_then(|path| load_referenced_tag_from_source(source, path, "particle", b"prt3").ok()) {
-        let lasting = Arc::new(H3EffectTimes::lasting());
+        let lasting = Arc::new(EffectTimes::lasting());
         for system in elements(tag.root(), "attached particle systems") {
             if let Some(read) = read_system_parts(source, system) {
                 parts.push((H3ParticleTrigger::Carried, read, Arc::clone(&lasting), 0));
@@ -2360,13 +2360,13 @@ pub(super) fn read_h3_particles(
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
 ) -> Vec<H3ParticleSystem> {
     let mut systems = Vec::new();
-    for object_effect in h3_object_effects(source, object) {
+    for object_effect in object_effects(source, object) {
         let Ok(effect) = load_referenced_tag_from_source(source, &object_effect.path, "effect", b"effe") else {
             continue;
         };
         let locations = elements(effect.root(), "locations");
         let times = Arc::new(object_effect.times_of(effect.root()));
-        let world_oriented = H3ObjectEffect::world_oriented(effect.root());
+        let world_oriented = ObjectEffect::world_oriented(effect.root());
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for system in elements(event, "particle systems") {
                 let location = usize::try_from(system.read_block_index("location")).ok();
@@ -3227,7 +3227,7 @@ impl H3ParticleField {
         &mut self,
         systems: &[Arc<H3ParticleSystem>],
         values: impl Fn(u8) -> Option<FunctionValues>,
-        onsets: &mut H3EffectOnsets,
+        onsets: &mut EffectOnsets,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
         ground: f32,

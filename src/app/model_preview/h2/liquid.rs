@@ -16,7 +16,7 @@ use super::light_volumes::{read_glow, read_h2_bitmap};
 use super::lights::attachment_value;
 use super::super::dx9::passes::H2Image;
 use super::super::common::named_function::tag_function_at;
-use super::super::gen3::effects::marker_name;
+use super::super::effects::marker_name;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot};

@@ -12,7 +12,7 @@ use super::super::common::fields::{elements, has_flag};
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::tag_function_at;
-use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame, read_part_placement};
+use super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part, part_frame, read_part_placement};
 use super::super::particles::{
     H3ParticleVertex, H3SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader, slerped,
 };
@@ -447,7 +447,7 @@ pub(crate) struct H3StripAt {
     scale_by: String,
     secondary_by: String,
     seeds: [f32; OWN_SEEDS],
-    times: Arc<H3EffectTimes>,
+    times: Arc<EffectTimes>,
     event: usize,
     look: Arc<StripLook>,
     kind: Arc<StripKind>,
@@ -530,7 +530,7 @@ pub(in crate::app::model_preview) fn read_carried_strips(source: &TagSource, pat
     let Ok(effect) = load_referenced_tag_from_source(source, path, "effect", b"effe") else {
         return strips;
     };
-    let times = Arc::new(H3EffectTimes::read(effect.root()));
+    let times = Arc::new(EffectTimes::read(effect.root()));
     let contrail_group = u32::from_be_bytes(*b"cntl");
     for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
         for part in elements(event, "parts") {
@@ -1058,7 +1058,7 @@ impl H3StripField {
         &mut self,
         strips: &[Arc<H3StripAt>],
         values: impl Fn(u8) -> Option<FunctionValues>,
-        onsets: &mut H3EffectOnsets,
+        onsets: &mut EffectOnsets,
         tracks: impl Fn(&Arc<H3StripAt>) -> Vec<(u64, [f32; 3])>,
         bones: Option<&[[f32; 4]]>,
         time: f32,
@@ -1329,7 +1329,7 @@ mod tests {
             scale_by: String::new(),
             secondary_by: String::new(),
             seeds: [0.0; OWN_SEEDS],
-            times: Arc::new(H3EffectTimes::read_nothing()),
+            times: Arc::new(EffectTimes::read_nothing()),
             event: 0,
             look: Arc::new(look(None)),
             kind: Arc::new(StripKind::Contrail(contrail(60.0, 0.5))),
@@ -1341,7 +1341,7 @@ mod tests {
         let strip = carried_strip();
         let strips = [Arc::clone(&strip)];
         let mut field = H3StripField::default();
-        let mut onsets = H3EffectOnsets::default();
+        let mut onsets = EffectOnsets::default();
         let view = ViewFrame { eye: [0.0, -5.0, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] };
         let lighting = [[0.0; 4]; 10];
         let mut advance = |field: &mut H3StripField, place: Option<[f32; 3]>, time: f32| {

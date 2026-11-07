@@ -12,7 +12,7 @@ use super::super::common::sprites::{
 use super::super::renderer::*;
 use super::super::*;
 use super::super::common::view::ViewFrame;
-use super::super::gen3::effects::H3EffectOnsets;
+use super::super::super::effects::EffectOnsets;
 use super::super::particles::H3ParticleField;
 use super::pipeline::{h3_layered_distance, h3_lighting_constants, h3_set_blend};
 use super::render::Gen3Game;
@@ -335,7 +335,7 @@ pub(in crate::app::model_preview) struct Gen3Sprites<'a> {
     pub(in crate::app::model_preview) view: &'a ViewFrame,
     pub(in crate::app::model_preview) bones: Option<&'a [[f32; 4]]>,
     /// When each effect began.
-    pub(in crate::app::model_preview) onsets: &'a mut H3EffectOnsets,
+    pub(in crate::app::model_preview) onsets: &'a mut EffectOnsets,
     /// Every game's particle systems.
     pub(in crate::app::model_preview) particles: &'a mut H3ParticleField,
     /// The particle program, the map an unmapped stage samples, and the

@@ -7,7 +7,7 @@ use eframe::glow::{self, HasContext as _};
 use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system,
 };
-use super::super::gen3::effects::H3EffectOnsets;
+use super::super::effects::EffectOnsets;
 use super::super::gen3::pipeline::h3_layered_distance;
 use super::super::common::view::ViewFrame;
 use super::super::renderer::*;
@@ -121,5 +121,5 @@ pub(in crate::app::model_preview) struct Dx9Sprites<'a> {
     pub(in crate::app::model_preview) slot: usize,
     pub(in crate::app::model_preview) uploads: u64,
     /// When each effect began.
-    pub(in crate::app::model_preview) onsets: &'a mut H3EffectOnsets,
+    pub(in crate::app::model_preview) onsets: &'a mut EffectOnsets,
 }

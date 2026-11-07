@@ -16,7 +16,7 @@ use super::super::common::fields::{elements, has_flag};
 use super::super::common::view::posed_on;
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::{NamedFunction, tag_function_at};
-use super::super::gen3::effects::part_markers;
+use super::super::effects::part_markers;
 use super::super::gen3::shaders::H3Pass;
 use super::super::reach::lights::object_value;
 use super::super::*;

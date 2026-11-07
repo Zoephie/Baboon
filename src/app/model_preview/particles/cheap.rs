@@ -15,8 +15,8 @@ use super::super::common::fields::{elements, has_flag};
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::tag_function_at;
-use super::super::gen3::effects::{
-    CHEAP_PARTICLE_EMITTER, H3EffectOnsets, H3EffectTimes, for_each_attached_part, part_frame,
+use super::super::effects::{
+    CHEAP_PARTICLE_EMITTER, EffectOnsets, EffectTimes, for_each_attached_part, part_frame,
     read_part_placement,
 };
 use super::super::particles::{PRE_ROLL, Random, particle_game_time};
@@ -750,7 +750,7 @@ pub(crate) struct ReachCheapEmitterAt {
     /// `A scales values` and `B scales values` take `type-specific scale`.
     scaled: bool,
     b_scaled: bool,
-    times: Arc<H3EffectTimes>,
+    times: Arc<EffectTimes>,
     event: usize,
     definition: Arc<CheapEmitterDefinition>,
 }
@@ -894,7 +894,7 @@ impl ReachCheapField {
         emitters: &[ReachCheapEmitterAt],
         shown: &[bool],
         values: impl Fn(u8) -> Option<FunctionValues>,
-        onsets: &mut H3EffectOnsets,
+        onsets: &mut EffectOnsets,
         bones: Option<&[[f32; 4]]>,
         eye: [f32; 3],
         time: f32,
@@ -1192,11 +1192,11 @@ mod tests {
         }
     }
 
-    fn times(delay: f32, duration: f32) -> Arc<H3EffectTimes> {
-        Arc::new(H3EffectTimes::of_events(&[([delay; 2], [duration; 2])], true))
+    fn times(delay: f32, duration: f32) -> Arc<EffectTimes> {
+        Arc::new(EffectTimes::of_events(&[([delay; 2], [duration; 2])], true))
     }
 
-    fn emitter(definition: CheapEmitterDefinition, times: Arc<H3EffectTimes>) -> ReachCheapEmitterAt {
+    fn emitter(definition: CheapEmitterDefinition, times: Arc<EffectTimes>) -> ReachCheapEmitterAt {
         ReachCheapEmitterAt {
             object: 0,
             node: 0,
@@ -1555,7 +1555,7 @@ mod tests {
             let all = vec![one.clone(); emitters];
             let mut field = ReachCheapField::fresh(emitters);
             field.time = Some(0.0);
-            field.advance(&all, &[], |_| None, &mut H3EffectOnsets::default(), None, [0.0; 3], 1.0 / 60.0);
+            field.advance(&all, &[], |_| None, &mut EffectOnsets::default(), None, [0.0; 3], 1.0 / 60.0);
             live(&field)
         };
         assert_eq!(count(200), 200, "a particle each at 60 a second");

@@ -983,7 +983,7 @@ pub(in crate::app::model_preview) fn read_ce_event_effects(
     markers: &[RenderModelPreviewMarker],
 ) -> Vec<CeEffectAt> {
     let mut named = Vec::new();
-    super::super::gen3::effects::collect_event_effects(object.root(), &mut named);
+    super::super::effects::collect_event_effects(object.root(), &mut named);
     let mut cache = CeEffectCache::default();
     let mut seen = std::collections::HashSet::new();
     let mut effects = Vec::new();
@@ -1001,7 +1001,7 @@ pub(in crate::app::model_preview) fn read_ce_event_effects(
             object: owner,
             def,
             spawn: None,
-            event: Some(CeEventEffect { name: super::super::gen3::effects::event_function_name(&field, &path), path: path.clone() }),
+            event: Some(CeEventEffect { name: super::super::effects::event_function_name(&field, &path), path: path.clone() }),
             primary: None,
             secondary: None,
             change_color: None,

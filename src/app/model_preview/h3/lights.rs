@@ -10,8 +10,8 @@ use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_labelled, object_block};
 use super::super::ce::lights::FlareSprite;
 use super::super::common::view::{ViewFrame, posed_on};
-use super::super::gen3::effects::{
-    H3EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
+use super::super::effects::{
+    EffectTimes, for_each_attached_part, marker_name, part_frame, part_markers, read_part_placement,
 };
 use super::super::functions::FunctionValues;
 use blam_tags::tag_function::transition_function_evaluate;
@@ -66,7 +66,7 @@ pub(crate) struct H3Light {
     /// `use parent position but world orientation`: its axes do not turn.
     world_oriented: bool,
     /// When its effect's event runs, for a light an attached effect makes.
-    event: Option<(Arc<H3EffectTimes>, usize)>,
+    event: Option<(Arc<EffectTimes>, usize)>,
     /// `destroy light after`, seconds from then.
     destroy_after: f32,
     pub(crate) object: u8,
@@ -310,7 +310,7 @@ pub(in crate::app::model_preview) fn read_h3_lights(
                            scale_by: String,
                            change_color: Option<usize>,
                            by_effect: Option<H3EffectScale>,
-                           event: Option<(Arc<H3EffectTimes>, usize)>,
+                           event: Option<(Arc<EffectTimes>, usize)>,
                            world_oriented: bool| H3Light {
         event,
         world_oriented,
@@ -508,7 +508,7 @@ pub(crate) struct H3FlareAt {
     /// Set for a flare an attached effect draws.
     by_effect: Option<H3EffectScale>,
     /// When its effect's event runs, for a flare an attached effect draws.
-    event: Option<(Arc<H3EffectTimes>, usize)>,
+    event: Option<(Arc<EffectTimes>, usize)>,
     flare: Arc<H3Flare>,
     /// A light's own flare: the light, whose state colors and scales it.
     light: Option<Arc<H3Light>>,
@@ -646,7 +646,7 @@ pub(in crate::app::model_preview) fn read_h3_flares(
                            scale_by: String,
                            secondary_by: String,
                            by_effect: Option<H3EffectScale>,
-                           event: Option<(Arc<H3EffectTimes>, usize)>,
+                           event: Option<(Arc<EffectTimes>, usize)>,
                            placed: &dyn Fn(MarkerFrame, usize) -> (MarkerFrame, usize)| {
         let Some(flare) = read_h3_flare(source, path).map(Arc::new) else {
             return;

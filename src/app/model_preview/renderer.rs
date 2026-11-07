@@ -2006,7 +2006,7 @@ pub(in crate::app::model_preview) struct SlotSimulations {
     pub(in crate::app::model_preview) reach_cheap: particles::cheap::ReachCheapField,
     pub(in crate::app::model_preview) h3_strips: gen3::strips::H3StripField,
     /// When each effect began, for Halo 2's and the gen3 games' effect parts.
-    pub(in crate::app::model_preview) effect_onsets: gen3::effects::H3EffectOnsets,
+    pub(in crate::app::model_preview) effect_onsets: effects::EffectOnsets,
     /// Halo 2's and the gen3 games' cloth.
     pub(in crate::app::model_preview) cloth: cloth::H3ClothField,
     /// Every antenna's spring.
@@ -4217,7 +4217,7 @@ impl RenderCore {
 
 
     /// The slot's effect onsets: when each effect's scale came on.
-    pub(in crate::app::model_preview) fn effect_onsets(&mut self, slot: usize) -> &mut gen3::effects::H3EffectOnsets {
+    pub(in crate::app::model_preview) fn effect_onsets(&mut self, slot: usize) -> &mut effects::EffectOnsets {
         &mut self.slots[slot].simulations.effect_onsets
     }
 

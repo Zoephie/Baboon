@@ -1,14 +1,15 @@
-//! Halo 3's attached effects, as `effect_new_looping` runs them on an object at
-//! rest: what each event's parts are, and where they go.
+//! Attached effects, as Halo 3's `effect_new_looping` runs them on an object at
+//! rest: what each event's parts are, and where they go. Halo 2, Halo 3, ODST,
+//! Reach and Halo 4 read and time their effect parts through these.
 
 use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::super::attachment::{MarkerFrame, perpendicular};
-use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
-use super::super::functions::FunctionValues;
-use super::super::*;
+use super::attachment::{MarkerFrame, perpendicular};
+use super::common::fields::{elements, function_slot_of, has_flag, object_block};
+use super::functions::FunctionValues;
+use super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 
@@ -82,7 +83,7 @@ impl H3EventTime {
 
 /// An effect's events, as `effect_new_looping` runs them: always looping.
 #[derive(Debug, Clone, PartialEq)]
-pub(in crate::app::model_preview) struct H3EffectTimes {
+pub(in crate::app::model_preview) struct EffectTimes {
     events: Vec<H3EventTime>,
     loop_start: usize,
     parallel: bool,
@@ -90,7 +91,7 @@ pub(in crate::app::model_preview) struct H3EffectTimes {
     once: bool,
 }
 
-impl H3EffectTimes {
+impl EffectTimes {
     pub(in crate::app::model_preview) fn read(effect: TagStruct<'_>) -> Self {
         // Reach's effect gathers its looping sound into `looping sounds`, which
         // Halo 3's and ODST's lack; only Reach's postprocess leaves durations
@@ -242,9 +243,9 @@ impl H3EffectTimes {
 /// the effect then, so its events run from there. What was on from the first
 /// frame has run all along.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct H3EffectOnsets(std::collections::BTreeMap<(u8, String), (bool, f32)>);
+pub(crate) struct EffectOnsets(std::collections::BTreeMap<(u8, String), (bool, f32)>);
 
-impl H3EffectOnsets {
+impl EffectOnsets {
     pub(crate) fn of(&mut self, object: u8, name: &str, values: Option<&FunctionValues>, time: f32) -> f32 {
         if name.is_empty() {
             return 0.0;
@@ -263,8 +264,8 @@ impl H3EffectOnsets {
 }
 
 /// An event's part on an attachment's effect.
-pub(in crate::app::model_preview) struct H3EffectPart<'a> {
-    pub(in crate::app::model_preview) effect: &'a H3ObjectEffect,
+pub(in crate::app::model_preview) struct EffectPart<'a> {
+    pub(in crate::app::model_preview) effect: &'a ObjectEffect,
     pub(in crate::app::model_preview) part: TagStruct<'a>,
     pub(in crate::app::model_preview) group: u32,
     pub(in crate::app::model_preview) path: String,
@@ -280,7 +281,7 @@ pub(in crate::app::model_preview) struct H3EffectPart<'a> {
     pub(in crate::app::model_preview) scaled: bool,
     /// `B scales values` does, for the secondary scale.
     pub(in crate::app::model_preview) b_scaled: bool,
-    pub(in crate::app::model_preview) times: Arc<H3EffectTimes>,
+    pub(in crate::app::model_preview) times: Arc<EffectTimes>,
     /// Which of the effect's events it belongs to.
     pub(in crate::app::model_preview) event: usize,
 }
@@ -339,15 +340,15 @@ fn part_made(group: u32, generated: bool, disabled: bool) -> bool {
 pub(in crate::app::model_preview) fn for_each_attached_part(
     source: &TagSource,
     object: &TagFile,
-    mut visit: impl for<'a> FnMut(H3EffectPart<'a>),
+    mut visit: impl for<'a> FnMut(EffectPart<'a>),
 ) {
-    for object_effect in h3_object_effects(source, object) {
+    for object_effect in object_effects(source, object) {
         let Ok(effect) = load_referenced_tag_from_source(source, &object_effect.path, "effect", b"effe") else {
             continue;
         };
         let locations = elements(effect.root(), "locations");
         let times = Arc::new(object_effect.times_of(effect.root()));
-        let world_oriented = H3ObjectEffect::world_oriented(effect.root());
+        let world_oriented = ObjectEffect::world_oriented(effect.root());
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for part in elements(event, "parts") {
                 let Some((group, path)) = part.read_tag_ref_with_group("type") else {
@@ -366,7 +367,7 @@ pub(in crate::app::model_preview) fn for_each_attached_part(
                 let scaled = has_flag(part, "A scales values", PART_SCALE);
                 let b_scaled = has_flag(part, "B scales values", PART_SCALE);
                 let times = Arc::clone(&times);
-                visit(H3EffectPart {
+                visit(EffectPart {
                     effect: &object_effect,
                     part,
                     group,
@@ -385,7 +386,7 @@ pub(in crate::app::model_preview) fn for_each_attached_part(
     }
 }
 
-impl H3EffectPart<'_> {
+impl EffectPart<'_> {
     /// Where a marker puts this part: its frame and the node it follows.
     pub(in crate::app::model_preview) fn placed(&self, place: MarkerFrame, node: usize) -> (MarkerFrame, usize) {
         let place = if self.world_oriented { MarkerFrame { axes: WORLD_AXES, ..place } } else { place };
@@ -396,7 +397,7 @@ impl H3EffectPart<'_> {
 /// An effect an object runs: an attachment, on while its function is, or one
 /// an event plays, which the preview gives a function of its own to start it.
 #[derive(Debug, Clone)]
-pub(in crate::app::model_preview) struct H3ObjectEffect {
+pub(in crate::app::model_preview) struct ObjectEffect {
     pub(in crate::app::model_preview) path: String,
     marker: String,
     pub(in crate::app::model_preview) scale_by: String,
@@ -410,7 +411,7 @@ pub(in crate::app::model_preview) struct H3ObjectEffect {
     vectors: bool,
 }
 
-impl H3ObjectEffect {
+impl ObjectEffect {
     /// `effect_build_locations`' marker for a location.
     pub(in crate::app::model_preview) fn marker_of(&self, location: TagStruct<'_>) -> String {
         let marker = marker_name(location, "marker name");
@@ -422,8 +423,8 @@ impl H3ObjectEffect {
         has_flag(effect, "flags", WORLD_ORIENTATION)
     }
 
-    pub(in crate::app::model_preview) fn times_of(&self, effect: TagStruct<'_>) -> H3EffectTimes {
-        H3EffectTimes { once: self.once, ..H3EffectTimes::read(effect) }
+    pub(in crate::app::model_preview) fn times_of(&self, effect: TagStruct<'_>) -> EffectTimes {
+        EffectTimes { once: self.once, ..EffectTimes::read(effect) }
     }
 
     /// What a location named `name` (after `marker_of`) lands on. Reach's
@@ -536,7 +537,7 @@ fn axes_of_vector(forward: [f32; 3]) -> [[f32; 3]; 3] {
 }
 
 /// Every effect `object` and its `.model` name, attachments first.
-pub(in crate::app::model_preview) fn h3_object_effects(source: &TagSource, object: &TagFile) -> Vec<H3ObjectEffect> {
+pub(in crate::app::model_preview) fn object_effects(source: &TagSource, object: &TagFile) -> Vec<ObjectEffect> {
     let mut effects = Vec::new();
     let effect_group = u32::from_be_bytes(*b"effe");
     let reach = source.game() == Some(crate::core::game::GameId::HaloReach);
@@ -546,7 +547,7 @@ pub(in crate::app::model_preview) fn h3_object_effects(source: &TagSource, objec
                 continue;
             };
             if group == effect_group && !path.is_empty() {
-                effects.push(H3ObjectEffect {
+                effects.push(ObjectEffect {
                     path,
                     marker: marker_name(attachment, "marker"),
                     scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
@@ -568,7 +569,7 @@ pub(in crate::app::model_preview) fn h3_object_effects(source: &TagSource, objec
     let mut seen = std::collections::HashSet::new();
     for (field, path) in named {
         if seen.insert(path.clone()) {
-            effects.push(H3ObjectEffect {
+            effects.push(ObjectEffect {
                 scale_by: event_function_name(&field, &path),
                 once: !field.contains("looping"),
                 path,
@@ -606,7 +607,7 @@ const MOST_NESTING: usize = 3;
 
 /// Each effect, then those its parts name, at those parts' locations. A part's
 /// effect is played by its event, once, under the same function.
-fn with_nested_effects(source: &TagSource, mut effects: Vec<H3ObjectEffect>) -> Vec<H3ObjectEffect> {
+fn with_nested_effects(source: &TagSource, mut effects: Vec<ObjectEffect>) -> Vec<ObjectEffect> {
     let effect_group = u32::from_be_bytes(*b"effe");
     let mut level = 0..effects.len();
     for _ in 0..MOST_NESTING {
@@ -625,7 +626,7 @@ fn with_nested_effects(source: &TagSource, mut effects: Vec<H3ObjectEffect>) -> 
                 let location = location.and_then(|location| locations.get(location));
                 if let (true, false, Some(location)) = (group == effect_group, path.is_empty(), location) {
                     let marker = outer.marker_of(*location);
-                    nested.push(H3ObjectEffect { path, marker, once: true, vectors: false, ..outer.clone() });
+                    nested.push(ObjectEffect { path, marker, once: true, vectors: false, ..outer.clone() });
                 }
             }
         }
@@ -719,9 +720,9 @@ mod tests {
         }
     }
 
-    fn times(events: &[([f32; 2], [f32; 2])], loop_start: usize, parallel: bool) -> H3EffectTimes {
+    fn times(events: &[([f32; 2], [f32; 2])], loop_start: usize, parallel: bool) -> EffectTimes {
         let events = events.iter().map(|(delay, duration)| H3EventTime::of(*delay, *duration)).collect();
-        H3EffectTimes { events, loop_start, parallel, once: false }
+        EffectTimes { events, loop_start, parallel, once: false }
     }
 
     /// A part asked to be nonviolent is not made, whether it says so in its
@@ -753,9 +754,9 @@ mod tests {
 
     #[test]
     fn an_effect_restarts_each_time_its_function_comes_on() {
-        let mut onsets = H3EffectOnsets::default();
+        let mut onsets = EffectOnsets::default();
         let values = |value: f32| FunctionValues::from([("on".to_owned(), value)]);
-        let of = |onsets: &mut H3EffectOnsets, value, time| onsets.of(0, "on", Some(&values(value)), time);
+        let of = |onsets: &mut EffectOnsets, value, time| onsets.of(0, "on", Some(&values(value)), time);
         assert_eq!(of(&mut onsets, 1.0, 5.0), 0.0, "on from the start");
         assert_eq!(of(&mut onsets, 0.0, 6.0), 0.0);
         assert_eq!(of(&mut onsets, 1.0, 7.0), 7.0);
@@ -776,7 +777,7 @@ mod tests {
 
     #[test]
     fn a_delayed_tick_of_an_event_is_found_however_late_it_was_played() {
-        let delayed = H3EffectTimes { once: true, ..times(&[([0.1, 0.1], [0.0, 0.0])], 0, false) };
+        let delayed = EffectTimes { once: true, ..times(&[([0.1, 0.1], [0.0, 0.0])], 0, false) };
         let inside = delayed.begins_within(0, 0.05, 0.11).unwrap();
         assert!(delayed.age(0, inside).is_some());
         // The sum this must not go through: late enough, it rounds down.
@@ -833,8 +834,8 @@ mod tests {
         assert_eq!(part_markers(&[marker], "up", true)[0].position, [1.0, 2.0, 3.0]);
     }
 
-    fn attachment(vectors: bool) -> H3ObjectEffect {
-        H3ObjectEffect {
+    fn attachment(vectors: bool) -> ObjectEffect {
+        ObjectEffect {
             path: String::new(),
             marker: "fx_anchor".to_owned(),
             scale_by: String::new(),
@@ -889,7 +890,7 @@ mod tests {
     fn an_events_effect_runs_once_and_an_attachment_loops() {
         let looped = times(&[([0.0, 0.0], [2.0, 2.0])], 0, false);
         assert!(looped.age(0, 3.0).is_some());
-        let once = H3EffectTimes { once: true, ..times(&[([0.0, 0.0], [2.0, 2.0])], 0, false) };
+        let once = EffectTimes { once: true, ..times(&[([0.0, 0.0], [2.0, 2.0])], 0, false) };
         assert!(once.age(0, 1.0).is_some());
         assert_eq!(once.age(0, 3.0), None);
         assert!(once.moves());

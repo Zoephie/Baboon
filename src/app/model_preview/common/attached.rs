@@ -44,7 +44,7 @@ pub(in crate::app::model_preview) fn object_attachments(
     groups: &[u32],
 ) -> Vec<ObjectAttachment> {
     use crate::app::model_preview::common::fields::{elements, function_slot_of, has_flag, object_block};
-    use crate::app::model_preview::gen3::effects::marker_name;
+    use crate::app::model_preview::effects::marker_name;
     let Some(block) = object_block(object, "attachments") else {
         return Vec::new();
     };
@@ -104,7 +104,7 @@ macro_rules! attached {
             }
 
             fn on_attached(mut self, name: &str) -> Self {
-                $crate::app::model_preview::gen3::effects::adopt_event_function(
+                $crate::app::model_preview::effects::adopt_event_function(
                     name,
                     &mut self.scale_by,
                     &mut self.object,

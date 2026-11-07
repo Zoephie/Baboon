@@ -11,7 +11,7 @@ use super::super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::tag_function_at;
-use super::effects::{H3EffectOnsets, H3EffectTimes, for_each_attached_part};
+use super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
 use super::super::*;
 use super::super::renderer::REACH_SCREEN_NOISE_BITMAP;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -493,7 +493,7 @@ pub(crate) struct H3ScreenEffectAt {
     node: usize,
     position: [f32; 3],
     scale_by: String,
-    times: Arc<H3EffectTimes>,
+    times: Arc<EffectTimes>,
     event: usize,
     definitions: Arc<Vec<H3ScreenDefinition>>,
 }
@@ -597,7 +597,7 @@ pub(in crate::app::model_preview) fn add_screen_shader_materials(preview: &mut R
 pub(crate) fn h3_screen_settings<'a>(
     effects: &[H3ScreenEffectAt],
     values: impl Fn(u8) -> Option<&'a FunctionValues>,
-    onsets: &mut H3EffectOnsets,
+    onsets: &mut EffectOnsets,
     bones: Option<&[[f32; 4]]>,
     view: &ViewFrame,
     time: f32,

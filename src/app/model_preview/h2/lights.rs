@@ -12,7 +12,7 @@ use super::super::common::fields::{elements, function_slot_of, has_flag, has_fla
 use super::super::ce::lights::FlareSprite;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
-use super::super::gen3::effects::{H3EffectTimes, for_each_attached_part, part_markers};
+use super::super::effects::{EffectTimes, for_each_attached_part, part_markers};
 use blam_tags::tag_function::h2::transition_evaluate;
 use super::super::dx9::passes::{H2DefaultLight, H2Image, H2Layer, ce_color_interpolate};
 use super::super::functions::object_input;
@@ -124,7 +124,7 @@ struct H2Light {
 /// is deleted after it, `sub_8EE2E0`; without, nothing deletes it.
 #[derive(Debug, Clone)]
 pub(crate) struct H2EffectLight {
-    times: Arc<H3EffectTimes>,
+    times: Arc<EffectTimes>,
     event: usize,
     /// `A scales values` takes the type-specific bit: `sub_515FC0` scales it
     /// by the effect's A scale, which the attachment's function gives.
@@ -132,7 +132,7 @@ pub(crate) struct H2EffectLight {
 }
 
 impl H2EffectLight {
-    pub(crate) fn new(times: Arc<H3EffectTimes>, event: usize, scaled: bool) -> Self {
+    pub(crate) fn new(times: Arc<EffectTimes>, event: usize, scaled: bool) -> Self {
         Self { times, event, scaled }
     }
 
@@ -162,7 +162,7 @@ impl H2EffectLight {
 /// runs (`render_submit_special_model_groups`), not `effect_generate_part`.
 #[derive(Debug, Clone)]
 pub(crate) struct H2EffectPart {
-    times: Arc<H3EffectTimes>,
+    times: Arc<EffectTimes>,
     event: usize,
     /// `A scales values` and `B scales values` take the type-specific bit:
     /// the effect's A and B scales brighten it.
@@ -186,7 +186,7 @@ pub(crate) struct H2PartLight {
 const SHORTEST_FADING_EVENT: f32 = 0.033_433_337;
 
 impl H2EffectPart {
-    pub(in crate::app::model_preview) fn new(part: &super::super::gen3::effects::H3EffectPart<'_>) -> Self {
+    pub(in crate::app::model_preview) fn new(part: &super::super::effects::EffectPart<'_>) -> Self {
         Self {
             times: Arc::clone(&part.times),
             event: part.event,
@@ -1342,7 +1342,7 @@ mod tests {
 
     #[test]
     fn an_effects_light_dims_over_its_duration_and_is_gone_after_it() {
-        let times = Arc::new(H3EffectTimes::read_nothing());
+        let times = Arc::new(EffectTimes::read_nothing());
         let effect = H2EffectLight::new(times, 0, false);
         let lasting = H2Light { effect_duration: 0.5, ..light() };
         assert_eq!(effect.value(&lasting, 1.0, 0.0, 0.0), Some(1.0));
@@ -1352,7 +1352,7 @@ mod tests {
         assert_eq!(effect.value(&lasting, 1.0, 0.5, 0.5), Some(1.0), "runs from its onset");
         assert_eq!(effect.value(&lasting, 0.0, 0.1, 0.0), None, "nothing while its function is off");
         assert_eq!(effect.value(&light(), 1.0, 50.0, 0.0), Some(1.0), "no duration lasts");
-        let scaled = H2EffectLight::new(Arc::new(H3EffectTimes::read_nothing()), 0, true);
+        let scaled = H2EffectLight::new(Arc::new(EffectTimes::read_nothing()), 0, true);
         assert_eq!(scaled.value(&light(), 0.25, 1.0, 0.0), Some(0.25));
     }
 
@@ -1463,7 +1463,7 @@ mod tests {
     #[test]
     fn an_effect_part_fades_over_its_event_and_takes_the_scales_it_asks_for() {
         let part = |scaled: [bool; 2]| H2EffectPart {
-            times: Arc::new(H3EffectTimes::read_nothing()),
+            times: Arc::new(EffectTimes::read_nothing()),
             event: 0,
             scaled,
             secondary_by: "power".to_owned(),

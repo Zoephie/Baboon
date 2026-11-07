@@ -14,7 +14,7 @@ use super::super::common::view::posed_on;
 use super::super::h3::lights::SHADOWS_AND_GELS;
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::{NamedFunction, tag_function_at};
-use super::super::gen3::effects::part_markers;
+use super::super::effects::part_markers;
 use super::super::*;
 use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::cross;

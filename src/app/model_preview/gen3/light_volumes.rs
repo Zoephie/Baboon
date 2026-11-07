@@ -14,8 +14,8 @@ use super::super::antennas::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::tag_function_at;
-use super::effects::{
-    H3EffectTimes, for_each_attached_part, part_frame, read_part_placement,
+use super::super::effects::{
+    EffectTimes, for_each_attached_part, part_frame, read_part_placement,
 };
 use super::super::particles::inline_real;
 use super::shaders::{H3Blend, H3Sampler, read_h3_definition};
@@ -485,7 +485,7 @@ pub(crate) struct H3LightVolumeAt {
     /// `secondary scale`, the effect's `b`.
     secondary_by: String,
     seeds: [f32; SEEDS],
-    times: Arc<H3EffectTimes>,
+    times: Arc<EffectTimes>,
     event: usize,
     pub(crate) definition: Arc<H3VolumeDefinition>,
 }
@@ -1117,7 +1117,7 @@ mod tests {
             scale_by: String::new(),
             secondary_by: String::new(),
             seeds: [0.0; SEEDS],
-            times: Arc::new(H3EffectTimes::read_nothing()),
+            times: Arc::new(EffectTimes::read_nothing()),
             event: 0,
             definition: Arc::new(definition),
         }
