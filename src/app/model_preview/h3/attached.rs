@@ -31,7 +31,7 @@ pub(in crate::app::model_preview) fn read_h3_attached_features<F: Fn(&RenderMode
     preview.gen3.strips.extend(carried);
     let strips = super::super::gen3::strips::read_h3_strips(source, object, owner, markers, frame);
     preview.gen3.strips.extend(named(strips, name).map(Arc::new));
-    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
+    super::super::cloth::read_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     let screens = super::super::gen3::screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
     preview.gen3.screen_effects.extend(screens);
     super::super::gen3::screen_effects::add_screen_shader_materials(preview);

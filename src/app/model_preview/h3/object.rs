@@ -40,7 +40,7 @@ pub(in crate::app::model_preview) fn read_h3_object_features(source: &TagSource,
     }
     preview.antennas = super::super::antennas::read_antennas(source, model_tag, &preview.markers);
     let markers = preview.markers.clone();
-    super::super::cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
+    super::super::cloth::read_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     super::super::weapons::attached::read_extension_weapons(source, model_tag, 0, &markers, &frame, preview, None);
     let middle = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
     let leaves = super::super::h3::leaves::read_h3_leaves(source, model_tag, &markers, middle);

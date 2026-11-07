@@ -36,6 +36,6 @@ pub(in crate::app::model_preview) fn read_h2_attached_features<F: Fn(&RenderMode
     preview.h2.contrails.extend(contrails.into_iter().map(|contrail| contrail.on_attached(name)));
     let liquids = super::liquid::read_h2_liquids(source, object, owner, markers, frame);
     preview.h2.liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
-    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
+    super::super::cloth::read_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
     super::super::weapons::attached::read_extension_weapons(source, object, owner, markers, frame, preview, Some(name));
 }

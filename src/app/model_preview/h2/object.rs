@@ -54,7 +54,7 @@ pub(in crate::app::model_preview) fn read_h2_object_features(source: &TagSource,
     };
     let frame = &frame;
     preview.h2.liquids = super::super::h2::liquid::read_h2_liquids(source, model_tag, 0, &markers, frame);
-    super::super::cloth::read_h3_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
+    super::super::cloth::read_cloth(source, model_tag, 0, &markers, frame, preview, ClothGame::Halo2, [0.0; 3]);
     super::super::weapons::attached::read_extension_weapons(source, model_tag, 0, &markers, frame, preview, None);
     preview.markers = markers;
 }

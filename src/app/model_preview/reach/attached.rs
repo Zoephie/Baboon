@@ -45,7 +45,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     preview.gen3.screen_effects.extend(screens);
     super::super::gen3::screen_effects::add_screen_shader_materials(preview);
     preview.antennas.extend(super::super::antennas::read_reach_antennas(source, object, markers, frame, name));
-    super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
+    super::super::cloth::read_cloth(source, object, owner, markers, frame, preview, ClothGame::Reach, center);
     // `render_screenspace_light_callback`'s `99 + combo`, gels aside.
     let lit = !(preview.reach.lights.is_empty() && preview.reach.cheap_lights.is_empty());
     if lit && preview.reach.light_passes.is_empty() {
