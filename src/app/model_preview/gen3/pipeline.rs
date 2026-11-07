@@ -2,7 +2,7 @@
 //! albedo and normal into targets, a lit pass reading them back into an HDR
 //! accumulation target, and the final composite's tone curve onto the scene.
 
-use super::render::{Gen3Cx, Gen3Game};
+use super::render::{Gen3Batch, Gen3Cx, Gen3Game};
 use super::sprites::SpriteStage;
 use super::super::gl::program::Linked;
 use super::super::gl::target::{Made, Sampling, Texels};
@@ -700,6 +700,24 @@ impl RenderCore {
     }
 }
 
+/// What a gen3 frame's stages share: the frame and its slot, the targets'
+/// size and names, the batches the pipeline draws, and the screen effects.
+struct Gen3Frame<'a> {
+    gl: &'a glow::Context,
+    frame: &'a ModelGpuFrame,
+    slot: usize,
+    order: &'a [usize],
+    size: [i32; 2],
+    framebuffer: glow::NativeFramebuffer,
+    albedo_target: glow::NativeFramebuffer,
+    accumulation_target: glow::NativeFramebuffer,
+    accumulation: glow::NativeTexture,
+    batches: Vec<Gen3Batch>,
+    bloomed: bool,
+    screen: gen3::screen_effects::H3ScreenSettings,
+    shaders: Vec<gen3::screen_effects::H3ScreenShader>,
+}
+
 impl Gen3State {
     /// Run `draw` with `pass`'s program, linking it the first time, and keep
     /// it for the next frame whatever `draw` returns. `None` when the pass
@@ -1098,11 +1116,61 @@ impl Gen3State {
         slot: usize,
         order: &[usize],
     ) {
+        unsafe {
+            let Some(drawing) = self.begin_frame(core, game, gl, frame, slot, order) else {
+                return;
+            };
+            self.albedo_pass(core, &drawing);
+            self.albedo_decals(core, &drawing);
+            game.after_albedo(&mut Gen3Cx { gl, frame, core, slot, state: self }, drawing.albedo_target, drawing.size);
+            // Whether a shadow map was drawn for the apply after the opaque pass.
+            let shadowed =
+                game.self_shadow(&mut Gen3Cx { gl, frame, core, slot, state: self }, &drawing.batches, order, drawing.framebuffer);
+            let (blended, reach_lit) = self.static_lighting(core, game, &drawing, shadowed);
+            self.dynamic_lights(core, &drawing);
+            game.screen_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &reach_lit, drawing.accumulation_target);
+            let sprites = self.begin_transparents(core, game, &drawing);
+            self.blended_transparents(core, game, &drawing, blended, sprites);
+            let mut bloom = self.camo(core, game, &drawing);
+            self.pass_values = None;
+            self.shield_impact(core, &drawing);
+            game.shield(&mut Gen3Cx { gl, frame, core, slot, state: self });
+            // `c_player_view::render`: after the transparents, before the bloom
+            // and the tone curve, so these are in the same light as the scene.
+            if sprites {
+                self.draw_sprites(core, game, gl, frame, slot, SpriteStage::Rest);
+                game.late_sprites(&mut Gen3Cx { gl, frame, core, slot, state: self });
+            }
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(drawing.framebuffer));
+            if drawing.bloomed && bloom.is_none() {
+                bloom = game.bloom(&mut Gen3Cx { gl, frame, core, slot, state: self }, drawing.framebuffer, drawing.accumulation, drawing.size);
+            }
+            let (framebuffer, accumulation, screen, size) = (drawing.framebuffer, drawing.accumulation, drawing.screen, drawing.size);
+            game.composite(&mut Gen3Cx { gl, frame, core, slot, state: self }, framebuffer, accumulation, bloom, screen, size);
+            self.stops = 0.0;
+            self.finish_picture(core, game, gl, frame, slot, framebuffer, size, &screen, &drawing.shaders);
+            gl.depth_mask(true);
+            gl.disable(glow::BLEND);
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
+        }
+    }
+
+    /// The frame's targets, sized to the scene, and what the pipeline draws
+    /// with: the slot's maps, the cloth moved, what camo hides, the batches
+    /// with the game's own taken out, and the screen effects sampled. `None`
+    /// when there is nothing to draw into.
+    unsafe fn begin_frame<'a>(
+        &mut self,
+        core: &mut RenderCore,
+        game: &mut dyn Gen3Game,
+        gl: &'a glow::Context,
+        frame: &'a ModelGpuFrame,
+        slot: usize,
+        order: &'a [usize],
+    ) -> Option<Gen3Frame<'a>> {
         // Direct3D 11 always filters across a cube's faces; OpenGL has to be asked.
         unsafe { gl.enable(glow::TEXTURE_CUBE_MAP_SEAMLESS) };
-        let Some(scene) = core.scene.as_ref() else {
-            return;
-        };
+        let scene = core.scene.as_ref()?;
         let (size, depth, framebuffer) = (scene.size, scene.depth, scene.framebuffer);
         unsafe {
             if self.targets.as_ref().is_none_or(|targets| targets.size != size) {
@@ -1114,7 +1182,7 @@ impl Gen3State {
             }
             let Some(targets) = self.targets.as_ref() else {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-                return;
+                return None;
             };
             let (albedo_target, accumulation_target) =
                 (targets.albedo_framebuffer, targets.accumulation_framebuffer);
@@ -1160,24 +1228,51 @@ impl Gen3State {
                 gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
             };
             self.stops = game.stops(&screen);
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
+            Some(Gen3Frame {
+                gl,
+                frame,
+                slot,
+                order,
+                size,
+                framebuffer,
+                albedo_target,
+                accumulation_target,
+                accumulation,
+                batches,
+                bloomed,
+                screen,
+                shaders,
+            })
+        }
+    }
+
+    /// The albedo pass, into its own target. It lays depth down for the lit
+    /// pass to meet exactly; the preview's own draw rounds differently.
+    unsafe fn albedo_pass(&mut self, core: &mut RenderCore, drawing: &Gen3Frame<'_>) {
+        let Gen3Frame { gl, frame, slot, .. } = *drawing;
+        unsafe {
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(drawing.albedo_target));
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear_depth_f32(1.0);
-            // The albedo pass lays depth down for the lit one to meet exactly;
-            // the preview's own draw rounds differently.
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
-            for (batch, material) in &batches {
+            for (batch, material) in &drawing.batches {
                 if let Some(pass) = material.albedo.as_ref() {
                     self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                 }
             }
-            // `render_albedo_decals`, with `_z_buffer_mode_decals`' bias.
+        }
+    }
+
+    /// `render_albedo_decals`, with `_z_buffer_mode_decals`' bias.
+    unsafe fn albedo_decals(&mut self, core: &mut RenderCore, drawing: &Gen3Frame<'_>) {
+        let Gen3Frame { gl, frame, slot, .. } = *drawing;
+        unsafe {
             gl.enable(glow::BLEND);
             gl.depth_mask(false);
             gl.enable(glow::POLYGON_OFFSET_FILL);
             gl.polygon_offset(DECAL_SLOPE_BIAS, DECAL_DEPTH_BIAS * DEPTH_UNITS);
             for (batch, material) in
-                batches.iter().filter(|(_, material)| material.decal && !material.after_lighting)
+                drawing.batches.iter().filter(|(_, material)| material.decal && !material.after_lighting)
             {
                 h3_set_blend(gl, material.blend);
                 // `render_mesh_part_default` (Reach X360 0x826754D8): a
@@ -1200,10 +1295,23 @@ impl Gen3State {
             gl.color_mask(true, true, true, true);
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.disable(glow::BLEND);
-            game.after_albedo(&mut Gen3Cx { gl, frame, core, slot, state: self }, albedo_target, size);
-            // Whether a shadow map was drawn for the apply after the opaque pass.
-            let shadowed = game.self_shadow(&mut Gen3Cx { gl, frame, core, slot, state: self }, &batches, order, framebuffer);
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
+        }
+    }
+
+    /// The static lighting into the accumulation target: the frame's inline
+    /// lights (`build_simple_light_draw_list`), the opaque parts' lit pass,
+    /// then the self shadow's apply if one was drawn. What blends, for the
+    /// transparents, and the lights the screen lights draw.
+    unsafe fn static_lighting<'b>(
+        &mut self,
+        core: &mut RenderCore,
+        game: &mut dyn Gen3Game,
+        drawing: &'b Gen3Frame<'_>,
+        shadowed: bool,
+    ) -> (Vec<&'b Gen3Batch>, Vec<ReachLitLight>) {
+        let Gen3Frame { gl, frame, slot, order, .. } = *drawing;
+        unsafe {
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(drawing.accumulation_target));
             gl.disable(glow::BLEND);
             h3_set_cull(gl, frame);
             gl.enable(glow::DEPTH_TEST);
@@ -1216,7 +1324,7 @@ impl Gen3State {
             let reach_lit = game.frame_lights(&mut Gen3Cx { gl, frame, core, slot, state: self });
             self.set_reach_inline_lights(&reach_lit);
             let (opaque, blended): (Vec<_>, Vec<_>) =
-                batches
+                drawing.batches
                     .iter()
                     .filter(|(_, material)| !material.decal || material.after_lighting)
                     .partition(|(_, material)| material.blend == H3Blend::Opaque);
@@ -1234,11 +1342,19 @@ impl Gen3State {
                 gl.depth_func(glow::LEQUAL);
                 h3_set_cull(gl, frame);
             }
+            (blended, reach_lit)
+        }
+    }
+
+    /// `submit_visibility_and_render`: the object's lights, additive, each
+    /// on its own.
+    unsafe fn dynamic_lights(&mut self, core: &mut RenderCore, drawing: &Gen3Frame<'_>) {
+        let Gen3Frame { gl, frame, slot, .. } = *drawing;
+        unsafe {
             gl.enable(glow::BLEND);
             gl.depth_mask(false);
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, true);
-            // `submit_visibility_and_render`: additive, each light on its own.
             gl.blend_func(glow::ONE, glow::ONE);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             for (index, light) in frame.preview.h3.lights.iter().enumerate() {
@@ -1252,17 +1368,23 @@ impl Gen3State {
                     continue;
                 };
                 self.light = Some((lit, core.slots[slot].h3_textures.gels.get(index).copied().flatten()));
-                for (batch, material) in &batches {
+                for (batch, material) in &drawing.batches {
                     if let Some(pass) = material.dynamic_light.as_ref() {
                         self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                     }
                 }
                 self.light = None;
             }
-            game.screen_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &reach_lit, accumulation_target);
-            // `c_transparency_renderer`: what blends, far to near, sprites among
-            // the materials.
-            let sprites = core.draws_object_sprites(frame);
+        }
+    }
+
+    /// `c_transparency_renderer`'s setup: the scene's depth copied for the
+    /// soft sprites, and `submit_distortions` into their own target. Whether
+    /// the frame draws its object's sprites.
+    unsafe fn begin_transparents(&mut self, core: &mut RenderCore, game: &mut dyn Gen3Game, drawing: &Gen3Frame<'_>) -> bool {
+        let Gen3Frame { gl, frame, slot, .. } = *drawing;
+        let sprites = core.draws_object_sprites(frame);
+        unsafe {
             if sprites {
                 if let Some(targets) = self.targets.as_ref() {
                     let [width, height] = targets.size;
@@ -1279,13 +1401,30 @@ impl Gen3State {
                         gl.clear_color(0.0, 0.0, 0.0, 0.0);
                         gl.clear(glow::COLOR_BUFFER_BIT);
                         self.draw_sprites(core, game, gl, frame, slot, SpriteStage::Distortions);
-                        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
+                        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(drawing.accumulation_target));
                     }
                 }
             }
+        }
+        sprites
+    }
+
+    /// `c_transparency_renderer`: what blends, far to near, sprites among
+    /// the materials, then the sprites nearer than all of them and the
+    /// distortions applied.
+    unsafe fn blended_transparents(
+        &mut self,
+        core: &mut RenderCore,
+        game: &mut dyn Gen3Game,
+        drawing: &Gen3Frame<'_>,
+        blended: Vec<&Gen3Batch>,
+        sprites: bool,
+    ) {
+        let Gen3Frame { gl, frame, slot, size, .. } = *drawing;
+        unsafe {
             // Each with the pass it draws and the blend it draws under: its
             // own, or the alpha blend of an `opaque_alpha_blend` fringe.
-            let fringes = batches.iter().filter_map(|(batch, material)| {
+            let fringes = drawing.batches.iter().filter_map(|(batch, material)| {
                 let fringe = material.fringe.as_ref()?;
                 Some((batch, material, fringe, H3Blend::AlphaBlend))
             });
@@ -1321,10 +1460,26 @@ impl Gen3State {
             if sprites {
                 self.draw_sprites(core, game, gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                 if self.distorted {
-                    self.apply_distortions(gl, accumulation_target, size);
+                    self.apply_distortions(gl, drawing.accumulation_target, size);
                     gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
                 }
             }
+        }
+    }
+
+    /// The game's camo, over what lies behind it. Camo shows what is behind
+    /// it, which the game blooms the same with or without the object, so
+    /// with bloom on the bloom is built here, under the camo. The bloom,
+    /// when built.
+    unsafe fn camo(
+        &mut self,
+        core: &mut RenderCore,
+        game: &mut dyn Gen3Game,
+        drawing: &Gen3Frame<'_>,
+    ) -> Option<glow::NativeTexture> {
+        let Gen3Frame { gl, frame, slot, size, .. } = *drawing;
+        let mut bloom = None;
+        unsafe {
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, true);
             gl.enable(glow::BLEND);
@@ -1332,19 +1487,22 @@ impl Gen3State {
             // Neither the camo nor the shield can count on a transparent having
             // put the model's own geometry back after the lights and sprites.
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
-            let mut bloom = None;
             if let Some(opaque) = game.camo(&mut Gen3Cx { gl, frame, core, slot, state: self }) {
-                // Camo shows what is behind it, which the game blooms the same
-                // with or without the object. A preview's backdrop has no bloom
-                // of its own, so what camo hides is left dark for it.
-                if bloomed {
+                // A preview's backdrop has no bloom of its own, so what camo
+                // hides is left dark for it.
+                if drawing.bloomed {
                     gl.blend_func(glow::ZERO, glow::ZERO);
-                    for (batch, material) in &batches {
+                    for (batch, material) in &drawing.batches {
                         if let Some(pass) = material.camo.as_ref() {
                             self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                         }
                     }
-                    bloom = game.bloom(&mut Gen3Cx { gl, frame, core, slot, state: self }, accumulation_target, accumulation, size);
+                    bloom = game.bloom(
+                        &mut Gen3Cx { gl, frame, core, slot, state: self },
+                        drawing.accumulation_target,
+                        drawing.accumulation,
+                        size,
+                    );
                     gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
                     gl.enable(glow::DEPTH_TEST);
                     gl.enable(glow::BLEND);
@@ -1356,7 +1514,7 @@ impl Gen3State {
                     gl.disable(glow::BLEND);
                     gl.depth_mask(true);
                 }
-                for (batch, material) in &batches {
+                for (batch, material) in &drawing.batches {
                     if let Some(pass) = material.camo.as_ref() {
                         self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                     }
@@ -1364,37 +1522,27 @@ impl Gen3State {
                 gl.enable(glow::BLEND);
                 gl.depth_mask(false);
             }
-            self.pass_values = None;
-            // `render_object_context`'s shield impact, over every lit part.
-            if h3_shield_showing(frame.function_values.as_ref()) {
-                h3_set_blend(gl, H3Blend::Additive);
-                for (batch, material) in &batches {
-                    if let Some(shield) = material.shield.as_ref() {
-                        // `render_object_shield_impact`: by the settings that win.
-                        let settings = frame.preview.h3.shield.as_ref().unwrap_or(&shield.settings);
-                        let pass = shield.procedural.as_ref().filter(|_| settings.procedural).unwrap_or(&shield.pass);
-                        self.draw_pass(core, gl, frame, slot, batch, material, pass, Some(shield));
-                    }
+        }
+        bloom
+    }
+
+    /// `render_object_context`'s shield impact, over every lit part.
+    unsafe fn shield_impact(&mut self, core: &mut RenderCore, drawing: &Gen3Frame<'_>) {
+        let Gen3Frame { gl, frame, slot, .. } = *drawing;
+        if !h3_shield_showing(frame.function_values.as_ref()) {
+            return;
+        }
+        unsafe {
+            h3_set_blend(gl, H3Blend::Additive);
+            for (batch, material) in &drawing.batches {
+                if let Some(shield) = material.shield.as_ref() {
+                    // `render_object_shield_impact`: by the settings that win.
+                    let settings = frame.preview.h3.shield.as_ref().unwrap_or(&shield.settings);
+                    let pass = shield.procedural.as_ref().filter(|_| settings.procedural).unwrap_or(&shield.pass);
+                    self.draw_pass(core, gl, frame, slot, batch, material, pass, Some(shield));
                 }
-                gl.color_mask(true, true, true, true);
             }
-            game.shield(&mut Gen3Cx { gl, frame, core, slot, state: self });
-            // `c_player_view::render`: after the transparents, before the bloom
-            // and the tone curve, so these are in the same light as the scene.
-            if sprites {
-                self.draw_sprites(core, game, gl, frame, slot, SpriteStage::Rest);
-                game.late_sprites(&mut Gen3Cx { gl, frame, core, slot, state: self });
-            }
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            if bloomed && bloom.is_none() {
-                bloom = game.bloom(&mut Gen3Cx { gl, frame, core, slot, state: self }, framebuffer, accumulation, size);
-            }
-            game.composite(&mut Gen3Cx { gl, frame, core, slot, state: self }, framebuffer, accumulation, bloom, screen, size);
-            self.stops = 0.0;
-            self.finish_picture(core, game, gl, frame, slot, framebuffer, size, &screen, &shaders);
-            gl.depth_mask(true);
-            gl.disable(glow::BLEND);
-            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
+            gl.color_mask(true, true, true, true);
         }
     }
 
