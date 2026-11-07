@@ -2005,8 +2005,6 @@ pub(in crate::app::model_preview) struct SlotSimulations {
     /// Reach's cheap particles.
     pub(in crate::app::model_preview) reach_cheap: particles::cheap::ReachCheapField,
     pub(in crate::app::model_preview) h3_strips: gen3::strips::H3StripField,
-    /// Halo 4's trailing tracers between frames.
-    pub(in crate::app::model_preview) h4_trails: h4::tracers::H4TracerField,
     /// When each effect began, for Halo 2's and the gen3 games' effect parts.
     pub(in crate::app::model_preview) effect_onsets: gen3::effects::H3EffectOnsets,
     /// Halo 2's and the gen3 games' cloth.
@@ -2027,7 +2025,6 @@ impl SlotSimulations {
             particles,
             reach_cheap,
             h3_strips,
-            h4_trails,
             effect_onsets,
             cloth,
             antennas,
@@ -2037,7 +2034,6 @@ impl SlotSimulations {
         visit("particles", particles);
         visit("reach_cheap", reach_cheap);
         visit("h3_strips", h3_strips);
-        visit("h4_trails", h4_trails);
         visit("effect_onsets", effect_onsets);
         visit("cloth", cloth);
         visit("antennas", antennas);
@@ -2088,8 +2084,6 @@ pub(super) struct ModelGpuSlot {
     pub(in crate::app::model_preview) leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     pub(in crate::app::model_preview) strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     pub(in crate::app::model_preview) particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
-    /// Halo 4's particle programs, bitmaps and state buffer.
-    pub(in crate::app::model_preview) h4_effects: h4::effect_gl::H4EffectGl,
 }
 
 impl ModelGpuSlot {
@@ -2141,7 +2135,6 @@ impl ModelGpuSlot {
                 leaf_textures: Vec::new(),
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
-                h4_effects: Default::default(),
             })
         }
     }
@@ -2257,7 +2250,6 @@ impl ModelGpuSlot {
             return;
         }
         unsafe {
-            self.h4_effects.clear(gl);
             let drained = self
                 .particle_textures
                 .drain(..)

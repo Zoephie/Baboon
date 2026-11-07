@@ -1275,7 +1275,7 @@ impl RenderCore {
                         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.distortion_framebuffer));
                         gl.clear_color(0.0, 0.0, 0.0, 0.0);
                         gl.clear(glow::COLOR_BUFFER_BIT);
-                        self.draw_gen3_sprites(gl, frame, slot, SpriteStage::Distortions);
+                        self.draw_gen3_sprites(game, gl, frame, slot, SpriteStage::Distortions);
                         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
                     }
                 }
@@ -1298,7 +1298,7 @@ impl RenderCore {
             for (distance, batch, material, pass, blend) in blended {
                 game.blended(&mut FrameCx { gl, frame, core: self, slot }, distance, size);
                 if sprites {
-                    self.draw_gen3_sprites(gl, frame, slot, SpriteStage::FartherThan(distance));
+                    self.draw_gen3_sprites(game, gl, frame, slot, SpriteStage::FartherThan(distance));
                 }
                 gl.enable(glow::BLEND);
                 gl.depth_mask(false);
@@ -1316,7 +1316,7 @@ impl RenderCore {
             }
             game.blended(&mut FrameCx { gl, frame, core: self, slot }, f32::NEG_INFINITY, size);
             if sprites {
-                self.draw_gen3_sprites(gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                self.draw_gen3_sprites(game, gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                 if self.gen3.distorted {
                     self.h3_apply_distortions(gl, accumulation_target, size);
                     gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1379,7 +1379,7 @@ impl RenderCore {
             // `c_player_view::render`: after the transparents, before the bloom
             // and the tone curve, so these are in the same light as the scene.
             if sprites {
-                self.draw_gen3_sprites(gl, frame, slot, SpriteStage::Rest);
+                self.draw_gen3_sprites(game, gl, frame, slot, SpriteStage::Rest);
                 game.late_sprites(&mut FrameCx { gl, frame, core: self, slot });
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));

@@ -142,11 +142,6 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
         };
         simulations.h3_strips.advance(&frame.preview.h3_strips, values, &mut simulations.effect_onsets, tracks, bones, frame.time);
     }
-    if frame.preview.h4_tracers.iter().any(|tracer| tracer.trails()) {
-        let values = |object: u8| frame.function_values_of_object(object).cloned();
-        let tracers = &frame.preview.h4_tracers;
-        simulations.h4_trails.advance(tracers, values, &mut simulations.effect_onsets, bones, view.eye, frame.time);
-    }
 }
 
 /// The frame's antennas: Halo 2's and Halo 3's, and Reach's and Halo 4's,

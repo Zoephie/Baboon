@@ -3,7 +3,9 @@
 
 use eframe::glow::{self, HasContext};
 
+use super::super::common::slots::GameSlots;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
+use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore};
 use super::super::gen3::pipeline::{h3_layered_distance, h3_set_cull};
@@ -34,6 +36,8 @@ pub(in crate::app::model_preview) struct H4Game {
     camo: Option<H4CamoDraw>,
     camo_batches: Vec<Gen3Batch>,
     mask: Option<glow::NativeTexture>,
+    /// Each of the renderer's slots' state.
+    slots: GameSlots<super::slot::H4Slot>,
 }
 
 impl Gen3Game for H4Game {
@@ -164,6 +168,102 @@ impl Gen3Game for H4Game {
                 self.draw_camo(cx, &batches, draw, size);
                 self.camo_batches = batches;
             }
+        }
+    }
+
+    /// The trailing tracers step on, and the effects' GL state follows the
+    /// slot's geometry.
+    unsafe fn advance_own_sprites(&mut self, cx: &mut Gen3Sprites<'_>) {
+        let frame = cx.frame;
+        let h4 = self.slots.of(cx.slot, cx.uploads);
+        unsafe { h4.sync_effects(cx.gl, frame) };
+        if frame.preview.h4_tracers.iter().any(|tracer| tracer.trails()) {
+            let values = |object: u8| frame.function_values_of_object(object).cloned();
+            let tracers = &frame.preview.h4_tracers;
+            h4.trails.advance(tracers, values, cx.onsets, cx.bones, cx.view.eye, frame.time);
+        }
+    }
+
+    /// The tracers, and the light volumes and particle systems that draw
+    /// through their material, from packed state.
+    unsafe fn draw_own_sprite(&mut self, cx: &mut Gen3Sprites<'_>, sprite: Gen3Sprite) -> bool {
+        let (gl, frame, bones, view) = (cx.gl, cx.frame, cx.bones, cx.view);
+        let h4 = self.slots.of(cx.slot, cx.uploads);
+        let (depth, size, placeholder) = (cx.depth_copy, cx.size, cx.placeholder);
+        let drew = unsafe {
+            match sprite {
+                Gen3Sprite::Tracer(index) => {
+                    let at = &frame.preview.h4_tracers[index];
+                    let values = frame.function_values_of_object(at.object);
+                    let onset = cx.onsets.of(at.object, at.scale_name(), values, frame.time);
+                    let draw = if at.trails() {
+                        h4.trails.draw(index, at, values, bones, view.eye, frame.time, onset)
+                    } else {
+                        at.draw(values, bones, view.eye, frame.time, onset)
+                    };
+                    if let Some(draw) = draw {
+                        let material = &at.definition.material;
+                        let effects = &mut h4.effects;
+                        super::tracer_pass::draw_h4_tracer(gl, effects, frame, material, &draw, depth, size, placeholder, at.object);
+                        Some(true)
+                    } else {
+                        Some(false)
+                    }
+                }
+                Gen3Sprite::Volume(index) => {
+                    let at = &frame.preview.h3_light_volumes[index];
+                    let Some(material) = at.h4_material() else {
+                        return false;
+                    };
+                    let values = frame.function_values_of_object(at.object);
+                    let onset = cx.onsets.of(at.object, at.scale_name(), values, frame.time);
+                    match at.h4_draw(values, bones, view, frame.time, onset) {
+                        Some(draw) => {
+                            let effects = &mut h4.effects;
+                            super::light_volume_pass::draw_h4_light_volume(
+                                gl, effects, frame, material, &draw, depth, size, placeholder, at.object,
+                            );
+                            Some(true)
+                        }
+                        None => Some(false),
+                    }
+                }
+                Gen3Sprite::System(index) => {
+                    let system = &frame.preview.h3_particles[index];
+                    let Some(render) = system.look.h4.as_ref() else {
+                        return false;
+                    };
+                    let values = frame.function_values_of_object(system.object);
+                    let onset = cx.onsets.of(system.object, system.scale_name(), values, frame.time);
+                    let draws = cx.particles.h4_draws(index, system, values, bones, view, frame.time, onset);
+                    if draws.is_empty() {
+                        Some(false)
+                    } else {
+                        let effects = &mut h4.effects;
+                        super::particle_pass::draw_h4_particles(
+                            gl, effects, frame, render, &draws, depth, size, placeholder, system.object,
+                        );
+                        Some(true)
+                    }
+                }
+            }
+        };
+        // What drew through its own program hands the sprite program back.
+        if drew == Some(true) {
+            let flares = cx.flares;
+            unsafe {
+                gl.use_program(Some(flares.program));
+                gl.bind_vertex_array(Some(flares.vertex_array));
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+            }
+        }
+        drew.is_some()
+    }
+
+    #[cfg(test)]
+    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+        if let Some(h4) = self.slots.current(slot, uploads) {
+            visit("h4_trails", &h4.trails);
         }
     }
 }

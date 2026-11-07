@@ -20,6 +20,7 @@ pub(crate) mod shaders;
 pub(super) mod shadow;
 pub(in crate::app::model_preview) mod shadow_pass;
 pub(super) mod shield;
+pub(in crate::app::model_preview) mod slot;
 pub(super) mod submit;
 pub(in crate::app::model_preview) mod tracer_pass;
 pub(super) mod tracers;

@@ -10,7 +10,11 @@ use super::super::common::sprites::{
 };
 use super::super::renderer::*;
 use super::super::*;
+use super::super::common::view::ViewFrame;
+use super::super::gen3::effects::H3EffectOnsets;
+use super::super::particles::H3ParticleField;
 use super::pipeline::{h3_layered_distance, h3_lighting_constants, h3_set_blend};
+use super::render::Gen3Game;
 
 /// Which part of the object's sprites a call draws.
 #[derive(Debug, Clone, Copy)]
@@ -27,6 +31,7 @@ impl RenderCore {
     /// The part of the frame's sprites `stage` names.
     pub(in crate::app::model_preview) unsafe fn draw_gen3_sprites(
         &mut self,
+        game: &mut dyn Gen3Game,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -43,16 +48,42 @@ impl RenderCore {
             let no_map = self.gen3.no_bloom;
             // What Reach's area screen effects do to the sprites' exposure.
             let stops = self.gen3.stops;
+            let placeholder = self.placeholder;
+            let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
+            let depth_copy = self.gen3.depth_copy;
             let uploaded = &mut self.slots[slot];
+            let uploads = uploaded.uploads();
             let camera = &frame.camera;
             let view = ce_flare_view(camera);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+            macro_rules! sprites {
+                ($uploaded:expr) => {
+                    Gen3Sprites {
+                        gl,
+                        frame,
+                        flares,
+                        view: &view,
+                        bones,
+                        onsets: &mut $uploaded.simulations.effect_onsets,
+                        particles: &mut $uploaded.simulations.particles,
+                        depth_copy,
+                        size,
+                        placeholder,
+                        slot,
+                        uploads,
+                    }
+                };
+            }
             if matches!(stage, SpriteStage::Rest) {
                 draw_antennas(gl, flares, &mut uploaded.simulations.antennas, &uploaded.antenna_textures, frame, bones, &view, h3);
             }
             gl.color_mask(true, true, true, false);
             // `render_effects`, among the transparents: every profile is its own quad.
+            let first = !self.sprites_advanced;
             advance_sprite_simulations(uploaded, frame, bones, &view, &mut self.sprites_advanced);
+            if first {
+                game.advance_own_sprites(&mut sprites!(uploaded));
+            }
             let cursor = &mut self.gen3.sprite_cursor;
             // `c_transparency_renderer` sorts far to near, each from its location.
             enum Sprites {
@@ -111,33 +142,8 @@ impl RenderCore {
                 }
                 match sprites {
                     Sprites::Tracer(index) => {
-                        let at = &frame.preview.h4_tracers[index];
-                        if !frame.h4_tracers_shown.get(index).copied().unwrap_or(true) {
-                            continue;
-                        }
-                        let values = frame.function_values_of_object(at.object);
-                        let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
-                        let draw = if at.trails() {
-                            uploaded.simulations.h4_trails.draw(index, at, values, bones, view.eye, frame.time, onset)
-                        } else {
-                            at.draw(values, bones, view.eye, frame.time, onset)
-                        };
-                        if let Some(draw) = draw {
-                            let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
-                            h4::tracer_pass::draw_h4_tracer(
-                                gl,
-                                &mut uploaded.h4_effects,
-                                frame,
-                                &at.definition.material,
-                                &draw,
-                                self.gen3.depth_copy,
-                                size,
-                                self.placeholder,
-                                at.object,
-                            );
-                            gl.use_program(Some(flares.program));
-                            gl.bind_vertex_array(Some(flares.vertex_array));
-                            gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+                        if frame.h4_tracers_shown.get(index).copied().unwrap_or(true) {
+                            game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::Tracer(index));
                         }
                     }
                     Sprites::Volume(index) => {
@@ -145,27 +151,7 @@ impl RenderCore {
                         if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
                             continue;
                         }
-                        // Halo 4's: through their material, from packed state.
-                        if let Some(material) = at.h4_material() {
-                            let values = frame.function_values_of_object(at.object);
-                            let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
-                            if let Some(draw) = at.h4_draw(values, bones, &view, frame.time, onset) {
-                                let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
-                                h4::light_volume_pass::draw_h4_light_volume(
-                                    gl,
-                                    &mut uploaded.h4_effects,
-                                    frame,
-                                    material,
-                                    &draw,
-                                    self.gen3.depth_copy,
-                                    size,
-                                    self.placeholder,
-                                    at.object,
-                                );
-                                gl.use_program(Some(flares.program));
-                                gl.bind_vertex_array(Some(flares.vertex_array));
-                                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
-                            }
+                        if game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::Volume(index)) {
                             continue;
                         }
                         let texture = uploaded.volume_textures.get(index).copied().flatten();
@@ -204,32 +190,10 @@ impl RenderCore {
                         }
                     }
                     Sprites::System(index) => {
-                        let system = &frame.preview.h3_particles[index];
                         if !frame.h3_systems_shown.get(index).copied().unwrap_or(true) {
                             continue;
                         }
-                        // Halo 4's: through their material, from packed state.
-                        if let Some(render) = system.look.h4.as_ref() {
-                            let values = frame.function_values_of_object(system.object);
-                            let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
-                            let draws = uploaded.simulations.particles.h4_draws(index, system, values, bones, &view, frame.time, onset);
-                            if !draws.is_empty() {
-                                let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
-                                h4::particle_pass::draw_h4_particles(
-                                    gl,
-                                    &mut uploaded.h4_effects,
-                                    frame,
-                                    render,
-                                    &draws,
-                                    self.gen3.depth_copy,
-                                    size,
-                                    self.placeholder,
-                                    system.object,
-                                );
-                                gl.use_program(Some(flares.program));
-                                gl.bind_vertex_array(Some(flares.vertex_array));
-                                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
-                            }
+                        if game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::System(index)) {
                             continue;
                         }
                         let Some(particles) = particle_gl.as_ref() else {
@@ -352,4 +316,37 @@ impl RenderCore {
             self.end_sprites(gl, frame, slot);
         }
     }
+}
+
+/// A sprite a game may draw as its own, inside the gen3 sprite pass.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::app::model_preview) enum Gen3Sprite {
+    /// Of `h4_tracers`.
+    Tracer(usize),
+    /// Of `h3_light_volumes`.
+    Volume(usize),
+    /// Of `h3_particles`.
+    System(usize),
+}
+
+/// What a game's own sprites draw with, inside the gen3 sprite pass: the
+/// sprite program bound, which a sprite drawn through a program of its own
+/// binds again after, and the shared simulations.
+pub(in crate::app::model_preview) struct Gen3Sprites<'a> {
+    pub(in crate::app::model_preview) gl: &'a glow::Context,
+    pub(in crate::app::model_preview) frame: &'a ModelGpuFrame,
+    pub(in crate::app::model_preview) flares: &'a SpriteGl,
+    pub(in crate::app::model_preview) view: &'a ViewFrame,
+    pub(in crate::app::model_preview) bones: Option<&'a [[f32; 4]]>,
+    /// When each effect began.
+    pub(in crate::app::model_preview) onsets: &'a mut H3EffectOnsets,
+    /// Every game's particle systems.
+    pub(in crate::app::model_preview) particles: &'a mut H3ParticleField,
+    /// The scene's depth, for the soft fade, and the targets' size.
+    pub(in crate::app::model_preview) depth_copy: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) size: [i32; 2],
+    pub(in crate::app::model_preview) placeholder: Option<glow::NativeTexture>,
+    /// The frame's slot, and how many models it has taken.
+    pub(in crate::app::model_preview) slot: usize,
+    pub(in crate::app::model_preview) uploads: u64,
 }

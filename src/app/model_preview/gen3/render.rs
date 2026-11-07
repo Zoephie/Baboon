@@ -14,6 +14,7 @@ use super::super::common::plain::PlainRender;
 use super::super::renderer::{FrameCx, GameRender, ModelGpuFrame, RenderCore};
 use super::screen_effects::H3ScreenSettings;
 use super::shaders::H3Material;
+use super::sprites::{Gen3Sprite, Gen3Sprites};
 use crate::core::game::GameId;
 
 /// A batch the gen3 pipeline draws, with its material.
@@ -91,6 +92,21 @@ pub(in crate::app::model_preview) trait Gen3Game {
         screen: H3ScreenSettings,
         size: [i32; 2],
     );
+
+    /// In the sprite pass, once a frame after the shared simulations: the
+    /// game's own.
+    unsafe fn advance_own_sprites(&mut self, _cx: &mut Gen3Sprites<'_>) {}
+
+    /// In the sprite pass, in its far-to-near order: `sprite`, if it is the
+    /// game's own to draw. Whether it was.
+    unsafe fn draw_own_sprite(&mut self, _cx: &mut Gen3Sprites<'_>, _sprite: Gen3Sprite) -> bool {
+        false
+    }
+
+    /// Each simulation the game keeps for `slot` while it holds its
+    /// `uploads`th model, by name.
+    #[cfg(test)]
+    fn each_simulation(&self, _slot: usize, _uploads: u64, _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {}
 }
 
 /// Halo 3's, ODST's, Reach's and Halo 4's drawing: the slot's own draw, then
@@ -136,10 +152,19 @@ impl GameRender for Gen3Render {
             unsafe {
                 if cx.core.draws_object_sprites(cx.frame) {
                     use super::sprites::SpriteStage;
-                    cx.core.draw_gen3_sprites(cx.gl, cx.frame, cx.slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
-                    cx.core.draw_gen3_sprites(cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
+                    let game = self.game(cx.frame.preview.game);
+                    cx.core.draw_gen3_sprites(game, cx.gl, cx.frame, cx.slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                    cx.core.draw_gen3_sprites(game, cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
                 }
             }
+        }
+    }
+
+    #[cfg(test)]
+    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+        let Self { h3, reach, h4 } = self;
+        for game in [h3 as &dyn Gen3Game, reach, h4] {
+            game.each_simulation(slot, uploads, visit);
         }
     }
 }
