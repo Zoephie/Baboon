@@ -11,7 +11,8 @@ use super::super::common::fields::{elements, function_slot, function_slot_of, ha
 use super::super::antennas::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::passes::{FramebufferBlend, argb};
-use super::super::dx9::passes::{H2Image, ce_color_interpolate, ce_color_interpolation};
+use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
+use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

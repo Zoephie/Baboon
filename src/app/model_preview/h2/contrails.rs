@@ -12,7 +12,7 @@ use super::super::antennas::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::lights::attachment_value;
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use super::super::effects::marker_name;
 use super::super::gen3::shaders::H3Blend;
 use super::super::materials::decode_h2_image;

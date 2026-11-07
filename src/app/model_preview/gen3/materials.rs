@@ -13,7 +13,7 @@ use super::super::gen3::shaders::{
     H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
     H3Dialect, H3Sampler, H3Texels, H3Texture, H3Value,
 };
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;
 use std::sync::Arc;

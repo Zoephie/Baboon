@@ -15,7 +15,7 @@ use super::super::common::fields::{elements, has_flag};
 use super::super::h3::lights::{OcclusionOffset, rotation_function};
 use super::super::common::view::posed_on;
 use super::super::functions::FunctionValues;
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use super::super::common::named_function::tag_function_at;
 use super::super::effects::part_markers;
 use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};

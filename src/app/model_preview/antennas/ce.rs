@@ -10,7 +10,7 @@ use super::super::ce::passes::argb;
 use super::super::common::fields::{elements, object_block};
 use super::super::common::math::dot;
 use super::super::common::view::{ViewFrame, posed_on};
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use super::{ANTENNA_TRIM, AntennaQuad, AntennaSprite, antenna_sprite};

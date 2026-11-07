@@ -11,6 +11,7 @@ pub(super) mod contrails;
 pub(super) mod light_volumes;
 pub(super) mod liquid;
 pub(super) mod lights;
+pub(in crate::app::model_preview) mod passes;
 pub(in crate::app) mod prt;
 pub(in crate::app::model_preview) mod render;
 pub(in crate::app::model_preview) mod slot;

@@ -12,7 +12,7 @@ use super::ce::passes::argb;
 use super::common::fields::{elements, object_block};
 use super::common::math::{cross, dot};
 use super::common::view::{ViewFrame, posed_on};
-use super::dx9::passes::H2Image;
+use super::common::image::H2Image;
 use super::gen3::materials::{H3Bitmap, read_h3_bitmap};
 use super::h2::lights::UNSET;
 use super::materials::decode_h2_image;

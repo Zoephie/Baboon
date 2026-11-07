@@ -3,11 +3,8 @@
 
 use super::super::*;
 use super::super::common::fields::has_flag;
-use super::super::dx9::passes::{
-    H2DrawPass, H2Layer, H2ParameterValue, animation_function,
-    h2_pass_needs_frame_texture, prepare_draw_pass,
-    resolve_h2_layer_passes,
-};
+use super::super::dx9::passes::{H2DrawPass, H2Layer, H2ParameterValue, animation_function};
+use super::passes::{h2_pass_needs_frame_texture, prepare_draw_pass, resolve_h2_layer_passes};
 use std::sync::Arc;
 use std::collections::HashMap;
 use super::super::materials::*;

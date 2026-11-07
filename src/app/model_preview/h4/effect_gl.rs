@@ -13,7 +13,7 @@ use super::super::h4::materials::H4EffectMaterial;
 use super::super::renderer::*;
 use super::super::*;
 use super::super::gl::program::Linked;
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
 

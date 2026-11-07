@@ -5,7 +5,7 @@ use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use super::super::gen3::shaders::{H3Material, H3Sampler, H3Texels};
 use super::super::RenderModelPreviewBatch;
 use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS, h3_set_cull, screen_program, upload_h2_image_linear};

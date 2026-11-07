@@ -12,7 +12,7 @@ use super::super::common::fields::{elements, function_slot_of, has_flag, object_
 use super::super::common::view::{ViewFrame, posed_on};
 use super::particles::CePointPhysics;
 use super::passes::{FramebufferBlend, argb};
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

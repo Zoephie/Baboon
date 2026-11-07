@@ -7,7 +7,7 @@ use std::sync::Arc;
 use eframe::glow::{self, HasContext as _};
 
 use super::super::common::slots::GameSlot;
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use super::super::renderer::{ModelGpuFrame, upload_h2_image};
 
 /// The maps Halo 2's sprites draw with, uploaded once per geometry.

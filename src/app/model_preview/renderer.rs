@@ -7,10 +7,11 @@ use super::gl::scope::PostScope;
 use super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use super::*;
 use super::dx9::passes::{
-    H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
+    H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2DefaultLight, H2DrawPass, H2Layer,
     H2_GLSL_VERSION, H2_LAYER_COUNT, H2_REFLECTION_SCALE,
     h2_change_colors_for, h2_normalization_face, h2_object_light_direction, h2_prt_object_lights,
 };
+use super::common::image::H2Image;
 use super::h2::bloom::H2Bloom;
 use super::dx9::passes::{H2Clock, h2_prt_lights};
 use super::dx9::stage::H2VertexStage;

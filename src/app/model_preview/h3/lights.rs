@@ -16,7 +16,7 @@ use super::super::effects::{
 use super::super::functions::FunctionValues;
 use blam_tags::tag_function::transition_function_evaluate;
 
-use super::super::dx9::passes::H2Image;
+use super::super::common::image::H2Image;
 use super::super::common::named_function::{NamedFunction, tag_function_at};
 use super::super::renderer::H3_EXPOSURE as EXPOSURE;
 use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
