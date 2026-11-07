@@ -2,6 +2,7 @@
 //! passes, an object's attached effects and their parts, light volumes,
 //! strips, screen effects and PRT.
 
+pub(crate) mod flares;
 pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod pipeline;
 pub(crate) mod light_volumes;
@@ -26,7 +27,7 @@ pub(crate) struct Gen3Features {
     /// The markers a Reach or Halo 4 unit's IK chains can reach for: its own
     /// and its held weapons', in bind space on the nodes they ride.
     pub ik_markers: Vec<super::animation::reach_ik::ReachIkMarker>,
-    pub flares: Vec<super::h3::lights::H3FlareAt>,
+    pub flares: Vec<super::gen3::flares::H3FlareAt>,
     pub light_volumes: Vec<super::gen3::light_volumes::H3LightVolumeAt>,
     pub strips: Vec<std::sync::Arc<super::gen3::strips::H3StripAt>>,
     pub screen_effects: Vec<super::gen3::screen_effects::H3ScreenEffectAt>,

@@ -16,8 +16,8 @@ pub(in crate::app::model_preview) fn read_h3_object_features(source: &TagSource,
         .filter(|path| !path.is_empty())
         .and_then(|path| super::super::gen3::materials::read_h3_shield_settings(source, &path));
     preview.h3.lights = super::super::h3::lights::read_h3_lights(source, model_tag, 0, &preview.markers, frame);
-    preview.gen3.flares = super::super::h3::lights::read_h3_flares(source, model_tag, 0, &preview.markers, frame);
-    preview.gen3.flares.extend(super::super::h3::lights::light_flares(&preview.h3.lights));
+    preview.gen3.flares = super::super::gen3::flares::read_h3_flares(source, model_tag, 0, &preview.markers, frame);
+    preview.gen3.flares.extend(super::super::gen3::flares::light_flares(&preview.h3.lights));
     preview.gen3.light_volumes =
         super::super::gen3::light_volumes::read_h3_light_volumes(source, model_tag, 0, &preview.markers, frame);
     let systems = super::super::particles::read_h3_particles(source, model_tag, 0, &preview.markers, frame);

@@ -25,7 +25,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<F: Fn(&RenderM
     center: [f32; 3],
     preview: &mut RenderModelPreview,
 ) {
-    let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
+    let flares = super::super::gen3::flares::read_h3_flares(source, object, owner, markers, frame);
     preview.gen3.flares.extend(named(flares, name));
     let (lights, cheap) = super::super::reach::lights::read_reach_lights(source, object, owner, markers, frame);
     preview.reach.lights.extend(named(lights, name));

@@ -21,7 +21,7 @@ pub(in crate::app::model_preview) fn read_h3_attached_features<F: Fn(&RenderMode
     preview: &mut RenderModelPreview,
 ) {
     let lights = super::super::h3::lights::read_h3_lights(source, object, owner, markers, frame);
-    let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
+    let flares = super::super::gen3::flares::read_h3_flares(source, object, owner, markers, frame);
     let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
     preview.gen3.light_volumes.extend(named(volumes, name));
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
@@ -37,6 +37,6 @@ pub(in crate::app::model_preview) fn read_h3_attached_features<F: Fn(&RenderMode
     super::super::gen3::screen_effects::add_screen_shader_materials(preview);
     let lights: Vec<_> = named(lights, name).collect();
     preview.gen3.flares.extend(named(flares, name));
-    preview.gen3.flares.extend(super::super::h3::lights::light_flares(&lights));
+    preview.gen3.flares.extend(super::super::gen3::flares::light_flares(&lights));
     preview.h3.lights.extend(lights);
 }

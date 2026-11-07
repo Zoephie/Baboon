@@ -12,7 +12,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::h3::lights::{OcclusionOffset, rotation_function};
+use super::super::gen3::flares::{OcclusionOffset, rotation_function};
 use super::super::common::view::posed_on;
 use super::super::functions::FunctionValues;
 use super::super::common::image::H2Image;
