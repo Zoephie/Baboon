@@ -14,6 +14,29 @@ use super::lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
 use super::lights::{CHEAP_ALBEDO_BLEND, ReachLightMethod, ReachLitLight};
 use super::render::ReachGame;
 
+use std::sync::Arc;
+
+use super::super::gen3::shaders::{H3Pass, H3Sources, SCREEN_VERTEX, VERTEX_SKINNED, base_defines, pass_of};
+use crate::core::hlsl::emit::{Stage, Translated};
+
+impl H3Sources {
+    /// One of Reach's `light_apply` explicit shaders (`lights\\<file>`): its
+    /// pixel stage only, over a triangle that covers the picture. The game
+    /// draws it over the light's volume behind a stencil; outside a light's
+    /// reach its falloff is 0, so the whole picture serves.
+    pub(crate) fn reach_light_pass(&mut self, file: &str) -> Result<Arc<H3Pass>, String> {
+        let main = format!("#include \"lights\\{file}.hlsl\"\n");
+        let defines = base_defines(self.dialect(), VERTEX_SKINNED, Stage::Pixel);
+        let pixel = self.compile(&defines, &main, "default_ps", Stage::Pixel)?;
+        let vertex =
+            Translated { source: SCREEN_VERTEX.to_owned(), uniforms: Vec::new(), textures: Vec::new(), attributes: Vec::new() };
+        let mut pass = pass_of(vertex, pixel);
+        pass.vertex = SCREEN_VERTEX.to_owned();
+        pass.fullscreen = true;
+        Ok(Arc::new(pass))
+    }
+}
+
 /// `render_screenspace_light`'s near fade: out within `near_fading` of the
 /// camera, full at twice it.
 fn near_fade(light: &ReachLitLight, eye: [f32; 3]) -> f32 {

@@ -11,7 +11,7 @@ use blam_tags::render_method::{
 use super::super::common::fields::{elements, has_flag};
 use super::super::gen3::shaders::{
     H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
-    H3Dialect, H3Sampler, H3Texels, H3Texture, H3Value,
+    H3Sampler, H3Texels, H3Texture, H3Value, RenderMethodDialect,
 };
 use super::super::common::image::H2Image;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -315,7 +315,7 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
     // Reach's `select_mesh_entry_point_for_pass` (MCC `sub_14084C910`) lights
     // what blends in a single pass, by the mesh's policy: one probe, or the
     // ambient transfer.
-    let single_pass_entries = (dialect == H3Dialect::Reach && !opaque && has("single_pass_single_probe"))
+    let single_pass_entries = (dialect == RenderMethodDialect::Reach && !opaque && has("single_pass_single_probe"))
         .then_some(("single_pass_single_probe", "single_pass_single_probe_ambient"));
     let lit_entry = single_pass_entries.as_ref().map_or(lit_entry, |(entry, _)| entry);
     // `render_method_update_postprocess`: the single pass flag counts as blended.
@@ -338,11 +338,10 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
     // Reach's writes back what it samples, which the preview's copy holds
     // encoded.
     let camo = match dialect {
-        H3Dialect::Reach => camo.and_then(|pass| super::super::reach::camo::camo_pass(&pass)).map(Arc::new),
-        H3Dialect::Halo3 => camo,
-        H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
+        RenderMethodDialect::Reach => camo.and_then(|pass| super::super::reach::camo::camo_pass(&pass)).map(Arc::new),
+        RenderMethodDialect::Halo3 => camo,
     };
-    let shadow_generate = (dialect == H3Dialect::Reach && opaque && has("shadow_generate"))
+    let shadow_generate = (dialect == RenderMethodDialect::Reach && opaque && has("shadow_generate"))
         .then(|| sources.pass(&definition, &options, "shadow_generate", false))
         .transpose()?;
     let dynamic_light = (opaque && definition.entry_points.iter().any(|entry| entry == "dynamic_light"))
@@ -365,7 +364,7 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
         .map(|parameter| parameter.parameter_name.clone())
         .collect();
     let mut material = H3Material {
-        dialect,
+        dialect: dialect.into(),
         albedo,
         lit,
         screen_maps,
@@ -383,7 +382,6 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
         change_colors: Vec::new(),
         animations: Vec::new(),
         shield: None,
-        h4: None,
         fringe: None,
     };
     if opaque {
@@ -525,7 +523,7 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
             };
             material.textures.push(H3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
         }
-        if dialect == H3Dialect::Reach {
+        if dialect == RenderMethodDialect::Reach {
             reach_environment_maps(source, pass, &mut material, caches);
         }
     }

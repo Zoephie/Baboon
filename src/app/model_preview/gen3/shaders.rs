@@ -76,7 +76,7 @@ struct H3SharedStages {
 pub(crate) struct H3Definition {
     /// The family: `shader`, `terrain`..
     pub(crate) name: String,
-    dialect: H3Dialect,
+    dialect: RenderMethodDialect,
     /// The file it compiles, as an `#include` names it: Halo 3's `shader.fx`,
     /// Reach's `templated\shader.fx`.
     source_file: String,
@@ -92,7 +92,7 @@ pub(crate) struct H3Definition {
 }
 
 pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Definition> {
-    let dialect = H3Dialect::of(source);
+    let dialect = RenderMethodDialect::of(source);
     let tag = load_referenced_tag_from_source(source, path, "render_method_definition", b"rmdf").ok()?;
     let root = tag.root();
     let function = |holder: TagStruct<'_>, name: &str| holder.read_string_id(name).filter(|name| !name.is_empty());
@@ -118,14 +118,14 @@ pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Def
     let mut shared = std::collections::BTreeMap::new();
     for entry in elements(root, "entry_points") {
         let passes = elements(entry, "passes");
-        if dialect == H3Dialect::Reach && passes.is_empty() {
+        if dialect == RenderMethodDialect::Reach && passes.is_empty() {
             continue;
         }
         let Some(name) = entry.read_enum_option("entry point") else {
             continue;
         };
         let name = entry_name(dialect, &name).to_owned();
-        if dialect == H3Dialect::Reach {
+        if dialect == RenderMethodDialect::Reach {
             let first = passes[0];
             // `sub_140342850` asserts a stage depends on fewer than two.
             let category = |block: &str| {
@@ -217,51 +217,50 @@ impl H3Definition {
     /// category Reach blends `shader_glass` and nothing else.
     pub(crate) fn blend_of(&self, options: &[usize], glass: bool) -> H3Blend {
         let Some(name) = self.chosen("blend_mode", options) else {
-            return if glass && self.dialect == H3Dialect::Reach { H3Blend::AlphaBlend } else { H3Blend::Opaque };
+            return if glass && self.dialect == RenderMethodDialect::Reach { H3Blend::AlphaBlend } else { H3Blend::Opaque };
         };
         let index = match self.dialect {
-            H3Dialect::Halo3 => {
+            RenderMethodDialect::Halo3 => {
                 let name = name.to_ascii_lowercase();
                 BLEND_MODES.iter().position(|mode| name.starts_with(mode))
             }
             // Reach's entries past `motion_blur_inhibit` are its own; no
             // Reach definition offers them as options, so none reach here.
-            H3Dialect::Reach => REACH_BLEND_MODES[..13].iter().position(|mode| name.starts_with(mode)),
-            H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
+            RenderMethodDialect::Reach => REACH_BLEND_MODES[..13].iter().position(|mode| name.starts_with(mode)),
         };
         H3Blend::ALL[index.unwrap_or(0)]
     }
 }
 
 /// tool's name for an entry point, where the tag's enum spells it for people.
-fn entry_name(dialect: H3Dialect, option: &str) -> &str {
+fn entry_name(dialect: RenderMethodDialect, option: &str) -> &str {
     match (dialect, option) {
         (_, "vertex color lighting") => "static_per_vertex_color",
         (_, "water tessellation") => "water_tessellation",
         (_, "water shading") => "water_shading",
         // Reach tool's `entry_point` table, `off_14290E110`.
-        (H3Dialect::Reach, "imposter_static_lighting_sh") => "imposter_static_sh",
-        (H3Dialect::Reach, "imposter_static_lighting_prt_ambient") => "imposter_static_prt_ambient",
+        (RenderMethodDialect::Reach, "imposter_static_lighting_sh") => "imposter_static_sh",
+        (RenderMethodDialect::Reach, "imposter_static_lighting_prt_ambient") => "imposter_static_prt_ambient",
         (_, other) => other,
     }
 }
 
 /// The function each stage compiles. Some entry points share one. Reach's
 /// are tool's `off_14290DCC0` (vertex) and `off_14290DBD0` (pixel).
-fn entry_functions(dialect: H3Dialect, entry: &str) -> (String, String) {
+fn entry_functions(dialect: RenderMethodDialect, entry: &str) -> (String, String) {
     let pair = |vertex: &str, pixel: &str| (vertex.to_owned(), pixel.to_owned());
     match (dialect, entry) {
         (_, "static_prt_ambient" | "static_prt_linear" | "static_prt_quadratic") => {
             (format!("{entry}_vs"), "static_prt_ps".to_owned())
         }
-        (H3Dialect::Halo3, "dynamic_light_cinematic") => pair("dynamic_light_cine_vs", "dynamic_light_cine_ps"),
-        (H3Dialect::Reach, "dynamic_light") => pair("default_dynamic_light_vs", "dynamic_light_ps"),
-        (H3Dialect::Reach, "dynamic_light_cinematic") => pair("default_dynamic_light_vs", "dynamic_light_cine_ps"),
-        (H3Dialect::Reach, "dynamic_light_hq_shadows") => pair("default_dynamic_light_vs", "dynamic_light_hq_shadows_ps"),
-        (H3Dialect::Reach, "dynamic_light_cinematic_hq_shadows") => {
+        (RenderMethodDialect::Halo3, "dynamic_light_cinematic") => pair("dynamic_light_cine_vs", "dynamic_light_cine_ps"),
+        (RenderMethodDialect::Reach, "dynamic_light") => pair("default_dynamic_light_vs", "dynamic_light_ps"),
+        (RenderMethodDialect::Reach, "dynamic_light_cinematic") => pair("default_dynamic_light_vs", "dynamic_light_cine_ps"),
+        (RenderMethodDialect::Reach, "dynamic_light_hq_shadows") => pair("default_dynamic_light_vs", "dynamic_light_hq_shadows_ps"),
+        (RenderMethodDialect::Reach, "dynamic_light_cinematic_hq_shadows") => {
             pair("default_dynamic_light_vs", "dynamic_light_cine_hq_shadows_ps")
         }
-        (H3Dialect::Reach, "imposter_static_prt_ambient") => pair("imposter_static_prt_ambient_vs", "imposter_static_prt_ps"),
+        (RenderMethodDialect::Reach, "imposter_static_prt_ambient") => pair("imposter_static_prt_ambient_vs", "imposter_static_prt_ps"),
         (_, other) => (format!("{other}_vs"), format!("{other}_ps")),
     }
 }
@@ -269,7 +268,11 @@ fn entry_functions(dialect: H3Dialect, entry: &str) -> (String, String) {
 /// `sub_140C587A0`: what every shader compiles with. Reach's `sub_141171B10`
 /// adds `_standard_vs`, without which every vertex shader body is compiled
 /// out, and `disable_register_reorder`.
-fn base_defines(dialect: H3Dialect, vertex_type: usize, stage: Stage) -> Vec<(String, String)> {
+pub(in crate::app::model_preview) fn base_defines(
+    dialect: RenderMethodDialect,
+    vertex_type: usize,
+    stage: Stage,
+) -> Vec<(String, String)> {
     let (vertex, deform) = VERTEX_TYPES[vertex_type];
     let stage = match stage {
         Stage::Vertex => "VERTEX_SHADER",
@@ -284,7 +287,7 @@ fn base_defines(dialect: H3Dialect, vertex_type: usize, stage: Stage) -> Vec<(St
         ("PARAM_ALLOC_FIRST_PASS", "1"),
         (stage, "1"),
     ];
-    if dialect == H3Dialect::Reach {
+    if dialect == RenderMethodDialect::Reach {
         defines.extend([("_standard_vs", "1"), ("disable_register_reorder", "1")]);
     }
     defines.into_iter().map(|(name, value)| (name.to_owned(), value.to_owned())).collect()
@@ -323,7 +326,8 @@ fn option_defines(definition: &H3Definition, options: &[Option<usize>]) -> Vec<(
     defines
 }
 
-/// Whose tool lays out the sources.
+/// Whose frame a material is lit and drawn in: Halo 3's (and ODST's),
+/// Reach's or Halo 4's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum H3Dialect {
     Halo3,
@@ -333,9 +337,16 @@ pub(crate) enum H3Dialect {
     Halo4,
 }
 
-impl H3Dialect {
-    /// A render method's dialect; never `Halo4`, whose materials are not
-    /// render methods.
+/// Whose tool lays out a render method's sources: Halo 3's (and ODST's) or
+/// Reach's. Halo 4 has materials, not render methods, so it has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenderMethodDialect {
+    Halo3,
+    Reach,
+}
+
+impl RenderMethodDialect {
+    /// Reach's for a Reach kit, Halo 3's for any other.
     fn of(source: &TagSource) -> Self {
         match source.game() {
             Some(GameId::HaloReach) => Self::Reach,
@@ -344,29 +355,37 @@ impl H3Dialect {
     }
 }
 
+impl From<RenderMethodDialect> for H3Dialect {
+    fn from(dialect: RenderMethodDialect) -> Self {
+        match dialect {
+            RenderMethodDialect::Halo3 => Self::Halo3,
+            RenderMethodDialect::Reach => Self::Reach,
+        }
+    }
+}
+
 /// The tag behind an `#include`. Halo 3 keeps every source in one folder:
 /// `global.fx` is `shaders\global_fx`. Reach's `c_tag_d3dx_include`
 /// (tool `sub_141219410`) keeps the folder and cuts the last extension:
 /// `templated\albedo.fx` is `shaders\templated\albedo`.
-fn include_tag(dialect: H3Dialect, name: &str) -> String {
+fn include_tag(dialect: RenderMethodDialect, name: &str) -> String {
     match dialect {
-        H3Dialect::Halo3 => {
+        RenderMethodDialect::Halo3 => {
             let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
             format!("shaders\\{}", file.replace('.', "_"))
         }
-        H3Dialect::Reach => {
+        RenderMethodDialect::Reach => {
             let path = name.replace('/', "\\");
             let stem = path.rsplit_once('.').map_or(path.as_str(), |(stem, _)| stem);
             format!("shaders\\{stem}")
         }
-        H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
     }
 }
 
 /// A kit's sources, read once.
 pub(crate) struct H3Sources {
     source: TagSource,
-    dialect: H3Dialect,
+    dialect: RenderMethodDialect,
     definitions: HashMap<String, Option<Arc<H3Definition>>>,
     files: HashMap<String, Option<Arc<str>>>,
     passes: HashMap<(String, [Vec<Option<usize>>; 2], String, bool), Arc<H3Pass>>,
@@ -374,12 +393,12 @@ pub(crate) struct H3Sources {
 
 impl H3Sources {
     pub(crate) fn new(source: &TagSource) -> Self {
-        let dialect = H3Dialect::of(source);
+        let dialect = RenderMethodDialect::of(source);
         let source = source.clone();
         Self { source, dialect, definitions: HashMap::new(), files: HashMap::new(), passes: HashMap::new() }
     }
 
-    pub(crate) fn dialect(&self) -> H3Dialect {
+    pub(crate) fn dialect(&self) -> RenderMethodDialect {
         self.dialect
     }
 
@@ -417,7 +436,7 @@ impl H3Sources {
         defines.push(("entry_point".to_owned(), entry.to_owned()));
         // `sub_140C587A0`: a blended shader has no albedo pass to read back.
         // Reach's sources never read it; its blended shaders go by `blend_type`.
-        if own_albedo && self.dialect == H3Dialect::Halo3 {
+        if own_albedo && self.dialect == RenderMethodDialect::Halo3 {
             defines.push(("maybe_calc_albedo".to_owned(), "1".to_owned()));
         }
         defines.extend(option_defines(definition, &definition.stage_options(options, entry, stage)));
@@ -426,7 +445,7 @@ impl H3Sources {
         self.compile(&defines, &main, if stage == Stage::Vertex { &vertex } else { &pixel }, stage)
     }
 
-    fn compile(
+    pub(in crate::app::model_preview) fn compile(
         &mut self,
         defines: &[(String, String)],
         main: &str,
@@ -443,31 +462,14 @@ impl H3Sources {
     pub(crate) fn explicit_pass(&mut self, file: &str) -> Result<Arc<H3Pass>, String> {
         // Reach keeps its explicit shaders in `shaders\explicit`.
         let main = match self.dialect {
-            H3Dialect::Halo3 => format!("#include \"{file}.hlsl\"\n"),
-            H3Dialect::Reach => format!("#include \"explicit\\{file}.hlsl\"\n"),
-            H3Dialect::Halo4 => unreachable!("Halo 4 draws materials, not render methods"),
+            RenderMethodDialect::Halo3 => format!("#include \"{file}.hlsl\"\n"),
+            RenderMethodDialect::Reach => format!("#include \"explicit\\{file}.hlsl\"\n"),
         };
         let vertex_defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Vertex);
         let pixel_defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Pixel);
         let vertex = self.compile(&vertex_defines, &main, "default_vs", Stage::Vertex)?;
         let pixel = self.compile(&pixel_defines, &main, "default_ps", Stage::Pixel)?;
         Ok(Arc::new(pass_of(vertex, pixel)))
-    }
-
-    /// One of Reach's `light_apply` explicit shaders (`lights\\<file>`): its
-    /// pixel stage only, over a triangle that covers the picture. The game
-    /// draws it over the light's volume behind a stencil; outside a light's
-    /// reach its falloff is 0, so the whole picture serves.
-    pub(crate) fn reach_light_pass(&mut self, file: &str) -> Result<Arc<H3Pass>, String> {
-        let main = format!("#include \"lights\\{file}.hlsl\"\n");
-        let defines = base_defines(self.dialect, VERTEX_SKINNED, Stage::Pixel);
-        let pixel = self.compile(&defines, &main, "default_ps", Stage::Pixel)?;
-        let vertex =
-            Translated { source: SCREEN_VERTEX.to_owned(), uniforms: Vec::new(), textures: Vec::new(), attributes: Vec::new() };
-        let mut pass = pass_of(vertex, pixel);
-        pass.vertex = SCREEN_VERTEX.to_owned();
-        pass.fullscreen = true;
-        Ok(Arc::new(pass))
     }
 
     /// A `shader_screen`'s pixel shader, fed by a triangle over the picture
@@ -509,7 +511,7 @@ impl H3Sources {
 }
 
 /// `default_vs` of `screen.fx`, for a triangle that covers the picture.
-const SCREEN_VERTEX: &str = "#version 410 core
+pub(in crate::app::model_preview) const SCREEN_VERTEX: &str = "#version 410 core
 out vec4 v_TEXCOORD0;
 void main() {
     vec2 corner = vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4.0 - 1.0;
@@ -832,8 +834,9 @@ impl H3Texels {
 /// A shader's passes and everything they read.
 #[derive(Debug)]
 pub(crate) struct H3Material {
-    /// Whose frame lights it: Halo 3's (and ODST's) or Reach's.
-    pub(crate) dialect: H3Dialect,
+    /// Whose frame lights it, with Halo 4's per-draw functions and hologram
+    /// rig: read through [`H3Material::dialect`] and [`H3Material::h4`].
+    pub(crate) dialect: H3MaterialDialect,
     pub(crate) albedo: Option<Arc<H3Pass>>,
     pub(crate) lit: Arc<H3Pass>,
     /// Halo 4's `opaque_alpha_blend` draws twice: `lit` with the opaque
@@ -863,8 +866,50 @@ pub(crate) struct H3Material {
     pub(crate) change_colors: Vec<(String, usize)>,
     pub(crate) animations: Vec<H3Animation>,
     pub(crate) shield: Option<Arc<H3Shield>>,
+}
+
+/// A material's dialect, with what only Halo 4's carry: its per-draw
+/// functions and hologram rig.
+#[derive(Debug)]
+pub(crate) enum H3MaterialDialect {
+    Halo3,
+    Reach,
+    Halo4(Arc<super::super::h4::submit::H4Submit>),
+}
+
+impl From<RenderMethodDialect> for H3MaterialDialect {
+    fn from(dialect: RenderMethodDialect) -> Self {
+        match dialect {
+            RenderMethodDialect::Halo3 => Self::Halo3,
+            RenderMethodDialect::Reach => Self::Reach,
+        }
+    }
+}
+
+impl H3Material {
+    /// Whose frame lights it.
+    pub(crate) fn dialect(&self) -> H3Dialect {
+        match self.dialect {
+            H3MaterialDialect::Halo3 => H3Dialect::Halo3,
+            H3MaterialDialect::Reach => H3Dialect::Reach,
+            H3MaterialDialect::Halo4(_) => H3Dialect::Halo4,
+        }
+    }
+
     /// Halo 4's per-draw functions and hologram rig.
-    pub(crate) h4: Option<Arc<super::super::h4::submit::H4Submit>>,
+    pub(crate) fn h4(&self) -> Option<&Arc<super::super::h4::submit::H4Submit>> {
+        match &self.dialect {
+            H3MaterialDialect::Halo4(submit) => Some(submit),
+            H3MaterialDialect::Halo3 | H3MaterialDialect::Reach => None,
+        }
+    }
+
+    pub(crate) fn h4_mut(&mut self) -> Option<&mut Arc<super::super::h4::submit::H4Submit>> {
+        match &mut self.dialect {
+            H3MaterialDialect::Halo4(submit) => Some(submit),
+            H3MaterialDialect::Halo3 | H3MaterialDialect::Reach => None,
+        }
+    }
 }
 
 /// Uniform values by name. Ordered only so the loader's snapshot prints them
@@ -1143,7 +1188,7 @@ mod stage_option_tests {
     fn definition(automatic_macros: bool, shared: &[(&str, H3SharedStages)]) -> H3Definition {
         H3Definition {
             name: "shader".to_owned(),
-            dialect: H3Dialect::Reach,
+            dialect: RenderMethodDialect::Reach,
             source_file: "templated\\shader.fx".to_owned(),
             automatic_macros,
             categories: vec![
@@ -1173,14 +1218,14 @@ mod stage_option_tests {
         reach.categories[1].options[1].name = "ADDITIVE".to_owned();
         assert_eq!(reach.blend(&[0, 1]), H3Blend::Opaque, "Reach minds case");
         assert_eq!(reach.blend(&[0, 3]), H3Blend::AlphaBlend);
-        reach.dialect = H3Dialect::Halo3;
+        reach.dialect = RenderMethodDialect::Halo3;
         assert_eq!(reach.blend(&[0, 1]), H3Blend::Additive, "Halo 3 does not");
 
         let mut glass = definition(false, &[]);
         glass.categories.truncate(1);
         assert_eq!(glass.blend_of(&[0], true), H3Blend::AlphaBlend);
         assert_eq!(glass.blend_of(&[0], false), H3Blend::Opaque);
-        glass.dialect = H3Dialect::Halo3;
+        glass.dialect = RenderMethodDialect::Halo3;
         assert_eq!(glass.blend_of(&[0], true), H3Blend::Opaque);
     }
 

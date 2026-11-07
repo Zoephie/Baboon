@@ -212,7 +212,7 @@ pub(in crate::app::model_preview) struct HologramPicture {
 /// A hologram's material is drawn by `RenderHolograms` when its screen
 /// materials were read.
 pub(in crate::app::model_preview) fn draws_as_hologram(material: &H3Material) -> bool {
-    material.h4.as_ref().is_some_and(|submit| submit.is_hologram() && submit.post().is_some())
+    material.h4().is_some_and(|submit| submit.is_hologram() && submit.post().is_some())
 }
 
 /// `alpha_blend_max` (22), the blend pass's state: an alpha blend whose alpha
@@ -241,7 +241,7 @@ impl H4Game {
         size: [i32; 2],
     ) -> Option<HologramPicture> {
         let (first, material) = holograms.first()?;
-        let post = Arc::clone(material.h4.as_ref()?.post()?);
+        let post = Arc::clone(material.h4()?.post()?);
         let owner = frame.preview.materials.get(first.material_index as usize).map_or(0, |material| material.object);
         let (center, radius) = hologram_sphere(frame);
         let view = ce_flare_view(&frame.camera);
@@ -316,7 +316,7 @@ impl H4Game {
             gl.depth_mask(false);
             state.submit_draw = Some(H4Draw::HologramBlend);
             for (batch, material) in holograms.iter().filter(|(_, material)| {
-                !post_bloom(material) && material.h4.as_ref().is_some_and(|submit| submit.is_blended_hologram())
+                !post_bloom(material) && material.h4().is_some_and(|submit| submit.is_blended_hologram())
             }) {
                 state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }

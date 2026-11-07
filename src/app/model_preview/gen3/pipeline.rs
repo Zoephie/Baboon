@@ -821,7 +821,7 @@ impl Gen3State {
         let object = batch.material_index as usize;
         let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
         // Halo 4: the sampler's frame-index function, on the object's values.
-        if let Some(submit) = material.h4.as_ref().filter(|_| count > 0) {
+        if let Some(submit) = material.h4().filter(|_| count > 0) {
             let drawn = super::super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
             if let Some(index) = submit.frame(uniform, &drawn) {
                 return frame_key(uniform, index);
@@ -856,7 +856,7 @@ impl Gen3State {
             self.with_program(core, gl, pass, |state, this, program| {
                 gl.use_program(Some(program.program));
                 let size = state.targets.as_ref().map_or([1, 1], |targets| targets.size);
-                let h4_values = material.h4.as_ref().map(|submit| {
+                let h4_values = material.h4().map(|submit| {
                     let object = batch.material_index as usize;
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                     let drawn =
@@ -903,7 +903,7 @@ impl Gen3State {
                         "simple_lights" => {
                             if let Some((lit, _)) = &state.light {
                                 gl.uniform_4_f32_slice(location.as_ref(), lit.rows.as_flattened());
-                            } else if material.dialect == H3Dialect::Reach && !state.inline_lights.is_empty() {
+                            } else if material.dialect() == H3Dialect::Reach && !state.inline_lights.is_empty() {
                                 let inline = state.inline_lights.as_flattened().as_flattened();
                                 gl.uniform_4_f32_slice(location.as_ref(), inline);
                             }
@@ -918,14 +918,14 @@ impl Gen3State {
                         _ => {}
                     }
                     // The shadow's generate draws from the light.
-                    if material.dialect == H3Dialect::Halo4
+                    if material.dialect() == H3Dialect::Halo4
                         && name == "vs_view_view_projection_matrix"
                         && let Some(matrix) = state.shadow_view_projection
                     {
                         gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                         continue;
                     }
-                    if material.dialect == H3Dialect::Halo4
+                    if material.dialect() == H3Dialect::Halo4
                         && let Some(matrix) = h4_matrix(frame, name)
                     {
                         match matrix.len() {
@@ -945,10 +945,10 @@ impl Gen3State {
                         H3Value::Floats([r, g, b, 1.0])
                     });
                     let reach_light =
-                        (material.dialect == H3Dialect::Reach).then(|| state.reach_simple_light(name)).flatten();
+                        (material.dialect() == H3Dialect::Reach).then(|| state.reach_simple_light(name)).flatten();
                     let mut value = change_color
                         .or(reach_light)
-                        .or_else(|| frame_value(frame, material.dialect, name, size, state.stops))
+                        .or_else(|| frame_value(frame, material.dialect(), name, size, state.stops))
                         .or_else(|| h4_values.as_ref().and_then(|values| values.get(name)).cloned())
                         .or_else(|| material.values.get(name).cloned());
                     let object = batch.material_index as usize;
@@ -1185,13 +1185,13 @@ impl Gen3State {
                 // alone. One that modulates writes alpha too, under a separate
                 // alpha blend this preview does not set [inferred: it keeps
                 // the colour blend's].
-                let keeps_mask = material.dialect == H3Dialect::Reach && !material.decal_modulates_specular;
+                let keeps_mask = material.dialect() == H3Dialect::Reach && !material.decal_modulates_specular;
                 gl.color_mask_draw_buffer(0, true, true, true, !keeps_mask);
                 // The blend's mask opens every target, so the normals'
                 // is set after it. Halo 4's normal decals (`DECAL_OUTPUT_NORMAL`)
                 // write the encoded normal's two channels, z and w masked
                 // (`decals.fxh`); nothing else here writes normals.
-                let normals = material.dialect == H3Dialect::Halo4 && material.lit.pixel.contains("o_target1");
+                let normals = material.dialect() == H3Dialect::Halo4 && material.lit.pixel.contains("o_target1");
                 gl.color_mask_draw_buffer(1, normals, normals, false, false);
                 self.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
@@ -1804,7 +1804,7 @@ fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Optio
         .chain(material.prt.iter().map(Option::as_ref))
         .flatten()
         .any(|known| Arc::ptr_eq(known, pass));
-    material.dialect == H3Dialect::Reach && foliage && own
+    material.dialect() == H3Dialect::Reach && foliage && own
 }
 
 /// `c_object_renderer::render_albedo` and its like: `_cull_mode_cw` throughout.
@@ -2053,6 +2053,7 @@ pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
 
 #[cfg(test)]
 mod tests {
+    use super::super::shaders::H3MaterialDialect;
     use super::*;
 
     /// Reach's foliage draws both faces of its own passes; any other group
@@ -2080,16 +2081,15 @@ mod tests {
             change_colors: Vec::new(),
             animations: Vec::new(),
             shield: None,
-            h4: None,
             fringe: None,
         };
         let foliage = Some(u32::from_be_bytes(*b"rmfl"));
-        let reach = material(H3Dialect::Reach);
+        let reach = material(H3MaterialDialect::Reach);
         assert!(reach_draws_two_sided(&reach, &reach.lit, foliage));
         assert!(reach_draws_two_sided(&reach, reach.prt[2].as_ref().unwrap(), foliage));
         assert!(!reach_draws_two_sided(&reach, &pass(), foliage), "a shield over it culls");
         assert!(!reach_draws_two_sided(&reach, &reach.lit, Some(u32::from_be_bytes(*b"rmhg"))), "a halogram culls");
-        let halo3 = material(H3Dialect::Halo3);
+        let halo3 = material(H3MaterialDialect::Halo3);
         assert!(!reach_draws_two_sided(&halo3, &halo3.lit, foliage));
     }
 

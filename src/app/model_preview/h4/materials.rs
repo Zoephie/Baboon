@@ -13,7 +13,7 @@ use blam_tags::render_method::{
 use super::super::common::fields::elements;
 use super::super::gen3::shaders::{
     H3Blend, H3Material, H3Pass,
-    H3Dialect, H3Sampler, H3Texture,
+    H3MaterialDialect, H3Sampler, H3Texture,
 };
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;
@@ -284,8 +284,9 @@ pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag
             let clip = (hologram || blended_hologram).then_some(if blended_hologram { 1.0 } else { 0.0 });
             let post = clip.and_then(|_| hologram_post(source, caches));
             let submit = H4Submit::new(baked.clone(), ENTRY_ALBEDO, lit_entry, clip).with_post(post);
+            let values = submit.baked_values();
             let mut h3 = H3Material {
-                dialect: H3Dialect::Halo4,
+                dialect: H3MaterialDialect::Halo4(Arc::new(submit)),
                 albedo: albedo.filter(|_| opaque),
                 lit: Arc::clone(&lit),
                 fringe,
@@ -299,12 +300,11 @@ pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag
                 shadow_generate: shader.pass("shadow_generate").filter(|_| opaque),
                 dynamic_light: None,
                 blend,
-                values: submit.baked_values(),
+                values,
                 textures: Vec::new(),
                 change_colors: Vec::new(),
                 animations: Vec::new(),
                 shield: None,
-                h4: Some(Arc::new(submit)),
             };
             let mut submit_frames = Vec::new();
             let passes = [h3.albedo.as_ref(), Some(&lit), h3.fringe.as_ref()];
@@ -362,7 +362,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag
                 h3.textures.push(H3Texture { uniform, image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
             }
             // Still this material's alone, so the submit takes them in place.
-            if let Some(submit) = h3.h4.as_mut().and_then(Arc::get_mut) {
+            if let Some(submit) = h3.h4_mut().and_then(Arc::get_mut) {
                 for (uniform, function, count) in submit_frames {
                     submit.add_frames(uniform, function, count);
                 }
