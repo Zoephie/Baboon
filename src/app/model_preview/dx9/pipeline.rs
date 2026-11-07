@@ -36,9 +36,8 @@ impl RenderCore {
                 let order = frame.visible_batches.clone();
                 self.copy_h2_frame(gl, frame, &order);
                 self.draw_h2_passes(gl, frame, slot, &order, H2Layer::ActiveCamo, None);
-            } else if frame.game_shaders && !self.h3_draws(frame) {
-                // Halo 3 lit itself in `draw_h3`, its shadow included; the
-                // passes and lights here are Halo 2's and Halo CE's.
+            } else if frame.game_shaders {
+                // The lit layers, the self shadow, then every light.
                 let order = frame.visible_batches.clone();
                 self.copy_h2_frame(gl, frame, &order);
                 self.fill_h2_texaccum(gl, frame, slot, &order);
@@ -157,10 +156,8 @@ impl RenderCore {
                 }
             }
             // `rasterizer_postprocess_scene` blooms the finished frame,
-            // after every transparent and effect. Halo 2's own bloom: a gen3
-            // tag's frame has none of its bloom layers, and comes out white.
-            let gen3 = frame.preview.generation == Some(blam_tags::game::Game::Halo3);
-            if frame.game_shaders && frame.bloom && !gen3 && !self.h3_draws(frame) {
+            // after every transparent and effect.
+            if frame.game_shaders && frame.bloom {
                 return Some(order.clone());
             }
             None

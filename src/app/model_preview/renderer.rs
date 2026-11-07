@@ -3949,63 +3949,43 @@ pub(super) trait GameRender {
     unsafe fn finish(&mut self, cx: &mut FrameCx<'_>);
 }
 
-/// Today's drawing, every game's at once, until each game has its own.
-#[derive(Default)]
-pub(super) struct LegacyRender {
-    /// What Halo 2's bloom covers, from the shading to the finish.
-    bloom_order: Option<Vec<usize>>,
-    /// Halo 3's hooks, for a frame with gen3 materials and no gen3 game.
-    h3: h3::render::H3Game,
-}
-
-impl GameRender for LegacyRender {
-    unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
-        use dx9::pipeline::Dx9Game as _;
-        unsafe {
-            h2::render::H2Game.prepare(cx);
-            ce::render::CeGame.prepare(cx);
-        }
-    }
-
-    unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
-        self.bloom_order = unsafe { cx.core.legacy_shade(&mut self.h3, cx.gl, cx.frame, cx.slot) };
-    }
-
-    unsafe fn finish(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe {
-            // A gen3 frame drew its sprites from inside the gen3 pipeline.
-            if !cx.core.h3_draws(cx.frame) && cx.core.draws_object_sprites(cx.frame) {
-                cx.core.draw_dx9_sprites(cx.gl, cx.frame, cx.slot);
-            }
-            self.bloom(cx);
-        }
-    }
-}
-
-impl LegacyRender {
-    /// Halo 2's bloom over what `shade` left to bloom.
-    pub(in crate::app::model_preview) unsafe fn bloom(&mut self, cx: &mut FrameCx<'_>) {
-        let bloom_order = self.bloom_order.take();
-        unsafe { cx.core.draw_dx9_bloom(cx.gl, cx.frame, cx.slot, bloom_order) }
-    }
-}
-
 /// Each game's drawing, by the game a preview is from.
 #[derive(Default)]
 struct GameRenders {
-    legacy: LegacyRender,
+    plain: common::plain::PlainRender,
     dx9: dx9::render::Dx9Render,
     gen3: gen3::render::Gen3Render,
 }
 
 impl GameRenders {
-    /// The drawing for a preview of `game`: the gen3 games' own, and
-    /// today's for the rest until each has its own.
-    fn of(&mut self, game: Option<GameId>) -> &mut dyn GameRender {
-        match game {
-            Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4) => &mut self.gen3,
-            Some(GameId::HaloCe | GameId::Halo2) => &mut self.dx9,
-            _ => &mut self.legacy,
+    /// The drawing for `frame`, by [`Route::of`] its preview.
+    fn of(&mut self, frame: &ModelGpuFrame) -> &mut dyn GameRender {
+        match Route::of(&frame.preview) {
+            Route::Gen3 => &mut self.gen3,
+            Route::Dx9 => &mut self.dx9,
+            Route::Plain => &mut self.plain,
+        }
+    }
+}
+
+/// Which drawing a preview goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    Gen3,
+    Dx9,
+    Plain,
+}
+
+impl Route {
+    /// By the game the preview is from. One of no game this draws draws as
+    /// Halo 3's when its tag is gen3 (from a source that names no game), and
+    /// plainly when no tag gave it (Chimp's meshes).
+    fn of(preview: &RenderModelPreview) -> Self {
+        match preview.game {
+            Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4) => Self::Gen3,
+            Some(GameId::HaloCe | GameId::Halo2) => Self::Dx9,
+            _ if preview.generation == Some(blam_tags::game::Game::Halo3) => Self::Gen3,
+            _ => Self::Plain,
         }
     }
 }
@@ -4025,7 +4005,7 @@ impl ModelGlRenderer {
             let Some(slot) = self.core.acquire_frame_slot(gl, frame) else {
                 return;
             };
-            let game = self.games.of(frame.preview.game);
+            let game = self.games.of(frame);
             game.prepare(&mut FrameCx { gl, frame, core: &mut self.core, slot });
             let scene = self.core.begin_scene(gl, frame);
             // The game's passes need the scene target's stencil and copies;
@@ -4036,7 +4016,7 @@ impl ModelGlRenderer {
                 return;
             }
             self.core.begin_drawing(gl, frame, slot);
-            let game = self.games.of(frame.preview.game);
+            let game = self.games.of(frame);
             if frame.render_mode.draws_shading() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
                 gl.uniform_1_f32(Some(&self.core.unlit), 0.0);
@@ -4396,27 +4376,6 @@ impl RenderCore {
         }
     }
 
-    /// Today's shading, for every game: the slot draw, the gen3 pipeline,
-    /// the dx9 lit passes, transparents and shields. What Halo 2 blooms over,
-    /// if it does.
-    pub(super) unsafe fn legacy_shade(
-        &mut self,
-        h3: &mut h3::render::H3Game,
-        gl: &glow::Context,
-        frame: &ModelGpuFrame,
-        slot: usize,
-    ) -> Option<Vec<usize>> {
-        unsafe {
-            self.prepare_h2_programs(gl, frame);
-            self.draw_batches(gl, frame, false, Self::bound_materials(frame, &self.slots[slot].materials));
-            if self.h3_draws(frame) {
-                let order = frame.visible_batches.clone();
-                // Only a game without hooks of its own lands here: Halo 3's.
-                self.draw_h3(h3, gl, frame, slot, &order);
-            }
-            self.draw_dx9_passes(&mut ce::render::CeGame, gl, frame, slot)
-        }
-    }
 
     /// The slot's effect onsets: when each effect's scale came on.
     pub(in crate::app::model_preview) fn effect_onsets(&mut self, slot: usize) -> &mut gen3::effects::H3EffectOnsets {
@@ -5400,6 +5359,23 @@ pub(super) fn slice_bytes<T>(slice: &[T]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each game's preview goes to its family's drawing; one of no game goes
+    /// to gen3 if its tag is gen3, and is drawn plainly if no tag gave it.
+    #[test]
+    fn a_preview_routes_by_its_game_then_its_generation() {
+        use blam_tags::game::Game;
+        let route = |game: Option<GameId>, generation: Option<Game>| {
+            Route::of(&RenderModelPreview { game, generation, ..Default::default() })
+        };
+        for game in [GameId::Halo3, GameId::Halo3Odst, GameId::HaloReach, GameId::Halo4] {
+            assert_eq!(route(Some(game), Some(Game::Halo3)), Route::Gen3, "{game:?}");
+        }
+        assert_eq!(route(Some(GameId::HaloCe), Some(Game::Halo1)), Route::Dx9);
+        assert_eq!(route(Some(GameId::Halo2), Some(Game::Halo2)), Route::Dx9);
+        assert_eq!(route(None, Some(Game::Halo3)), Route::Gen3, "a gen3 tag of no game");
+        assert_eq!(route(None, None), Route::Plain, "geometry no tag gave");
+    }
 
     #[test]
     fn a_shields_parts_leave_the_ordinary_passes_once_materials_are_known() {

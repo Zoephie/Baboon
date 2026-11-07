@@ -10,7 +10,8 @@ use super::super::h3::render::H3Game;
 use super::super::h4::render::H4Game;
 use super::super::reach::lights::ReachLitLight;
 use super::super::reach::render::ReachGame;
-use super::super::renderer::{FrameCx, GameRender, LegacyRender, ModelGpuFrame, RenderCore};
+use super::super::common::plain::PlainRender;
+use super::super::renderer::{FrameCx, GameRender, ModelGpuFrame, RenderCore};
 use super::screen_effects::H3ScreenSettings;
 use super::shaders::H3Material;
 use crate::core::game::GameId;
@@ -99,8 +100,6 @@ pub(in crate::app::model_preview) struct Gen3Render {
     h3: H3Game,
     reach: ReachGame,
     h4: H4Game,
-    /// A context that cannot draw the gen3 shaders draws as before.
-    fallback: LegacyRender,
 }
 
 impl Gen3Render {
@@ -114,15 +113,13 @@ impl Gen3Render {
 }
 
 impl GameRender for Gen3Render {
-    unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
-        if !cx.core.h3_draws(cx.frame) {
-            unsafe { self.fallback.prepare(cx) }
-        }
-    }
+    unsafe fn prepare(&mut self, _cx: &mut FrameCx<'_>) {}
 
+    /// With no gen3 shading to draw (game shaders off, a mode without maps, a
+    /// context short of GLSL 4.10), the plain draw.
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
         if !cx.core.h3_draws(cx.frame) {
-            return unsafe { self.fallback.shade(cx) };
+            return unsafe { PlainRender.shade(cx) };
         }
         unsafe {
             // Halo 3's and ODST's self shadow draws through dx9 shadow passes.
@@ -142,7 +139,6 @@ impl GameRender for Gen3Render {
                     cx.core.draw_gen3_sprites(cx.gl, cx.frame, cx.slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
                     cx.core.draw_gen3_sprites(cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
                 }
-                self.fallback.bloom(cx);
             }
         }
     }
