@@ -12,10 +12,10 @@ use super::super::functions::object_input;
 use std::collections::HashMap;
 use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagStruct};
-use super::super::dx9::stage::H2VertexStage;
+use super::super::dx9::stage::{H2VertexStage, H2_TEXTURE_ROWS};
 use super::super::materials::TextureImage;
 use crate::app::model_preview::common::fields::has_flag;
-use crate::core::h2_pixel_shader::{
+use crate::core::h2_pixel_shader::{ConstantBinding, SamplerBinding, 
     AlphaCompare, AlphaTest, PixelShaderOptions, SamplerKind, translate,
 };
 use super::super::dx9::passes::*;
@@ -519,17 +519,68 @@ pub(in crate::app) fn prepare_draw_pass(
         .ok_or_else(|| format!("No vertex stage for {}", pass.vertex_shader))?;
     let options = PixelShaderOptions { cases, alpha_test: pass.alpha_test };
     let translated = translate(psh, H2_GLSL_VERSION, &options)?;
-    let lookup = |name: &str| {
-        pass.parameters.iter().find(|(parameter, _)| parameter == name).map(|(_, value)| value)
-    };
+    let pixel = pixel_constants(pass, &translated.constants, specular_brightness);
+    let textures = draw_textures(pass, &translated.samplers, &mut bitmap);
+    let vertex = vertex_constants(pass, stage, specular_brightness, &scale);
+    Ok(H2DrawPass {
+        stage,
+        fragment: translated.glsl,
+        blend: pass.blend,
+        depth: pass.depth,
+        depth_bias: 0.0,
+        cull: H2Cull::Frame,
+        hidden_by_camo: false,
+        numeric: None,
+        channels: pass.custom_channels.unwrap_or_else(|| channel_mask(&pass.channels)),
+        textures,
+        constants: pixel.constants,
+        texture_rows: vertex.texture_rows,
+        tint_facing: vertex.tint_facing,
+        tint_glancing: vertex.tint_glancing,
+        change_colors: pixel.change_colors,
+        light_colors: pixel.light_colors,
+        camo_amounts: pixel.camo_amounts,
+        light_direct: vertex.light_direct,
+        light_indirect: vertex.light_indirect,
+        animated_constants: pixel.animated_constants,
+        animated_rows: vertex.animated_rows,
+        animated_row_values: vertex.animated_row_values,
+        animated_tint_facing: vertex.animated_tint_facing,
+        animated_tint_glancing: vertex.animated_tint_glancing,
+        ce_animation: None,
+    })
+}
 
-    let animations_of = |name: &str| pass.animations.get(name).cloned().unwrap_or_default();
+/// `pass`'s value for the parameter `name`, if it has one.
+fn parameter_of<'a>(pass: &'a H2Pass, name: &str) -> Option<&'a H2ParameterValue> {
+    pass.parameters.iter().find(|(parameter, _)| parameter == name).map(|(_, value)| value)
+}
+
+/// The animations `pass` runs on the parameter `name`.
+fn animations_of(pass: &H2Pass, name: &str) -> Vec<H2Animation> {
+    pass.animations.get(name).cloned().unwrap_or_default()
+}
+
+/// The pixel shader's constants, and which of their components animate, take
+/// a change color, a light's color or the active camo amount.
+struct PixelConstants {
+    constants: Vec<(u32, [f32; 4])>,
+    animated_constants: Vec<(u32, usize, Vec<H2Animation>)>,
+    change_colors: Vec<(u32, usize, usize)>,
+    light_colors: Vec<(u32, usize)>,
+    camo_amounts: Vec<(u32, usize)>,
+}
+
+/// The translated pixel shader's constant bindings, filled from `pass`'s
+/// parameters component by component.
+fn pixel_constants(pass: &H2Pass, bindings: &[ConstantBinding], specular_brightness: f32) -> PixelConstants {
+    let lookup = |name: &str| parameter_of(pass, name);
     let mut constants: Vec<(u32, [f32; 4])> = Vec::new();
     let mut animated_constants = Vec::new();
     let mut change_colors = Vec::new();
     let mut light_colors = Vec::new();
     let mut camo_amounts = Vec::new();
-    for binding in &translated.constants {
+    for binding in bindings {
         let value = lookup(&binding.source)
             .map_or([0.0, 0.0, 0.0, 1.0], |value| parameter_vector(value, specular_brightness));
         let at = constants.iter().position(|(register, _)| *register == binding.register);
@@ -545,7 +596,7 @@ pub(in crate::app) fn prepare_draw_pass(
                 _ => 3,
             };
             constants[at].1[index] = value[index];
-            let animations = animations_of(&binding.source);
+            let animations = animations_of(pass, &binding.source);
             if animations.iter().any(|animation| !animation.is_transform()) {
                 animated_constants.push((binding.register, index, animations));
             }
@@ -575,14 +626,23 @@ pub(in crate::app) fn prepare_draw_pass(
             }
         }
     }
+    PixelConstants { constants, animated_constants, change_colors, light_colors, camo_amounts }
+}
 
-    let textures = translated
-        .samplers
+/// Each sampler's map: a bitmap decoded by `bitmap`, a black feed for the
+/// camera externs, the bump map for active camo's, or an extern the renderer
+/// binds (normalization, texaccum, falloff, gel, the frame copy).
+fn draw_textures(
+    pass: &H2Pass,
+    samplers: &[SamplerBinding],
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<std::sync::Arc<H2Image>>,
+) -> Vec<H2DrawTexture> {
+    samplers
         .iter()
         .map(|sampler| {
             let value = pass.textures.get(sampler.slot as usize).map(|texture| &texture.value);
             let image = match value {
-                Some(H2ParameterValue::Bitmap(path)) => bitmap(path, sampler.kind),
+                Some(H2ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
                 Some(H2ParameterValue::Extern(name)) if CAMERA_FEEDS.contains(&name.as_str()) => {
                     Some(std::sync::Arc::new(H2Image::Flat(TextureImage {
                         rgba: vec![0, 0, 0, 255],
@@ -594,8 +654,8 @@ pub(in crate::app) fn prepare_draw_pass(
                     })))
                 }
                 Some(H2ParameterValue::Extern(name)) if name == ACTIVE_CAMO_BUMP => {
-                    match lookup("bump_map") {
-                        Some(H2ParameterValue::Bitmap(path)) => bitmap(path, sampler.kind),
+                    match parameter_of(pass, "bump_map") {
+                        Some(H2ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
                         _ => None,
                     }
                 }
@@ -629,9 +689,27 @@ pub(in crate::app) fn prepare_draw_pass(
                 falloff,
             }
         })
-        .collect();
+        .collect()
+}
 
-    let mut texture_rows = if stage.uses_scale_rows() {
+/// The vertex shader's constants: the texture rows (scales and transforms),
+/// the facing and glancing tints, the lightmap's two light vectors, and
+/// which of them animate.
+struct VertexConstants {
+    texture_rows: [[f32; 4]; H2_TEXTURE_ROWS],
+    tint_facing: [f32; 4],
+    tint_glancing: [f32; 4],
+    animated_tint_facing: Vec<([bool; 4], Vec<H2Animation>)>,
+    animated_tint_glancing: Vec<([bool; 4], Vec<H2Animation>)>,
+    animated_rows: Vec<H2AnimatedRow>,
+    animated_row_values: Vec<(usize, usize, Vec<H2Animation>)>,
+    light_direct: [f32; 3],
+    light_indirect: [f32; 3],
+}
+
+/// The texture rows a `stage` starts from before its constants fill them.
+fn default_texture_rows(stage: H2VertexStage) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+    if stage.uses_scale_rows() {
         std::array::from_fn(|row| {
             if (row == 3 && stage.is_lightmap()) || (row == 2 && stage == H2VertexStage::Texaccum) {
                 [1.0; 4]
@@ -641,7 +719,19 @@ pub(in crate::app) fn prepare_draw_pass(
         })
     } else {
         identity_rows()
-    };
+    }
+}
+
+/// `pass`'s vertex constants, in order: a lightmap stage's light vectors, the
+/// `Vn` tints, then the texture rows, by value or by `scale`'s tiling.
+fn vertex_constants(
+    pass: &H2Pass,
+    stage: H2VertexStage,
+    specular_brightness: f32,
+    scale: &impl Fn(&str) -> [f32; 2],
+) -> VertexConstants {
+    let lookup = |name: &str| parameter_of(pass, name);
+    let mut texture_rows = default_texture_rows(stage);
     let (mut tint_facing, mut tint_glancing) = ([1.0; 4], [1.0; 4]);
     let (mut animated_tint_facing, mut animated_tint_glancing) = (Vec::new(), Vec::new());
     let mut animated_rows = Vec::new();
@@ -679,7 +769,7 @@ pub(in crate::app) fn prepare_draw_pass(
                 _ => continue,
             };
             fill_components(tint, value, mask);
-            animated.push((mask, animations_of(&constant.parameter)));
+            animated.push((mask, animations_of(pass, &constant.parameter)));
             continue;
         }
         let Some(row) = texture_rows.get_mut(constant.register.max(0) as usize) else {
@@ -693,7 +783,7 @@ pub(in crate::app) fn prepare_draw_pass(
                 let value = lookup(&constant.parameter)
                     .map_or(0.0, |value| parameter_vector(value, specular_brightness)[channel]);
                 row[channel] = value;
-                let animations = animations_of(&constant.parameter);
+                let animations = animations_of(pass, &constant.parameter);
                 if animations.iter().any(|animation| !animation.is_transform()) {
                     animated_row_values.push((constant.register.max(0) as usize, channel, animations));
                 }
@@ -701,30 +791,10 @@ pub(in crate::app) fn prepare_draw_pass(
             }
         }
         let [x, y] = scale(&constant.parameter);
-        let form = if constant.components.contains("row1") {
-            *row = [x, 0.0, 0.0, 0.0];
-            H2RowForm::Row1
-        } else if constant.components.contains("row2") {
-            *row = [0.0, y, 0.0, 0.0];
-            H2RowForm::Row2
-        } else if constant.components.contains("row3") {
-            *row = [0.0, 0.0, x, 0.0];
-            H2RowForm::Row3
-        } else if constant.components.contains("simple xform") {
-            *row = [x, y, 0.0, 0.0];
-            H2RowForm::SimpleXform
-        } else if constant.components.starts_with("xy (2D scale") {
-            row[0] = x;
-            row[1] = y;
-            H2RowForm::ScaleXy
-        } else if constant.components.starts_with("zw (2D scale") {
-            row[2] = x;
-            row[3] = y;
-            H2RowForm::ScaleZw
-        } else {
+        let Some(form) = scale_row(row, &constant.components, [x, y]) else {
             continue;
         };
-        let animations: Vec<_> = animations_of(&constant.parameter)
+        let animations: Vec<_> = animations_of(pass, &constant.parameter)
             .into_iter()
             .filter(H2Animation::is_transform)
             .collect();
@@ -737,34 +807,46 @@ pub(in crate::app) fn prepare_draw_pass(
             });
         }
     }
-
-    Ok(H2DrawPass {
-        stage,
-        fragment: translated.glsl,
-        blend: pass.blend,
-        depth: pass.depth,
-        depth_bias: 0.0,
-        cull: H2Cull::Frame,
-        hidden_by_camo: false,
-        numeric: None,
-        channels: pass.custom_channels.unwrap_or_else(|| channel_mask(&pass.channels)),
-        textures,
-        constants,
+    VertexConstants {
         texture_rows,
         tint_facing,
         tint_glancing,
-        change_colors,
-        light_colors,
-        camo_amounts,
-        light_direct,
-        light_indirect,
-        animated_constants,
-        animated_rows,
-        animated_row_values,
         animated_tint_facing,
         animated_tint_glancing,
-        ce_animation: None,
-    })
+        animated_rows,
+        animated_row_values,
+        light_direct,
+        light_indirect,
+    }
+}
+
+/// A texture row filled from a parameter's tiling, in the form its
+/// `components` name; `None` when they name none.
+fn scale_row(row: &mut [f32; 4], components: &str, [x, y]: [f32; 2]) -> Option<H2RowForm> {
+    let form = if components.contains("row1") {
+        *row = [x, 0.0, 0.0, 0.0];
+        H2RowForm::Row1
+    } else if components.contains("row2") {
+        *row = [0.0, y, 0.0, 0.0];
+        H2RowForm::Row2
+    } else if components.contains("row3") {
+        *row = [0.0, 0.0, x, 0.0];
+        H2RowForm::Row3
+    } else if components.contains("simple xform") {
+        *row = [x, y, 0.0, 0.0];
+        H2RowForm::SimpleXform
+    } else if components.starts_with("xy (2D scale") {
+        row[0] = x;
+        row[1] = y;
+        H2RowForm::ScaleXy
+    } else if components.starts_with("zw (2D scale") {
+        row[2] = x;
+        row[3] = y;
+        H2RowForm::ScaleZw
+    } else {
+        return None;
+    };
+    Some(form)
 }
 
 /// The passes of one layer of `shader`, in template order. `load` reads a tag
