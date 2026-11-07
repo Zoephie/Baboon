@@ -13,7 +13,7 @@ use super::attachment::{MarkerFrame, WeaponOption};
 use super::ce::attachments::{loose_weapon_paths, weapon_ik};
 use super::common::fields::{elements, has_flag};
 use super::attachment::{attach_point, attach_vector};
-use super::loading::build_render_preview;
+use super::load::build_render_preview;
 use super::ce::attachments::CeWeaponIk;
 use super::*;
 use crate::core::source::TagSource;

@@ -1138,7 +1138,7 @@ mod tests {
     fn plays_a_classic_idle(source: TagSource, entry: TagEntry, game: &str, idle: &str) {
         let tag = crate::core::source::read_entry(&source, &entry).expect("tag reads");
         let names = TagNameIndex::load_game(crate::core::test_kits::definitions(), GameId::from_id(game).unwrap()).expect("tag names");
-        let data = crate::app::model_preview::loading::load_model_preview(
+        let data = crate::app::model_preview::load::load_model_preview(
             &tag,
             &entry,
             &names,
@@ -1433,12 +1433,12 @@ mod tests {
         let tag = crate::core::source::read_entry(&source, &entry).unwrap();
         let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
-        let data = super::super::loading::load_model_preview(
+        let data = super::super::load::load_model_preview(
             &tag,
             &entry,
             &names,
             Some(&source),
-            &super::super::loading::PreviewLoadSettings::default(),
+            &super::super::load::PreviewLoadSettings::default(),
         )
         .expect("the vehicle's model loads");
         assert!(!data.preview.batches.is_empty());
@@ -1472,12 +1472,12 @@ mod tests {
         let tag = crate::core::source::read_entry(&source, &entry).unwrap();
         let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
-        let data = super::super::loading::load_model_preview(
+        let data = super::super::load::load_model_preview(
             &tag,
             &entry,
             &names,
             Some(&source),
-            &super::super::loading::PreviewLoadSettings::default(),
+            &super::super::load::PreviewLoadSettings::default(),
         )
         .unwrap();
         let helmet = |variant: &str| {

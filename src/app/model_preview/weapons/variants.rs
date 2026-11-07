@@ -4,7 +4,7 @@
 use blam_tags::{TagFile, TagStruct};
 use super::super::attachment::MarkerFrame;
 use super::super::common::fields::elements;
-use super::super::loading::build_render_preview;
+use super::super::load::build_render_preview;
 use super::super::*;
 use crate::core::source::TagSource;
 use super::attached::{AttachedObject, fold_attached};

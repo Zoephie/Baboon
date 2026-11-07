@@ -34,7 +34,8 @@ pub(crate) mod h3;
 pub(crate) mod h4;
 mod reach;
 pub(crate) mod particles;
-pub(in crate::app) mod loading;
+pub(in crate::app) mod load;
+pub(in crate::app) mod campaign_evolved;
 pub(in crate::app) mod materials;
 mod antennas;
 mod common;
@@ -48,7 +49,8 @@ pub(in crate::app) mod weapons;
 use animation::*;
 use derived::*;
 use errors::*;
-use loading::*;
+use load::*;
+use campaign_evolved::*;
 // Re-exported up to `crate::app` for the worker messages and the playback
 // state that lives on `ModelPreviewState`.
 pub(in crate::app) use animation::{
@@ -59,9 +61,9 @@ pub(in crate::app) use animation::{
 pub(in crate::app) use materials::*;
 // Re-exported for the Model Library (`model_browser`), whose worker rasterizes
 // the same geometry with the same flat palette into grid thumbnails.
-pub(in crate::app) use loading::build_render_preview;
+pub(in crate::app) use load::build_render_preview;
 // Started by the source loader when a Campaign Evolved install mounts.
-pub(in crate::app) use loading::prewarm_ce_mesh_sync_index;
+pub(in crate::app) use campaign_evolved::prewarm_ce_mesh_sync_index;
 pub(in crate::app) use renderer::material_color;
 use renderer::*;
 use dx9::passes::{H2ChangeColors, read_h2_change_colors};

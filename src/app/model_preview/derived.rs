@@ -1575,7 +1575,7 @@ impl Baboon {
             return false;
         };
         // Read as the base load reads it, unsaved edits and all.
-        let edits = super::loading::snapshot_edits(kit.parsed_tags.get(key));
+        let edits = super::load::snapshot_edits(kit.parsed_tags.get(key));
         let stamp = KitStamp {
             kit: kit.id,
             generation: kit.generation,
@@ -1589,13 +1589,13 @@ impl Baboon {
         // overlays never arrive.
         let (key, panic_key) = (key.to_owned(), key.to_owned());
         let build = move || -> Option<(Overlay, Overlay)> {
-                let model = super::loading::read_opened_tag(&source, &entry, edits).ok()?;
+                let model = super::load::read_opened_tag(&source, &entry, edits).ok()?;
                 if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
                     && is_object_family_group(model.header.group_tag, source.game())
                 {
                     return Some((halo1_object_collision_overlay(&model, &source), Ok(None)));
                 }
-                let model = super::loading::preview_model_tag(&source, &model).ok()?.unwrap_or(model);
+                let model = super::load::preview_model_tag(&source, &model).ok()?.unwrap_or(model);
                 // Classic models only: a Campaign Evolved hlmt previews
                 // through Unreal geometry and hides the overlay toggles.
                 model.root().read_tag_ref_with_group("render model")?;

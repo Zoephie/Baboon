@@ -772,7 +772,7 @@ pub(in crate::app) fn extract_model_geometry(
             // high-resolution render JMS from the Unreal Nanite/skeletal meshes
             // fused onto the classic skeleton_model rig.
             if let Some(skel_ref) = skeleton_ref.as_deref() {
-                match crate::app::model_preview::loading::campaign_evolved_render_jms(
+                match crate::app::model_preview::campaign_evolved::campaign_evolved_render_jms(
                     &model, entry, source, skel_ref,
                 ) {
                     Ok(jms) => {

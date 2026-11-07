@@ -5384,7 +5384,7 @@ mod tests {
             return;
         };
         let path = "objects\\characters\\marine\\marine";
-        let data = super::super::loading::kit_object_tests::kit_preview(
+        let data = super::super::load::kit_object_tests::kit_preview(
             &root,
             crate::core::game::GameId::HaloReach,
             path,

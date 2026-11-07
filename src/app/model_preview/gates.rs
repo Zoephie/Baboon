@@ -9,7 +9,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use super::loading::kit_object_tests::kit_preview;
+use super::load::kit_object_tests::kit_preview;
 use super::state::ModelPreviewData;
 use crate::core::game::GameId;
 

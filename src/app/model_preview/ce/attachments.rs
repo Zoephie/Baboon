@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
 use super::super::dx9::passes::{H2ChangeColors, read_h2_change_colors};
-use super::super::loading::build_render_preview;
+use super::super::load::build_render_preview;
 use super::super::*;
 use super::super::attachment::*;
 use crate::core::source::TagSource;
