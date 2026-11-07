@@ -8,6 +8,8 @@ pub(in crate::app) mod style;
 pub(in crate::app) use style::*;
 mod input;
 pub(in crate::app) use input::*;
+mod table_header;
+pub(in crate::app) use table_header::*;
 mod dropdown;
 pub(in crate::app) use dropdown::{ValueComboBox, ValueComboUi, value_dropdown_contents};
 pub(in crate::app) mod button_icons;

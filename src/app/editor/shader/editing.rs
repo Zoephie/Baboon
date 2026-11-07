@@ -407,31 +407,25 @@ pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
     let label = shader_label_width(ui);
     let default = shader_default_width(ui);
     let width = shader_grid_width(ui);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 28.0), Sense::hover());
-    ui.painter().rect_filled(rect, 4.0, foundation_block_bar());
-    ui.painter().rect_stroke(
-        rect,
-        4.0,
-        Stroke::new(1.0, foundation_block_edge()),
-        egui::StrokeKind::Inside,
-    );
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, TABLE_HEADER_HEIGHT), Sense::hover());
+    ui.painter().add(table_header_background(rect));
     ui.painter().text(
         rect.left_center() + Vec2::new(label - 2.0, 0.0),
         Align2::RIGHT_CENTER,
-        "field",
-        FontId::proportional(12.0),
-        material_muted_text(),
+        "Field",
+        table_header_font(ui),
+        ui.visuals().strong_text_color(),
     );
     for (x, text) in [
-        (label + 12.0, "default value"),
-        (label + default + 16.0, "override value"),
+        (label + 12.0, "Default Value"),
+        (label + default + 16.0, "Override Value"),
     ] {
         ui.painter().text(
             rect.left_center() + Vec2::new(x, 0.0),
             Align2::LEFT_CENTER,
             text,
-            FontId::proportional(12.0),
-            material_muted_text(),
+            table_header_font(ui),
+            ui.visuals().strong_text_color(),
         );
     }
     for (name, x, current, min, max) in [
@@ -445,19 +439,8 @@ pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
         ),
     ] {
         let x = rect.left() + x;
-        let handle = egui::Rect::from_center_size(
-            egui::pos2(x, rect.center().y),
-            Vec2::new(8.0, rect.height()),
-        );
-        let response = ui
-            .interact(
-                handle,
-                ui.make_persistent_id(("shader_column_resize", name)),
-                Sense::click_and_drag(),
-            )
-            .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-        ui.painter()
-            .vline(x, rect.y_range(), Stroke::new(1.0, foundation_block_edge()));
+        let response = table_header_resize_divider(ui, rect, x,
+            ui.make_persistent_id(("shader_column_resize", name)));
         let start_id = egui::Id::new(("shader_column_drag_start", name));
         if response.drag_started() {
             ui.data_mut(|d| {
@@ -478,6 +461,7 @@ pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
             ui.data_mut(|d| d.remove::<f32>(egui::Id::new(name)));
         }
     }
+    paint_table_header_rule(ui, rect);
 }
 
 pub(super) fn shader_cell_scope<R>(
@@ -842,32 +826,6 @@ fn draw_shader_grid_row_inner(
         )
         .on_hover_text(hover);
     }
-    // Resizable label column (Phase 4.3): a drag handle at the label/value
-    // boundary updates the shared session width that every row reads.
-    let split_x = label_rect.right() + 1.0;
-    let split_resp = ui.interact(
-        egui::Rect::from_center_size(egui::pos2(split_x, rect.center().y), Vec2::new(6.0, height)),
-        ui.make_persistent_id(("shader_col_split", &row.label)),
-        Sense::drag(),
-    );
-    if split_resp.hovered() || split_resp.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-        ui.painter().line_segment(
-            [
-                egui::pos2(split_x, rect.top()),
-                egui::pos2(split_x, rect.bottom()),
-            ],
-            Stroke::new(1.0_f32, row_text),
-        );
-    }
-    if split_resp.drag_started() {
-        ui.data_mut(|data| data.insert_temp(egui::Id::new("shader_grid_default_width"), default_width));
-    }
-    if split_resp.dragged() {
-        let new_width = (base_label_width + split_resp.drag_delta().x).clamp(120.0, 600.0);
-        ui.data_mut(|d| d.insert_temp(shader_label_width_id(), new_width));
-    }
-
     let default_rect = egui::Rect::from_min_size(
         label_rect.right_top() + Vec2::new(2.0, 4.0),
         Vec2::new(default_width, shader_row_inner_height(height)),
@@ -3564,6 +3522,39 @@ mod tests {
                 egui::Shape::Rect(frame) if frame.rect == rect && frame.fill == expected_fill)),
                 "{id} must use the standard fill, with defaults faded to 50%");
         }
+    }
+
+    #[test]
+    fn shader_columns_do_not_resize_from_body_rows() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let row = pending_h2_scalar_row();
+        let point = std::cell::Cell::new(egui::Pos2::ZERO);
+        let frame = |events| {
+            crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 600.0))),
+                events, ..Default::default()
+            }, |ui| {
+                draw_shader_columns_header(ui);
+                point.set(ui.cursor().min + Vec2::new(shader_label_width(ui) + 5.0, 16.0));
+                with_test_edit_context(|edit| {
+                    draw_shader_grid_row(ui, &row, 0, &mut None, &mut None, edit);
+                });
+            })
+        };
+        frame(Vec::new());
+        let start = point.get();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default(),
+        };
+        let hover = frame(vec![egui::Event::PointerMoved(start)]);
+        assert_ne!(hover.platform_output.cursor_icon, egui::CursorIcon::ResizeHorizontal);
+        frame(vec![button(start, true)]);
+        let end = start + Vec2::new(40.0, 0.0);
+        frame(vec![egui::Event::PointerMoved(end)]);
+        frame(vec![button(end, false)]);
+        assert!(ctx.data(|data| data.get_temp::<f32>(shader_label_width_id())).is_none(),
+            "Dragging the shader body must not change the label-column width");
     }
 
     #[test]

@@ -31,7 +31,7 @@ pub(in crate::app) fn draw_shader_scroll_area(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.set_min_width(SHADER_GRID_MIN_WIDTH);
-            let header = ui.allocate_exact_size(Vec2::new(shader_grid_width(ui), 28.0), Sense::hover()).0;
+            let header = ui.allocate_exact_size(Vec2::new(shader_grid_width(ui), TABLE_HEADER_HEIGHT), Sense::hover()).0;
             let body = ScrollArea::vertical()
                 .id_salt(("shader_vertical", &scope))
                 .max_height(ui.available_height().max(0.0))
@@ -1069,7 +1069,7 @@ mod shader_section_tests {
                 if pass == 2 {
                     let header_split = output.shapes.iter().filter_map(|shape| match &shape.shape {
                         egui::Shape::LineSegment { points, .. }
-                            if points[0].x == points[1].x && (points[1].y - points[0].y).abs() == 28.0 => Some(points[0].x),
+                            if points[0].x == points[1].x && (points[1].y - points[0].y).abs() == TABLE_HEADER_HEIGHT => Some(points[0].x),
                         _ => None,
                     }).min_by(f32::total_cmp).expect("header column splitter");
                     assert!((header_split - split.get()).abs() < 1.0,
@@ -1109,7 +1109,7 @@ mod shader_section_tests {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text() == "field" => Some(text.pos.y),
+                    egui::Shape::Text(text) if text.galley.text() == "Field" => Some(text.pos.y),
                     _ => None,
                 })
                 .unwrap()

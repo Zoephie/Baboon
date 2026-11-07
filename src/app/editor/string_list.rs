@@ -43,7 +43,7 @@ pub(in crate::app) enum StringListTab {
 /// a filter box.
 const COMPLETION_ROWS: usize = 12;
 const ROW_HEIGHT: f32 = 36.0;
-const HEADER_HEIGHT: f32 = 26.0;
+const HEADER_HEIGHT: f32 = TABLE_HEADER_HEIGHT;
 const GROUPED_ROWS_HELP: &str = "Choose Sheet in View to insert, cut, copy or paste whole strings. Text-field copy/paste remains available.";
 /// The gap the text leaves before a colour for its swatch.
 const SWATCH_SPACE: f32 = 16.0;
@@ -747,6 +747,7 @@ fn draw_table_contents(
     let grouped = view.grouped == Some(true);
     let mut id_header_rect = None;
     let painter = ui.painter().clone();
+    let header_background = painter.add(egui::Shape::Noop);
     let ctx = ui.ctx().clone();
     let separator_stroke = ui.visuals().widgets.noninteractive.bg_stroke;
     let column_spacing = ui.spacing().item_spacing.x;
@@ -765,7 +766,7 @@ fn draw_table_contents(
     let mut table = TableBuilder::new(ui)
         .id_salt(table_id)
         .striped(true)
-        .resizable(!grouped)
+        .resizable(false)
         .sense(Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .max_scroll_height(height)
@@ -776,9 +777,9 @@ fn draw_table_contents(
         table = table.column(Column::exact(38.0).resizable(false));
     }
     if multilingual {
-        table = table.column(if grouped {
-            Column::exact(if view.id_column_width > 0.0 { view.id_column_width } else { 260.0 }).clip(true)
-        } else { Column::initial(260.0).at_least(100.0).clip(true) });
+        table = table.column(Column::exact(
+            if view.id_column_width > 0.0 { view.id_column_width } else { 260.0 },
+        ).clip(true));
     }
     table = table.column(Column::remainder().at_least(160.0).clip(true));
     if let Some(row) = scroll_to {
@@ -793,7 +794,7 @@ fn draw_table_contents(
             header.col(|ui| {
                 controls_edge = Some(ui.max_rect().right() + column_spacing * 0.5);
                 padded_index_cell(ui, |ui| {
-                ui.strong("Index");
+                table_header_label(ui, "Index");
                 });
             });
             if checkboxes {
@@ -816,15 +817,15 @@ fn draw_table_contents(
             if multilingual {
                 header.col(|ui| {
                     id_header_rect = Some(ui.max_rect());
-                    padded_table_cell(ui, |ui| { ui.strong(list.storage.identity_label()); });
+                    padded_table_cell(ui, |ui| { table_header_label(ui, list.storage.identity_label()); });
                 });
             }
             header.col(|ui| padded_table_cell(ui, |ui| {
-                header_bottom = ui.max_rect().bottom() + column_spacing * 0.5;
+                header_bottom = ui.max_rect().bottom();
                 if list.storage == Storage::Multilingual {
-                    ui.strong(format!("{} Text", list.languages[language].name));
+                    table_header_label(ui, format!("{} Text", list.languages[language].name));
                 } else {
-                    ui.strong(list.storage.text_label());
+                    table_header_label(ui, list.storage.text_label());
                 }
             }));
         })
@@ -1280,25 +1281,19 @@ fn draw_table_contents(
                 ctx.request_repaint();
             }
         });
+    let header_rect = egui::Rect::from_min_max(top, egui::pos2(scroll.inner_rect.right(), header_bottom));
+    painter.set(header_background, table_header_background(header_rect));
     if let Some(rect) = id_header_rect {
-        if grouped {
-            let x = rect.right()+column_spacing*0.5;
-            let line = egui::Rect::from_min_max(egui::pos2(x,top.y),egui::pos2(x,header_bottom));
-            let response = ui.interact(line.expand2(Vec2::new(ui.style().interaction.resize_grab_radius_side,0.0)),
-                table_id.with("header column resize"),Sense::click_and_drag());
-            if response.dragged() && let Some(pointer)=ctx.pointer_latest_pos() {
-                let maximum = (scroll.inner_rect.right()-rect.left()-160.0-column_spacing).max(100.0);
-                view.id_column_width = (rect.width()+pointer.x-x).clamp(100.0,maximum);
-                ctx.request_repaint();
-            }
-            if response.hovered() || response.dragged() {ctx.set_cursor_icon(egui::CursorIcon::ResizeColumn);}
-            painter.vline(x,top.y..=header_bottom,if response.dragged() {ui.visuals().widgets.active.bg_stroke}
-                else if response.hovered() {ui.visuals().widgets.hovered.bg_stroke} else {separator_stroke});
-        } else {
-            view.id_column_width = rect.width();
+        let x = rect.right() + column_spacing * 0.5;
+        let response = table_header_resize_divider(ui, header_rect, x,
+            table_id.with("header column resize"));
+        if response.dragged() && let Some(pointer) = ctx.pointer_latest_pos() {
+            let maximum = (scroll.inner_rect.right() - rect.left() - 160.0 - column_spacing).max(100.0);
+            view.id_column_width = (rect.width() + pointer.x - x).clamp(100.0, maximum);
+            ctx.request_repaint();
         }
     }
-    painter.hline(top.x..=scroll.inner_rect.right(), header_bottom, Stroke::new(2.0, foundation_block_edge()));
+    paint_table_header_rule(ui, header_rect);
     let max_offset = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
     view.scroll_offset = scroll.state.offset.y;
     view.page_height = scroll.inner_rect.height();
@@ -3782,31 +3777,69 @@ mod tests {
     }
 
     #[test]
-    fn grouped_column_resizes_only_from_header_and_defers_full_wrap_reflow_until_release() {
-        let mut panel=named_panel(&["A_one","A_two"]);
-        panel.wrap_text=true;
-        set_display(&panel,true,StringSort::Index,false,&["A"]);
-        panel.frame(vec![]);
-        let frame=panel.frame(vec![]);
-        let heading=text_position(&frame,"String ID");
-        let divider=frame.lines.iter().find(|(points,_)|points[0].x==points[1].x
-            && points[0].x>heading.x && points[0].y<heading.y && points[1].y>heading.y).unwrap().0;
-        assert!(divider[1].y<text_position(&frame,"A_one").y,"divider must stop at the header");
-        let view_id=egui::Id::new(("field_edit","test","strings.multilingual_unicode_string_list","string list view"));
-        let initial=panel.ctx.data(|data|data.get_temp::<StringListView>(view_id)).unwrap().wrapped_rows.unwrap().layout.widths.clone();
-        let at=egui::pos2(divider[0].x,heading.y);
-        let pointer=|pos,pressed|egui::Event::PointerButton {pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()};
-        panel.frame(vec![egui::Event::PointerMoved(at),pointer(at,true)]);
-        let target=at+Vec2::new(80.0,0.0);
-        panel.frame(vec![egui::Event::PointerMoved(target)]);
-        panel.frame(vec![egui::Event::PointerMoved(target)]);
-        let resizing=panel.ctx.data(|data|data.get_temp::<StringListView>(view_id)).unwrap();
-        assert!(resizing.id_column_width>300.0,"header handle must resize the ID column");
-        assert_eq!(resizing.wrapped_rows.unwrap().layout.widths,initial,"full-list wrap reflow must be deferred during resize");
-        panel.frame(vec![pointer(target,false)]);
-        panel.frame(vec![]);
-        let finished=panel.ctx.data(|data|data.get_temp::<StringListView>(view_id)).unwrap();
-        assert_ne!(finished.wrapped_rows.unwrap().layout.widths,initial,"full reflow must finish when resize ends");
+    fn table_header_painted_height_matches_shared_header_height() {
+        for grouped in [false, true] {
+            for checkboxes in [false, true] {
+                let mut panel = named_panel(&["A_one", "A_two"]);
+                panel.checkboxes = checkboxes;
+                set_display(&panel, grouped, StringSort::Index, false, &["A"]);
+                panel.frame(vec![]);
+                let frame = panel.frame(vec![]);
+                let heading = text_position(&frame, "String ID");
+                let header = frame.rects.iter().find(|(rect, fill)|
+                    *fill == editor_bg() && rect.contains(heading) && rect.height() < 40.0)
+                    .expect("the painted column header").0;
+                assert_eq!(header.height(), TABLE_HEADER_HEIGHT,
+                    "Strings header must match folder and shader header heights (grouped={grouped}, checkboxes={checkboxes})");
+                let divider = frame.lines.iter().find(|(points, _)|
+                    points[0].x == points[1].x && points[0].x > heading.x
+                        && points[0].y < heading.y && points[1].y > heading.y)
+                    .expect("the header resize divider").0;
+                assert_eq!(divider[1].y - divider[0].y, TABLE_HEADER_HEIGHT);
+            }
+        }
+    }
+
+    #[test]
+    fn columns_resize_only_from_header_and_defer_full_wrap_reflow_until_release() {
+        for grouped in [false, true] {
+            let mut panel=named_panel(&["A_one","A_two"]);
+            panel.wrap_text=true;
+            set_display(&panel,grouped,StringSort::Index,false,&["A"]);
+            panel.frame(vec![]);
+            let frame=panel.frame(vec![]);
+            let heading=text_position(&frame,"String ID");
+            let divider=frame.lines.iter().find(|(points,_)|points[0].x==points[1].x
+                && points[0].x>heading.x && points[0].y<heading.y && points[1].y>heading.y).unwrap().0;
+            assert!(divider[1].y<text_position(&frame,"A_one").y,"divider must stop at the header");
+            let view_id=egui::Id::new(("field_edit","test","strings.multilingual_unicode_string_list","string list view"));
+            let initial=panel.ctx.data(|data|data.get_temp::<StringListView>(view_id)).unwrap().wrapped_rows.unwrap().layout.widths.clone();
+            let at=egui::pos2(divider[0].x,heading.y);
+            let pointer=|pos,pressed|egui::Event::PointerButton {pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()};
+            panel.frame(vec![egui::Event::PointerMoved(at),pointer(at,true)]);
+            let target=at+Vec2::new(80.0,0.0);
+            panel.frame(vec![egui::Event::PointerMoved(target)]);
+            panel.frame(vec![egui::Event::PointerMoved(target)]);
+            let resizing=panel.ctx.data(|data|data.get_temp::<StringListView>(view_id)).unwrap();
+            assert!(resizing.id_column_width>300.0,"header handle must resize the ID column");
+            assert_eq!(resizing.wrapped_rows.unwrap().layout.widths,initial,"full-list wrap reflow must be deferred during resize");
+            panel.frame(vec![pointer(target,false)]);
+            panel.frame(vec![]);
+            let finished=panel.ctx.data(|data|data.get_temp::<StringListView>(view_id)).unwrap();
+            assert_ne!(finished.wrapped_rows.unwrap().layout.widths,initial,"full reflow must finish when resize ends");
+            let width = finished.id_column_width;
+            let frame = panel.frame(vec![]);
+            let heading = text_position(&frame, "String ID");
+            let x = frame.lines.iter().find(|(points, _)| points[0].x == points[1].x
+                && points[0].x > heading.x && points[0].y < heading.y && points[1].y > heading.y).unwrap().0[0].x;
+            let at = egui::pos2(x, text_position(&frame, "A_one").y);
+            panel.frame(vec![egui::Event::PointerMoved(at), pointer(at, true)]);
+            let target = at + Vec2::new(40.0, 0.0);
+            panel.frame(vec![egui::Event::PointerMoved(target)]);
+            panel.frame(vec![pointer(target, false)]);
+            assert_eq!(panel.ctx.data(|data| data.get_temp::<StringListView>(view_id)).unwrap().id_column_width,
+                width, "Dragging the body boundary must not resize columns (grouped={grouped})");
+        }
     }
 
     #[test]
