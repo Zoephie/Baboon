@@ -320,9 +320,8 @@ impl RenderCore {
                 return;
             }
             begin_flares(gl, flares, self.placeholder);
-            // The slot's flare maps run CE's lights, Halo 2's flares, then
-            // these.
-            let first_h3 = frame.preview.ce_lights.len() + frame.preview.h2_flares.len();
+            // The slot's flare maps run Halo 2's flares, then these.
+            let first_h3 = frame.preview.h2_flares.len();
             let viewport = self.scene.as_ref().map_or([1, 1], |scene| scene.size);
             let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
             for (index, at) in frame.preview.h3_flares.iter().enumerate() {

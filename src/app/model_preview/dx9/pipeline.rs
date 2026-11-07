@@ -8,6 +8,7 @@ use eframe::glow::{self, HasContext as _};
 use super::super::renderer::*;
 use super::super::*;
 use super::passes::{H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT, H2DefaultLight, H2Layer};
+use super::sprites::Dx9Sprites;
 
 /// Where Halo CE's and Halo 2's shading differ.
 pub(in crate::app::model_preview) trait Dx9Game {
@@ -19,6 +20,19 @@ pub(in crate::app::model_preview) trait Dx9Game {
     unsafe fn transparents(&mut self, cx: &mut FrameCx<'_>, order: &[usize]) {
         unsafe { cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None) }
     }
+
+    /// In the sprite pass, after the antennas: the game's own sprites, with
+    /// the sprite program bound again after.
+    unsafe fn draw_own_sprites(&mut self, _cx: &mut Dx9Sprites<'_>) {}
+
+    /// In the sprite pass, under the flares' added blend: the game's lens
+    /// flares.
+    unsafe fn draw_flares(&mut self, _cx: &mut Dx9Sprites<'_>) {}
+
+    /// Each simulation the game keeps for `slot` while it holds its
+    /// `uploads`th model, by name.
+    #[cfg(test)]
+    fn each_simulation(&self, _slot: usize, _uploads: u64, _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {}
 }
 
 impl RenderCore {

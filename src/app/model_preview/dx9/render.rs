@@ -43,10 +43,19 @@ impl GameRender for Dx9Render {
     unsafe fn finish(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
             if cx.core.draws_object_sprites(cx.frame) {
-                cx.core.draw_dx9_sprites(cx.gl, cx.frame, cx.slot);
+                let game = self.game(cx.frame.preview.game);
+                cx.core.draw_dx9_sprites(game, cx.gl, cx.frame, cx.slot);
             }
             let order = self.bloom_order.take();
             cx.core.draw_dx9_bloom(cx.gl, cx.frame, cx.slot, order);
+        }
+    }
+
+    #[cfg(test)]
+    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+        let Self { ce, h2, .. } = self;
+        for game in [ce as &dyn Dx9Game, h2] {
+            game.each_simulation(slot, uploads, visit);
         }
     }
 }

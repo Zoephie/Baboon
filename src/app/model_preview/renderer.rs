@@ -2005,9 +2005,6 @@ pub(in crate::app::model_preview) struct SlotSimulations {
     pub(in crate::app::model_preview) particles: particles::H3ParticleField,
     /// Reach's cheap particles.
     pub(in crate::app::model_preview) reach_cheap: particles::cheap::ReachCheapField,
-    ce_contrails: ce::contrails::CeContrailField,
-    ce_glows: ce::widgets::CeGlowField,
-    ce_flags: ce::flags::CeFlagField,
     pub(in crate::app::model_preview) h3_strips: gen3::strips::H3StripField,
     /// Halo 4's trailing tracers between frames.
     pub(in crate::app::model_preview) h4_trails: h4::tracers::H4TracerField,
@@ -2018,9 +2015,6 @@ pub(in crate::app::model_preview) struct SlotSimulations {
     /// Every antenna's spring.
     pub(in crate::app::model_preview) antennas: antennas::spring::ReachAntennaField,
     pub(in crate::app::model_preview) h3_leaves: h3::leaves::H3LeafField,
-    /// Halo CE effect particles.
-    pub(in crate::app::model_preview) ce_particles: ce::particles::CeParticleField,
-    ce_pctl: ce::particle_systems::CeParticleSystemField,
     /// How long VISR has been on, as of when.
     pub(in crate::app::model_preview) h3_vision_clock: Option<(f32, f32)>,
 }
@@ -2034,33 +2028,23 @@ impl SlotSimulations {
             h2_contrails,
             particles,
             reach_cheap,
-            ce_contrails,
-            ce_glows,
-            ce_flags,
             h3_strips,
             h4_trails,
             effect_onsets,
             cloth,
             antennas,
             h3_leaves,
-            ce_particles,
-            ce_pctl,
             h3_vision_clock,
         } = self;
         visit("h2_contrails", h2_contrails);
         visit("particles", particles);
         visit("reach_cheap", reach_cheap);
-        visit("ce_contrails", ce_contrails);
-        visit("ce_glows", ce_glows);
-        visit("ce_flags", ce_flags);
         visit("h3_strips", h3_strips);
         visit("h4_trails", h4_trails);
         visit("effect_onsets", effect_onsets);
         visit("cloth", cloth);
         visit("antennas", antennas);
         visit("h3_leaves", h3_leaves);
-        visit("ce_particles", ce_particles);
-        visit("ce_pctl", ce_pctl);
         visit("h3_vision_clock", h3_vision_clock);
     }
 }
@@ -2084,6 +2068,9 @@ pub(super) struct ModelGpuSlot {
     grid_built: bool,
     /// The `mesh_id` the buffers hold.
     mesh_id: Option<u64>,
+    /// How many models the slot has taken, which each game's own state for
+    /// the slot follows.
+    uploads: u64,
     /// Per batch, where its transparent passes sort from.
     pub(in crate::app::model_preview) h2_sort_points: Vec<[f32; 3]>,
     /// GL textures per material, in `RenderModelPreview::materials` order.
@@ -2094,8 +2081,6 @@ pub(super) struct ModelGpuSlot {
     uploaded_textures: Option<u64>,
     /// Halo CE's lens flares: per light, then per image, of `flare_geometry`.
     pub(in crate::app::model_preview) flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
-    /// The flares of lights CE effects make: by effect, light, then image.
-    pub(in crate::app::model_preview) ce_effect_flare_textures: HashMap<usize, Vec<Vec<Option<glow::NativeTexture>>>>,
     /// Each of `h2_gel_lights`' gels, of `gel_geometry`.
     pub(in crate::app::model_preview) gel_textures: Vec<Option<glow::NativeTexture>>,
     pub(in crate::app::model_preview) gel_geometry: Option<u64>,
@@ -2109,19 +2094,6 @@ pub(super) struct ModelGpuSlot {
     pub(in crate::app::model_preview) h2_liquid_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     /// The cheap particles' library's render texture array.
     pub(in crate::app::model_preview) reach_cheap_texture: Option<glow::NativeTexture>,
-    /// Halo CE effect particles' images, by [`ce::particles::def_key`],
-    /// particle, then image.
-    ce_particle_textures: HashMap<usize, Vec<Vec<Option<glow::NativeTexture>>>>,
-    ce_contrail_textures: Vec<Vec<Option<glow::NativeTexture>>>,
-    ce_light_volume_textures: Vec<Option<glow::NativeTexture>>,
-    ce_lightning_textures: Vec<Option<glow::NativeTexture>>,
-    /// By system, sheet, then image.
-    ce_pctl_textures: Vec<Vec<Vec<Option<glow::NativeTexture>>>>,
-    /// Effects' particle systems: by effect, system, sheet, then image.
-    ce_effect_pctl_textures: HashMap<usize, Vec<Vec<Vec<Option<glow::NativeTexture>>>>>,
-    /// Effect shaders' second maps, by the map, made on first draw.
-    ce_secondary_textures: HashMap<usize, glow::NativeTexture>,
-    ce_glow_textures: Vec<Option<glow::NativeTexture>>,
     pub(in crate::app::model_preview) leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     pub(in crate::app::model_preview) strip_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     pub(in crate::app::model_preview) particle_textures: Vec<[Option<glow::NativeTexture>; 4]>,
@@ -2155,6 +2127,7 @@ impl ModelGpuSlot {
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             Ok(Self {
                 mesh_id: None,
+                uploads: 0,
                 h2_sort_points: Vec::new(),
                 vertex_array,
                 vertex_buffer,
@@ -2168,7 +2141,6 @@ impl ModelGpuSlot {
                 materials: Vec::new(),
                 uploaded_textures: None,
                 flare_textures: Vec::new(),
-                ce_effect_flare_textures: HashMap::new(),
                 gel_textures: Vec::new(),
                 gel_geometry: None,
                 h3_textures: Default::default(),
@@ -2180,14 +2152,6 @@ impl ModelGpuSlot {
                 h2_contrail_textures: Vec::new(),
                 h2_liquid_textures: Vec::new(),
                 reach_cheap_texture: None,
-                ce_particle_textures: HashMap::new(),
-                ce_contrail_textures: Vec::new(),
-                ce_light_volume_textures: Vec::new(),
-                ce_lightning_textures: Vec::new(),
-                ce_pctl_textures: Vec::new(),
-                ce_effect_pctl_textures: HashMap::new(),
-                ce_secondary_textures: HashMap::new(),
-                ce_glow_textures: Vec::new(),
                 leaf_textures: Vec::new(),
                 strip_textures: Vec::new(),
                 particle_textures: Vec::new(),
@@ -2344,44 +2308,23 @@ impl ModelGpuSlot {
             }
             self.flare_textures = frame
                 .preview
-                .ce_lights
+                .h2_flares
                 .iter()
-                .map(|light| {
-                    let images = light.flare.iter().flat_map(|flare| &flare.images);
-                    images.map(|image| upload_h2_image(gl, image)).collect()
-                })
-                .chain(frame.preview.h2_flares.iter().map(|at| {
-                    at.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect()
-                }))
+                .map(|at| at.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect())
                 .chain(frame.preview.h3_flares.iter().map(|at| {
                     let (image, texels, mips) = at.bitmap();
                     vec![gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, None)]
                 }))
                 .chain(h4::flare_pass::h4_flare_images(gl, frame))
                 .collect();
-            for texture in self.ce_effect_flare_textures.drain().flat_map(|(_, lights)| lights).flatten().flatten() {
-                gl.delete_texture(texture);
-            }
-            let reachable = ce::particles::reachable_defs(&frame.preview.ce_effects);
-            self.ce_effect_flare_textures = reachable
-                .iter()
-                .map(|def| {
-                    let lights = def.lights.iter().map(|light| {
-                        let images = light.light.flare.iter().flat_map(|flare| &flare.images);
-                        images.map(|image| upload_h2_image(gl, image)).collect()
-                    });
-                    (ce::particles::def_key(def), lights.collect())
-                })
-                .collect();
             for texture in self.antenna_textures.drain(..).flatten() {
                 gl.delete_texture(texture);
             }
             self.antenna_textures = frame
                 .preview
-                .ce_antennas
+                .h2_antennas
                 .iter()
-                .map(|antenna| upload_h2_image(gl, &antenna.image))
-                .chain(frame.preview.h2_antennas.iter().map(|antenna| match &antenna.h3_bitmap {
+                .map(|antenna| match &antenna.h3_bitmap {
                     // `build_sprite`. Reach's `draw_textured_transparent_quad`
                     // sets address mode 1 and filter mode 2, taken to be
                     // clamped and trilinear. [inferred]
@@ -2392,73 +2335,6 @@ impl ModelGpuSlot {
                         gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
                     }
                     None => upload_h2_image(gl, &antenna.image),
-                }))
-                .collect();
-            for texture in self.ce_particle_textures.drain().flat_map(|(_, particles)| particles).flatten().flatten() {
-                gl.delete_texture(texture);
-            }
-            for texture in self.ce_contrail_textures.drain(..).flatten().flatten() {
-                gl.delete_texture(texture);
-            }
-            for texture in self.ce_light_volume_textures.drain(..).flatten() {
-                gl.delete_texture(texture);
-            }
-            self.ce_light_volume_textures =
-                frame.preview.ce_light_volumes.iter().map(|volume| upload_h2_image(gl, &volume.image)).collect();
-            for texture in self.ce_lightning_textures.drain(..).flatten() {
-                gl.delete_texture(texture);
-            }
-            self.ce_lightning_textures =
-                frame.preview.ce_lightning.iter().map(|lightning| upload_h2_image(gl, &lightning.image)).collect();
-            for texture in self.ce_glow_textures.drain(..).flatten() {
-                gl.delete_texture(texture);
-            }
-            self.ce_glow_textures = frame.preview.ce_glows.iter().map(|glow| upload_h2_image(gl, &glow.image)).collect();
-            for texture in self.ce_pctl_textures.drain(..).flatten().flatten().flatten() {
-                gl.delete_texture(texture);
-            }
-            self.ce_pctl_textures = frame
-                .preview
-                .ce_particle_systems
-                .iter()
-                .map(|system| {
-                    system.def.sheets.iter().map(|sheet| {
-                        sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                    }).collect()
-                })
-                .collect();
-            for (_, texture) in self.ce_secondary_textures.drain() {
-                gl.delete_texture(texture);
-            }
-            for texture in self.ce_effect_pctl_textures.drain().flat_map(|(_, systems)| systems).flatten().flatten().flatten() {
-                gl.delete_texture(texture);
-            }
-            self.ce_effect_pctl_textures = reachable
-                .iter()
-                .map(|def| {
-                    let systems = def.systems.iter().map(|system| {
-                        system.sheets.iter().map(|sheet| {
-                            sheet.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                        }).collect()
-                    });
-                    (ce::particles::def_key(def), systems.collect())
-                })
-                .collect();
-            self.ce_contrail_textures = frame
-                .preview
-                .ce_contrails
-                .iter()
-                .map(|contrail| {
-                    contrail.def.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                })
-                .collect();
-            self.ce_particle_textures = reachable
-                .iter()
-                .map(|def| {
-                    let particles = def.particles.iter().map(|particle| {
-                        particle.images.iter().map(|image| image.as_ref().and_then(|image| upload_h2_image(gl, image))).collect()
-                    });
-                    (ce::particles::def_key(def), particles.collect())
                 })
                 .collect();
             for texture in self.h2_liquid_textures.drain(..).flatten().flatten() {
@@ -2512,6 +2388,11 @@ impl ModelGpuSlot {
     /// The fields restart on their own only when their count changes or time
     /// goes back, so a slot taken over by another model would step the last
     /// model's particles, flags and cloth against the new model's definitions.
+    /// How many models the slot has taken.
+    pub(in crate::app::model_preview) fn uploads(&self) -> u64 {
+        self.uploads
+    }
+
     fn restart_simulations(&mut self) {
         self.simulations = SlotSimulations::default();
     }
@@ -2885,7 +2766,7 @@ pub(super) struct SpriteGl {
 /// `effect_update` for Halo CE's attached effects, up to the frame's time.
 /// Stepping to a time it has reached does nothing, so the model's lights
 /// and the sprites can both ask for it.
-pub(in crate::app::model_preview) fn advance_ce_effects(uploaded: &mut ModelGpuSlot, frame: &ModelGpuFrame, bones: Option<&[[f32; 4]]>) {
+pub(in crate::app::model_preview) fn advance_ce_effects(ce: &mut ce::slot::CeSlot, frame: &ModelGpuFrame, bones: Option<&[[f32; 4]]>) {
     let states = &frame.object_states;
     let inputs = |object: u8| {
         let state = states.get(object as usize);
@@ -2897,10 +2778,10 @@ pub(in crate::app::model_preview) fn advance_ce_effects(uploaded: &mut ModelGpuS
     };
     let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
     let ground = lowest.fold(0.0, f32::min);
-    let others = uploaded.simulations.ce_pctl.particle_count();
+    let others = ce.simulations.pctl.particle_count();
     let effects = &frame.preview.ce_effects;
-    uploaded.simulations.ce_particles.advance(effects, &frame.ce_plays, inputs, bones, ground, frame.time, others);
-    let running = uploaded.simulations.ce_particles.runs_played(effects.len());
+    ce.simulations.particles.advance(effects, &frame.ce_plays, inputs, bones, ground, frame.time, others);
+    let running = ce.simulations.particles.runs_played(effects.len());
     CE_EVENTS_RUNNING.with(|set| {
         let mut set = set.borrow_mut();
         if running {
@@ -3010,7 +2891,7 @@ impl CeSpriteGroups {
 /// are uploaded already.
 pub(in crate::app::model_preview) fn ce_groups(
     gl: &glow::Context,
-    uploaded: &mut ModelGpuSlot,
+    ce: &mut ce::slot::CeSlot,
     frame: &ModelGpuFrame,
     bones: Option<&[[f32; 4]]>,
     view: &common::view::ViewFrame,
@@ -3033,13 +2914,13 @@ pub(in crate::app::model_preview) fn ce_groups(
     let switched = |object: u8| {
         states.get(object as usize).map_or(([0.0; 4], [false; 4]), |state| (state.outputs, state.active))
     };
-    uploaded.simulations.ce_contrails.advance(contrails, switched, bones, ground, frame.time);
+    ce.simulations.contrails.advance(contrails, switched, bones, ground, frame.time);
     let change_colors = |object: u8| states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors);
     let mut sprites = CeSpriteGroups::default();
     // Made afresh every frame, as the game draws it.
     let seed = (frame.time * 1000.0) as u32;
     for (index, lightning) in frame.preview.ce_lightning.iter().enumerate() {
-        let Some(texture) = uploaded.ce_lightning_textures.get(index).copied().flatten() else {
+        let Some(texture) = ce.textures.lightning.get(index).copied().flatten() else {
             continue;
         };
         let seed = seed.wrapping_add(index as u32 * 7919);
@@ -3053,9 +2934,9 @@ pub(in crate::app::model_preview) fn ce_groups(
     }
     // `particle_systems_render`, for those effects' parts made.
     let pixel_of = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
-    for (effect, system, quad) in uploaded.simulations.ce_particles.system_quads(effects, view, pixel_of) {
-        let texture = uploaded
-            .ce_effect_pctl_textures
+    for (effect, system, quad) in ce.simulations.particles.system_quads(effects, view, pixel_of) {
+        let texture = ce
+            .textures.effect_pctl
             .get(&effect)
             .and_then(|systems| systems.get(system))
             .and_then(|sheets| sheets.get(quad.sheet))
@@ -3078,11 +2959,11 @@ pub(in crate::app::model_preview) fn ce_groups(
                 state.map_or([[1.0; 3]; 4], |state| state.change_colors),
             )
         };
-        let others = uploaded.simulations.ce_particles.system_particle_count();
-        uploaded.simulations.ce_pctl.advance(systems, inputs, bones, ground, frame.time, others);
+        let others = ce.simulations.particles.system_particle_count();
+        ce.simulations.pctl.advance(systems, inputs, bones, ground, frame.time, others);
         let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
-        for quad in uploaded.simulations.ce_pctl.quads(systems, view, pixel) {
-            let texture = uploaded.ce_pctl_textures.get(quad.system).and_then(|sheets| sheets.get(quad.sheet)).and_then(|images| images.get(quad.image)).copied().flatten();
+        for quad in ce.simulations.pctl.quads(systems, view, pixel) {
+            let texture = ce.textures.pctl.get(quad.system).and_then(|sheets| sheets.get(quad.sheet)).and_then(|images| images.get(quad.image)).copied().flatten();
             if let Some(texture) = texture {
                 let sprite = (texture, quad.blend, quad.nonlinear_tint, [quad.color; 4], quad.corners, quad.secondary);
                 sprites.push((CE_SYSTEM, quad.group, 0), quad.sort_bias, false, sprite);
@@ -3096,26 +2977,26 @@ pub(in crate::app::model_preview) fn ce_groups(
         let (outputs, active) = switched(object);
         std::array::from_fn(|slot| if active[slot] { outputs[slot] } else { 0.0 })
     };
-    uploaded.simulations.ce_glows.advance(glows, read_if_on, bones, frame.time);
+    ce.simulations.glows.advance(glows, read_if_on, bones, frame.time);
     let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
-    for (index, quad) in uploaded.simulations.ce_glows.quads(glows, view, pixel) {
-        if let Some(texture) = uploaded.ce_glow_textures.get(index).copied().flatten() {
+    for (index, quad) in ce.simulations.glows.quads(glows, view, pixel) {
+        if let Some(texture) = ce.textures.glows.get(index).copied().flatten() {
             sprites.push((CE_GLOW, index, 0), false, false, (texture, ce::passes::FramebufferBlend::Add, false, quad.colors, quad.corners, None));
         }
     }
-    for quad in uploaded.simulations.ce_contrails.quads(contrails, change_colors, view) {
+    for quad in ce.simulations.contrails.quads(contrails, change_colors, view) {
         let Some(contrail) = contrails.get(quad.contrail) else {
             continue;
         };
-        let texture = uploaded.ce_contrail_textures.get(quad.contrail).and_then(|images| images.get(quad.image)).copied().flatten();
+        let texture = ce.textures.contrails.get(quad.contrail).and_then(|images| images.get(quad.image)).copied().flatten();
         if let Some(texture) = texture {
             let sprite = (texture, contrail.def.blend, contrail.def.nonlinear_tint, quad.colors, quad.corners, None);
             sprites.push((CE_CONTRAIL, quad.contrail, 0), contrail.def.sort_bias, false, sprite);
         }
     }
-    for quad in uploaded.simulations.ce_particles.quads(effects, bones, view, pixels) {
-        let texture = uploaded
-            .ce_particle_textures
+    for quad in ce.simulations.particles.quads(effects, bones, view, pixels) {
+        let texture = ce
+            .textures.particles
             .get(&quad.effect)
             .and_then(|defs| defs.get(quad.def))
             .and_then(|images| images.get(quad.image))
@@ -3128,7 +3009,7 @@ pub(in crate::app::model_preview) fn ce_groups(
     }
     let mut groups: Vec<CeGroup> = sprites.sorted_by(view).collect();
     // `antenna_render_proper`: one group each, at the mean of its sprites.
-    for (antenna, texture) in frame.preview.ce_antennas.iter().zip(&uploaded.antenna_textures) {
+    for (antenna, texture) in frame.preview.ce_antennas.iter().zip(&ce.textures.antennas) {
         let Some(texture) = *texture else {
             continue;
         };
@@ -3138,7 +3019,7 @@ pub(in crate::app::model_preview) fn ce_groups(
         groups.push(CeGroup { z_sort: ce_z_sort(view, centroid, false), draw });
     }
     // `light_volume_submit`: one group each, at its marker.
-    for (volume, texture) in frame.preview.ce_light_volumes.iter().zip(&uploaded.ce_light_volume_textures) {
+    for (volume, texture) in frame.preview.ce_light_volumes.iter().zip(&ce.textures.light_volumes) {
         let Some(texture) = *texture else {
             continue;
         };
@@ -3158,7 +3039,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_group(
     effect_gl: &mut Option<Option<CeEffectGl>>,
     main: glow::NativeProgram,
     flares: &SpriteGl,
-    uploaded: &mut ModelGpuSlot,
+    ce: &mut ce::slot::CeSlot,
     camera: &ModelGpuCamera,
     group: CeGroup,
 ) {
@@ -3174,7 +3055,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_group(
         match group.draw {
             CeGroupDraw::Sprites(sprites) => {
                 if let Some(effect_gl) = effect_gl.get_or_insert_with(|| ce_effect_gl(gl, main)).as_ref() {
-                    draw_ce_sprites(gl, effect_gl, uploaded, camera, sprites);
+                    draw_ce_sprites(gl, effect_gl, ce, camera, sprites);
                 }
             }
             CeGroupDraw::Plain { quads, texture, additive } => {
@@ -3206,7 +3087,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_group(
 unsafe fn draw_ce_sprites(
     gl: &glow::Context,
     effect_gl: &CeEffectGl,
-    uploaded: &mut ModelGpuSlot,
+    ce: &mut ce::slot::CeSlot,
     camera: &ModelGpuCamera,
     sprites: Vec<CeSprite>,
 ) {
@@ -3227,12 +3108,12 @@ unsafe fn draw_ce_sprites(
             // A second map that would not upload draws as none, not as black.
             let secondary = secondary.as_ref().and_then(|draw| {
                 let key = Arc::as_ptr(&draw.map) as usize;
-                if !uploaded.ce_secondary_textures.contains_key(&key)
+                if !ce.textures.secondary.contains_key(&key)
                     && let Some(made) = upload_h2_image(gl, &draw.map.image)
                 {
-                    uploaded.ce_secondary_textures.insert(key, made);
+                    ce.textures.secondary.insert(key, made);
                 }
-                uploaded.ce_secondary_textures.get(&key).map(|map| (draw, *map))
+                ce.textures.secondary.get(&key).map(|map| (draw, *map))
             });
             match secondary {
                 Some((draw, map)) => {
@@ -3947,6 +3828,11 @@ pub(super) trait GameRender {
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>);
     /// After the wireframe: what draws over it.
     unsafe fn finish(&mut self, cx: &mut FrameCx<'_>);
+
+    /// Each simulation the game keeps for `slot` while it holds its `uploads`th
+    /// model, by name: what the G-sim gate reads.
+    #[cfg(test)]
+    fn each_simulation(&self, _slot: usize, _uploads: u64, _visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {}
 }
 
 /// Each game's drawing, by the game a preview is from.
@@ -3958,6 +3844,15 @@ struct GameRenders {
 }
 
 impl GameRenders {
+    /// Each game's own simulations for `slot`.
+    #[cfg(test)]
+    fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
+        let Self { plain, dx9, gen3 } = self;
+        for game in [plain as &dyn GameRender, dx9, gen3] {
+            game.each_simulation(slot, uploads, visit);
+        }
+    }
+
     /// The drawing for `frame`, by [`Route::of`] its preview.
     fn of(&mut self, frame: &ModelGpuFrame) -> &mut dyn GameRender {
         match Route::of(&frame.preview) {
@@ -4031,8 +3926,11 @@ impl ModelGlRenderer {
     }
 
     #[cfg(test)]
-    pub(super) fn for_each_simulation(&self, geometry_id: u64, visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
-        self.core.for_each_simulation(geometry_id, visit);
+    pub(super) fn for_each_simulation(&self, geometry_id: u64, mut visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
+        self.core.for_each_simulation(geometry_id, &mut visit);
+        if let Some(slot) = self.core.slot_of(geometry_id) {
+            self.games.each_simulation(slot, self.core.slot_uploads(slot), &mut visit);
+        }
     }
 }
 
@@ -4048,8 +3946,6 @@ pub(super) struct RenderCore {
     /// The frame's CE point lights with those its effects have made, which
     /// only the drawing knows; none while effects make no lights.
     pub(in crate::app::model_preview) ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
-    /// As `h2_bloom`.
-    pub(in crate::app::model_preview) ce_effect_gl: Option<Option<CeEffectGl>>,
     /// As `h2_bloom`.
     pub(in crate::app::model_preview) particle_gl: Option<Option<H3ParticleGl>>,
     /// As `h2_bloom`.
@@ -4132,22 +4028,37 @@ impl RenderCore {
     /// for the refactor's G-sim gate.
     #[cfg(test)]
     pub(super) fn for_each_simulation(&self, geometry_id: u64, visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
-        let Some(index) = self.lru.slots.iter().position(|(id, _)| *id == geometry_id) else {
-            return;
-        };
-        let Some(slot) = self.slots.get(index) else {
-            return;
-        };
-        slot.simulations.each(visit);
+        if let Some(slot) = self.slot_of(geometry_id) {
+            self.slots[slot].simulations.each(visit);
+        }
+    }
+
+    /// How many models `slot` has taken: a game's own state for the slot
+    /// starts afresh when this moves on.
+    pub(in crate::app::model_preview) fn slot_uploads(&self, slot: usize) -> u64 {
+        self.slots[slot].uploads
+    }
+
+    /// The slot holding `geometry_id`, if one does.
+    #[cfg(test)]
+    fn slot_of(&self, geometry_id: u64) -> Option<usize> {
+        let index = self.lru.slots.iter().position(|(id, _)| *id == geometry_id)?;
+        (index < self.slots.len()).then_some(index)
     }
 
     /// `flag_render_proper` builds its mesh from where the sheet is now.
-    pub(in crate::app::model_preview) unsafe fn move_ce_flags(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn move_ce_flags(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        ce: &mut ce::slot::CeSlot,
+    ) {
         let uploaded = &mut self.slots[slot];
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
         let ground = lowest.fold(0.0, f32::min);
-        let written = uploaded.simulations.ce_flags.advance(&frame.preview.ce_flags, bones, ground, frame.time);
+        let written = ce.simulations.flags.advance(&frame.preview.ce_flags, bones, ground, frame.time);
         for (first, moved) in written {
             let moved = moved.into_iter().map(|(position, normal)| (position, normal, None));
             unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
@@ -4197,7 +4108,6 @@ impl RenderCore {
                     submit_draw: None,
                 },
                 sprite_gl: None,
-                ce_effect_gl: None,
                 shaders_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
                 h2_programs: HashMap::new(),
                 black_cube: upload_black_cube(gl),
@@ -4262,6 +4172,7 @@ impl RenderCore {
             }
             if upload {
                 self.slots[slot].restart_simulations();
+                self.slots[slot].uploads += 1;
             }
             // Overlays merging in keep the slot, and its running effects,
             // and change only the buffers.
@@ -4469,7 +4380,14 @@ impl RenderCore {
     /// Halo CE's transparents as `rasterizer_transparent_geometry_draw` draws
     /// them: the model's transparent parts and the effects' groups in one sort
     /// by `z_sort`, far to near, each part from its centroid on its node.
-    pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        ce: &mut ce::slot::CeSlot,
+        effect_gl: &mut Option<Option<CeEffectGl>>,
+    ) {
         enum Transparent {
             Part(usize),
             Group(CeGroup),
@@ -4480,9 +4398,8 @@ impl RenderCore {
             let mut groups = Vec::new();
             if self.draws_object_sprites(frame) && ce_has_groups(&frame.preview) {
                 self.sprite_gl.get_or_insert_with(|| link_sprite_gl(gl, self.program));
-                let uploaded = &mut self.slots[slot];
-                uploaded.sync_sprite_textures(gl, frame);
-                groups = ce_groups(gl, uploaded, frame, bones, &view);
+                self.slots[slot].sync_sprite_textures(gl, frame);
+                groups = ce_groups(gl, ce, frame, bones, &view);
             }
             let points = &self.slots[slot].h2_sort_points;
             let parts = frame.visible_batches.iter().map(|&index| {
@@ -4514,8 +4431,7 @@ impl RenderCore {
                         let Some(flares) = self.sprite_gl.as_ref().and_then(Option::as_ref) else {
                             continue;
                         };
-                        let uploaded = &mut self.slots[slot];
-                        draw_ce_group(gl, &mut self.ce_effect_gl, self.program, flares, uploaded, &frame.camera, group);
+                        draw_ce_group(gl, effect_gl, self.program, flares, ce, &frame.camera, group);
                     }
                 }
             }
@@ -6925,7 +6841,6 @@ pub(in crate::app::model_preview) fn h2_antennas(
     tips: &[Option<[f32; 3]>],
 ) -> Vec<(Vec<ce::lights::CeAntennaQuad>, glow::NativeTexture, bool)> {
     let preview = &frame.preview;
-    let textures = textures.iter().skip(preview.ce_antennas.len());
     preview
         .h2_antennas
         .iter()

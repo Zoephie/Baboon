@@ -9,11 +9,20 @@ use super::super::common::sprites::{
 };
 use super::super::gen3::pipeline::{h3_layered_distance, h3_set_blend};
 use super::super::gen3::shaders::H3Blend;
+use super::super::common::view::ViewFrame;
 use super::super::renderer::*;
+use super::pipeline::Dx9Game;
 
 impl RenderCore {
-    /// The frame's dx9 sprites, after the model and its wireframe.
-    pub(in crate::app::model_preview) unsafe fn draw_dx9_sprites(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    /// The frame's dx9 sprites, after the model and its wireframe, with
+    /// `game`'s own among them.
+    pub(in crate::app::model_preview) unsafe fn draw_dx9_sprites(
+        &mut self,
+        game: &mut dyn Dx9Game,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
         unsafe {
             if self.begin_sprites(gl, frame, slot).is_none() {
                 return;
@@ -87,53 +96,12 @@ impl RenderCore {
                 }
             }
             draw_antennas(gl, flares, uploaded, frame, bones, &view, h3);
-            // Halo CE's groups, when the transparents did not sort them in.
-            if ce_has_groups(&frame.preview) && !ce_sorts_transparents(frame) {
-                for group in ce_groups(gl, uploaded, frame, bones, &view) {
-                    draw_ce_group(gl, &mut self.ce_effect_gl, self.program, flares, uploaded, camera, group);
-                }
-                gl.use_program(Some(flares.program));
-                gl.bind_vertex_array(Some(flares.vertex_array));
-                gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
-                gl.blend_equation(glow::FUNC_ADD);
-                gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-            }
+            let uploads = uploaded.uploads();
+            let mut sprites = Dx9Sprites { gl, frame, flares, view: &view, bones, program: self.program, slot, uploads };
+            game.draw_own_sprites(&mut sprites);
             gl.color_mask(true, true, true, false);
             begin_flares(gl, flares, self.placeholder);
-            for (index, light) in frame.preview.ce_lights.iter().enumerate() {
-                let state = frame.object_states.get(usize::from(light.object));
-                let outputs = state.map_or([0.0; 4], |state| state.outputs);
-                let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
-                let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, &view) else {
-                    continue;
-                };
-                let Some(occlusion) = ce_flare_occlusion(gl, flares, camera, &view, &patch) else {
-                    continue;
-                };
-                let sprites = light.sprites(&outputs, &colors, bones, &view, frame.time, occlusion);
-                let Some(textures) = uploaded.flare_textures.get(index) else {
-                    continue;
-                };
-                draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
-            }
-            for (effect, def, light) in uploaded.simulations.ce_particles.lights(&frame.preview.ce_effects) {
-                let state = frame.object_states.get(usize::from(light.object));
-                let outputs = state.map_or([0.0; 4], |state| state.outputs);
-                let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
-                let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, &view) else {
-                    continue;
-                };
-                let Some(occlusion) = ce_flare_occlusion(gl, flares, camera, &view, &patch) else {
-                    continue;
-                };
-                let sprites = light.sprites(&outputs, &colors, bones, &view, frame.time, occlusion);
-                let Some(textures) = uploaded.ce_effect_flare_textures.get(&effect).and_then(|lights| lights.get(def)) else {
-                    continue;
-                };
-                draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
-            }
-            // The slot's flare maps run CE's lights, then Halo 2's flares.
-            let first_h2 = frame.preview.ce_lights.len();
+            game.draw_flares(&mut sprites);
             for (index, at) in frame.preview.h2_flares.iter().enumerate() {
                 if !frame.h2_flares_shown.get(index).copied().unwrap_or(true) {
                     continue;
@@ -154,7 +122,7 @@ impl RenderCore {
                 let colors = frame.change_colors_of_object(at.object);
                 let onset = uploaded.simulations.effect_onsets.of(at.object, at.scale_name(), values, frame.time);
                 let sprites = at.sprites(values, &colors, bones, &view, frame.time, onset, occlusion);
-                let Some(textures) = uploaded.flare_textures.get(first_h2 + index) else {
+                let Some(textures) = uploaded.flare_textures.get(index) else {
                     continue;
                 };
                 draw_flare_sprites(gl, flares, camera, &view, &sprites, textures);
@@ -200,4 +168,20 @@ impl RenderCore {
             }
         }
     }
+}
+
+/// What a game's own sprites draw with, inside the dx9 sprite pass: the
+/// sprite program bound, and the frame's view and pose.
+pub(in crate::app::model_preview) struct Dx9Sprites<'a> {
+    pub(in crate::app::model_preview) gl: &'a glow::Context,
+    pub(in crate::app::model_preview) frame: &'a ModelGpuFrame,
+    pub(in crate::app::model_preview) flares: &'a SpriteGl,
+    pub(in crate::app::model_preview) view: &'a ViewFrame,
+    pub(in crate::app::model_preview) bones: Option<&'a [[f32; 4]]>,
+    /// The shared program, for what draws through a program of its own and
+    /// must hand state back.
+    pub(in crate::app::model_preview) program: glow::NativeProgram,
+    /// The frame's slot, and how many models it has taken.
+    pub(in crate::app::model_preview) slot: usize,
+    pub(in crate::app::model_preview) uploads: u64,
 }

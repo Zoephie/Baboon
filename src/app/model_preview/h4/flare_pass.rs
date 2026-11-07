@@ -198,9 +198,7 @@ impl H4Game {
                     .as_ref()
                     .map_or([1, 1], |targets| targets.size);
                 let textures = this.slots[slot].flare_textures.clone();
-                let first = frame.preview.ce_lights.len()
-                    + frame.preview.h2_flares.len()
-                    + frame.preview.h3_flares.len();
+                let first = frame.preview.h2_flares.len() + frame.preview.h3_flares.len();
                 for (index, draws) in drawn {
                     let images = textures.get(first + index);
                     for draw in draws {
