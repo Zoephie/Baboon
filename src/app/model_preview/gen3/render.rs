@@ -15,13 +15,24 @@ use super::super::renderer::{FrameCx, GameRender, ModelGpuFrame, RenderCore};
 use super::screen_effects::H3ScreenSettings;
 use super::shaders::H3Material;
 use super::sprites::{Gen3Sprite, Gen3Sprites};
+use super::state::Gen3State;
 use crate::core::game::GameId;
 
 /// A batch the gen3 pipeline draws, with its material.
 pub(in crate::app::model_preview) type Gen3Batch = (RenderModelPreviewBatch, Arc<H3Material>);
 
+/// What a gen3 hook draws with: the frame's `FrameCx` and the gen3
+/// pipeline's own state.
+pub(in crate::app::model_preview) struct Gen3Cx<'a> {
+    pub(in crate::app::model_preview) gl: &'a glow::Context,
+    pub(in crate::app::model_preview) frame: &'a ModelGpuFrame,
+    pub(in crate::app::model_preview) core: &'a mut RenderCore,
+    pub(in crate::app::model_preview) slot: usize,
+    pub(in crate::app::model_preview) state: &'a mut Gen3State,
+}
+
 /// Where the gen3 games differ inside the shared pipeline
-/// ([`RenderCore::draw_h3`]). Each default is what a game without the stage
+/// ([`Gen3State::draw`]). Each default is what a game without the stage
 /// does: Halo 3's and ODST's, whose own differences are the self shadow.
 pub(in crate::app::model_preview) trait Gen3Game {
     /// Take out of `batches` what draws apart from the scene.
@@ -33,13 +44,13 @@ pub(in crate::app::model_preview) trait Gen3Game {
     }
 
     /// After the albedo and its decals, before the lights.
-    unsafe fn after_albedo(&mut self, _cx: &mut FrameCx<'_>, _albedo: glow::NativeFramebuffer, _size: [i32; 2]) {}
+    unsafe fn after_albedo(&mut self, _cx: &mut Gen3Cx<'_>, _albedo: glow::NativeFramebuffer, _size: [i32; 2]) {}
 
     /// The self shadow ahead of the lit pass: whether a shadow map was drawn
     /// for the apply after the opaque pass.
     unsafe fn self_shadow(
         &mut self,
-        _cx: &mut FrameCx<'_>,
+        _cx: &mut Gen3Cx<'_>,
         _batches: &[Gen3Batch],
         _order: &[usize],
         _scene: glow::NativeFramebuffer,
@@ -48,35 +59,35 @@ pub(in crate::app::model_preview) trait Gen3Game {
     }
 
     /// The lights the lit pass reads inline, which the screen lights draw too.
-    fn frame_lights(&mut self, _cx: &mut FrameCx<'_>) -> Vec<ReachLitLight> {
+    fn frame_lights(&mut self, _cx: &mut Gen3Cx<'_>) -> Vec<ReachLitLight> {
         Vec::new()
     }
 
     /// What the opaque lit pass reads of the self shadow.
-    fn lit_values(&mut self, _core: &mut RenderCore) {}
+    fn lit_values(&mut self, _cx: &mut Gen3Cx<'_>) {}
 
     /// Lights drawn over the screen after the static lighting.
-    unsafe fn screen_lights(&mut self, _cx: &mut FrameCx<'_>, _lit: &[ReachLitLight], _accumulation: glow::NativeFramebuffer) {}
+    unsafe fn screen_lights(&mut self, _cx: &mut Gen3Cx<'_>, _lit: &[ReachLitLight], _accumulation: glow::NativeFramebuffer) {}
 
     /// What composites among the blended parts, where it lies farther than
     /// `nearer_than`.
-    unsafe fn blended(&mut self, _cx: &mut FrameCx<'_>, _nearer_than: f32, _size: [i32; 2]) {}
+    unsafe fn blended(&mut self, _cx: &mut Gen3Cx<'_>, _nearer_than: f32, _size: [i32; 2]) {}
 
     /// Whether the camo pass draws, and if so whether opaque.
-    fn camo(&mut self, _core: &mut RenderCore, frame: &ModelGpuFrame) -> Option<bool> {
-        frame.active_camo.then_some(false)
+    fn camo(&mut self, cx: &mut Gen3Cx<'_>) -> Option<bool> {
+        cx.frame.active_camo.then_some(false)
     }
 
     /// Shield passes after the shared shield impact.
-    unsafe fn shield(&mut self, _cx: &mut FrameCx<'_>) {}
+    unsafe fn shield(&mut self, _cx: &mut Gen3Cx<'_>) {}
 
     /// Sprites after the rest, before the bloom.
-    unsafe fn late_sprites(&mut self, _cx: &mut FrameCx<'_>) {}
+    unsafe fn late_sprites(&mut self, _cx: &mut Gen3Cx<'_>) {}
 
     /// The bloom of what `accumulation` holds, drawn into `framebuffer`.
     unsafe fn bloom(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         size: [i32; 2],
@@ -85,7 +96,7 @@ pub(in crate::app::model_preview) trait Gen3Game {
     /// The lit scene and its bloom onto `framebuffer`.
     unsafe fn composite(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
@@ -119,23 +130,31 @@ pub(in crate::app::model_preview) trait Gen3Game {
 /// the gen3 pipeline with the game's hooks.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct Gen3Render {
+    /// The pipeline's own state, between and within frames.
+    state: Gen3State,
     h3: H3Game,
     reach: ReachGame,
     h4: H4Game,
 }
 
 impl Gen3Render {
-    fn game(&mut self, game: Option<GameId>) -> &mut dyn Gen3Game {
-        match game {
-            Some(GameId::HaloReach) => &mut self.reach,
-            Some(GameId::Halo4) => &mut self.h4,
-            _ => &mut self.h3,
-        }
+    /// The pipeline's state, and the hooks of `game`.
+    fn parts(&mut self, game: Option<GameId>) -> (&mut Gen3State, &mut dyn Gen3Game) {
+        let Self { state, h3, reach, h4 } = self;
+        let game: &mut dyn Gen3Game = match game {
+            Some(GameId::HaloReach) => reach,
+            Some(GameId::Halo4) => h4,
+            _ => h3,
+        };
+        (state, game)
     }
 }
 
 impl GameRender for Gen3Render {
-    unsafe fn prepare(&mut self, _cx: &mut FrameCx<'_>) {}
+    /// The scene's depth copy is the frame's own, made while its picture draws.
+    unsafe fn prepare(&mut self, _cx: &mut FrameCx<'_>) {
+        self.state.depth_copy = None;
+    }
 
     /// With no gen3 shading to draw (game shaders off, a mode without maps, a
     /// context short of GLSL 4.10), the plain draw.
@@ -148,8 +167,8 @@ impl GameRender for Gen3Render {
             cx.core.prepare_h2_programs(cx.gl, cx.frame);
             cx.core.draw_slot_batches(cx.gl, cx.frame, cx.slot);
             let order = cx.frame.visible_batches.clone();
-            let game = self.game(cx.frame.preview.game);
-            cx.core.draw_h3(game, cx.gl, cx.frame, cx.slot, &order);
+            let (state, game) = self.parts(cx.frame.preview.game);
+            state.draw(cx.core, game, cx.gl, cx.frame, cx.slot, &order);
         }
     }
 
@@ -158,9 +177,9 @@ impl GameRender for Gen3Render {
             unsafe {
                 if cx.core.draws_object_sprites(cx.frame) {
                     use super::sprites::SpriteStage;
-                    let game = self.game(cx.frame.preview.game);
-                    cx.core.draw_gen3_sprites(game, cx.gl, cx.frame, cx.slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
-                    cx.core.draw_gen3_sprites(game, cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
+                    let (state, game) = self.parts(cx.frame.preview.game);
+                    state.draw_sprites(cx.core, game, cx.gl, cx.frame, cx.slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                    state.draw_sprites(cx.core, game, cx.gl, cx.frame, cx.slot, SpriteStage::Rest);
                 }
             }
         }
@@ -168,7 +187,7 @@ impl GameRender for Gen3Render {
 
     #[cfg(test)]
     fn each_simulation(&self, slot: usize, uploads: u64, visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug)) {
-        let Self { h3, reach, h4 } = self;
+        let Self { h3, reach, h4, .. } = self;
         for game in [h3 as &dyn Gen3Game, reach, h4] {
             game.each_simulation(slot, uploads, visit);
         }

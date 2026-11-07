@@ -4,7 +4,7 @@
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_effects::H3ScreenSettings;
-use super::super::renderer::FrameCx;
+use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::{HALF_LENS, screen_program};
 use super::render::H3Game;
 
@@ -54,12 +54,13 @@ impl H3Game {
     /// tone curve onto the frame.
     pub(super) unsafe fn draw_composite(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
         screen: H3ScreenSettings,
     ) {
         let (gl, core) = (cx.gl, &mut *cx.core);
+        let state = &mut *cx.state;
         unsafe {
             if self.composite_program.is_none() {
                 self.composite_program = screen_program(gl, COMPOSITE_FRAGMENT);
@@ -90,7 +91,7 @@ impl H3Game {
             gl.enable(glow::BLEND);
             // The accumulation is premultiplied: what adds light covers nothing.
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            gl.bind_vertex_array(Some(core.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(state.empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.enable(glow::DEPTH_TEST);
         }

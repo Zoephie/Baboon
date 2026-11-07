@@ -11,7 +11,7 @@ use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::renderer::particle_floats;
 use super::slot::H3Slot;
 use super::super::gen3::screen_effects::H3ScreenSettings;
-use super::super::renderer::FrameCx;
+use super::super::gen3::render::Gen3Cx;
 use super::bloom::H3Bloom;
 
 /// Halo 3's and ODST's hooks: the pipeline's defaults, the self shadow, and
@@ -71,7 +71,7 @@ impl Gen3Game for H3Game {
 
     unsafe fn self_shadow(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         _batches: &[Gen3Batch],
         order: &[usize],
         scene: glow::NativeFramebuffer,
@@ -90,13 +90,13 @@ impl Gen3Game for H3Game {
 
     unsafe fn bloom(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         size: [i32; 2],
     ) -> Option<glow::NativeTexture> {
         unsafe {
-            let vertices = cx.core.h3_empty_array(cx.gl);
+            let vertices = cx.state.empty_array(cx.gl);
             if self.bloom.is_none() {
                 self.bloom = H3Bloom::new(cx.gl, cx.core.black_flat);
             }
@@ -106,7 +106,7 @@ impl Gen3Game for H3Game {
 
     unsafe fn composite(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         _framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,

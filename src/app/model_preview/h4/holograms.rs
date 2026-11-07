@@ -12,6 +12,7 @@
 //! `(x, H - top, width, -height)`, and the shader's aligned texcoord and
 //! distortion come out as the game's.
 
+use super::super::gen3::state::Gen3State;
 use super::render::H4Game;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -231,6 +232,7 @@ impl H4Game {
     pub(in crate::app::model_preview) unsafe fn generate_holograms(
         &mut self,
         core: &mut RenderCore,
+        state: &mut Gen3State,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -301,29 +303,29 @@ impl H4Game {
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
             h3_set_cull(gl, frame);
-            core.gen3.submit_draw = Some(H4Draw::HologramOpaque);
+            state.submit_draw = Some(H4Draw::HologramOpaque);
             for (batch, material) in holograms.iter().filter(|(_, material)| !post_bloom(material)) {
-                core.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
-            core.gen3.submit_draw = None;
+            state.submit_draw = None;
             // Mode 1 (`g_disableHologramOrderIndependentTransparency`, the
             // default) then draws pass 2, "hologram blend": blended holograms
             // alone, tested but not written, through `alpha_blend_max`.
             gl.enable(glow::BLEND);
             set_alpha_blend_max(gl);
             gl.depth_mask(false);
-            core.gen3.submit_draw = Some(H4Draw::HologramBlend);
+            state.submit_draw = Some(H4Draw::HologramBlend);
             for (batch, material) in holograms.iter().filter(|(_, material)| {
                 !post_bloom(material) && material.h4.as_ref().is_some_and(|submit| submit.is_blended_hologram())
             }) {
-                core.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
-            core.gen3.submit_draw = None;
+            state.submit_draw = None;
             gl.blend_equation(glow::FUNC_ADD);
             gl.disable(glow::BLEND);
             gl.disable(glow::SCISSOR_TEST);
             // Its bloom, by the hologram camera fx.
-            let vertices = core.h3_empty_array(gl);
+            let vertices = state.empty_array(gl);
             if self.bloom.is_none() {
                 self.bloom = super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
             }
@@ -343,7 +345,7 @@ impl H4Game {
                     gl.disable(glow::BLEND);
                 }
                 gl.depth_mask(!blends);
-                core.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
             gl.disable(glow::BLEND);
             gl.color_mask(true, true, true, true);
@@ -361,7 +363,7 @@ impl H4Game {
                 ("ps_filmic_tone_curve_params", H3Value::FloatArray(IDENTITY_CURVE.map(|value| [value; 4]).to_vec())),
             ];
             let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(core.black_flat))];
-            self.screen_pass(core, gl, frame, &post, &post.combine, owner, &engine, &textures, size);
+            self.screen_pass(core, state, gl, frame, &post, &post.combine, owner, &engine, &textures, size);
             gl.disable(glow::SCISSOR_TEST);
             gl.depth_mask(true);
             gl.enable(glow::DEPTH_TEST);
@@ -374,9 +376,11 @@ impl H4Game {
     /// `hologram_apply_callback` (X360 0x83AF4CF0): `hologram_composite` over
     /// the crop into the scene's light, premultiplied (blend mode 5), with no
     /// depth. Leaves the blend as it found it off.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::app::model_preview) unsafe fn composite_holograms(
         &mut self,
         core: &mut RenderCore,
+        state: &mut Gen3State,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -404,7 +408,7 @@ impl H4Game {
             ];
             let textures = [("source_samplerTexture", Some(combined))];
             let post = Arc::clone(&picture.post);
-            self.screen_pass(core, gl, frame, &post, &post.composite, picture.owner, &engine, &textures, size);
+            self.screen_pass(core, state, gl, frame, &post, &post.composite, picture.owner, &engine, &textures, size);
             gl.disable(glow::SCISSOR_TEST);
             gl.enable(glow::DEPTH_TEST);
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
@@ -418,6 +422,7 @@ impl H4Game {
     pub(in crate::app::model_preview) unsafe fn screen_pass(
         &mut self,
         core: &mut RenderCore,
+        state: &mut Gen3State,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         post: &Arc<H4HologramPost>,
@@ -446,7 +451,7 @@ impl H4Game {
             }
             let uploaded = holograms.uploaded.as_ref().map(|(_, map)| map.clone()).unwrap_or_default();
             let pass: &Arc<H3Pass> = &material.pass;
-            core.with_h3_program(gl, pass, |this, program| {
+            state.with_program(core, gl, pass, |state, this, program| {
                 gl.use_program(Some(program.program));
                 let drawn = DrawnObject { values: frame.function_values_of_object(owner), time: frame.time, owner };
                 let node = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
@@ -479,7 +484,7 @@ impl H4Game {
                     gl.uniform_1_i32(program.location(gl, name).as_ref(), unit as i32);
                 }
                 gl.active_texture(glow::TEXTURE0);
-                gl.bind_vertex_array(Some(this.h3_empty_array(gl)));
+                gl.bind_vertex_array(Some(state.empty_array(gl)));
                 gl.draw_arrays(glow::TRIANGLES, 0, 3);
             });
         }

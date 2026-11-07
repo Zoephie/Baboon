@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use eframe::glow;
 
-/// What the gen3 pipeline keeps between and within frames.
+/// What the gen3 pipeline keeps between and within frames. `Gen3Render`
+/// owns it, and the pipeline's stages are its methods, each handed the core.
+#[derive(Default)]
 pub(in crate::app::model_preview) struct Gen3State {
     /// The frame's targets: albedo and normals, the lit scene, what lies
     /// behind camo, the depth copy and the distortion.
@@ -25,8 +27,6 @@ pub(in crate::app::model_preview) struct Gen3State {
     /// This frame's copy of the H3 scene's depth, for soft particles; set
     /// only while an H3 picture draws its sprites.
     pub(in crate::app::model_preview) depth_copy: Option<glow::NativeTexture>,
-    /// What an H3 array sampler reads with nothing of its own.
-    pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
     /// The screen effects' blur, VISR and motion suck programs, and VISR's mask.
     pub(in crate::app::model_preview) blur_program: Option<glow::NativeProgram>,
     pub(in crate::app::model_preview) vision_program: Option<glow::NativeProgram>,

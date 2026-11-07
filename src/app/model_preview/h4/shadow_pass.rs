@@ -11,7 +11,9 @@ use super::super::gen3::render::Gen3Batch;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::gen3::shadow::shadow_casters;
 use super::super::gen3::pipeline::{h4_matrix, screen_program};
-use super::super::renderer::{FrameCx, RenderCore};
+use super::super::renderer::RenderCore;
+use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::state::Gen3State;
 use super::render::H4Game;
 use super::shadow::{DEPTH_BIAS, FADE, H4ShadowCamera, SLOPE_BIAS, VSM};
 
@@ -165,12 +167,13 @@ impl H4ShadowTargets {
 impl H4Game {
     /// The object's shadow into its mask, if it casts one: the mask, or none.
     /// Reads the depth and normals the albedo pass left.
-    pub(super) unsafe fn draw_shadow(&mut self, cx: &mut FrameCx<'_>, batches: &[Gen3Batch]) -> Option<glow::NativeTexture> {
+    pub(super) unsafe fn draw_shadow(&mut self, cx: &mut Gen3Cx<'_>, batches: &[Gen3Batch]) -> Option<glow::NativeTexture> {
         let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
         let core: &mut RenderCore = cx.core;
+        let state: &mut Gen3State = cx.state;
         let caster = frame.preview.h4_shadow_caster?;
         let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) =
-            core.gen3.targets.as_ref().map(|targets| {
+            state.targets.as_ref().map(|targets| {
                 (
                     targets.size,
                     targets.albedo_framebuffer,
@@ -220,10 +223,10 @@ impl H4Game {
             // `render_shadow_generate` (X360 0x83A99FA0): depth alone, biased.
             let view_projection = camera.view_projection;
             let bias = [SLOPE_BIAS, DEPTH_BIAS];
-            core.generate_shadow_depth(gl, frame, slot, &casters, depth_framebuffer, camera.pixels, view_projection, bias);
+            state.generate_shadow_depth(core, gl, frame, slot, &casters, depth_framebuffer, camera.pixels, view_projection, bias);
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::CULL_FACE);
-            gl.bind_vertex_array(Some(core.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(state.empty_array(gl)));
             // Explicit 85: the horizontal blur from the depth, then the vertical.
             let gaussian = camera.gaussian();
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(blurs[0].1));
@@ -245,10 +248,10 @@ impl H4Game {
                 &gaussian[1],
             );
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
-            RenderCore::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
+            Gen3State::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
             // `setup_targets_shadow_mask`'s white, then the apply.
             let textures = [("scene_depth", depth_copy), ("normals", normal), ("variance", blurs[1].0)];
-            RenderCore::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0; 4], apply, textures, &view_projection)?;
+            Gen3State::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0; 4], apply, textures, &view_projection)?;
             let at = |name: &str| gl.get_uniform_location(apply, name);
             let axis = h4_matrix(frame, "ps_worldspace_normal_axis")?;
             let axis: [f32; 9] = axis.try_into().ok()?;
@@ -262,7 +265,7 @@ impl H4Game {
             gl.uniform_1_f32(at("knockout").as_ref(), 0.0);
             gl.uniform_1_i32(at("normal_test").as_ref(), i32::from(!caster.hires));
             // Green and blue alone.
-            core.draw_shadow_apply(gl, slot, [false, true, true, false]);
+            state.draw_shadow_apply(core, gl, slot, [false, true, true, false]);
             Some(mask)
         }
     }

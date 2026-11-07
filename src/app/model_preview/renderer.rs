@@ -3877,9 +3877,11 @@ impl ModelGlRenderer {
 /// targets, and, until each game's drawing moves to its own folder, every
 /// game's own state too.
 pub(super) struct RenderCore {
-    /// The gen3 pipeline's own state, until the sprite pass that reads it
-    /// mid-frame splits by family and `Gen3Render` can own it.
-    pub(in crate::app::model_preview) gen3: gen3::state::Gen3State,
+    /// The normals the gen3 albedo pass laid down, which Halo 3's dx9
+    /// shadow apply reads: the gen3 targets' own, kept as they are remade.
+    pub(in crate::app::model_preview) h3_normal_target: Option<glow::NativeTexture>,
+    /// What a gen3 array sampler reads with nothing of its own.
+    pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
     /// As `h2_bloom`.
     pub(in crate::app::model_preview) sprite_gl: Option<Option<SpriteGl>>,
     /// The frame's CE point lights with those its effects have made, which
@@ -4032,29 +4034,8 @@ impl RenderCore {
             Ok(Self {
                 gen3_supported: !version.is_embedded && (version.major, version.minor) >= (4, 1),
                 black_flat,
-                gen3: gen3::state::Gen3State {
-                    targets: None,
-                    programs: HashMap::new(),
-                    light: None,
-                    distorted: false,
-                    distortion_program: None,
-                    depth_copy: None,
-                    black_array,
-                    blur_program: None,
-                    vision_program: None,
-                    suck_program: None,
-                    vision_mask: None,
-                    screen_alpha: None,
-                    empty_vertex_array: None,
-                    inline_lights: Vec::new(),
-                    pass_values: None,
-                    shadow_mask: None,
-                    stops: 0.0,
-                    sprite_cursor: 0,
-                    shadow_view_projection: None,
-                    camo_scene: None,
-                    submit_draw: None,
-                },
+                black_array,
+                h3_normal_target: None,
                 sprite_gl: None,
                 shaders_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
                 h2_programs: HashMap::new(),
@@ -4129,7 +4110,6 @@ impl RenderCore {
             }
             self.slots[slot].sync_textures(gl, frame);
             self.ce_points_now = None;
-            self.gen3.depth_copy = None;
             Some(slot)
         }
     }
@@ -4932,7 +4912,7 @@ impl RenderCore {
                     let location = program.location(gl, "u_shadow_map");
                     gl.uniform_1_i32(location.as_ref(), H2_SHADOW_MAP_UNIT as i32);
                 }
-                if let Some(normal) = self.h3_normal_target() {
+                if let Some(normal) = self.h3_normal_target {
                     gl.active_texture(glow::TEXTURE0 + H3_NORMAL_TARGET_UNIT);
                     gl.bind_texture(glow::TEXTURE_2D, Some(normal));
                     let location = program.location(gl, "u_normal_target");

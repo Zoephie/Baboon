@@ -6,7 +6,7 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::gen3::shaders::H3Sampler;
-use super::super::renderer::FrameCx;
+use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::{HALF_LENS, screen_program, upload_h2_image_linear};
 use super::lighting::{
     REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_composite_gamma, reach_noise_offset, reach_noise_params,
@@ -17,13 +17,14 @@ impl ReachGame {
     /// Reach's `final_composite`: see [`REACH_COMPOSITE_FRAGMENT`].
     pub(super) unsafe fn draw_composite(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
         depth: Option<glow::NativeTexture>,
         screen: H3ScreenSettings,
     ) {
         let (gl, core) = (cx.gl, &mut *cx.core);
+        let state = &mut *cx.state;
         let noise = cx.frame.preview.reach_screen_noise.as_ref();
         unsafe {
             if self.noise.is_none()
@@ -73,7 +74,7 @@ impl ReachGame {
             gl.disable(glow::DEPTH_TEST);
             gl.enable(glow::BLEND);
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            gl.bind_vertex_array(Some(core.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(state.empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.enable(glow::DEPTH_TEST);
         }

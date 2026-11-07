@@ -4,6 +4,7 @@
 //! reflections added through explicit shader 46. See
 //! `docs/h4-preview-research/lights.md` §4.
 
+use super::super::gen3::state::Gen3State;
 use eframe::glow::{self, HasContext};
 use super::render::H4Game;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
@@ -67,6 +68,7 @@ impl H4Game {
     pub(in crate::app::model_preview) unsafe fn draw_flares(
         &mut self,
         core: &mut RenderCore,
+        state: &mut Gen3State,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -87,8 +89,8 @@ impl H4Game {
             };
             let camera = &frame.camera;
             let view = ce_flare_view(camera);
-            let viewport = core
-                .gen3.targets
+            let viewport = state
+                .targets
                 .as_ref()
                 .map_or([1, 1], |targets| targets.size)
                 .map(|side| side as f32);
@@ -166,7 +168,7 @@ impl H4Game {
             if drawn.is_empty() {
                 return;
             }
-            let linked = core.with_h3_program(gl, &pass, |this, program| {
+            let linked = state.with_program(core, gl, &pass, |state, this, program| {
                 // `draw_textured_screen_quad`'s corners and texture coordinates.
                 let (vertex_array, buffer) = match self.flare_geometry {
                     Some(geometry) => geometry,
@@ -193,8 +195,8 @@ impl H4Game {
                 gl.enable(glow::BLEND);
                 gl.blend_equation(glow::FUNC_ADD);
                 gl.blend_func(glow::ONE, glow::ONE);
-                let size = this
-                    .gen3.targets
+                let size = state
+                    .targets
                     .as_ref()
                     .map_or([1, 1], |targets| targets.size);
                 let textures = this.slots[slot].flare_textures.clone();

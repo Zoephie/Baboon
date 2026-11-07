@@ -3,6 +3,7 @@
 //! scene's depth, and an apply blended by its least into the mask.
 
 use eframe::glow::{self, HasContext as _};
+use super::state::Gen3State;
 use super::super::renderer::*;
 use super::super::*;
 use super::shaders::{H3Material, H3Pass};
@@ -19,7 +20,7 @@ pub(in crate::app::model_preview) fn shadow_casters(batches: &[(RenderModelPrevi
         .collect()
 }
 
-impl RenderCore {
+impl Gen3State {
     /// `render_shadow_generate`: `casters`' depth alone into `framebuffer`, a
     /// square of `pixels`, seen through `view_projection`, biased by `slope`
     /// and by `depth` in depth units, culled as ever. Leaves depth testing on
@@ -27,6 +28,7 @@ impl RenderCore {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::app::model_preview) unsafe fn generate_shadow_depth(
         &mut self,
+        core: &mut RenderCore,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -49,12 +51,12 @@ impl RenderCore {
             gl.enable(glow::POLYGON_OFFSET_FILL);
             gl.polygon_offset(slope, depth * (1 << 24) as f32);
             super::pipeline::h3_set_cull(gl, frame);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
-            self.gen3.shadow_view_projection = Some(view_projection);
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
+            self.shadow_view_projection = Some(view_projection);
             for (batch, material, pass) in casters {
-                self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
             }
-            self.gen3.shadow_view_projection = None;
+            self.shadow_view_projection = None;
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.color_mask(true, true, true, true);
         }
@@ -114,7 +116,7 @@ impl RenderCore {
 
     /// The apply's triangle, kept to `channels` and the least of each, then
     /// the state the scene draws with again and the slot's vertex array.
-    pub(in crate::app::model_preview) unsafe fn draw_shadow_apply(&mut self, gl: &glow::Context, slot: usize, [red, green, blue, alpha]: [bool; 4]) {
+    pub(in crate::app::model_preview) unsafe fn draw_shadow_apply(&mut self, core: &mut RenderCore, gl: &glow::Context, slot: usize, [red, green, blue, alpha]: [bool; 4]) {
         unsafe {
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::CULL_FACE);
@@ -122,13 +124,13 @@ impl RenderCore {
             gl.blend_equation(glow::MIN);
             gl.blend_func(glow::ONE, glow::ONE);
             gl.color_mask(red, green, blue, alpha);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(self.empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, true);
             gl.disable(glow::BLEND);
             gl.enable(glow::DEPTH_TEST);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
         }
     }
 }

@@ -7,7 +7,9 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_lights::screen_to_relative_world;
 use super::super::gen3::pipeline::{set_uniform_value, view_projection};
-use super::super::renderer::{FrameCx, RenderCore, h2_eye_position};
+use super::super::renderer::h2_eye_position;
+use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::state::Gen3State;
 use super::lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
 use super::lights::{CHEAP_ALBEDO_BLEND, ReachLightMethod, ReachLitLight};
 use super::render::ReachGame;
@@ -25,7 +27,7 @@ fn near_fade(light: &ReachLitLight, eye: [f32; 3]) -> f32 {
 impl ReachGame {
     /// Every Reach light of the frame, lit: its attached lights by age since
     /// their scale came on, and its cheap lights by render time.
-    pub(super) fn frame_lights_of(cx: &mut FrameCx<'_>) -> Vec<ReachLitLight> {
+    pub(super) fn frame_lights_of(cx: &mut Gen3Cx<'_>) -> Vec<ReachLitLight> {
         let (frame, slot) = (cx.frame, cx.slot);
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let mut lit = Vec::new();
@@ -56,14 +58,15 @@ impl ReachGame {
     /// pass to read.
     pub(super) unsafe fn draw_screen_lights(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         lit: &[ReachLitLight],
         accumulation_target: glow::NativeFramebuffer,
     ) {
         let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
+        let state = &mut *cx.state;
         let screen: Vec<&ReachLitLight> =
             lit.iter().filter(|light| light.method == ReachLightMethod::Screenspace).collect();
-        let Some(targets) = core.gen3.targets.as_ref() else {
+        let Some(targets) = state.targets.as_ref() else {
             return;
         };
         if screen.is_empty() {
@@ -74,7 +77,7 @@ impl ReachGame {
         let view_projection = view_projection(&frame.camera);
         let depth_copy_framebuffer = targets.depth_copy_framebuffer;
         unsafe {
-            core.begin_screen_lights(gl, size, accumulation_target, depth_copy_framebuffer);
+            state.begin_screen_lights(gl, size, accumulation_target, depth_copy_framebuffer);
             for light in screen {
                 let combo = usize::from(light.frustum) + 2 * usize::from(light.specular);
                 let Some(pass) = frame.preview.reach_light_passes.get(combo).cloned().flatten() else {
@@ -87,7 +90,7 @@ impl ReachGame {
                 if fade <= 1e-4 {
                     continue;
                 }
-                let linked = core.with_h3_program(gl, &pass, |this, program| {
+                let linked = state.with_program(core, gl, &pass, |state, _, program| {
                     gl.use_program(Some(program.program));
                     // Tag lights come down by the HDR target's stops; cheap
                     // lights only by exposure (`render_cheap_screenspace_lights`).
@@ -115,13 +118,13 @@ impl ReachGame {
                             }
                             "material_coeff" => gl.uniform_4_f32(location.as_ref(), CHEAP_ALBEDO_BLEND, 0.0, 0.0, 0.0),
                             other => {
-                                if let Some(value) = reach_frame_value(frame, other, this.gen3.stops) {
+                                if let Some(value) = reach_frame_value(frame, other, state.stops) {
                                     set_uniform_value(gl, location.as_ref(), ty, &value);
                                 }
                             }
                         }
                     }
-                    RenderCore::bind_screen_light_textures(gl, &pass, program, |name| match name {
+                    Gen3State::bind_screen_light_textures(gl, &pass, program, |name| match name {
                         "GlobalTexture_depth_sampler" => Some(Some(depth_copy)),
                         "GlobalTexture_albedo_sampler" => Some(Some(albedo)),
                         "GlobalTexture_normal_sampler" => Some(Some(normal)),
@@ -133,7 +136,7 @@ impl ReachGame {
                     continue;
                 }
             }
-            RenderCore::end_screen_lights(gl);
+            Gen3State::end_screen_lights(gl);
         }
     }
 }

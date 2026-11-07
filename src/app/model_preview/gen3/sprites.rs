@@ -4,6 +4,7 @@
 //! cheap particles and the lens flares.
 
 use eframe::glow::{self, HasContext as _};
+use super::state::Gen3State;
 
 use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system, draw_sprite_quad,
@@ -27,10 +28,11 @@ pub(in crate::app::model_preview) enum SpriteStage {
     Distortions,
 }
 
-impl RenderCore {
+impl Gen3State {
     /// The part of the frame's sprites `stage` names.
-    pub(in crate::app::model_preview) unsafe fn draw_gen3_sprites(
+    pub(in crate::app::model_preview) unsafe fn draw_sprites(
         &mut self,
+        core: &mut RenderCore,
         game: &mut dyn Gen3Game,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -38,20 +40,20 @@ impl RenderCore {
         stage: SpriteStage,
     ) {
         unsafe {
-            let Some(h3) = self.begin_sprites(gl, frame, slot) else {
+            let Some(h3) = core.begin_sprites(gl, frame, slot) else {
                 return;
             };
-            let Some(flares) = self.sprite_gl.as_ref().and_then(Option::as_ref) else {
+            let Some(flares) = core.sprite_gl.as_ref().and_then(Option::as_ref) else {
                 return;
             };
-            let particle_gl = self.particle_gl.as_ref().and_then(Option::as_ref);
-            let no_map = self.black_flat;
+            let particle_gl = core.particle_gl.as_ref().and_then(Option::as_ref);
+            let no_map = core.black_flat;
             // What Reach's area screen effects do to the sprites' exposure.
-            let stops = self.gen3.stops;
-            let placeholder = self.placeholder;
-            let size = self.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
-            let depth_copy = self.gen3.depth_copy;
-            let uploaded = &mut self.slots[slot];
+            let stops = self.stops;
+            let placeholder = core.placeholder;
+            let size = self.targets.as_ref().map_or([1, 1], |targets| targets.size);
+            let depth_copy = self.depth_copy;
+            let uploaded = &mut core.slots[slot];
             let uploads = uploaded.uploads();
             let camera = &frame.camera;
             let view = ce_flare_view(camera);
@@ -82,12 +84,12 @@ impl RenderCore {
             }
             gl.color_mask(true, true, true, false);
             // `render_effects`, among the transparents: every profile is its own quad.
-            let first = !self.sprites_advanced;
-            advance_sprite_simulations(uploaded, frame, bones, &view, &mut self.sprites_advanced);
+            let first = !core.sprites_advanced;
+            advance_sprite_simulations(uploaded, frame, bones, &view, &mut core.sprites_advanced);
             if first {
                 game.advance_own_sprites(&mut sprites!(uploaded));
             }
-            let cursor = &mut self.gen3.sprite_cursor;
+            let cursor = &mut self.sprite_cursor;
             // `c_transparency_renderer` sorts far to near, each from its location.
             enum Sprites {
                 Volume(usize),
@@ -167,14 +169,14 @@ impl RenderCore {
                         gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
                         gl.active_texture(glow::TEXTURE0);
                         h3_set_blend(gl, at.blend());
-                        gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder));
+                        gl.bind_texture(glow::TEXTURE_2D, texture.or(core.placeholder));
                         let [center, falloff] = circular.unwrap_or([0.0; 2]);
                         gl.uniform_2_f32(flares.circular.as_ref(), center, falloff);
                         // With no depth copy, no fade to read one.
-                        let fade = at.depth_fade().filter(|_| self.gen3.depth_copy.is_some());
+                        let fade = at.depth_fade().filter(|_| self.depth_copy.is_some());
                         if let Some(range) = fade {
                             gl.active_texture(glow::TEXTURE1);
-                            gl.bind_texture(glow::TEXTURE_2D, self.gen3.depth_copy);
+                            gl.bind_texture(glow::TEXTURE_2D, self.depth_copy);
                             gl.active_texture(glow::TEXTURE0);
                             gl.uniform_1_i32(flares.scene_depth.as_ref(), 1);
                             gl.uniform_4_f32_slice(flares.depth.as_ref(), &scene_depth_terms(camera));
@@ -204,8 +206,8 @@ impl RenderCore {
                         };
                         let targets = ParticleTargets {
                             no_map,
-                            depth_copy: self.gen3.depth_copy,
-                            distortion_copy: &mut self.h2_distortion_copy,
+                            depth_copy: self.depth_copy,
+                            distortion_copy: &mut core.h2_distortion_copy,
                             stops,
                         };
                         draw_particle_system(gl, particles, uploaded, frame, index, &view, targets);
@@ -230,12 +232,12 @@ impl RenderCore {
                         }
                         let vertices = particle_floats(camera, &drawn);
                         let textures = uploaded.strip_textures.get(index).copied().unwrap_or_default();
-                        particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.gen3.depth_copy, camera, &lighting, stops);
+                        particles.draw(gl, strip.shader(), &vertices, textures, no_map, self.depth_copy, camera, &lighting, stops);
                     }
                 }
             }
             if distorting {
-                self.gen3.distorted = distorted > 0;
+                self.distorted = distorted > 0;
             }
             // `s_cheap_particle_system::render`: after every other
             // transparent, in one batch, in ring-slot order.
@@ -244,7 +246,7 @@ impl RenderCore {
             {
                 let drawn = uploaded.simulations.reach_cheap.vertices(first.library(), &view);
                 if !drawn.is_empty()
-                    && let Some(cheap) = self.reach_cheap_gl.get_or_insert_with(|| reach_cheap_gl(gl, self.program)).as_ref()
+                    && let Some(cheap) = core.reach_cheap_gl.get_or_insert_with(|| reach_cheap_gl(gl, core.program)).as_ref()
                 {
                     let vertices: Vec<[f32; CHEAP_FLOATS]> = drawn
                         .iter()
@@ -272,11 +274,11 @@ impl RenderCore {
             if matches!(stage, SpriteStage::FartherThan(_) | SpriteStage::Distortions) {
                 gl.blend_equation(glow::FUNC_ADD);
                 gl.color_mask(true, true, true, true);
-                gl.use_program(Some(self.program));
+                gl.use_program(Some(core.program));
                 return;
             }
-            begin_flares(gl, flares, self.placeholder);
-            let viewport = self.scene.as_ref().map_or([1, 1], |scene| scene.size);
+            begin_flares(gl, flares, core.placeholder);
+            let viewport = core.scene.as_ref().map_or([1, 1], |scene| scene.size);
             let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
             for (index, at) in frame.preview.h3_flares.iter().enumerate() {
                 if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
@@ -304,8 +306,8 @@ impl RenderCore {
                     draw_flare_sprites(gl, flares, camera, &view, &[sprite], textures);
                 }
             }
-            self.gen3.sprite_cursor = 0;
-            self.end_sprites(gl, frame, slot);
+            self.sprite_cursor = 0;
+            core.end_sprites(gl, frame, slot);
         }
     }
 }

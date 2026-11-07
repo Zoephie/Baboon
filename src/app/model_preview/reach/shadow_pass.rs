@@ -9,7 +9,9 @@ use super::super::gen3::render::Gen3Batch;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::gen3::shadow::shadow_casters;
 use super::super::gen3::pipeline::screen_program;
-use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore};
+use super::super::renderer::{ModelGpuFrame, RenderCore};
+use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::state::Gen3State;
 use super::super::unrotate_view_vector;
 use super::render::ReachGame;
 use super::shadow::{ReachShadowCamera, ReachShadowFilter, hull_planes};
@@ -175,14 +177,15 @@ impl ReachGame {
     /// Reads the depth and normals the albedo pass left.
     pub(in crate::app::model_preview) unsafe fn draw_shadow(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         batches: &[Gen3Batch],
     ) -> Option<glow::NativeTexture> {
         let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
         let core: &mut RenderCore = cx.core;
+        let state: &mut Gen3State = cx.state;
         let caster = frame.preview.reach_shadow_caster?;
-        let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) = core
-            .gen3.targets
+        let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) = state
+            .targets
             .as_ref()
             .map(|targets| (targets.size, targets.albedo_framebuffer, targets.normal, targets.depth_copy, targets.depth_copy_framebuffer))?;
         let camera = Self::shadow_camera(frame, size);
@@ -205,14 +208,14 @@ impl ReachGame {
                 self.shadow.as_ref().map(|targets| (targets.map, targets.map_framebuffer, targets.mask, targets.mask_framebuffer))?;
             let bias = [caster.slope_bias, caster.depth_bias];
             let view_projection = camera.view_projection;
-            core.generate_shadow_depth(gl, frame, slot, &casters, map_framebuffer, camera.pixels, view_projection, bias);
-            RenderCore::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
+            state.generate_shadow_depth(core, gl, frame, slot, &casters, map_framebuffer, camera.pixels, view_projection, bias);
+            Gen3State::copy_scene_depth(gl, size, albedo_framebuffer, depth_copy_framebuffer);
             if self.shadow_program.is_none() {
                 self.shadow_program = screen_program(gl, APPLY_FRAGMENT);
             }
             let program = self.shadow_program?;
             let textures = [("scene_depth", depth_copy), ("normals", normal), ("shadow_map", map)];
-            RenderCore::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0, 0.5, 0.5, 1.0], program, textures, &view_projection)?;
+            Gen3State::begin_shadow_apply(gl, frame, size, mask_framebuffer, [1.0, 0.5, 0.5, 1.0], program, textures, &view_projection)?;
             let at = |name: &str| gl.get_uniform_location(program, name);
             let texel = 1.0 / camera.pixels as f32;
             gl.uniform_2_f32(at("texel_offset").as_ref(), -texel, texel);
@@ -232,7 +235,7 @@ impl ReachGame {
             // distance, which a preview's framing stays inside.
             gl.uniform_1_f32(at("shadow_alpha").as_ref(), 1.0);
             // The red and alpha the apply writes.
-            core.draw_shadow_apply(gl, slot, [true, false, false, true]);
+            state.draw_shadow_apply(core, gl, slot, [true, false, false, true]);
             Some(mask)
         }
     }

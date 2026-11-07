@@ -2,7 +2,7 @@
 //! albedo and normal into targets, a lit pass reading them back into an HDR
 //! accumulation target, and the final composite's tone curve onto the scene.
 
-use super::render::Gen3Game;
+use super::render::{Gen3Cx, Gen3Game};
 use super::sprites::SpriteStage;
 use super::super::gl::program::Linked;
 use super::super::gl::target::{Made, Sampling, Texels};
@@ -15,6 +15,7 @@ use super::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampl
 use super::super::reach::lighting::reach_frame_value;
 use super::super::reach::lights::{ReachLitLight, inline_rows};
 use eframe::glow::{self, HasContext as _};
+use super::state::Gen3State;
 use super::super::renderer::*;
 use super::super::dx9::passes::{H2Image, H2Layer};
 use super::super::*;
@@ -678,36 +679,47 @@ impl RenderCore {
         frame.textures.as_ref()?.get(material)?.h3.as_ref()
     }
 
-    /// The normals the albedo pass laid down, for the shadow pass to read.
-    pub(in crate::app::model_preview) fn h3_normal_target(&self) -> Option<glow::NativeTexture> {
-        self.gen3.targets.as_ref().map(|targets| targets.normal)
-    }
-
     pub(in crate::app::model_preview) fn h3_draws(&self, frame: &ModelGpuFrame) -> bool {
         frame.game_shaders
             && self.gen3_supported
             && frame.textures.iter().any(|textures| textures.iter().any(|texture| texture.h3.is_some()))
     }
 
+    /// `cloth_render_opaque` builds its mesh from where the sheet is now.
+    pub(in crate::app::model_preview) unsafe fn move_cloth(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        if frame.preview.h3_cloth.is_empty() {
+            return;
+        }
+        let uploaded = &mut self.slots[slot];
+        let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+        let written = uploaded.simulations.cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
+        for (first, moved) in written {
+            unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
+        }
+    }
+}
+
+impl Gen3State {
     /// Run `draw` with `pass`'s program, linking it the first time, and keep
     /// it for the next frame whatever `draw` returns. `None` when the pass
     /// does not link. The program leaves the cache while `draw` runs, so
     /// `draw` can use the renderer too.
-    pub(in crate::app::model_preview) unsafe fn with_h3_program<R>(
+    pub(in crate::app::model_preview) unsafe fn with_program<R>(
         &mut self,
+        core: &mut RenderCore,
         gl: &glow::Context,
         pass: &Arc<H3Pass>,
-        draw: impl FnOnce(&mut Self, &H3Program) -> R,
+        draw: impl FnOnce(&mut Self, &mut RenderCore, &H3Program) -> R,
     ) -> Option<R> {
-        let program = unsafe { self.h3_program(gl, pass) }?;
-        Some(draw(self, &program))
+        let program = unsafe { self.program(core, gl, pass) }?;
+        Some(draw(self, core, &program))
     }
 
     /// `pass`'s program, linked the first time it is asked for. It stays in
     /// the cache while lent, so a pass drawn inside another's draw finds it.
-    unsafe fn h3_program(&mut self, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<Rc<H3Program>> {
+    unsafe fn program(&mut self, core: &mut RenderCore, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<Rc<H3Program>> {
         let key = Arc::as_ptr(pass) as usize;
-        match self.gen3.programs.get(&key) {
+        match self.programs.get(&key) {
             Some(Ok(program)) => return Some(Rc::clone(program)),
             Some(Err(_)) => return None,
             None => {}
@@ -716,7 +728,7 @@ impl RenderCore {
             let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
             let mut attributes = Vec::new();
             for (name, preview) in ATTRIBUTES {
-                if let Some(location) = gl.get_attrib_location(self.program, preview) {
+                if let Some(location) = gl.get_attrib_location(core.program, preview) {
                     attributes.push((location, name));
                 }
             }
@@ -724,20 +736,20 @@ impl RenderCore {
             match super::super::gl::link::link(gl, &stages, &attributes) {
                 Ok(program) => {
                     let program = Rc::new(H3Program { _pass: Arc::clone(pass), linked: Linked::new(program) });
-                    self.gen3.programs.insert(key, Ok(Rc::clone(&program)));
+                    self.programs.insert(key, Ok(Rc::clone(&program)));
                     Some(program)
                 }
                 Err(error) => {
                     eprintln!("h3 program: {error}");
-                    self.gen3.programs.insert(key, Err(Arc::clone(pass)));
+                    self.programs.insert(key, Err(Arc::clone(pass)));
                     None
                 }
             }
         }
     }
 
-    unsafe fn h3_upload(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
-        let uploaded = &mut self.slots[slot].h3_textures;
+    unsafe fn upload(&mut self, core: &mut RenderCore, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        let uploaded = &mut core.slots[slot].h3_textures;
         if uploaded.id == Some(frame.textures_id) {
             return;
         }
@@ -796,7 +808,7 @@ impl RenderCore {
 
     /// The uploaded name for `uniform` on this draw, a chosen image if it
     /// animates.
-    fn h3_frame_key(
+    fn uploaded_key(
         &self,
         frame: &ModelGpuFrame,
         batch: &RenderModelPreviewBatch,
@@ -824,8 +836,9 @@ impl RenderCore {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::app::model_preview) unsafe fn h3_draw_pass(
+    pub(in crate::app::model_preview) unsafe fn draw_pass(
         &mut self,
+        core: &mut RenderCore,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
@@ -839,9 +852,9 @@ impl RenderCore {
             return;
         }
         unsafe {
-            self.with_h3_program(gl, pass, |this, program| {
+            self.with_program(core, gl, pass, |state, this, program| {
                 gl.use_program(Some(program.program));
-                let size = this.gen3.targets.as_ref().map_or([1, 1], |targets| targets.size);
+                let size = state.targets.as_ref().map_or([1, 1], |targets| targets.size);
                 let h4_values = material.h4.as_ref().map(|submit| {
                     let object = batch.material_index as usize;
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
@@ -849,7 +862,7 @@ impl RenderCore {
                         super::super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
                     let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
                     let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
-                    let draw = match this.gen3.submit_draw {
+                    let draw = match state.submit_draw {
                         Some(draw) => draw,
                         None if albedo => super::super::h4::submit::H4Draw::Albedo,
                         None if fringe => super::super::h4::submit::H4Draw::Fringe,
@@ -870,7 +883,7 @@ impl RenderCore {
                     }
                     match name.as_str() {
                         "View_Projection" => {
-                            let matrix = this.gen3.shadow_view_projection.unwrap_or_else(|| view_projection(&frame.camera));
+                            let matrix = state.shadow_view_projection.unwrap_or_else(|| view_projection(&frame.camera));
                             gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                             continue;
                         }
@@ -883,20 +896,20 @@ impl RenderCore {
                             continue;
                         }
                         "Nodes" | "vs_model_skinning_matrices" => {
-                            this.h3_nodes(gl, frame, location.as_ref(), ty);
+                            state.nodes(gl, frame, location.as_ref(), ty);
                             continue;
                         }
                         "simple_lights" => {
-                            if let Some((lit, _)) = &this.gen3.light {
+                            if let Some((lit, _)) = &state.light {
                                 gl.uniform_4_f32_slice(location.as_ref(), lit.rows.as_flattened());
-                            } else if material.dialect == H3Dialect::Reach && !this.gen3.inline_lights.is_empty() {
-                                let inline = this.gen3.inline_lights.as_flattened().as_flattened();
+                            } else if material.dialect == H3Dialect::Reach && !state.inline_lights.is_empty() {
+                                let inline = state.inline_lights.as_flattened().as_flattened();
                                 gl.uniform_4_f32_slice(location.as_ref(), inline);
                             }
                             continue;
                         }
                         "Shadow_Projection" => {
-                            if let Some((lit, _)) = &this.gen3.light {
+                            if let Some((lit, _)) = &state.light {
                                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &lit.projection);
                             }
                             continue;
@@ -906,7 +919,7 @@ impl RenderCore {
                     // The shadow's generate draws from the light.
                     if material.dialect == H3Dialect::Halo4
                         && name == "vs_view_view_projection_matrix"
-                        && let Some(matrix) = this.gen3.shadow_view_projection
+                        && let Some(matrix) = state.shadow_view_projection
                     {
                         gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                         continue;
@@ -921,7 +934,7 @@ impl RenderCore {
                         continue;
                     }
                     // The dynamic pass borrows this constant for its gel's xform.
-                    if name == "p_lighting_constant_4" && this.gen3.light.is_some() {
+                    if name == "p_lighting_constant_4" && state.light.is_some() {
                         gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 0.0, 0.0);
                         continue;
                     }
@@ -931,14 +944,14 @@ impl RenderCore {
                         H3Value::Floats([r, g, b, 1.0])
                     });
                     let reach_light =
-                        (material.dialect == H3Dialect::Reach).then(|| this.reach_simple_light(name)).flatten();
+                        (material.dialect == H3Dialect::Reach).then(|| state.reach_simple_light(name)).flatten();
                     let mut value = change_color
                         .or(reach_light)
-                        .or_else(|| frame_value(frame, material.dialect, name, size, this.gen3.stops))
+                        .or_else(|| frame_value(frame, material.dialect, name, size, state.stops))
                         .or_else(|| h4_values.as_ref().and_then(|values| values.get(name)).cloned())
                         .or_else(|| material.values.get(name).cloned());
                     let object = batch.material_index as usize;
-                    let screen_values = this.gen3.screen_alpha.map(|alpha| {
+                    let screen_values = state.screen_alpha.map(|alpha| {
                         let mut values = frame.function_values_of(object).cloned().unwrap_or_default();
                         values.insert("alpha".to_owned(), alpha);
                         values
@@ -956,7 +969,7 @@ impl RenderCore {
                     if let Some(value) = value {
                         set_value(gl, location.as_ref(), ty, &value);
                     }
-                    if let Some(value) = this.gen3.pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
+                    if let Some(value) = state.pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
                         set_value(gl, location.as_ref(), ty, &H3Value::Floats(*value));
                     }
                     let settings = frame.preview.h3_shield.as_ref().or(shield.map(|shield| &shield.settings));
@@ -979,7 +992,7 @@ impl RenderCore {
                         gl.uniform_4_f32(location.as_ref(), center[0], center[1], center[2], radius);
                     }
                 }
-                let targets = this.gen3.targets.as_ref();
+                let targets = state.targets.as_ref();
                 let uploaded = this.slots[slot].h3_textures.materials.get(batch.material_index as usize);
                 for (unit, (name, kind)) in pass.textures.iter().enumerate() {
                     gl.active_texture(glow::TEXTURE0 + unit as u32);
@@ -987,20 +1000,20 @@ impl RenderCore {
                         "albedo_texture" | "ps_view_albedo" => targets.map(|targets| targets.albedo),
                         "normal_texture" | "ps_view_normal" => targets.map(|targets| targets.normal),
                         // No level casts shadows into Halo 4's mask: white.
-                        "ps_view_shadow_mask" => this.gen3.shadow_mask.or(this.placeholder),
+                        "ps_view_shadow_mask" => state.shadow_mask.or(this.placeholder),
                         "GlobalTexture_scene_ldr_texture" => targets.map(|targets| targets.behind),
                         // Halo 4's camo: what the object hides.
-                        "sceneTexture_texture" => this.gen3.camo_scene.or(targets.map(|targets| targets.behind)),
-                        "depth_buffer" | "psDepthSampler_texture" => this.gen3.depth_copy,
-                        "shadow_mask_texture" => this.gen3.shadow_mask,
+                        "sceneTexture_texture" => state.camo_scene.or(targets.map(|targets| targets.behind)),
+                        "depth_buffer" | "psDepthSampler_texture" => state.depth_copy,
+                        "shadow_mask_texture" => state.shadow_mask,
                         other if material.screen_maps.iter().any(|map| other.ends_with(map.as_str())) => {
                             targets.map(|targets| targets.behind)
                         }
                         "UserParameterTexture_dynamic_light_gel_texture" => {
-                            this.gen3.light.as_ref().and_then(|(_, gel)| *gel)
+                            state.light.as_ref().and_then(|(_, gel)| *gel)
                         }
                         other => uploaded.and_then(|map| {
-                            map.get(&this.h3_frame_key(frame, batch, material, other)).or_else(|| map.get(other))
+                            map.get(&state.uploaded_key(frame, batch, material, other)).or_else(|| map.get(other))
                         }).copied().or_else(|| {
                             let noise = other.strip_prefix("LocalTexture_").unwrap_or(other);
                             this.slots[slot].h3_textures.shield.get(noise).copied()
@@ -1013,7 +1026,7 @@ impl RenderCore {
                         TextureKind::Volume => gl.bind_texture(glow::TEXTURE_3D, texture.or(this.black_volume)),
                         // The kit's arrays (light probes, the dominant light's
                         // intensity, water) are built by the game, never authored.
-                        TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, this.gen3.black_array),
+                        TextureKind::FlatArray => gl.bind_texture(glow::TEXTURE_2D_ARRAY, this.black_array),
                         // Reach's per-vertex light probes, which only level
                         // geometry's `static_per_vertex` reads.
                         TextureKind::Bytes => gl.bind_texture(glow::TEXTURE_BUFFER, None),
@@ -1039,7 +1052,7 @@ impl RenderCore {
         }
     }
 
-    unsafe fn h3_nodes(
+    unsafe fn nodes(
         &self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -1073,23 +1086,11 @@ impl RenderCore {
         }
     }
 
-    /// `cloth_render_opaque` builds its mesh from where the sheet is now.
-    pub(in crate::app::model_preview) unsafe fn move_cloth(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
-        if frame.preview.h3_cloth.is_empty() {
-            return;
-        }
-        let uploaded = &mut self.slots[slot];
-        let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-        let written = uploaded.simulations.cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
-        for (first, moved) in written {
-            unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
-        }
-    }
-
     /// The object's passes, between the preview's own draw and the scene's end.
     /// The gen3 pipeline, `game` filling in where the gen3 games differ.
-    pub(in crate::app::model_preview) unsafe fn draw_h3(
+    pub(in crate::app::model_preview) unsafe fn draw(
         &mut self,
+        core: &mut RenderCore,
         game: &mut dyn Gen3Game,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -1098,36 +1099,37 @@ impl RenderCore {
     ) {
         // Direct3D 11 always filters across a cube's faces; OpenGL has to be asked.
         unsafe { gl.enable(glow::TEXTURE_CUBE_MAP_SEAMLESS) };
-        let Some(scene) = self.scene.as_ref() else {
+        let Some(scene) = core.scene.as_ref() else {
             return;
         };
         let (size, depth, framebuffer) = (scene.size, scene.depth, scene.framebuffer);
         unsafe {
-            if self.gen3.targets.as_ref().is_none_or(|targets| targets.size != size) {
-                if let Some(old) = self.gen3.targets.take() {
+            if self.targets.as_ref().is_none_or(|targets| targets.size != size) {
+                if let Some(old) = self.targets.take() {
                     old.delete(gl);
                 }
-                self.gen3.targets = H3Targets::new(gl, size, depth);
+                self.targets = H3Targets::new(gl, size, depth);
+                core.h3_normal_target = self.targets.as_ref().map(|targets| targets.normal);
             }
-            let Some(targets) = self.gen3.targets.as_ref() else {
+            let Some(targets) = self.targets.as_ref() else {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 return;
             };
             let (albedo_target, accumulation_target) =
                 (targets.albedo_framebuffer, targets.accumulation_framebuffer);
             let accumulation = targets.accumulation;
-            self.h3_upload(gl, frame, slot);
-            self.move_cloth(gl, frame, slot);
+            self.upload(core, gl, frame, slot);
+            core.move_cloth(gl, frame, slot);
             if frame.active_camo {
                 // What the object hides, before anything of it lands. The copy
                 // is sRGB so that sampling it reads the linear light it was.
-                let behind = self.gen3.targets.as_ref().map(|targets| targets.behind);
+                let behind = self.targets.as_ref().map(|targets| targets.behind);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
                 gl.bind_texture(glow::TEXTURE_2D, behind);
                 gl.copy_tex_image_2d(glow::TEXTURE_2D, 0, glow::SRGB8_ALPHA8, 0, 0, size[0], size[1], 0);
                 gl.bind_texture(glow::TEXTURE_2D, None);
             }
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             gl.disable(glow::BLEND);
             h3_set_cull(gl, frame);
             gl.enable(glow::DEPTH_TEST);
@@ -1138,7 +1140,7 @@ impl RenderCore {
                 .iter()
                 .filter_map(|&index| frame.preview.batches.get(index))
                 .filter_map(|batch| {
-                    let material = self.h3_material(frame, batch.material_index as usize)?;
+                    let material = core.h3_material(frame, batch.material_index as usize)?;
                     Some((batch.clone(), Arc::clone(material)))
                 })
                 .collect();
@@ -1149,14 +1151,14 @@ impl RenderCore {
             // `c_player_view::render` hands its exposure stops to
             // `setup_camera_fx_parameters` before anything draws.
             let (screen, shaders) = {
-                let uploaded = &mut self.slots[slot];
+                let uploaded = &mut core.slots[slot];
                 let values = |object: u8| frame.function_values_of_object(object);
                 let view = ce_flare_view(&frame.camera);
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let effects = &frame.preview.h3_screen_effects;
                 gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
             };
-            self.gen3.stops = game.stops(&screen);
+            self.stops = game.stops(&screen);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(albedo_target));
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear_depth_f32(1.0);
@@ -1165,7 +1167,7 @@ impl RenderCore {
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
             for (batch, material) in &batches {
                 if let Some(pass) = material.albedo.as_ref() {
-                    self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                    self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                 }
             }
             // `render_albedo_decals`, with `_z_buffer_mode_decals`' bias.
@@ -1190,16 +1192,16 @@ impl RenderCore {
                 // (`decals.fxh`); nothing else here writes normals.
                 let normals = material.dialect == H3Dialect::Halo4 && material.lit.pixel.contains("o_target1");
                 gl.color_mask_draw_buffer(1, normals, normals, false, false);
-                self.h3_draw_pass(gl, frame, slot, batch, material, &material.lit, None);
+                self.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, true);
             gl.color_mask(true, true, true, true);
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.disable(glow::BLEND);
-            game.after_albedo(&mut FrameCx { gl, frame, core: self, slot }, albedo_target, size);
+            game.after_albedo(&mut Gen3Cx { gl, frame, core, slot, state: self }, albedo_target, size);
             // Whether a shadow map was drawn for the apply after the opaque pass.
-            let shadowed = game.self_shadow(&mut FrameCx { gl, frame, core: self, slot }, &batches, order, framebuffer);
+            let shadowed = game.self_shadow(&mut Gen3Cx { gl, frame, core, slot, state: self }, &batches, order, framebuffer);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
             gl.disable(glow::BLEND);
             h3_set_cull(gl, frame);
@@ -1210,23 +1212,23 @@ impl RenderCore {
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
             // `build_simple_light_draw_list`, before the static pass reads it.
-            let reach_lit = game.frame_lights(&mut FrameCx { gl, frame, core: self, slot });
+            let reach_lit = game.frame_lights(&mut Gen3Cx { gl, frame, core, slot, state: self });
             self.set_reach_inline_lights(&reach_lit);
             let (opaque, blended): (Vec<_>, Vec<_>) =
                 batches
                     .iter()
                     .filter(|(_, material)| !material.decal || material.after_lighting)
                     .partition(|(_, material)| material.blend == H3Blend::Opaque);
-            game.lit_values(self);
+            game.lit_values(&mut Gen3Cx { gl, frame, core, slot, state: self });
             for (batch, material) in opaque {
                 let pass = h3_lit_pass(frame, batch, material);
-                self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
             }
-            self.gen3.shadow_mask = None;
-            self.gen3.pass_values = None;
+            self.shadow_mask = None;
+            self.pass_values = None;
             if shadowed {
-                self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowApply, None);
-                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                core.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowApply, None);
+                gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
                 gl.enable(glow::DEPTH_TEST);
                 gl.depth_func(glow::LEQUAL);
                 h3_set_cull(gl, frame);
@@ -1244,38 +1246,38 @@ impl RenderCore {
                 }
                 let values = frame.function_values_of_object(light.object);
                 let colors = frame.change_colors_of_object(light.object);
-                let onset = self.slots[slot].simulations.effect_onsets.of(light.object, light.scale_name(), values, frame.time);
+                let onset = core.slots[slot].simulations.effect_onsets.of(light.object, light.scale_name(), values, frame.time);
                 let Some(lit) = light.lit(values, &colors, bones, frame.time, onset) else {
                     continue;
                 };
-                self.gen3.light = Some((lit, self.slots[slot].h3_textures.gels.get(index).copied().flatten()));
+                self.light = Some((lit, core.slots[slot].h3_textures.gels.get(index).copied().flatten()));
                 for (batch, material) in &batches {
                     if let Some(pass) = material.dynamic_light.as_ref() {
-                        self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                        self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                     }
                 }
-                self.gen3.light = None;
+                self.light = None;
             }
-            game.screen_lights(&mut FrameCx { gl, frame, core: self, slot }, &reach_lit, accumulation_target);
+            game.screen_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &reach_lit, accumulation_target);
             // `c_transparency_renderer`: what blends, far to near, sprites among
             // the materials.
-            let sprites = self.draws_object_sprites(frame);
+            let sprites = core.draws_object_sprites(frame);
             if sprites {
-                if let Some(targets) = self.gen3.targets.as_ref() {
+                if let Some(targets) = self.targets.as_ref() {
                     let [width, height] = targets.size;
                     gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                     gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
                     let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
                     gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
                     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                    self.gen3.depth_copy = Some(targets.depth_copy);
+                    self.depth_copy = Some(targets.depth_copy);
                     // `submit_distortions`.
-                    self.gen3.distorted = false;
+                    self.distorted = false;
                     if frame.preview.h3_particles.iter().any(|system| system.look.shader.distortion.is_some()) {
                         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.distortion_framebuffer));
                         gl.clear_color(0.0, 0.0, 0.0, 0.0);
                         gl.clear(glow::COLOR_BUFFER_BIT);
-                        self.draw_gen3_sprites(game, gl, frame, slot, SpriteStage::Distortions);
+                        self.draw_sprites(core, game, gl, frame, slot, SpriteStage::Distortions);
                         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_target));
                     }
                 }
@@ -1296,30 +1298,30 @@ impl RenderCore {
                 .collect();
             blended.sort_by(|(a, ..), (b, ..)| b.total_cmp(a));
             for (distance, batch, material, pass, blend) in blended {
-                game.blended(&mut FrameCx { gl, frame, core: self, slot }, distance, size);
+                game.blended(&mut Gen3Cx { gl, frame, core, slot, state: self }, distance, size);
                 if sprites {
-                    self.draw_gen3_sprites(game, gl, frame, slot, SpriteStage::FartherThan(distance));
+                    self.draw_sprites(core, game, gl, frame, slot, SpriteStage::FartherThan(distance));
                 }
                 gl.enable(glow::BLEND);
                 gl.depth_mask(false);
                 gl.depth_func(glow::LEQUAL);
                 h3_set_cull(gl, frame);
                 gl.color_mask(true, true, true, true);
-                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
                 h3_set_blend(gl, blend);
                 if material.decal {
                     gl.enable(glow::POLYGON_OFFSET_FILL);
                     gl.polygon_offset(DECAL_SLOPE_BIAS, DECAL_DEPTH_BIAS * DEPTH_UNITS);
                 }
-                self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                 gl.disable(glow::POLYGON_OFFSET_FILL);
             }
-            game.blended(&mut FrameCx { gl, frame, core: self, slot }, f32::NEG_INFINITY, size);
+            game.blended(&mut Gen3Cx { gl, frame, core, slot, state: self }, f32::NEG_INFINITY, size);
             if sprites {
-                self.draw_gen3_sprites(game, gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
-                if self.gen3.distorted {
-                    self.h3_apply_distortions(gl, accumulation_target, size);
-                    gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                self.draw_sprites(core, game, gl, frame, slot, SpriteStage::FartherThan(f32::NEG_INFINITY));
+                if self.distorted {
+                    self.apply_distortions(gl, accumulation_target, size);
+                    gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
                 }
             }
             gl.blend_equation(glow::FUNC_ADD);
@@ -1328,9 +1330,9 @@ impl RenderCore {
             gl.depth_mask(false);
             // Neither the camo nor the shield can count on a transparent having
             // put the model's own geometry back after the lights and sprites.
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             let mut bloom = None;
-            if let Some(opaque) = game.camo(self, frame) {
+            if let Some(opaque) = game.camo(&mut Gen3Cx { gl, frame, core, slot, state: self }) {
                 // Camo shows what is behind it, which the game blooms the same
                 // with or without the object. A preview's backdrop has no bloom
                 // of its own, so what camo hides is left dark for it.
@@ -1338,11 +1340,11 @@ impl RenderCore {
                     gl.blend_func(glow::ZERO, glow::ZERO);
                     for (batch, material) in &batches {
                         if let Some(pass) = material.camo.as_ref() {
-                            self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                            self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                         }
                     }
-                    bloom = game.bloom(&mut FrameCx { gl, frame, core: self, slot }, accumulation_target, accumulation, size);
-                    gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                    bloom = game.bloom(&mut Gen3Cx { gl, frame, core, slot, state: self }, accumulation_target, accumulation, size);
+                    gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
                     gl.enable(glow::DEPTH_TEST);
                     gl.enable(glow::BLEND);
                 }
@@ -1355,13 +1357,13 @@ impl RenderCore {
                 }
                 for (batch, material) in &batches {
                     if let Some(pass) = material.camo.as_ref() {
-                        self.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                        self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
                     }
                 }
                 gl.enable(glow::BLEND);
                 gl.depth_mask(false);
             }
-            self.gen3.pass_values = None;
+            self.pass_values = None;
             // `render_object_context`'s shield impact, over every lit part.
             if h3_shield_showing(frame.function_values.as_ref()) {
                 h3_set_blend(gl, H3Blend::Additive);
@@ -1370,40 +1372,40 @@ impl RenderCore {
                         // `render_object_shield_impact`: by the settings that win.
                         let settings = frame.preview.h3_shield.as_ref().unwrap_or(&shield.settings);
                         let pass = shield.procedural.as_ref().filter(|_| settings.procedural).unwrap_or(&shield.pass);
-                        self.h3_draw_pass(gl, frame, slot, batch, material, pass, Some(shield));
+                        self.draw_pass(core, gl, frame, slot, batch, material, pass, Some(shield));
                     }
                 }
                 gl.color_mask(true, true, true, true);
             }
-            game.shield(&mut FrameCx { gl, frame, core: self, slot });
+            game.shield(&mut Gen3Cx { gl, frame, core, slot, state: self });
             // `c_player_view::render`: after the transparents, before the bloom
             // and the tone curve, so these are in the same light as the scene.
             if sprites {
-                self.draw_gen3_sprites(game, gl, frame, slot, SpriteStage::Rest);
-                game.late_sprites(&mut FrameCx { gl, frame, core: self, slot });
+                self.draw_sprites(core, game, gl, frame, slot, SpriteStage::Rest);
+                game.late_sprites(&mut Gen3Cx { gl, frame, core, slot, state: self });
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             if bloomed && bloom.is_none() {
-                bloom = game.bloom(&mut FrameCx { gl, frame, core: self, slot }, framebuffer, accumulation, size);
+                bloom = game.bloom(&mut Gen3Cx { gl, frame, core, slot, state: self }, framebuffer, accumulation, size);
             }
-            game.composite(&mut FrameCx { gl, frame, core: self, slot }, framebuffer, accumulation, bloom, screen, size);
-            self.gen3.stops = 0.0;
-            self.h3_finish_picture(game, gl, frame, slot, framebuffer, size, &screen, &shaders);
+            game.composite(&mut Gen3Cx { gl, frame, core, slot, state: self }, framebuffer, accumulation, bloom, screen, size);
+            self.stops = 0.0;
+            self.finish_picture(core, game, gl, frame, slot, framebuffer, size, &screen, &shaders);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
         }
     }
 
     /// The inline lights, as the static pass reads them.
     pub(in crate::app::model_preview) fn set_reach_inline_lights(&mut self, lit: &[ReachLitLight]) {
-        self.gen3.inline_lights = inline_rows(lit);
+        self.inline_lights = inline_rows(lit);
     }
 
     /// `simple_lights` and `simple_light_count` for a Reach static pass.
     pub(in crate::app::model_preview) fn reach_simple_light(&self, name: &str) -> Option<H3Value> {
         match name {
-            "simple_light_count" => Some(H3Value::Integer(self.gen3.inline_lights.len() as i32)),
+            "simple_light_count" => Some(H3Value::Integer(self.inline_lights.len() as i32)),
             _ => None,
         }
     }
@@ -1415,7 +1417,7 @@ impl RenderCore {
         gl: &glow::Context,
         framebuffer: glow::NativeFramebuffer,
     ) -> Option<glow::NativeTexture> {
-        self.gen3.targets.as_ref().map(|targets| unsafe {
+        self.targets.as_ref().map(|targets| unsafe {
             let [width, height] = targets.size;
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
@@ -1426,11 +1428,10 @@ impl RenderCore {
         })
     }
 
-
     /// `c_render_shield::render_object_internal`: every part that takes the
     /// shield, through 61 or 119, added over what lies behind with no depth
     /// written and no face culled.
-    pub(in crate::app::model_preview) unsafe fn draw_reach_shield(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(in crate::app::model_preview) unsafe fn draw_reach_shield(&mut self, core: &mut RenderCore, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         let Some(shield) = frame.preview.reach_shield.clone() else {
             return;
         };
@@ -1444,7 +1445,7 @@ impl RenderCore {
             .filter_map(|&index| frame.preview.batches.get(index))
             .filter_map(|batch| {
                 let index = batch.material_index as usize;
-                let material = self.h3_material(frame, index)?;
+                let material = core.h3_material(frame, index)?;
                 let textures = frame.textures.as_ref()?.get(index)?;
                 super::super::reach::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
                     .then(|| (batch.clone(), Arc::clone(material)))
@@ -1466,16 +1467,16 @@ impl RenderCore {
         values.insert(super::super::reach::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
             // What the pass fades against: everything drawn so far.
-            if let Some(targets) = self.gen3.targets.as_ref() {
+            if let Some(targets) = self.targets.as_ref() {
                 let [width, height] = targets.size;
                 gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                 gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
                 let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
                 gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                self.gen3.depth_copy = Some(targets.depth_copy);
+                self.depth_copy = Some(targets.depth_copy);
             }
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(false);
@@ -1484,29 +1485,28 @@ impl RenderCore {
             gl.blend_equation(glow::FUNC_ADD);
             gl.blend_func(glow::ONE, glow::ONE);
             gl.color_mask(true, true, true, true);
-            self.gen3.pass_values = Some(values);
+            self.pass_values = Some(values);
             for (batch, material) in &parts {
-                self.h3_draw_pass(gl, frame, slot, batch, material, shield.pass(), None);
+                self.draw_pass(core, gl, frame, slot, batch, material, shield.pass(), None);
             }
-            self.gen3.pass_values = None;
+            self.pass_values = None;
             h3_set_cull(gl, frame);
         }
     }
 
-
     /// `apply_distortions`: each pixel the distortions leaned reads the scene
     /// from where they leaned it.
-    unsafe fn h3_apply_distortions(
+    unsafe fn apply_distortions(
         &mut self,
         gl: &glow::Context,
         accumulation_target: glow::NativeFramebuffer,
         size: [i32; 2],
     ) {
         unsafe {
-            if self.gen3.distortion_program.is_none() {
-                self.gen3.distortion_program = screen_program(gl, DISTORTION_FRAGMENT);
+            if self.distortion_program.is_none() {
+                self.distortion_program = screen_program(gl, DISTORTION_FRAGMENT);
             }
-            let (Some(program), Some(targets)) = (self.gen3.distortion_program, self.gen3.targets.as_ref()) else {
+            let (Some(program), Some(targets)) = (self.distortion_program, self.targets.as_ref()) else {
                 return;
             };
             let [width, height] = size;
@@ -1524,22 +1524,19 @@ impl RenderCore {
             gl.active_texture(glow::TEXTURE0);
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::BLEND);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(self.empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.enable(glow::DEPTH_TEST);
         }
     }
 
-
-
-
-
     /// `c_player_view`'s last steps: `render_screen_shaders`, then the blur, on
     /// a surface that holds light rather than the encoded frame, as the game's
     /// sRGB one does.
     #[allow(clippy::too_many_arguments)]
-    unsafe fn h3_finish_picture(
+    unsafe fn finish_picture(
         &mut self,
+        core: &mut RenderCore,
         game: &mut dyn Gen3Game,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -1559,7 +1556,7 @@ impl RenderCore {
         {
             return;
         }
-        let Some(targets) = self.gen3.targets.as_ref() else {
+        let Some(targets) = self.targets.as_ref() else {
             return;
         };
         let (behind, picture_framebuffer, behind_framebuffer) =
@@ -1578,7 +1575,7 @@ impl RenderCore {
             gl.disable(glow::CULL_FACE);
             gl.depth_mask(false);
             gl.color_mask(true, true, true, false);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(self.empty_array(gl)));
             // A shader reads the picture through texcoords that run top down.
             let screen_copy = |gl: &glow::Context, upright: bool| {
                 gl.disable(glow::FRAMEBUFFER_SRGB);
@@ -1600,7 +1597,7 @@ impl RenderCore {
             if let Some((blur, moved)) = suck {
                 copy_depth(gl);
                 screen_copy(gl, true);
-                self.h3_draw_suck(gl, frame, &blur, moved, behind, depth_copy);
+                self.draw_suck(gl, frame, &blur, moved, behind, depth_copy);
             }
             for shader in shaders.iter().filter(|shader| shader.at_frame_end()) {
                 let screen = u32::from_be_bytes(*b"rmss");
@@ -1616,16 +1613,16 @@ impl RenderCore {
                 };
                 screen_copy(gl, false);
                 h3_set_blend(gl, material.blend);
-                self.gen3.screen_alpha = Some(shader.alpha);
+                self.screen_alpha = Some(shader.alpha);
                 let batch = RenderModelPreviewBatch { material_index: at as u16, ..Default::default() };
-                self.h3_draw_pass(gl, frame, slot, &batch, material, &material.lit, None);
-                self.gen3.screen_alpha = None;
+                self.draw_pass(core, gl, frame, slot, &batch, material, &material.lit, None);
+                self.screen_alpha = None;
             }
             if let Some((spread, cover)) = blur {
-                if self.gen3.blur_program.is_none() {
-                    self.gen3.blur_program = screen_program(gl, BLUR_FRAGMENT);
+                if self.blur_program.is_none() {
+                    self.blur_program = screen_program(gl, BLUR_FRAGMENT);
                 }
-                if let Some(program) = self.gen3.blur_program {
+                if let Some(program) = self.blur_program {
                     screen_copy(gl, true);
                     gl.use_program(Some(program));
                     gl.active_texture(glow::TEXTURE0);
@@ -1635,15 +1632,15 @@ impl RenderCore {
                     gl.uniform_1_f32(gl.get_uniform_location(program, "cover").as_ref(), cover);
                     gl.enable(glow::BLEND);
                     gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-                    gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+                    gl.bind_vertex_array(Some(self.empty_array(gl)));
                     gl.draw_arrays(glow::TRIANGLES, 0, 3);
                 }
             }
             gl.disable(glow::FRAMEBUFFER_SRGB);
             if let Some(vision) = vision {
                 copy_depth(gl);
-                let on_for = game.vision_on_for(slot, self.slot_uploads(slot), frame.time);
-                self.h3_draw_vision(gl, frame, &vision, screen.vision(), on_for, depth_copy);
+                let on_for = game.vision_on_for(slot, core.slot_uploads(slot), frame.time);
+                self.draw_vision(gl, frame, &vision, screen.vision(), on_for, depth_copy);
             }
             gl.color_mask(true, true, true, true);
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(picture_framebuffer));
@@ -1656,7 +1653,7 @@ impl RenderCore {
 
     /// `c_view::distortion_apply`'s motion blur, for what moved the view and not
     /// for the preview's own camera.
-    unsafe fn h3_draw_suck(
+    unsafe fn draw_suck(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -1670,10 +1667,10 @@ impl RenderCore {
             return;
         };
         unsafe {
-            if self.gen3.suck_program.is_none() {
-                self.gen3.suck_program = screen_program(gl, SUCK_FRAGMENT);
+            if self.suck_program.is_none() {
+                self.suck_program = screen_program(gl, SUCK_FRAGMENT);
             }
-            let Some(program) = self.gen3.suck_program else {
+            let Some(program) = self.suck_program else {
                 return;
             };
             gl.use_program(Some(program));
@@ -1691,13 +1688,13 @@ impl RenderCore {
             gl.uniform_1_f32(spot("blur_step").as_ref(), blur.step);
             gl.uniform_2_f32_slice(spot("center_falloff").as_ref(), &blur.center_falloff);
             gl.disable(glow::BLEND);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(self.empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
     }
 
     /// `c_hud_camera_view`: over the frame as it will show, not over its light.
-    unsafe fn h3_draw_vision(
+    unsafe fn draw_vision(
         &mut self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
@@ -1712,16 +1709,16 @@ impl RenderCore {
             return;
         };
         unsafe {
-            if self.gen3.vision_program.is_none() {
-                self.gen3.vision_program = screen_program(gl, VISION_FRAGMENT);
+            if self.vision_program.is_none() {
+                self.vision_program = screen_program(gl, VISION_FRAGMENT);
             }
-            if self.gen3.vision_mask.is_none() {
+            if self.vision_mask.is_none() {
                 let Some((image, texels, mips)) = vision.mask() else {
                     return;
                 };
-                self.gen3.vision_mask = upload_h2_image_linear(gl, image, *texels, mips, None);
+                self.vision_mask = upload_h2_image_linear(gl, image, *texels, mips, None);
             }
-            let (Some(program), Some(mask)) = (self.gen3.vision_program, self.gen3.vision_mask) else {
+            let (Some(program), Some(mask)) = (self.vision_program, self.vision_mask) else {
                 return;
             };
             let view = ce_flare_view(&frame.camera);
@@ -1745,14 +1742,14 @@ impl RenderCore {
             // `_alpha_blend_multiply_add`, which is premultiplied.
             gl.enable(glow::BLEND);
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            gl.bind_vertex_array(Some(self.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(self.empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
     }
 
-    pub(in crate::app::model_preview) unsafe fn h3_empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
+    pub(in crate::app::model_preview) unsafe fn empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
         unsafe {
-            *self.gen3.empty_vertex_array.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
+            *self.empty_vertex_array.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
         }
     }
 }

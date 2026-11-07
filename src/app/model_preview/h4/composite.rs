@@ -1,6 +1,8 @@
 //! Halo 4's end of the frame: its colour grading, final composite, full camo
 //! drawn after it, and shield.
 
+use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::state::Gen3State;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::super::dx9::passes::H2Image;
@@ -17,7 +19,14 @@ impl H4Game {
     /// takes the shield through explicit 61, added (`ONE, ONE`) over what
     /// lies behind, no depth written, no face culled. The pass applies its
     /// own exposure.
-    pub(super) unsafe fn draw_shield(&mut self, core: &mut RenderCore, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+    pub(super) unsafe fn draw_shield(
+        &mut self,
+        core: &mut RenderCore,
+        state: &mut Gen3State,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+    ) {
         let Some(shield) = frame.preview.h4_shield.clone() else {
             return;
         };
@@ -51,14 +60,14 @@ impl H4Game {
         );
         values.insert(super::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
-            if let Some(targets) = core.gen3.targets.as_ref() {
+            if let Some(targets) = state.targets.as_ref() {
                 let [width, height] = targets.size;
                 gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                 gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
                 let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
                 gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                core.gen3.depth_copy = Some(targets.depth_copy);
+                state.depth_copy = Some(targets.depth_copy);
             }
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
@@ -69,11 +78,11 @@ impl H4Game {
             gl.blend_equation(glow::FUNC_ADD);
             gl.blend_func(glow::ONE, glow::ONE);
             gl.color_mask(true, true, true, true);
-            core.gen3.pass_values = Some(values);
+            state.pass_values = Some(values);
             for (batch, material) in &parts {
-                core.h3_draw_pass(gl, frame, slot, batch, material, &shield.pass, None);
+                state.draw_pass(core, gl, frame, slot, batch, material, &shield.pass, None);
             }
-            core.gen3.pass_values = None;
+            state.pass_values = None;
             h3_set_cull(gl, frame);
         }
     }
@@ -105,7 +114,7 @@ impl H4Game {
     /// Halo 4's `final_composite`: see `h4::lighting::H4_COMPOSITE_FRAGMENT`.
     pub(super) unsafe fn draw_composite(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
         depth: Option<glow::NativeTexture>,
@@ -113,6 +122,7 @@ impl H4Game {
     ) {
         use super::lighting::{H4_COMPOSITE_FRAGMENT, H4_DARK_MULTIPLIER};
         let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
+        let state = &mut *cx.state;
         unsafe {
             let grading = self.grading_texture(gl, frame);
             if self.composite_program.is_none() {
@@ -142,7 +152,7 @@ impl H4Game {
             gl.disable(glow::DEPTH_TEST);
             gl.enable(glow::BLEND);
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            gl.bind_vertex_array(Some(core.h3_empty_array(gl)));
+            gl.bind_vertex_array(Some(state.empty_array(gl)));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.enable(glow::DEPTH_TEST);
         }
@@ -160,17 +170,18 @@ impl H4Game {
     /// `camo depth bias function`'s constant.
     pub(super) unsafe fn draw_camo(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         batches: &[(RenderModelPreviewBatch, Arc<H3Material>)],
         draw: super::camo::H4CamoDraw,
         size: [i32; 2],
     ) {
         let (gl, frame, slot, core) = (cx.gl, cx.frame, cx.slot, &mut *cx.core);
+        let state = &mut *cx.state;
         /// `camo depth bias function`: the kit's constant, in a 24-bit
         /// buffer's units.
         const DEPTH_BIAS: f32 = -2e-5 * 16_777_216.0;
         let [width, height] = size.map(|side| side as f32);
-        core.gen3.pass_values = Some(
+        state.pass_values = Some(
             [
                 ("ps_activeCamoFactor", draw.factor),
                 ("ps_distortionTextureTransform", draw.transform),
@@ -181,10 +192,10 @@ impl H4Game {
             .collect(),
         );
         unsafe {
-            if core.gen3.camo_scene.is_none() {
-                core.gen3.camo_scene = gl.create_texture().ok();
+            if state.camo_scene.is_none() {
+                state.camo_scene = gl.create_texture().ok();
             }
-            gl.bind_texture(glow::TEXTURE_2D, core.gen3.camo_scene);
+            gl.bind_texture(glow::TEXTURE_2D, state.camo_scene);
             gl.copy_tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8, 0, 0, size[0], size[1], 0);
             for (name, value) in [
                 (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
@@ -199,10 +210,10 @@ impl H4Game {
             h3_set_cull(gl, frame);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
-            let camo = |this: &mut RenderCore| {
+            let mut camo = |this: &mut RenderCore| {
                 for (batch, material) in batches {
                     if let Some(pass) = material.camo.as_ref() {
-                        this.h3_draw_pass(gl, frame, slot, batch, material, pass, None);
+                        state.draw_pass(this, gl, frame, slot, batch, material, pass, None);
                     }
                 }
             };
@@ -225,6 +236,6 @@ impl H4Game {
             gl.disable(glow::POLYGON_OFFSET_FILL);
             gl.depth_mask(true);
         }
-        core.gen3.pass_values = None;
+        state.pass_values = None;
     }
 }

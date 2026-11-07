@@ -7,7 +7,8 @@ use super::super::common::slots::GameSlots;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::gen3::screen_effects::H3ScreenSettings;
-use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore};
+use super::super::renderer::ModelGpuFrame;
+use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::{h3_layered_distance, h3_set_cull};
 use super::holograms::{HologramPicture, draws_as_hologram};
 use super::camo::H4CamoDraw;
@@ -60,13 +61,13 @@ impl Gen3Game for H4Game {
 
     /// `RenderHolograms`' generate pass: after the albedo and its decals,
     /// before the lights.
-    unsafe fn after_albedo(&mut self, cx: &mut FrameCx<'_>, albedo: glow::NativeFramebuffer, size: [i32; 2]) {
+    unsafe fn after_albedo(&mut self, cx: &mut Gen3Cx<'_>, albedo: glow::NativeFramebuffer, size: [i32; 2]) {
         self.hologram = if self.holograms.is_empty() {
             None
         } else {
             unsafe {
                 let holograms = std::mem::take(&mut self.holograms);
-                let picture = self.generate_holograms(cx.core, cx.gl, cx.frame, cx.slot, &holograms, albedo, size);
+                let picture = self.generate_holograms(cx.core, cx.state, cx.gl, cx.frame, cx.slot, &holograms, albedo, size);
                 self.holograms = holograms;
                 picture
             }
@@ -77,7 +78,7 @@ impl Gen3Game for H4Game {
     /// the static lighting that reads it.
     unsafe fn self_shadow(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         batches: &[Gen3Batch],
         _order: &[usize],
         _scene: glow::NativeFramebuffer,
@@ -90,17 +91,18 @@ impl Gen3Game for H4Game {
         false
     }
 
-    fn lit_values(&mut self, core: &mut RenderCore) {
+    fn lit_values(&mut self, cx: &mut Gen3Cx<'_>) {
+        let state = &mut *cx.state;
         if let Some(mask) = self.mask.take() {
-            core.gen3.shadow_mask = Some(mask);
+            state.shadow_mask = Some(mask);
             let floor = [0.0, super::shadow::DIRECT_FLOOR, 0.0, 0.0];
-            core.gen3.pass_values = Some([("ps_bsp_lightmap_scale_constants", floor)].into_iter().collect());
+            state.pass_values = Some([("ps_bsp_lightmap_scale_constants", floor)].into_iter().collect());
         }
     }
 
     /// `MidnightLightParfait::Render`: after the static lighting, before
     /// what blends.
-    unsafe fn screen_lights(&mut self, cx: &mut FrameCx<'_>, _lit: &[super::super::reach::lights::ReachLitLight], accumulation: glow::NativeFramebuffer) {
+    unsafe fn screen_lights(&mut self, cx: &mut Gen3Cx<'_>, _lit: &[super::super::reach::lights::ReachLitLight], accumulation: glow::NativeFramebuffer) {
         unsafe {
             self.draw_lights(cx, accumulation);
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
@@ -113,35 +115,36 @@ impl Gen3Game for H4Game {
 
     /// `QueueHologramApply`: the holograms' composite is one more
     /// transparent, at their sphere.
-    unsafe fn blended(&mut self, cx: &mut FrameCx<'_>, nearer_than: f32, size: [i32; 2]) {
+    unsafe fn blended(&mut self, cx: &mut Gen3Cx<'_>, nearer_than: f32, size: [i32; 2]) {
         if let Some(picture) = self.hologram.take_if(|picture| h3_layered_distance(2, picture.distance) > nearer_than) {
-            unsafe { self.composite_holograms(cx.core, cx.gl, cx.frame, cx.slot, &picture, size) }
+            unsafe { self.composite_holograms(cx.core, cx.state, cx.gl, cx.frame, cx.slot, &picture, size) }
         }
     }
 
     /// Halo 4's camo draws after the composite, not here.
-    fn camo(&mut self, _core: &mut RenderCore, _frame: &ModelGpuFrame) -> Option<bool> {
+    fn camo(&mut self, _cx: &mut Gen3Cx<'_>) -> Option<bool> {
         None
     }
 
-    unsafe fn shield(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe { self.draw_shield(cx.core, cx.gl, cx.frame, cx.slot) }
+    unsafe fn shield(&mut self, cx: &mut Gen3Cx<'_>) {
+        unsafe { self.draw_shield(cx.core, cx.state, cx.gl, cx.frame, cx.slot) }
     }
 
-    unsafe fn late_sprites(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe { self.draw_flares(cx.core, cx.gl, cx.frame, cx.slot) }
+    unsafe fn late_sprites(&mut self, cx: &mut Gen3Cx<'_>) {
+        unsafe { self.draw_flares(cx.core, cx.state, cx.gl, cx.frame, cx.slot) }
     }
 
     unsafe fn bloom(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         size: [i32; 2],
     ) -> Option<glow::NativeTexture> {
         unsafe {
             let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
-            let vertices = core.h3_empty_array(gl);
+            let state = &mut *cx.state;
+            let vertices = state.empty_array(gl);
             let grading = self.grading_texture(gl, frame);
             if self.bloom.is_none() {
                 self.bloom = super::bloom::H4Bloom::new(gl, core.black_flat, core.white_volume);
@@ -153,7 +156,7 @@ impl Gen3Game for H4Game {
 
     unsafe fn composite(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
@@ -161,7 +164,7 @@ impl Gen3Game for H4Game {
         size: [i32; 2],
     ) {
         unsafe {
-            let depth = cx.core.object_depth(cx.gl, framebuffer);
+            let depth = cx.state.object_depth(cx.gl, framebuffer);
             self.draw_composite(cx, accumulation, bloom, depth, screen);
             if let Some(draw) = self.camo {
                 let batches = std::mem::take(&mut self.camo_batches);

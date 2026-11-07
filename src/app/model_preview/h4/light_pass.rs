@@ -7,7 +7,9 @@ use eframe::glow::{self, HasContext};
 use super::super::gen3::shaders::{H3Dialect, H3Value};
 use super::super::gen3::screen_lights::screen_to_relative_world;
 use super::super::gen3::pipeline::{frame_value, h4_matrix, set_uniform_value, view_projection};
-use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore, h2_eye_position};
+use super::super::renderer::{ModelGpuFrame, h2_eye_position};
+use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::state::Gen3State;
 use super::lights::{H4LightBlend, H4LitLight};
 use super::render::H4Game;
 
@@ -53,10 +55,11 @@ impl H4Game {
     /// the falloff reaches zero within it, so the picture's whole is the same
     /// \[inferred\], save a physically correct light whose radius from its
     /// colour outreaches its end, which the volume would cut.
-    pub(super) unsafe fn draw_lights(&mut self, cx: &mut FrameCx<'_>, accumulation_target: glow::NativeFramebuffer) {
+    pub(super) unsafe fn draw_lights(&mut self, cx: &mut Gen3Cx<'_>, accumulation_target: glow::NativeFramebuffer) {
         let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
+        let state = &mut *cx.state;
         let mut lit = Self::frame_lights_of(frame);
-        let Some(targets) = core.gen3.targets.as_ref() else {
+        let Some(targets) = state.targets.as_ref() else {
             return;
         };
         if lit.is_empty() {
@@ -78,7 +81,7 @@ impl H4Game {
         };
         let depth_copy_framebuffer = targets.depth_copy_framebuffer;
         unsafe {
-            core.begin_screen_lights(gl, size, accumulation_target, depth_copy_framebuffer);
+            state.begin_screen_lights(gl, size, accumulation_target, depth_copy_framebuffer);
             for light in &lit {
                 let Some(pass) = frame
                     .preview
@@ -95,7 +98,7 @@ impl H4Game {
                 ) else {
                     continue;
                 };
-                let linked = core.with_h3_program(gl, &pass, |this, program| {
+                let linked = state.with_program(core, gl, &pass, |_, this, program| {
                     gl.blend_equation(match light.blend() {
                         H4LightBlend::Add => glow::FUNC_ADD,
                         H4LightBlend::Subtract => glow::FUNC_REVERSE_SUBTRACT,
@@ -131,7 +134,7 @@ impl H4Game {
                         }
                     }
                     let placeholder = this.placeholder;
-                    RenderCore::bind_screen_light_textures(gl, &pass, program, |name| match name {
+                    Gen3State::bind_screen_light_textures(gl, &pass, program, |name| match name {
                         "depth_samplerTexture" => Some(Some(depth_copy)),
                         "albedo_samplerTexture" => Some(Some(albedo)),
                         "normal_samplerTexture" => Some(Some(normal)),
@@ -143,7 +146,7 @@ impl H4Game {
                     continue;
                 }
             }
-            RenderCore::end_screen_lights(gl);
+            Gen3State::end_screen_lights(gl);
         }
     }
 }

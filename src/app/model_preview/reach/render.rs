@@ -6,7 +6,7 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::screen_effects::H3ScreenSettings;
-use super::super::renderer::{FrameCx, ModelGpuFrame, RenderCore};
+use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::h3_set_cull;
 use super::lights::ReachLitLight;
 
@@ -37,7 +37,7 @@ impl Gen3Game for ReachGame {
     /// the static lighting that reads it.
     unsafe fn self_shadow(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         batches: &[Gen3Batch],
         _order: &[usize],
         _scene: glow::NativeFramebuffer,
@@ -51,19 +51,20 @@ impl Gen3Game for ReachGame {
     }
 
     /// `build_simple_light_draw_list`, before the static pass reads it.
-    fn frame_lights(&mut self, cx: &mut FrameCx<'_>) -> Vec<ReachLitLight> {
+    fn frame_lights(&mut self, cx: &mut Gen3Cx<'_>) -> Vec<ReachLitLight> {
         Self::frame_lights_of(cx)
     }
 
-    fn lit_values(&mut self, core: &mut RenderCore) {
+    fn lit_values(&mut self, cx: &mut Gen3Cx<'_>) {
+        let state = &mut *cx.state;
         if let Some(mask) = self.mask.take() {
-            core.gen3.shadow_mask = Some(mask);
-            core.gen3.pass_values = Some([("shadow_mask_enabled", [1.0; 4])].into_iter().collect());
+            state.shadow_mask = Some(mask);
+            state.pass_values = Some([("shadow_mask_enabled", [1.0; 4])].into_iter().collect());
         }
     }
 
     /// `c_lights_view::render`: after the static lighting, before what blends.
-    unsafe fn screen_lights(&mut self, cx: &mut FrameCx<'_>, lit: &[ReachLitLight], accumulation: glow::NativeFramebuffer) {
+    unsafe fn screen_lights(&mut self, cx: &mut Gen3Cx<'_>, lit: &[ReachLitLight], accumulation: glow::NativeFramebuffer) {
         unsafe {
             self.draw_screen_lights(cx, lit, accumulation);
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
@@ -75,26 +76,27 @@ impl Gen3Game for ReachGame {
     }
 
     /// Full camo, through `globals`' curves: only where the object has it.
-    fn camo(&mut self, core: &mut RenderCore, frame: &ModelGpuFrame) -> Option<bool> {
+    fn camo(&mut self, cx: &mut Gen3Cx<'_>) -> Option<bool> {
+        let (frame, state) = (cx.frame, &mut *cx.state);
         let draw = frame.preview.reach_camo.as_ref().map(|camo| camo.draw(1.0))?;
         let values = [("k_vs_active_camo_factor", draw.factor), ("p_lighting_constant_9", draw.factor)];
-        core.gen3.pass_values = Some(values.into_iter().collect());
+        state.pass_values = Some(values.into_iter().collect());
         frame.active_camo.then_some(draw.opaque)
     }
 
-    unsafe fn shield(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe { cx.core.draw_reach_shield(cx.gl, cx.frame, cx.slot) }
+    unsafe fn shield(&mut self, cx: &mut Gen3Cx<'_>) {
+        unsafe { cx.state.draw_reach_shield(cx.core, cx.gl, cx.frame, cx.slot) }
     }
 
     unsafe fn bloom(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         size: [i32; 2],
     ) -> Option<glow::NativeTexture> {
         unsafe {
-            let vertices = cx.core.h3_empty_array(cx.gl);
+            let vertices = cx.state.empty_array(cx.gl);
             if self.bloom.is_none() {
                 self.bloom = super::bloom::ReachBloom::new(cx.gl, cx.core.black_flat);
             }
@@ -104,7 +106,7 @@ impl Gen3Game for ReachGame {
 
     unsafe fn composite(
         &mut self,
-        cx: &mut FrameCx<'_>,
+        cx: &mut Gen3Cx<'_>,
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
@@ -112,7 +114,7 @@ impl Gen3Game for ReachGame {
         _size: [i32; 2],
     ) {
         unsafe {
-            let depth = cx.core.object_depth(cx.gl, framebuffer);
+            let depth = cx.state.object_depth(cx.gl, framebuffer);
             self.draw_composite(cx, accumulation, bloom, depth, screen);
         }
     }

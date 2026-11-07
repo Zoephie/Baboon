@@ -3,11 +3,11 @@
 //! under, and the scene textures each pass names.
 
 use eframe::glow::{self, HasContext as _};
-use super::super::renderer::*;
+use super::state::Gen3State;
 use super::shaders::H3Pass;
 use super::pipeline::H3Program;
 
-impl RenderCore {
+impl Gen3State {
     /// Ready the screen lights over `accumulation`, `size` of it: its depth
     /// copied for the passes to read, then no depth test or culling, adding
     /// one to one into its colour alone, through the empty vertex array.
@@ -28,7 +28,7 @@ impl RenderCore {
             gl.blend_func(glow::ONE, glow::ONE);
             // `RenderSSLightInternal`'s colour write mask 7.
             gl.color_mask(true, true, true, false);
-            let empty = self.h3_empty_array(gl);
+            let empty = self.empty_array(gl);
             gl.bind_vertex_array(Some(empty));
         }
     }
