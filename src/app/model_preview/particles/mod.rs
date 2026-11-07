@@ -35,7 +35,59 @@ use crate::app::model_preview::common::attached::attached;
 /// Seconds run before the first frame, so a held pose has its particles.
 pub(super) const PRE_ROLL: f32 = 6.0;
 /// `s_sprite_frame_list`'s room.
-const MOST_FRAMES: usize = 15;
+pub(in crate::app::model_preview) const MOST_FRAMES: usize = 15;
+
+/// What each game's particles do differently, from the game once. Each rule
+/// holds for the games named on it.
+#[derive(Debug, Clone, Copy, Default)]
+pub(in crate::app::model_preview) struct ParticleRules {
+    /// Reach: a sprite system's options read their parameters through the
+    /// resolver, with Reach's depth fade, warp, palette shift and plasma.
+    pub(in crate::app::model_preview) reach_render_method: bool,
+    /// Halo 4: drawn through the particle's own `actual material`; its
+    /// `actual shader` is the deprecated render method's remains.
+    pub(in crate::app::model_preview) draws_through_material: bool,
+    /// Reach and Halo 4: `c_particle_definition::postprocess` (tool
+    /// 0x140DD6FA0) and `effect_postprocess` (0x140DD5070) seed the
+    /// properties, controllers first.
+    pub(in crate::app::model_preview) reach_postprocess_seeds: bool,
+    /// Reach and Halo 4: `uses cheap shader` draws `particle_render_fast.hlsl`.
+    pub(in crate::app::model_preview) cheap_shader: bool,
+    /// Reach and Halo 4: the sprite adds its constant at illumination.
+    pub(in crate::app::model_preview) adds_at_illum: bool,
+    /// Reach and Halo 4: the look's own game time, lighting, exposure and
+    /// shapes (stored as `H3ParticleLook::reach`).
+    pub(in crate::app::model_preview) reach_look: bool,
+    /// Reach and Halo 4: a card's acceleration lerps between its ends.
+    pub(in crate::app::model_preview) card_lerps: bool,
+    /// Reach and Halo 4: `volume emitter particle velocities are random`.
+    pub(in crate::app::model_preview) random_volume_velocities: bool,
+    /// Reach and Halo 4: the emitter's `axis scale`.
+    pub(in crate::app::model_preview) scales_axes: bool,
+    /// Halo 4: the emitter's own terms past Reach's.
+    pub(in crate::app::model_preview) h4_emitter_terms: bool,
+}
+
+impl ParticleRules {
+    pub(in crate::app::model_preview) fn of(game: Option<GameId>) -> Self {
+        let reach = game == Some(GameId::HaloReach);
+        let halo4 = game == Some(GameId::Halo4);
+        // Halo 4's simulation is Reach's, with terms of its own.
+        let reach_on = reach || halo4;
+        Self {
+            reach_render_method: reach,
+            draws_through_material: halo4,
+            reach_postprocess_seeds: reach_on,
+            cheap_shader: reach_on,
+            adds_at_illum: reach_on,
+            reach_look: reach_on,
+            card_lerps: reach_on,
+            random_volume_velocities: reach_on,
+            scales_axes: reach_on,
+            h4_emitter_terms: halo4,
+        }
+    }
+}
 
 /// `global_gravity_get`, in world units a second squared.
 const GRAVITY: f32 = 4.171_259_4;
@@ -171,7 +223,7 @@ struct H3ParticleState {
 
 /// `c_particle_system_definition::calc_lod_amount`: distances in, out, and how
 /// far each fades over. None for `lod always 1.0`.
-fn lod_amount(lod: Option<[f32; 4]>, distance: f32) -> f32 {
+pub(in crate::app::model_preview) fn lod_amount(lod: Option<[f32; 4]>, distance: f32) -> f32 {
     let Some([near, far, near_feather, far_feather]) = lod else {
         return 1.0;
     };
@@ -188,7 +240,7 @@ fn lod_amount(lod: Option<[f32; 4]>, distance: f32) -> f32 {
 
 /// `c_editable_property_base`, with what `interpolate` runs between.
 #[derive(Debug, Clone)]
-struct H3ParticleProperty {
+pub(in crate::app::model_preview) struct H3ParticleProperty {
     input: H3ParticleInput,
     range: H3ParticleInput,
     adds: Option<bool>,
@@ -203,7 +255,7 @@ struct H3ParticleProperty {
 /// `allocate_random_seed`'s two counters, handing seeds out in property order,
 /// and what the game's state list leaves of the inputs it does not seed.
 #[derive(Default)]
-struct SeedAllocator {
+pub(in crate::app::model_preview) struct SeedAllocator {
     particle: usize,
     system: usize,
     /// Halo 3 and ODST: `particle rotation` reads the 0 their state list writes.
@@ -364,7 +416,7 @@ impl H3ParticleProperty {
     }
 
     /// The same thing, for what Halo 2 has no property for.
-    fn fixed(value: f32) -> Option<Self> {
+    pub(in crate::app::model_preview) fn fixed(value: f32) -> Option<Self> {
         use blam_tags::tag_function::{FunctionEncoding, FunctionType, H2Function};
         let mut function = H2Function::new(FunctionType::Identity);
         function.set_clamp_range(value, value).ok()?;
@@ -379,15 +431,15 @@ impl H3ParticleProperty {
         })
     }
 
-    fn fixed_vector(vector: [f32; 3]) -> Option<Self> {
+    pub(in crate::app::model_preview) fn fixed_vector(vector: [f32; 3]) -> Option<Self> {
         Some(Self { ends: [vector; 2], ..Self::fixed(1.0)? })
     }
 
-    fn scaled(self, scale: f32) -> Self {
+    pub(in crate::app::model_preview) fn scaled(self, scale: f32) -> Self {
         Self { scale, ..self }
     }
 
-    fn named(holder: TagStruct<'_>, name: &str, seeds: &mut SeedAllocator) -> Option<Self> {
+    pub(in crate::app::model_preview) fn named(holder: TagStruct<'_>, name: &str, seeds: &mut SeedAllocator) -> Option<Self> {
         Self::read(holder.descend(name)?, seeds)
     }
 
@@ -488,8 +540,8 @@ fn reach_baked_lod(raw: [f32; 4]) -> [f32; 4] {
 
 /// `1 / near fade range`, as it comes out on the card. Reach's postprocess
 /// takes it of `max(range, ε)`, so a range of nothing fades over a hair.
-fn near_fade_range(reach: bool, range: f32) -> f32 {
-    if reach { range.max(POSTPROCESS_EPSILON).recip() } else { range.recip() }
+fn near_fade_range(clamped: bool, range: f32) -> f32 {
+    if clamped { range.max(POSTPROCESS_EPSILON).recip() } else { range.recip() }
 }
 
 /// Where MCC's Reach particle clock comes round, in seconds.
@@ -500,38 +552,12 @@ const REACH_GAME_TIME_WRAP: f32 = 7200.0;
 /// (`s_render_time::update`, the 360's 0x827477A8, MCC sub_14084E170), the
 /// frames' seconds summed whole; MCC converts its counter as a signed int, so
 /// it runs to 7200 s and comes round from -7200 s.
-pub(super) fn particle_game_time(reach: bool, time: f32) -> f32 {
-    if reach {
+pub(super) fn particle_game_time(reach_clock: bool, time: f32) -> f32 {
+    if reach_clock {
         (time + REACH_GAME_TIME_WRAP).rem_euclid(2.0 * REACH_GAME_TIME_WRAP) - REACH_GAME_TIME_WRAP
     } else {
         time.rem_euclid(1.0)
     }
-}
-
-/// Halo 2 tool's particle system postprocess (`sub_80D2A0`): out and its
-/// feather default to 30 and 10, and only a system shown in any camera mode
-/// gets the near pair, from how fast it emits. A feather left at nothing stays
-/// so: `calc_lod_amount` (tag_test `sub_5D7990`) tests `near + feather` with
-/// it, so there is no fade, and only multiplies by the inverse it bakes.
-fn h2_baked_lod(raw: [f32; 4], any_camera: bool, rates: impl Iterator<Item = f32>) -> [f32; 4] {
-    let empty = |value: f32| value.abs() < 0.0001;
-    let [mut near, mut far, mut feather_in, mut feather_out] = raw;
-    if empty(far) {
-        far = 30.0;
-    }
-    if empty(feather_out) {
-        feather_out = 10.0;
-    }
-    if any_camera {
-        let busy = ((rates.map(|rate| rate / 30.0).sum::<f32>() - 2.0) / 3.0).clamp(0.0, 1.0);
-        if empty(near) {
-            near = busy * -0.1;
-        }
-        if empty(feather_in) {
-            feather_in = (1.0 - busy) + busy * 3.0;
-        }
-    }
-    [near, far, feather_in, feather_out]
 }
 
 /// `frame_advance`: what has landed stops once it is this slow.
@@ -566,7 +592,7 @@ const SPEED_AT_REST: f32 = 0.25;
 
 /// A `particle_physics` entry, in the order `update_particles` runs them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum H3ParticleController {
+pub(in crate::app::model_preview) enum H3ParticleController {
     Physics,
     Collider,
     Flock,
@@ -575,7 +601,7 @@ enum H3ParticleController {
 /// Where an emitter's particles are updated, as tool's `effect_postprocess`
 /// decides it (`c_particle_emitter_definition::decide_whether_cpu_or_gpu`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum H3ParticleUpdate {
+pub(in crate::app::model_preview) enum H3ParticleUpdate {
     /// `c_particle_emitter::frame_advance`, with every movement.
     Cpu,
     /// `particle_update.hlsl`: no collision, and physics once per emitter.
@@ -684,24 +710,6 @@ fn chained_parameter(
     chained_parameter(source, template.root(), kind, id, seeds, depth - 1)
 }
 
-/// A Halo 2 `particle_physics`' movements, its own or its template's.
-fn h2_controllers(source: &TagSource, movement: TagStruct<'_>) -> Vec<H3ParticleController> {
-    let template = movement
-        .read_tag_ref_path("template")
-        .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
-    let own = elements(movement, "movements");
-    let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
-    movements
-        .into_iter()
-        .filter_map(|entry| match entry.read_enum_option("type").as_deref() {
-            Some("physics") => Some(H3ParticleController::Physics),
-            Some("collider") => Some(H3ParticleController::Collider),
-            _ => None,
-        })
-        .collect()
-}
-
 /// A particle's physical rotation at birth, in turns: random with `random
 /// starting rotation`, else Halo 4's three-quarter turn for `bitmap authored
 /// vertically` (`c_particle_definition::initialize_particle`, the 360's
@@ -728,7 +736,7 @@ fn still_particles_move(game: Option<GameId>, billboard: H3Billboard) -> bool {
 
 /// `c_particle_definition`'s billboard styles, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum H3Billboard {
+pub(in crate::app::model_preview) enum H3Billboard {
     ScreenFacing,
     CameraFacing,
     ScreenParallel,
@@ -742,7 +750,7 @@ enum H3Billboard {
 }
 
 impl H3Billboard {
-    fn named(name: &str) -> Self {
+    pub(in crate::app::model_preview) fn named(name: &str) -> Self {
         match name {
             "camera facing" => Self::CameraFacing,
             "parallel to direction" => Self::ScreenParallel,
@@ -817,72 +825,73 @@ impl H3ParticleAlbedo {
 #[derive(Debug)]
 pub(crate) struct H3ParticleLook {
     /// `dies at rest`.
-    dies_at_rest: bool,
+    pub(in crate::app::model_preview) dies_at_rest: bool,
     /// Whether a speed of none is nudged to a little.
-    still_moves: bool,
-    billboard: H3Billboard,
-    flip_u: bool,
-    flip_v: bool,
-    random_rotation: bool,
-    intensity_fades: bool,
-    one_shot: bool,
-    backwards: bool,
+    pub(in crate::app::model_preview) still_moves: bool,
+    pub(in crate::app::model_preview) billboard: H3Billboard,
+    pub(in crate::app::model_preview) flip_u: bool,
+    pub(in crate::app::model_preview) flip_v: bool,
+    pub(in crate::app::model_preview) random_rotation: bool,
+    pub(in crate::app::model_preview) intensity_fades: bool,
+    pub(in crate::app::model_preview) one_shot: bool,
+    pub(in crate::app::model_preview) backwards: bool,
     /// `attachments`: effects its particles start, by what starts them.
-    attachments: Vec<(H3ParticleTrigger, String)>,
+    pub(in crate::app::model_preview) attachments: Vec<(H3ParticleTrigger, String)>,
     /// Whether the tag lists any attachment at all, which is what keeps its
     /// emitters off the card (`c_particle_definition::postprocess`).
-    any_attachments: bool,
+    pub(in crate::app::model_preview) any_attachments: bool,
     /// A Halo 2 particle with `attached particle systems`: its own tag.
-    carried_systems: Option<String>,
+    pub(in crate::app::model_preview) carried_systems: Option<String>,
     /// Halo 2: `sub_61AE40` scales a death or collision effect by `speed - 0.5`.
-    death_scaled_by_speed: bool,
+    pub(in crate::app::model_preview) death_scaled_by_speed: bool,
     /// `s_mesh_variant_list`: what `Model` draws in place of a quad.
-    model: Option<Vec<Vec<blam_tags::ParticleVertex>>>,
+    pub(in crate::app::model_preview) model: Option<Vec<Vec<blam_tags::ParticleVertex>>>,
     /// `bitmap authored vertically`: a quarter turn, for what is not a mesh.
-    vertical: bool,
+    pub(in crate::app::model_preview) vertical: bool,
     /// `dies on structure collision`.
-    dies_on_ground: bool,
+    pub(in crate::app::model_preview) dies_on_ground: bool,
     /// `tint from lightmap`.
-    tint_from_lightmap: bool,
-    double_sided: bool,
+    pub(in crate::app::model_preview) tint_from_lightmap: bool,
+    pub(in crate::app::model_preview) double_sided: bool,
     /// `fade when viewed edge-on`: `1 / range` and the cutoff, in radians.
-    edge_fade: Option<[f32; 2]>,
+    pub(in crate::app::model_preview) edge_fade: Option<[f32; 2]>,
     /// `motion blur`'s stretch.
-    blur_aspect: Option<f32>,
+    pub(in crate::app::model_preview) blur_aspect: Option<f32>,
     /// The postprocess's: at 1, a hemisphere.
-    curvature: f32,
+    pub(in crate::app::model_preview) curvature: f32,
     /// `m_sprite`: the quad's corner and size in its own units.
-    corner: [f32; 4],
+    pub(in crate::app::model_preview) corner: [f32; 4],
     /// `m_frames`: left, top, width and height.
-    frames: Vec<[f32; 4]>,
+    pub(in crate::app::model_preview) frames: Vec<[f32; 4]>,
     /// Halo 2's `select random sequence`: each sequence's frames and corner,
     /// one of which a particle takes at birth. Empty for one sequence.
-    sequences: Vec<(Vec<[f32; 4]>, [f32; 4])>,
-    aspect: H3ParticleProperty,
-    color: H3ParticleProperty,
-    intensity: H3ParticleProperty,
-    alpha: H3ParticleProperty,
-    frame: H3ParticleProperty,
-    rate: H3ParticleProperty,
-    palette: H3ParticleProperty,
+    pub(in crate::app::model_preview) sequences: Vec<(Vec<[f32; 4]>, [f32; 4])>,
+    pub(in crate::app::model_preview) aspect: H3ParticleProperty,
+    pub(in crate::app::model_preview) color: H3ParticleProperty,
+    pub(in crate::app::model_preview) intensity: H3ParticleProperty,
+    pub(in crate::app::model_preview) alpha: H3ParticleProperty,
+    pub(in crate::app::model_preview) frame: H3ParticleProperty,
+    pub(in crate::app::model_preview) rate: H3ParticleProperty,
+    pub(in crate::app::model_preview) palette: H3ParticleProperty,
     pub(crate) shader: Arc<H3SpriteShader>,
     /// Halo 4's: drawn through its material from packed state, not as quads.
     pub(crate) h4: Option<Arc<super::h4::particles::H4ParticleRender>>,
     /// Halo 3's colours are light, and Halo 2's are what shows.
-    exposed: bool,
-    /// Reach's: its own game time, lighting, exposure and shapes.
-    reach: bool,
+    pub(in crate::app::model_preview) exposed: bool,
+    /// Reach's and Halo 4's own game time, lighting, exposure and shapes:
+    /// [`ParticleRules::reach_look`].
+    pub(in crate::app::model_preview) reach: bool,
     /// Reach's `uses cheap shader`: `particle_render_fast.hlsl`.
-    cheap: bool,
+    pub(in crate::app::model_preview) cheap: bool,
     /// Reach's `runtime m_used_particle_states` (prt3+460): the states its
     /// properties read, seeds allocated included, which its emitters' seeds
     /// must go around. None for Halo 3's.
-    used_states: u32,
+    pub(in crate::app::model_preview) used_states: u32,
 }
 
 /// The `lighting` option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum H3ParticleLighting {
+pub(in crate::app::model_preview) enum H3ParticleLighting {
     None,
     Ambient,
     Directional,
@@ -925,9 +934,9 @@ pub(crate) struct H3SpriteShader {
     pub(crate) frame_blend: bool,
     /// `depth_fade_range`, with the `depth_fade` option on.
     pub(crate) depth_fade: Option<f32>,
-    add: [f32; 3],
+    pub(in crate::app::model_preview) add: [f32; 3],
     /// Reach's: `add` is at `V_ILLUM_EXPOSURE` (`default_vs`).
-    add_at_illum: bool,
+    pub(in crate::app::model_preview) add_at_illum: bool,
     /// Reach's beams: `sample_diffuse` takes a `particle_alpha` of 1
     /// (`effects__beam.hlsl` l.373–458), not the vertex's alpha.
     pub(crate) unit_particle_alpha: bool,
@@ -940,9 +949,9 @@ pub(crate) struct H3SpriteShader {
     pub(crate) sort_layer: i32,
     /// `distortion_scale`, for what bends the scene instead of covering it.
     pub(crate) distortion: Option<f32>,
-    lighting: H3ParticleLighting,
+    pub(in crate::app::model_preview) lighting: H3ParticleLighting,
     /// `starting_uv_scale` and `ending_uv_scale`.
-    uv_scale: [f32; 2],
+    pub(in crate::app::model_preview) uv_scale: [f32; 2],
     pub(crate) base_map: Option<H3Bitmap>,
     pub(crate) alpha_map: Option<H3Bitmap>,
     pub(crate) palette_map: Option<H3Bitmap>,
@@ -952,7 +961,7 @@ pub(crate) struct H3SpriteShader {
     pub(crate) samplers: [Option<H3Sampler>; 4],
     pub(crate) constants: H3AlbedoConstants,
     /// Reach's `per_pixel_smooth`: `contrast_scale` and `contrast_offset`.
-    contrast: [f32; 2],
+    pub(in crate::app::model_preview) contrast: [f32; 2],
     /// Reach's `warp` `sphere`: `sphere_warp_scale`.
     pub(crate) sphere_warp: Option<f32>,
     /// Reach's `depth_fade` `palette_shift`: `palette_shift_amount`.
@@ -976,7 +985,7 @@ impl H3SpriteShader {
     }
 
     /// What a leaf draws with: only a map, cut out at half its alpha.
-    fn plain(blend: H3Blend) -> Self {
+    pub(in crate::app::model_preview) fn plain(blend: H3Blend) -> Self {
         Self {
             albedo: H3ParticleAlbedo::Diffuse,
             blend,
@@ -1048,7 +1057,7 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
         .map(|option| option.read_int_any("short").unwrap_or(0).max(0) as usize)
         .collect();
     let chosen = |category: &str| definition.chosen(category, &options).unwrap_or_default().to_owned();
-    let reach = source.game() == Some(GameId::HaloReach);
+    let reach_method = ParticleRules::of(source.game()).reach_render_method;
     let resolved = resolve_embedded_method(source, shader);
     let resolved_real = |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
     let add = parameter(shader, "self_illum_color")
@@ -1061,7 +1070,7 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
     let depth_fade = chosen("depth_fade");
     // `compute_depth_fade`: Reach's `low_res` is `on` on DirectX 11, its
     // four taps being the 360's alone, and `palette_shift` fades as `on` does.
-    let fades = if reach { matches!(depth_fade.as_str(), "on" | "low_res" | "palette_shift") } else { depth_fade == "on" };
+    let fades = if reach_method { matches!(depth_fade.as_str(), "on" | "low_res" | "palette_shift") } else { depth_fade == "on" };
     let albedo = H3ParticleAlbedo::named(&chosen("albedo"));
     Some(H3SpriteShader {
         albedo,
@@ -1069,7 +1078,7 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
         black_point: chosen("black_point") == "on",
         frame_blend: chosen("frame_blend") == "on",
         depth_fade: (fades && chosen("blend_mode") != "opaque").then(|| {
-            let range = if reach {
+            let range = if reach_method {
                 resolved_real("depth_fade_range", 0.1)
             } else {
                 parameter(shader, "depth_fade_range")
@@ -1112,14 +1121,14 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
         palette_map,
         second_map,
         samplers,
-        constants: read_albedo_constants(shader, resolved.as_ref(), reach),
+        constants: read_albedo_constants(shader, resolved.as_ref(), reach_method),
         // `smooth_lighting.render_method_option`'s defaults.
         contrast: [resolved_real("contrast_scale", 0.5), resolved_real("contrast_offset", 0.5)],
         // `warp_sphere.render_method_option`'s default.
-        sphere_warp: (reach && chosen("warp") == "sphere").then(|| resolved_real("sphere_warp_scale", 0.41)),
+        sphere_warp: (reach_method && chosen("warp") == "sphere").then(|| resolved_real("sphere_warp_scale", 0.41)),
         // `depth_fade_palette_shift.render_method_option`'s default.
-        palette_shift: (reach && depth_fade == "palette_shift").then(|| resolved_real("palette_shift_amount", 0.5)),
-        plasma_second_sprite: reach && matches!(albedo, H3ParticleAlbedo::PalettePlasma | H3ParticleAlbedo::Palette2dPlasma),
+        palette_shift: (reach_method && depth_fade == "palette_shift").then(|| resolved_real("palette_shift_amount", 0.5)),
+        plasma_second_sprite: reach_method && matches!(albedo, H3ParticleAlbedo::PalettePlasma | H3ParticleAlbedo::Palette2dPlasma),
     })
 }
 
@@ -1188,7 +1197,7 @@ fn sprite_xform(shader: TagStruct<'_>, name: &str) -> [f32; 4] {
     xform
 }
 
-fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRenderMethod>, reach: bool) -> H3AlbedoConstants {
+fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRenderMethod>, reach_render_method: bool) -> H3AlbedoConstants {
     let real = |name: &str| inline_real(resolved, name).unwrap_or(0.0);
     let tint = match inline_value(resolved, "tint_color") {
         Some(ResolvedValue::Color([_, red, green, blue])) => [red, green, blue],
@@ -1196,7 +1205,7 @@ fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRender
     };
     // `albedo_palettized_plasma.render_method_option`'s, which Reach's 2d
     // plasma shares.
-    let alpha_modulation = if reach {
+    let alpha_modulation = if reach_render_method {
         inline_real(resolved, "alpha_modulation_factor").unwrap_or(0.1)
     } else {
         real("alpha_modulation_factor")
@@ -1212,7 +1221,7 @@ fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRender
 
 /// `postprocess_frame_animation`'s `m_sprite`, from a sprite's left, right, top
 /// and bottom, its registration point, and the particle's `center offset`.
-fn sprite_corner(rect: [f32; 4], center: [f32; 2], offset: [f32; 2], plate_aspect: f32) -> [f32; 4] {
+pub(in crate::app::model_preview) fn sprite_corner(rect: [f32; 4], center: [f32; 2], offset: [f32; 2], plate_aspect: f32) -> [f32; 4] {
     let [left, right, top, bottom] = rect;
     let (width, height) = (right - left, bottom - top);
     let (mut scale_x, mut scale_y) = (1.0, 1.0);
@@ -1301,10 +1310,8 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         Some(model) => Some(read_particle_mesh(source, &model)?),
         None => None,
     };
-    // Halo 4 draws through the particle's own `actual material`; its
-    // `actual shader` is the deprecated render method's remains.
-    let halo4 = source.game() == Some(GameId::Halo4);
-    let h4 = match halo4 {
+    let rules = ParticleRules::of(source.game());
+    let h4 = match rules.draws_through_material {
         true => {
             // The GPU draws a model's strip whole, variant by variant.
             let strip = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
@@ -1325,33 +1332,31 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     let offset = root.read_point2d("center offset");
     let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
     let one_shot = animated("frame animation one shot");
-    let (frames, corner) = match shader.filter(|_| !halo4) {
+    let (frames, corner) = match shader.filter(|_| !rules.draws_through_material) {
         Some(shader) => read_frames(source, shader, first, [offset.x, offset.y], start, one_shot),
         None => (vec![[0.0, 0.0, 1.0, 1.0]], [0.0, 0.0, 1.0, 1.0]),
     };
     let billboard = H3Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
-    // Halo 4's simulation is Reach's, with terms of its own.
-    let reach = matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4));
-    let cheap = reach && has_flag(root, "main flags", "uses cheap shader");
+    let cheap = rules.cheap_shader && has_flag(root, "main flags", "uses cheap shader");
     const PROPERTIES: [&str; 7] =
         ["aspect ratio", "color", "intensity", "alpha", "frame index", "animation rate", "palette animation"];
     let mut properties = unallocated_properties(root, PROPERTIES)?;
     // Reach's `c_particle_definition::postprocess` (tool 0x140DD6FA0) takes
     // the mask of all seven before allocating them in this order. Its
     // attachments' scales come between, which the preview does not read.
-    let mut seeds = if reach {
+    let mut seeds = if rules.reach_postprocess_seeds {
         SeedAllocator::reach(used_states_of(&properties) & REACH_ALLOCATED_STATES)
     } else {
         SeedAllocator::halo3()
     };
     properties.iter_mut().for_each(|property| property.allocate(&mut seeds));
     let [aspect, color, intensity, alpha, frame, rate, palette] = properties;
-    let mut sprite_shader = match shader.filter(|_| !halo4) {
+    let mut sprite_shader = match shader.filter(|_| !rules.draws_through_material) {
         Some(shader) => read_sprite_shader(source, shader)?,
         None => H3SpriteShader::plain(H3Blend::Additive),
     };
     // `default_vs`: Reach's constant self-illumination is at `V_ILLUM_EXPOSURE`.
-    sprite_shader.add_at_illum = reach;
+    sprite_shader.add_at_illum = rules.adds_at_illum;
     if cheap {
         // `particle_render_fast.hlsl` warps nothing and lights no pixel.
         sprite_shader.sphere_warp = None;
@@ -1412,7 +1417,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
         shader: Arc::new(sprite_shader),
         h4,
         exposed: true,
-        reach,
+        reach: rules.reach_look,
         cheap,
         used_states: seeds.used(),
     })
@@ -1429,149 +1434,9 @@ fn used_states_of(properties: &[H3ParticleProperty]) -> u32 {
     properties.iter().fold(0, |used, property| used | property.used_states())
 }
 
-/// Halo 2's `sequences`: the sprites of `first`, on a plate of its own shape.
-fn read_h2_frames(tag: &TagFile, first: usize) -> (Vec<[f32; 4]>, [f32; 4]) {
-    let plate_aspect = elements(tag.root(), "bitmaps").first().map_or(1.0, |image| {
-        let size = |name: &str| image.read_int_any(name).unwrap_or(1) as f32;
-        size("width") / size("height")
-    });
-    let sequences = elements(tag.root(), "sequences");
-    let sprites = sequences.get(first % sequences.len().max(1)).map_or(Vec::new(), |sequence| elements(*sequence, "sprites"));
-    let rect_of = |sprite: &TagStruct<'_>| ["left", "right", "top", "bottom"].map(|name| sprite.read_real(name).unwrap_or(0.0));
-    let frames: Vec<[f32; 4]> = sprites
-        .iter()
-        .take(MOST_FRAMES)
-        .map(|sprite| {
-            let [left, right, top, bottom] = rect_of(sprite);
-            [left, top, right - left, bottom - top]
-        })
-        .collect();
-    let (rect, center) = sprites.first().map_or(([0.0, 1.0, 0.0, 1.0], [0.5, 0.5]), |sprite| {
-        let registration = sprite.read_point2d("registration point");
-        (rect_of(sprite), [registration.x, registration.y])
-    });
-    let frames = if frames.is_empty() { vec![[0.0, 0.0, 1.0, 1.0]] } else { frames };
-    (frames, sprite_corner(rect, center, [0.0; 2], plate_aspect))
-}
-
-/// `effect_shader_*`'s pixel stage and blend, by the template that names the
-/// pass, by name alone: the distortion one lives under `particle\` too.
-fn h2_particle_pass(template: &str) -> Option<(H3ParticleAlbedo, H3Blend, bool)> {
-    use H3ParticleAlbedo::{Diffuse, H2Distortion, H2MultiplyAdd, H2Tint};
-    Some(match template.rsplit(['\\', '/']).next().unwrap_or_default() {
-        "particle_additive" => (Diffuse, H3Blend::AddSrcTimesSrcAlpha, false),
-        "particle_additive_tint" => (H2Tint, H3Blend::AddSrcTimesSrcAlpha, false),
-        "particle_alpha_blend" => (Diffuse, H3Blend::AlphaBlend, false),
-        "particle_alpha_blend_tint" => (H2Tint, H3Blend::AlphaBlend, false),
-        "particle_alpha_multiply_add" => (H2MultiplyAdd, H3Blend::PreMultiplied, false),
-        // Its alpha test passes anything above nothing, which the albedo does.
-        "particle_alpha_blend_distortion" => (H2Distortion, H3Blend::AlphaBlend, false),
-        "particle_alpha_test_no_lighting_fixed_for_glass" => (Diffuse, H3Blend::AlphaBlend, true),
-        _ => return None,
-    })
-}
-
-/// A Halo 2 `.particle`, and the two properties of a quad that Halo 3 moved to
-/// its emitters.
-fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3ParticleProperty, H3ParticleProperty)> {
-    let tag = load_referenced_tag_from_source(source, path, "particle", b"prt3").ok()?;
-    let root = tag.root();
-    let template = root.read_tag_ref_path("shader template")?;
-    let (albedo, blend, alpha_test) = h2_particle_pass(template.trim_end_matches(".shader_template"))?;
-    let parameters = elements(root, "shader parameters");
-    let parameter = |name: &str| parameters.iter().find(|entry| entry.read_string_id("name").as_deref() == Some(name));
-    let distorts = albedo == H3ParticleAlbedo::H2Distortion;
-    let map_name = if distorts { "bump_map" } else { "alpha_map_texture" };
-    let map = parameter(map_name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    let plate = load_referenced_tag_from_source(source, &map, "bitmap", b"bitm").ok()?;
-    let flagged = |wanted: &str| has_flag(root, "flags", wanted);
-    let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
-    let (frames, corner) = read_h2_frames(&plate, first);
-    // `sub_53CEA0`: `first + random % count`, held inside the bitmap's.
-    let sequences = if flagged("select random sequence") {
-        let count = root.read_int_any("sequence count").unwrap_or(1).max(1) as usize;
-        let last = elements(plate.root(), "sequences").len().saturating_sub(1);
-        (0..count).map(|at| read_h2_frames(&plate, (first + at).min(last))).collect()
-    } else {
-        Vec::new()
-    };
-    // The distortion's pixel shader reads `distortion_scale` where the others
-    // read `modulation_factor`; its template's default is 1.
-    let modulation = if distorts {
-        parameter("distortion_scale").and_then(|entry| entry.read_real("const value")).unwrap_or(1.0)
-    } else {
-        parameter("modulation_factor").and_then(|entry| entry.read_real("const value")).unwrap_or(0.0)
-    };
-    let shader = H3SpriteShader {
-        albedo,
-        alpha_test,
-        frame_blend: !flagged("disable frame blending"),
-        base_map: Some(read_h3_bitmap(source, &map, 0, SamplerKind::Texture2D)?),
-        constants: H3AlbedoConstants { modulation, ..Default::default() },
-        ..H3SpriteShader::plain(blend)
-    };
-    let mut seeds = SeedAllocator::default();
-    let billboard = H3Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
-    let mut property = |name: &str| H3ParticleProperty::named(root, name, &mut seeds);
-    let (color, alpha, scale, rotation, frame) =
-        (property("color")?, property("alpha")?, property("scale")?, property("rotation")?, property("frame index")?);
-    let look = H3ParticleLook {
-        billboard,
-        still_moves: false,
-        flip_u: flagged("random u mirror"),
-        flip_v: flagged("random v mirror"),
-        random_rotation: false,
-        intensity_fades: false,
-        model: None,
-        vertical: flagged("bitmap authored vertically"),
-        dies_on_ground: flagged("dies on structure collision"),
-        dies_at_rest: flagged("dies at rest"),
-        // The doubled tint of what is lit comes from a level.
-        tint_from_lightmap: false,
-        double_sided: true,
-        // `sub_61AE40`: a death's `effect` is made where the particle died, and
-        // a collision's where it first struck (`sub_53DF20`). A material effect
-        // needs the surface's material, which the preview's ground has none
-        // of, and a sound draws nothing.
-        attachments: [("death effect", H3ParticleTrigger::Death), ("collision effect", H3ParticleTrigger::Collision)]
-            .into_iter()
-            .filter_map(|(field, trigger)| {
-                let (group, path) = root.read_tag_ref_with_group(field)?;
-                (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then_some((trigger, path))
-            })
-            .collect(),
-        // Read only for Halo 3 and ODST: Halo 2's emitters are all on the processor.
-        any_attachments: false,
-        carried_systems: (!elements(root, "attached particle systems").is_empty()).then(|| path.to_owned()),
-        death_scaled_by_speed: true,
-        edge_fade: None,
-        blur_aspect: None,
-        curvature: 0.0,
-        one_shot: flagged("frame animation one shot"),
-        backwards: flagged("can animate backwards"),
-        corner,
-        frames,
-        sequences,
-        aspect: H3ParticleProperty::fixed(1.0)?,
-        color,
-        intensity: H3ParticleProperty::fixed(1.0)?,
-        alpha,
-        frame,
-        rate: H3ParticleProperty::fixed(0.0)?,
-        palette: H3ParticleProperty::fixed(0.0)?,
-        shader: Arc::new(shader),
-        h4: None,
-        exposed: false,
-        reach: false,
-        cheap: false,
-        used_states: 0,
-    };
-    Some((look, scale, rotation))
-}
-
 /// `c_particle_emitter_definition`'s emission shapes, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum H3EmissionShape {
+pub(in crate::app::model_preview) enum H3EmissionShape {
     Sprayer,
     Disc,
     Globe,
@@ -1597,7 +1462,7 @@ enum H3EmissionShape {
 
 /// ODST's `s_particle_emitter_custom_points::s_point`, decompressed.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct H3CustomPoint {
+pub(in crate::app::model_preview) struct H3CustomPoint {
     position: [f32; 3],
     normal: [f32; 3],
 }
@@ -1645,7 +1510,7 @@ fn emit_from_points(
 }
 
 impl H3EmissionShape {
-    fn named(name: &str) -> Option<Self> {
+    pub(in crate::app::model_preview) fn named(name: &str) -> Option<Self> {
         Some(match name {
             "sprayer" => Self::Sprayer,
             "disc" => Self::Disc,
@@ -1673,7 +1538,7 @@ impl H3EmissionShape {
 
 /// `set_shader_update_state`'s three, each off without a physics controller.
 #[derive(Debug)]
-struct H3ParticleFlock {
+pub(in crate::app::model_preview) struct H3ParticleFlock {
     separation_distance: H3ParticleProperty,
     separation_weight: H3ParticleProperty,
     cohesion_distance: H3ParticleProperty,
@@ -1686,7 +1551,7 @@ struct H3ParticleFlock {
 
 /// `update_particles_collider`'s two, against the preview's ground.
 #[derive(Debug)]
-struct H3ParticleCollider {
+pub(in crate::app::model_preview) struct H3ParticleCollider {
     elasticity: H3ParticleProperty,
     friction: H3ParticleProperty,
 }
@@ -1708,7 +1573,7 @@ fn read_collider(
 /// A Halo 2 `particle_physics`' `collider` movement, its own or its
 /// template's, if it collides with structure: friction is parameter 0 and
 /// elasticity 1, as `sub_53DF20` reads them.
-fn read_collider_of(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
+pub(in crate::app::model_preview) fn read_collider_of(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
@@ -1906,7 +1771,7 @@ impl H3ParticleFlock {
 }
 
 #[derive(Debug)]
-struct H3ParticlePhysics {
+pub(in crate::app::model_preview) struct H3ParticlePhysics {
     gravity: Option<H3ParticleProperty>,
     air_friction: Option<H3ParticleProperty>,
     rotational_friction: Option<H3ParticleProperty>,
@@ -1914,7 +1779,7 @@ struct H3ParticlePhysics {
 
 /// `e_particle_attachment_type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum H3ParticleTrigger {
+pub(in crate::app::model_preview) enum H3ParticleTrigger {
     Birth,
     Death,
     Collision,
@@ -1925,7 +1790,7 @@ enum H3ParticleTrigger {
 
 /// `emission_axis_enum`, for what turns about an axis of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum H3ParticleAxis {
+pub(in crate::app::model_preview) enum H3ParticleAxis {
     Constant,
     Cone,
     Disc,
@@ -1933,7 +1798,7 @@ enum H3ParticleAxis {
 }
 
 impl H3ParticleAxis {
-    fn named(name: &str) -> Self {
+    pub(in crate::app::model_preview) fn named(name: &str) -> Self {
         match name {
             "cone" => Self::Cone,
             "disc" => Self::Disc,
@@ -1966,63 +1831,63 @@ impl H3ParticleAxis {
 }
 
 #[derive(Debug)]
-struct H3Emitter {
-    update: H3ParticleUpdate,
+pub(in crate::app::model_preview) struct H3Emitter {
+    pub(in crate::app::model_preview) update: H3ParticleUpdate,
     /// On the card, Reach's and Halo 4's self-acceleration is a straight lerp
     /// between its ends (Reach's `map_to_vector3d_range` has its slerp
     /// commented out; Halo 4's `ParticleMapToVector3dLerp`); Halo 3's and
     /// ODST's turn from one to the other.
-    card_lerps: bool,
+    pub(in crate::app::model_preview) card_lerps: bool,
     /// `becomes gpu when at rest`: a particle that stops moves on to the card.
-    card_at_rest: bool,
+    pub(in crate::app::model_preview) card_at_rest: bool,
     /// What a pulse's count may fall short of a whole particle by and still
     /// make one: Halo 2's `c_particle_emitter::pulse` (0x68d160) spawns while
     /// `count + 0.0001 >= 1`; Halo 3's floors it.
-    spawn_slack: f32,
-    controllers: Vec<H3ParticleController>,
-    shape: H3EmissionShape,
-    points: Vec<H3CustomPoint>,
-    scroll: [f32; 2],
-    axis: H3ParticleAxis,
-    reference_axis: usize,
-    axis_angle: H3ParticleProperty,
-    offset: H3ParticleProperty,
-    direction: H3ParticleProperty,
-    radius: H3ParticleProperty,
-    angle: H3ParticleProperty,
-    starting: H3ParticleProperty,
-    most: H3ParticleProperty,
-    rate: H3ParticleProperty,
-    lifespan: H3ParticleProperty,
-    acceleration: H3ParticleProperty,
-    speed: H3ParticleProperty,
-    rotation: H3ParticleProperty,
-    rotation_rate: H3ParticleProperty,
-    size: H3ParticleProperty,
-    scale: H3ParticleProperty,
-    tint: H3ParticleProperty,
-    alpha: H3ParticleProperty,
-    black_point: H3ParticleProperty,
-    physics: Option<H3ParticlePhysics>,
-    flock: Option<H3ParticleFlock>,
-    collider: Option<H3ParticleCollider>,
+    pub(in crate::app::model_preview) spawn_slack: f32,
+    pub(in crate::app::model_preview) controllers: Vec<H3ParticleController>,
+    pub(in crate::app::model_preview) shape: H3EmissionShape,
+    pub(in crate::app::model_preview) points: Vec<H3CustomPoint>,
+    pub(in crate::app::model_preview) scroll: [f32; 2],
+    pub(in crate::app::model_preview) axis: H3ParticleAxis,
+    pub(in crate::app::model_preview) reference_axis: usize,
+    pub(in crate::app::model_preview) axis_angle: H3ParticleProperty,
+    pub(in crate::app::model_preview) offset: H3ParticleProperty,
+    pub(in crate::app::model_preview) direction: H3ParticleProperty,
+    pub(in crate::app::model_preview) radius: H3ParticleProperty,
+    pub(in crate::app::model_preview) angle: H3ParticleProperty,
+    pub(in crate::app::model_preview) starting: H3ParticleProperty,
+    pub(in crate::app::model_preview) most: H3ParticleProperty,
+    pub(in crate::app::model_preview) rate: H3ParticleProperty,
+    pub(in crate::app::model_preview) lifespan: H3ParticleProperty,
+    pub(in crate::app::model_preview) acceleration: H3ParticleProperty,
+    pub(in crate::app::model_preview) speed: H3ParticleProperty,
+    pub(in crate::app::model_preview) rotation: H3ParticleProperty,
+    pub(in crate::app::model_preview) rotation_rate: H3ParticleProperty,
+    pub(in crate::app::model_preview) size: H3ParticleProperty,
+    pub(in crate::app::model_preview) scale: H3ParticleProperty,
+    pub(in crate::app::model_preview) tint: H3ParticleProperty,
+    pub(in crate::app::model_preview) alpha: H3ParticleProperty,
+    pub(in crate::app::model_preview) black_point: H3ParticleProperty,
+    pub(in crate::app::model_preview) physics: Option<H3ParticlePhysics>,
+    pub(in crate::app::model_preview) flock: Option<H3ParticleFlock>,
+    pub(in crate::app::model_preview) collider: Option<H3ParticleCollider>,
     /// Halo 2's `looping particle`: another only when none are left.
-    one_at_a_time: bool,
+    pub(in crate::app::model_preview) one_at_a_time: bool,
     /// Halo 2's `persistent particle`: age comes round, and nothing dies of it.
-    persistent: bool,
+    pub(in crate::app::model_preview) persistent: bool,
     /// Without Halo 2's `spread between ticks`, a tick's all start at its end.
-    bunched: bool,
+    pub(in crate::app::model_preview) bunched: bool,
     /// Halo 2's rotation is all in `rotation`, and what spins it reads the
     /// `particle rotation` input.
-    rotation_given: bool,
+    pub(in crate::app::model_preview) rotation_given: bool,
     /// Reach's `volume emitter particle velocities are random`.
-    volume_random: bool,
+    pub(in crate::app::model_preview) volume_random: bool,
     /// Reach's `axis scale`; ones elsewhere.
-    axis_scale: [f32; 3],
+    pub(in crate::app::model_preview) axis_scale: [f32; 3],
     /// Reach's `turbulence` movement, which only the card runs.
-    turbulence: Option<H3ParticleTurbulence>,
+    pub(in crate::app::model_preview) turbulence: Option<H3ParticleTurbulence>,
     /// Halo 4's own update terms.
-    h4: Option<H4EmitterTerms>,
+    pub(in crate::app::model_preview) h4: Option<H4EmitterTerms>,
 }
 
 /// What Halo 4's `particle_update.fx` adds over Reach's: its system's
@@ -2030,7 +1895,7 @@ struct H3Emitter {
 /// (`m_scaleMultiplier`), and the emitter's scale x and y and alpha white
 /// point.
 #[derive(Debug)]
-struct H4EmitterTerms {
+pub(in crate::app::model_preview) struct H4EmitterTerms {
     live_forever: bool,
     disable_velocity: bool,
     size_scale: f32,
@@ -2076,7 +1941,7 @@ fn read_physics(
 }
 
 /// A Halo 2 `particle_physics`' physics movement, its own or its template's.
-fn read_movement(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
+pub(in crate::app::model_preview) fn read_movement(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
@@ -2122,9 +1987,9 @@ const EMITTER_PROPERTIES: [&str; 18] = [
 /// [`EMITTER_PROPERTIES`]: Reach's `effect_postprocess` (tool 0x140DD5070)
 /// goes in tag order, and Halo 3's and ODST's allocate `emission axis angle`
 /// last.
-fn emitter_seed_order(reach: bool) -> [usize; 18] {
+fn emitter_seed_order(reach_postprocess: bool) -> [usize; 18] {
     std::array::from_fn(|at| match at {
-        _ if reach => at,
+        _ if reach_postprocess => at,
         0..4 => at,
         4..17 => at + 1,
         _ => 4,
@@ -2141,8 +2006,7 @@ fn read_emitter(
     size_scale: f32,
 ) -> Option<H3Emitter> {
     // Halo 4 seeds and moves as Reach does, with terms of its own.
-    let halo4 = source.game() == Some(GameId::Halo4);
-    let reach = source.game() == Some(GameId::HaloReach) || halo4;
+    let rules = ParticleRules::of(source.game());
     let shape = H3EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
     let mut properties = unallocated_properties(emitter, EMITTER_PROPERTIES)?;
     let movement = emitter.descend("particle movement");
@@ -2151,7 +2015,7 @@ fn read_emitter(
     let (update, card_at_rest) = particle_update(system_flagged, look.any_attachments, movement_flagged);
     let controllers = flagged_controllers(movement_flagged);
     let (physics, flock, collider, turbulence);
-    if reach {
+    if rules.reach_postprocess_seeds {
         // `c_particle_controller::fully_index_parameters_and_postprocess`
         // (tool 0x140DD92D0): each controller first, with a mask of its own.
         // The preview reads no wind, nor swarm's parameter 5, so what those
@@ -2203,7 +2067,7 @@ fn read_emitter(
     let raw_scale = emitter.read_point3d("axis scale");
     Some(H3Emitter {
         update,
-        card_lerps: reach,
+        card_lerps: rules.card_lerps,
         card_at_rest,
         spawn_slack: 0.0,
         axis: H3ParticleAxis::named(&emitter.read_enum_option("particle axis (for models)").unwrap_or_default()),
@@ -2222,11 +2086,11 @@ fn read_emitter(
         persistent: false,
         bunched: false,
         rotation_given: false,
-        volume_random: reach
+        volume_random: rules.random_volume_velocities
             && has_flag(emitter, "emitter flags", "volume emitter particle velocities are random"),
-        axis_scale: if reach { reach_axis_scale([raw_scale.x, raw_scale.y, raw_scale.z]) } else { [1.0; 3] },
+        axis_scale: if rules.scales_axes { reach_axis_scale([raw_scale.x, raw_scale.y, raw_scale.z]) } else { [1.0; 3] },
         turbulence,
-        h4: halo4.then(|| {
+        h4: rules.h4_emitter_terms.then(|| {
             // Read past Reach's allocation [inferred: their seeds follow].
             let property = |name: &str| emitter.descend(name).and_then(|holder| H3ParticleProperty::unallocated(holder));
             let scale = property("particle scale x").zip(property("particle scale y")).map(|(x, y)| [x, y]);
@@ -2247,7 +2111,7 @@ fn read_emitter(
 /// texel of the movement's texture, picked by its birth time along u and its
 /// fifth seed along v.
 #[derive(Debug)]
-struct H3ParticleTurbulence {
+pub(in crate::app::model_preview) struct H3ParticleTurbulence {
     /// Parameter 0, read for each particle: `_index_emitter_movement_turbulence`,
     /// from `get_parameter_by_id_indexed(turbulence, 0)` in `populate_gpu_data`
     /// (the 360's 0x82EE8350).
@@ -2327,94 +2191,6 @@ fn sample_wrapped(image: &TextureImage, [u, v]: [f32; 2]) -> [f32; 3] {
     })
 }
 
-/// A Halo 2 emitter: Halo 3's without what it added, its rates in ticks and
-/// degrees, and `size` and `rotation` scaled by the `.particle`'s.
-fn read_h2_emitter(
-    source: &TagSource,
-    emitter: TagStruct<'_>,
-    scale: H3ParticleProperty,
-    rotation: H3ParticleProperty,
-    flagged: &impl Fn(&str) -> bool,
-) -> Option<H3Emitter> {
-    let mut seeds = SeedAllocator::default();
-    let shape = H3EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
-    let mut property = |name: &str| H3ParticleProperty::named(emitter, name, &mut seeds);
-    let (radius, angle, rate, lifespan) = (
-        property("emission radius")?,
-        property("emission angle")?,
-        property("particle emission rate")?.scaled(30.0),
-        property("particle lifespan")?,
-    );
-    let (speed, rotation_rate, size, tint, alpha) = (
-        property("particle velocity")?,
-        property("particle angular velocity")?.scaled(1.0 / 360.0),
-        property("particle size")?,
-        property("particle tint")?,
-        property("particle alpha")?,
-    );
-    let offset = emitter.read_point3d("translational offset");
-    let turn = emitter.read_euler2d("relative direction");
-    let (sin_yaw, cos_yaw) = turn.yaw.sin_cos();
-    let (sin_pitch, cos_pitch) = turn.pitch.sin_cos();
-    let movement = emitter
-        .read_tag_ref_path("particle physics")
-        .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
-    let physics = movement.as_ref().and_then(|tag| read_movement(source, tag.root(), &mut seeds));
-    let collider = movement.as_ref().and_then(|tag| read_collider_of(source, tag.root(), &mut seeds));
-    // In the order the tag lists them, as the game runs its movements.
-    let controllers = movement.as_ref().map_or_else(Vec::new, |tag| h2_controllers(source, tag.root()));
-    let controllers = controllers
-        .into_iter()
-        .filter(|controller| match controller {
-            H3ParticleController::Physics => physics.is_some(),
-            H3ParticleController::Collider => collider.is_some(),
-            H3ParticleController::Flock => false,
-        })
-        .collect();
-    Some(H3Emitter {
-        h4: None,
-        update: H3ParticleUpdate::Cpu,
-        card_lerps: false,
-        card_at_rest: false,
-        spawn_slack: 0.0001,
-        controllers,
-        shape,
-        points: Vec::new(),
-        scroll: [0.0; 2],
-        axis: H3ParticleAxis::named(""),
-        reference_axis: 0,
-        axis_angle: H3ParticleProperty::fixed(0.0)?,
-        offset: H3ParticleProperty::fixed_vector([offset.x, offset.y, offset.z])?,
-        direction: H3ParticleProperty::fixed_vector([cos_yaw * cos_pitch, sin_yaw * cos_pitch, sin_pitch])?,
-        radius,
-        angle,
-        starting: H3ParticleProperty::fixed(0.0)?,
-        most: H3ParticleProperty::fixed(0.0)?,
-        rate,
-        lifespan,
-        acceleration: H3ParticleProperty::fixed_vector([0.0; 3])?,
-        speed,
-        rotation,
-        rotation_rate,
-        size,
-        scale,
-        tint,
-        alpha,
-        black_point: H3ParticleProperty::fixed(0.0)?,
-        physics,
-        flock: None,
-        collider,
-        one_at_a_time: flagged("looping particle"),
-        persistent: flagged("persistent particle"),
-        bunched: !flagged("spread between ticks"),
-        rotation_given: true,
-        volume_random: false,
-        axis_scale: [1.0; 3],
-        turbulence: None,
-    })
-}
-
 /// A system in an event of an attached effect, at a marker.
 #[derive(Debug)]
 pub(crate) struct H3ParticleSystem {
@@ -2477,8 +2253,8 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
     let path = system.read_tag_ref_path("particle").filter(|path| !path.is_empty())?;
     let h2 = source.game() == Some(GameId::Halo2);
     let (look, emitters): (Arc<H3ParticleLook>, Vec<_>) = if h2 {
-        let (look, scale, rotation) = read_h2_look(source, &path)?;
-        let read = |emitter: &TagStruct<'_>| read_h2_emitter(source, *emitter, scale.clone(), rotation.clone(), &flagged);
+        let (look, scale, rotation) = super::h2::particles::read_h2_look(source, &path)?;
+        let read = |emitter: &TagStruct<'_>| super::h2::particles::read_h2_emitter(source, *emitter, scale.clone(), rotation.clone(), &flagged);
         (Arc::new(look), elements(system, "emitters").iter().filter_map(read).map(Arc::new).collect())
     } else {
         let look = read_look(source, &path).map(Arc::new)?;
@@ -2505,7 +2281,7 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
             let any_camera = system.field("camera mode").is_some_and(|field| field.enum_is("independent of camera mode"));
             let rates = emitters.iter().map(|emitter| emitter.rate.most());
             if h2 {
-                Some(h2_baked_lod(raw, any_camera, rates))
+                Some(super::h2::particles::h2_baked_lod(raw, any_camera, rates))
             } else if !has_flag_labelled(system, "flags", &LOD_ALWAYS_ONE) {
                 Some(if look.reach { reach_baked_lod(raw) } else { baked_lod(raw, any_camera, rates) })
             } else {
@@ -3364,10 +3140,10 @@ fn billboard(
 /// `V_ILLUM_EXPOSURE` (`v_alt_exposure.y`) and the rest at `v_exposure.x`,
 /// at the area screen effects' `stops`. Beams and contrails take the same
 /// (`effects__beam.hlsl` and `effects__contrail_render.hlsl`, l.258–269).
-pub(super) fn particle_exposure(blend: H3Blend, exposed: bool, reach: bool, stops: f32) -> f32 {
+pub(super) fn particle_exposure(blend: H3Blend, exposed: bool, reach_exposure_stops: bool, stops: f32) -> f32 {
     if blend == H3Blend::Multiply || !exposed {
         1.0
-    } else if !reach {
+    } else if !reach_exposure_stops {
         H3_EXPOSURE
     } else if matches!(blend, H3Blend::Additive | H3Blend::AddSrcTimesSrcAlpha) {
         reach_alt_exposure(stops)[1]
@@ -4016,28 +3792,6 @@ mod tests {
         assert_eq!(H3ParticleInput::named("emitter correlation 2"), H3ParticleInput::SystemSeed(1));
         assert_eq!(H3ParticleInput::named("system lod"), H3ParticleInput::Lod);
         assert_eq!(H3ParticleInput::named("no such input"), H3ParticleInput::Other);
-    }
-
-    #[test]
-    fn halo_2_passes_come_from_their_templates_and_distortion_has_none() {
-        let pass = |name: &str| h2_particle_pass(&format!("shaders\\shader_templates\\transparent\\{name}"));
-        assert_eq!(pass("particle_additive"), Some((H3ParticleAlbedo::Diffuse, H3Blend::AddSrcTimesSrcAlpha, false)));
-        assert_eq!(pass("particle_alpha_blend_tint"), Some((H3ParticleAlbedo::H2Tint, H3Blend::AlphaBlend, false)));
-        assert_eq!(pass("particle_alpha_multiply_add"), Some((H3ParticleAlbedo::H2MultiplyAdd, H3Blend::PreMultiplied, false)));
-        assert_eq!(pass("particle_alpha_blend_distortion"), Some((H3ParticleAlbedo::H2Distortion, H3Blend::AlphaBlend, false)));
-    }
-
-    #[test]
-    fn a_halo_2_lod_fades_in_near_the_camera_only_when_shown_in_any_camera_mode() {
-        assert_eq!(h2_baked_lod([0.0; 4], true, [].into_iter()), [0.0, 30.0, 1.0, 10.0]);
-        assert_eq!(h2_baked_lod([0.0; 4], true, [150.0].into_iter()), [-0.1, 30.0, 3.0, 10.0]);
-        assert_eq!(h2_baked_lod([0.0; 4], false, [150.0].into_iter()), [0.0, 30.0, 0.0, 10.0], "not for one camera");
-        assert_eq!(h2_baked_lod([1.0, 5.0, 2.0, 3.0], true, [150.0].into_iter()), [1.0, 5.0, 2.0, 3.0]);
-        // The SMG's muzzle burst, a hand's length from the eye.
-        let one_camera = Some(h2_baked_lod([0.0; 4], false, [30.0].into_iter()));
-        assert_eq!(lod_amount(one_camera, 0.8), 1.0);
-        let any_camera = Some(h2_baked_lod([0.0; 4], true, [30.0].into_iter()));
-        assert!((lod_amount(any_camera, 0.8) - 0.8).abs() < 1e-6);
     }
 
     #[test]

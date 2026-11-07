@@ -4,6 +4,7 @@
 
 pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod object;
+pub(in crate::app::model_preview) mod particles;
 pub(in crate::app::model_preview) mod attached;
 pub(super) mod bloom;
 pub(super) mod contrails;
