@@ -357,8 +357,8 @@ fn load_snapshot(data: &ModelPreviewData) -> String {
     );
     line(
         &mut out,
-        "h2_change_colors",
-        &format!("{:?}", data.h2_change_colors),
+        "change_colors",
+        &format!("{:?}", data.change_colors),
     );
     line(
         &mut out,
@@ -369,11 +369,11 @@ fn load_snapshot(data: &ModelPreviewData) -> String {
     line(&mut out, "ce_weapons", &format!("{:?}", data.ce_weapons));
     line(
         &mut out,
-        "h2_object_functions",
-        &format!("{:?}", data.h2_object_functions),
+        "object_functions",
+        &format!("{:?}", data.object_functions),
     );
-    line(&mut out, "h2_weapons", &format!("{:?}", data.h2_weapons));
-    line(&mut out, "h2_attached", &format!("{:?}", data.h2_attached));
+    line(&mut out, "weapons", &format!("{:?}", data.weapons));
+    line(&mut out, "attached", &format!("{:?}", data.attached));
     line(
         &mut out,
         "scenario_bsps",

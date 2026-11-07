@@ -242,16 +242,16 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) render_mode: ModelRenderMode,
     pub(in crate::app) show_backfaces: bool,
     /// Draw Halo 2 opaque materials through the game's own passes.
-    pub(in crate::app) h2_game_shaders: bool,
+    pub(in crate::app) game_shaders: bool,
     /// Take the game's no-lightmap path, with its two default lights, instead
     /// of its path for an object in a level.
-    pub(in crate::app) h2_default_lights: bool,
+    pub(in crate::app) default_lights: bool,
     /// Keep the direct light of the object path beside the viewer.
-    pub(in crate::app) h2_light_follows_camera: bool,
-    pub(in crate::app) h2_active_camo: bool,
-    pub(in crate::app) h2_bloom: bool,
-    pub(in crate::app) h2_self_shadow: bool,
-    pub(in crate::app) h2_prt: bool,
+    pub(in crate::app) light_follows_camera: bool,
+    pub(in crate::app) active_camo: bool,
+    pub(in crate::app) bloom: bool,
+    pub(in crate::app) self_shadow: bool,
+    pub(in crate::app) prt: bool,
     /// What the panel set an opened Halo CE object's function inputs to.
     pub(in crate::app) ce_function_inputs: super::ce::functions::CeFunctionInputs,
     /// How many times the panel has played each Halo CE event effect, by
@@ -262,7 +262,7 @@ pub(in crate::app) struct ModelPreviewState {
     /// The shots the panel has fired from Halo CE weapons' triggers.
     pub(in crate::app) ce_shots: super::ce::firing::CeShots,
     /// What the panel has set of a Halo 2 object's functions.
-    pub(in crate::app) h2_function_inputs: super::functions::FunctionInputs,
+    pub(in crate::app) function_inputs: super::functions::FunctionInputs,
     /// A texture-resolve job is running for the loaded model.
     pub(in crate::app) textures_pending: bool,
     /// `.model` overlays only: draw the render model itself. Off leaves just
@@ -323,18 +323,18 @@ impl Default for ModelPreviewState {
             loaded_scenario_selection: std::collections::BTreeSet::new(),
             render_mode: ModelRenderMode::Textured,
             show_backfaces: false,
-            h2_game_shaders: false,
-            h2_default_lights: false,
-            h2_light_follows_camera: true,
-            h2_active_camo: false,
-            h2_bloom: true,
-            h2_self_shadow: false,
-            h2_prt: true,
+            game_shaders: false,
+            default_lights: false,
+            light_follows_camera: true,
+            active_camo: false,
+            bloom: true,
+            self_shadow: false,
+            prt: true,
             ce_function_inputs: Default::default(),
             ce_event_counts: Default::default(),
             ce_event_scales: super::ce::functions::CE_EVENT_SCALES,
             ce_shots: Default::default(),
-            h2_function_inputs: Default::default(),
+            function_inputs: Default::default(),
             textures_pending: false,
             show_render: true,
             perspective: true,
@@ -531,7 +531,7 @@ pub(in crate::app) struct ModelPreviewData {
     /// The variant an object tag starts in, when it names one.
     pub(in crate::app) default_variant: Option<String>,
     /// The Halo 2 object beside this model's change colors; empty otherwise.
-    pub(in crate::app) h2_change_colors: H2ChangeColors,
+    pub(in crate::app) change_colors: H2ChangeColors,
     /// An opened Halo CE object's functions.
     pub(in crate::app) ce_object_functions: Option<super::ce::functions::CeObjectFunctions>,
     /// What the opened Halo CE object brings with it.
@@ -539,11 +539,11 @@ pub(in crate::app) struct ModelPreviewData {
     /// Halo CE bipeds: what the unit can hold.
     pub(in crate::app) ce_weapons: Option<super::ce::attachments::CeBipedWeapons>,
     /// Halo 2: the functions of an opened object.
-    pub(in crate::app) h2_object_functions: Option<super::functions::ObjectFunctions>,
+    pub(in crate::app) object_functions: Option<super::functions::ObjectFunctions>,
     /// Halo 2 units: what they can hold.
-    pub(in crate::app) h2_weapons: Option<super::weapons::UnitWeapons>,
+    pub(in crate::app) weapons: Option<super::weapons::UnitWeapons>,
     /// Halo 2 units: what they hold.
-    pub(in crate::app) h2_attached: Vec<super::weapons::attached::AttachedObject>,
+    pub(in crate::app) attached: Vec<super::weapons::attached::AttachedObject>,
     /// Scenario tags only: the `structure bsps` block's references (one per
     /// element, `None` where the reference is empty), driving the per-BSP
     /// checkbox list. Empty for every other tag group.

@@ -434,12 +434,12 @@ pub(super) fn render(
             }
         }
     }
-    let mut state = ModelPreviewState { h2_light_follows_camera: !options.fixed_light, ..Default::default() };
+    let mut state = ModelPreviewState { light_follows_camera: !options.fixed_light, ..Default::default() };
     let variant = options.variant.as_ref();
     let variant = variant.and_then(|name| data.variants.iter().position(|variant| &variant.name == name));
     reset_model_preview_selection(&mut state, &data, variant.or(default_variant_index(&data)));
-    state.h2_game_shaders = shot.shaders;
-    state.h2_default_lights = shot.lights;
+    state.game_shaders = shot.shaders;
+    state.default_lights = shot.lights;
     state.yaw = shot.yaw;
     state.pitch = shot.pitch;
     state.perspective = true;
@@ -471,15 +471,15 @@ pub(super) fn render(
         state.render_mode = mode;
     }
     state.show_grid = options.grid;
-    state.h2_active_camo = options.camo;
-    state.h2_bloom = options.bloom;
-    state.h2_self_shadow = options.shadow;
-    state.h2_prt = !options.no_prt;
+    state.active_camo = options.camo;
+    state.bloom = options.bloom;
+    state.self_shadow = options.shadow;
+    state.prt = !options.no_prt;
     if let Some(values) = options.inputs {
         state.ce_function_inputs.insert((data.geometry_id, 0), values);
     }
     for (name, value) in &options.functions {
-        state.h2_function_inputs.insert((data.geometry_id, name.clone()), *value);
+        state.function_inputs.insert((data.geometry_id, name.clone()), *value);
     }
     let background = preview_background(&if options.light_theme { egui::Visuals::light() } else { egui::Visuals::dark() });
     let mut frame = super::build_frame(&data, &state, rect, options.time, background, &options.forced);

@@ -269,7 +269,7 @@ fn build_frame(
     let shield_batches = visible_batches.clone();
     without_shield_parts(&mut visible_batches, &preview, data.textures.as_deref().map(Vec::as_slice));
     let skinning_rows = animation_skinning_rows(data, state);
-    let mut function_values = function_values_for(data, &state.h2_function_inputs, time);
+    let mut function_values = function_values_for(data, &state.function_inputs, time);
     // What a function exports, which its inputs cannot reach: a scripted
     // value, say. Only the harness forces any.
     if let Some(values) = function_values.as_mut() {
@@ -295,18 +295,18 @@ fn build_frame(
             .then(|| data.textures.clone())
             .flatten(),
         bones: skinning_rows.clone().map(Arc::new),
-        game_shaders: state.h2_game_shaders,
-        default_lights: state.h2_default_lights,
-        active_camo: state.h2_active_camo,
+        game_shaders: state.game_shaders,
+        default_lights: state.default_lights,
+        active_camo: state.active_camo,
         // Halo CE's renderer has no bloom: only the remaster's does.
-        bloom: state.h2_bloom && data.preview.game != Some(GameId::HaloCe),
-        self_shadow: state.h2_self_shadow,
-        prt: state.h2_prt,
-        light_follows_camera: state.h2_light_follows_camera,
+        bloom: state.bloom && data.preview.game != Some(GameId::HaloCe),
+        self_shadow: state.self_shadow,
+        prt: state.prt,
+        light_follows_camera: state.light_follows_camera,
         time,
         h2_prt_clusters: None,
         object_states: object_states(data, &state.ce_function_inputs, &state.ce_shots, time),
-        object_moves: object_moves(data, &state.h2_function_inputs, time, function_values.as_ref()),
+        object_moves: object_moves(data, &state.function_inputs, time, function_values.as_ref()),
         function_values,
         attached_values: attached_values(data, time),
         attached_colors: attached_colors(data),
@@ -323,7 +323,7 @@ fn build_frame(
         ce_points: Vec::new(),
         ce_plays: ce_event_plays(data, &state.ce_event_counts, state.ce_event_scales),
         change_colors: h2_change_colors_for(
-            &data.h2_change_colors,
+            &data.change_colors,
             state
                 .selected_variant
                 .and_then(|index| data.variants.get(index))
@@ -1088,7 +1088,7 @@ pub(super) fn h2_function_values(
     time: f32,
 ) -> functions::FunctionValues {
     let inputs = h2_shader_inputs(data, 0);
-    data.h2_object_functions.as_ref().map_or_else(Default::default, |functions| {
+    data.object_functions.as_ref().map_or_else(Default::default, |functions| {
         functions.values(set, data.geometry_id, &inputs, time, 0)
     })
 }
@@ -1096,11 +1096,11 @@ pub(super) fn h2_function_values(
 /// Weapons in hand run on their own functions, at rest: the sliders are the
 /// opened object's.
 pub(super) fn attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, functions::FunctionValues)> {
-    if data.h2_attached.is_empty() {
+    if data.attached.is_empty() {
         return Vec::new();
     }
     let rest = functions::FunctionInputs::default();
-    let values = data.h2_attached.iter().map(|attached| {
+    let values = data.attached.iter().map(|attached| {
         let inputs = h2_shader_inputs(data, attached.owner);
         (attached.owner, attached.functions.values(&rest, data.geometry_id, &inputs, time, attached.owner))
     });
@@ -1108,7 +1108,7 @@ pub(super) fn attached_values(data: &ModelPreviewData, time: f32) -> Vec<(u8, fu
 }
 
 fn attached_colors(data: &ModelPreviewData) -> Vec<(u8, [[f32; 3]; 4])> {
-    data.h2_attached.iter().map(|attached| (attached.owner, attached.change_colors)).collect()
+    data.attached.iter().map(|attached| (attached.owner, attached.change_colors)).collect()
 }
 
 fn function_values_for(
@@ -1120,7 +1120,7 @@ fn function_values_for(
         || data.preview.h2.point_lights.iter().any(|light| !light.scale_name().is_empty())
         || data.preview.h2.gel_lights.iter().any(|light| !light.scale_name().is_empty());
     let h3 = data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| texture.h3.is_some());
-    (data.h2_object_functions.is_some() || flares || h3).then(|| h2_function_values(data, set, time))
+    (data.object_functions.is_some() || flares || h3).then(|| h2_function_values(data, set, time))
 }
 
 /// Whether anything on the object changes with time alone.
@@ -1213,12 +1213,12 @@ fn h2_functions_move(
     time: f32,
 ) -> bool {
     let held = attached_values(data, time);
-    let held_move = data.h2_attached.iter().zip(&held).any(|(attached, (_, values))| {
+    let held_move = data.attached.iter().zip(&held).any(|(attached, (_, values))| {
         attached.functions.move_at_rest(values)
     });
     held_move
         || data
-            .h2_object_functions
+            .object_functions
             .as_ref()
             .is_some_and(|functions| functions.move_at_rest(&h2_function_values(data, set, time)))
 }
@@ -1246,7 +1246,7 @@ fn object_states(
         });
         CeObjectState { outputs, active, change_colors: dx9::passes::ce_change_colors(colors) }
     };
-    let mut states = vec![state(data.ce_object_functions.as_ref(), 0, &data.h2_change_colors)];
+    let mut states = vec![state(data.ce_object_functions.as_ref(), 0, &data.change_colors)];
     for (index, object) in data.ce_attached.iter().enumerate() {
         states.push(state(object.functions.as_ref(), index as u8 + 1, &object.change_colors));
     }

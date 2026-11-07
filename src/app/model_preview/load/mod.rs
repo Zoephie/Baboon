@@ -31,7 +31,7 @@ impl PreviewLoadSettings {
             weapon: state.weapon.clone(),
             secondary_weapon: state.secondary_weapon.clone(),
             h2_equippable: match &state.data {
-                Some(Ok(data)) => data.h2_weapons.as_ref().map(|weapons| weapons.equippable.clone()),
+                Some(Ok(data)) => data.weapons.as_ref().map(|weapons| weapons.equippable.clone()),
                 _ => None,
             },
             ce_equippable: match &state.data {
@@ -193,12 +193,12 @@ impl Baboon {
                 // Halo 2's, by name. A name only the old weapon had is
                 // carried too, and reads nothing.
                 let carried: Vec<_> = state
-                    .h2_function_inputs
+                    .function_inputs
                     .iter()
                     .filter(|((id, _), _)| *id == geometry_id)
                     .map(|((_, name), value)| ((data.geometry_id, name.clone()), *value))
                     .collect();
-                state.h2_function_inputs.extend(carried);
+                state.function_inputs.extend(carried);
             }
         }
         state.data = Some(result);
@@ -401,7 +401,7 @@ fn load_tag_preview(
             super::ce::object::read_ce_object_features(source, model_tag, attached.as_ref(), preview);
         });
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
-        data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+        data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
         data.ce_object_functions =
             feature(&mut notes, "its functions", || super::ce::functions::read_ce_object_functions(model_tag));
         data.ce_attached.extend(attached);
@@ -427,9 +427,9 @@ fn load_tag_preview(
         data.default_variant = object_default_variant(model_tag);
         let mut notes = std::mem::take(&mut data.notes);
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
-            data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+            data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::functions::read_object_functions(model_tag, Some(model));
-            data.h2_object_functions = feature(&mut notes, "its functions", functions);
+            data.object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its lights and effects", preview, |preview| {
                 super::h3::object::read_h3_object_features(source, model_tag, model, preview);
@@ -438,9 +438,9 @@ fn load_tag_preview(
         // Reach's attachments, lights and effects read differently, and wait
         // on their own readers; what the object's shaders read does not.
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::HaloReach), .. }) {
-            data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+            data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::functions::read_object_functions(model_tag, Some(model));
-            data.h2_object_functions = feature(&mut notes, "its functions", functions);
+            data.object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its flares and lights", preview, |preview| {
                 super::reach::object::read_reach_object_features(source, model_tag, model, preview);
@@ -449,9 +449,9 @@ fn load_tag_preview(
         // Halo 4's functions and switches feed its materials' functions; its
         // attachments, lights and effects wait on their own readers.
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo4), .. }) {
-            data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+            data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::functions::read_object_functions(model_tag, Some(model));
-            data.h2_object_functions = feature(&mut notes, "its functions", functions);
+            data.object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             preview.h4.bounding_sphere = super::h4::object::read_h4_bounding_sphere(model_tag);
             preview.h4.change_color_count = super::h4::object::read_h4_change_color_count(model_tag);
@@ -469,9 +469,9 @@ fn load_tag_preview(
             });
         }
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
-            data.h2_change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+            data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
             let functions = || super::functions::read_object_functions(model_tag, Some(model));
-            data.h2_object_functions = feature(&mut notes, "its functions", functions);
+            data.object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(&mut notes, "its lights and effects", preview, |preview| {
                 super::h2::object::read_h2_object_features(source, model_tag, preview);
@@ -511,9 +511,9 @@ fn load_tag_preview(
                     if attached.is_none() {
                         notes.push(format!("the weapon {path} could not be attached"));
                     }
-                    data.h2_attached.extend(attached);
+                    data.attached.extend(attached);
                 }
-                data.h2_weapons = Some(weapons);
+                data.weapons = Some(weapons);
             }
         }
         if weapons_family {
@@ -522,7 +522,7 @@ fn load_tag_preview(
             let attach = |preview: &mut RenderModelPreview| {
                 super::weapons::variants::attach_variant_objects(source, model, variants, preview)
             };
-            data.h2_attached.extend(feature_into(&mut notes, "the variants' children", preview, attach));
+            data.attached.extend(feature_into(&mut notes, "the variants' children", preview, attach));
         }
         data.notes = notes;
         return Ok(data);
@@ -731,7 +731,7 @@ fn load_tag_preview(
         let attach = |preview: &mut RenderModelPreview| {
             super::weapons::variants::attach_variant_objects(source, model_tag, variants, preview)
         };
-        data.h2_attached.extend(feature_into(&mut data.notes, "the variants' children", preview, attach));
+        data.attached.extend(feature_into(&mut data.notes, "the variants' children", preview, attach));
     }
     Ok(data)
 }
@@ -2313,7 +2313,7 @@ pub(super) mod kit_object_tests {
     /// Whether previewing the tag at `path` comes with any change colors.
     fn has_colors(root: &str, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> bool {
         let data = kit_preview(root, game, path, extension, group);
-        data.h2_change_colors.iter().any(|channel| !channel.is_empty())
+        data.change_colors.iter().any(|channel| !channel.is_empty())
     }
 
     /// With `BLAM_TEST_HCEEK`: change colors are the object's, so a gbxmodel
@@ -2538,9 +2538,9 @@ pub(super) mod kit_object_tests {
             return;
         };
         let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\scorpion\\scorpion", "vehicle", b"vehi");
-        let colored = data.h2_attached.iter().find(|attached| attached.change_colors != [[1.0; 3]; 4]);
+        let colored = data.attached.iter().find(|attached| attached.change_colors != [[1.0; 3]; 4]);
         let colored = colored.expect("a child with change colors");
-        let hull = super::super::dx9::passes::h2_change_colors_for(&data.h2_change_colors, "default");
+        let hull = super::super::dx9::passes::h2_change_colors_for(&data.change_colors, "default");
         assert_ne!(colored.change_colors, hull);
         let owned = data.preview.materials.iter().filter(|material| material.object == colored.owner);
         assert!(owned.count() > 0, "its materials read them");
@@ -2558,7 +2558,7 @@ pub(super) mod kit_object_tests {
         let name = "warthog_chaingun_illumination";
         assert!(!super::super::renderer::h2_shader_inputs(&data, 0).iter().any(|read| read == name));
         let values = super::super::renderer::attached_values(&data, 0.0);
-        for attached in &data.h2_attached {
+        for attached in &data.attached {
             let (_, own) = values.iter().find(|(owner, _)| *owner == attached.owner).unwrap();
             for read in super::super::renderer::h2_shader_inputs(&data, attached.owner) {
                 assert!(own.contains_key(&read), "owner {} lacks {read}", attached.owner);
@@ -2583,9 +2583,9 @@ pub(super) mod kit_object_tests {
             };
             let model = kit_preview(&root, game, path, "model", b"hlmt");
             let vehicle = kit_preview(&root, game, path, "vehicle", b"vehi");
-            assert!(!model.h2_attached.is_empty(), "{path}: the model's children");
+            assert!(!model.attached.is_empty(), "{path}: the model's children");
             let owners = |data: &ModelPreviewData| {
-                data.h2_attached.iter().map(|attached| attached.owner).collect::<Vec<_>>()
+                data.attached.iter().map(|attached| attached.owner).collect::<Vec<_>>()
             };
             assert_eq!(owners(&model), owners(&vehicle), "{path}: the same children, once each");
         }

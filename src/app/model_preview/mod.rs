@@ -399,13 +399,13 @@ fn model_preview_data(
         textures: None,
         variants,
         default_variant: None,
-        h2_change_colors: Default::default(),
+        change_colors: Default::default(),
         ce_object_functions: None,
         ce_attached: Vec::new(),
         ce_weapons: None,
-        h2_object_functions: None,
-        h2_weapons: None,
-        h2_attached: Vec::new(),
+        object_functions: None,
+        weapons: None,
+        attached: Vec::new(),
         scenario_bsps: Vec::new(),
         animations: None,
         notes: Vec::new(),
@@ -609,7 +609,7 @@ pub(super) fn draw_model_preview_panel(
                                     .ce_weapons
                                     .as_ref()
                                     .map(|weapons| &weapons.hidden_clips)
-                                    .or_else(|| data.h2_weapons.as_ref().map(|weapons| &weapons.hidden_clips))
+                                    .or_else(|| data.weapons.as_ref().map(|weapons| &weapons.hidden_clips))
                                     .unwrap_or(&no_clips);
                                 draw_animation_combo(
                                     ui,
@@ -1152,7 +1152,7 @@ fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
 /// A Halo 2 unit's two hands. The left only opens for what can pair, and
 /// a primary that cannot pair empties it.
 fn draw_h2_weapon_pickers(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
-    let Some(weapons) = data.h2_weapons.as_ref().filter(|weapons| !weapons.equippable.is_empty())
+    let Some(weapons) = data.weapons.as_ref().filter(|weapons| !weapons.equippable.is_empty())
     else {
         return;
     };
@@ -1201,14 +1201,14 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
     };
     ce::functions::draw_ce_event_effects(ui, controls, held_name);
     draw_h2_weapon_pickers(ui, data, state);
-    if let Some(functions) = &data.h2_object_functions {
+    if let Some(functions) = &data.object_functions {
         let time = ui.input(|input| input.time) as f32;
-        let values = renderer::h2_function_values(data, &state.h2_function_inputs, time);
+        let values = renderer::h2_function_values(data, &state.function_inputs, time);
         functions::draw_function_controls(
             ui,
             functions,
             data.geometry_id,
-            &mut state.h2_function_inputs,
+            &mut state.function_inputs,
             &values,
             &renderer::h2_shader_inputs(data, 0),
         );
@@ -1583,7 +1583,7 @@ fn draw_model_view_settings_menu(
                     "Ground-reference grid on the z = 0 plane, spaced to the model's size.",
                 );
             ui.baboon_checkbox(&mut state.show_backfaces, "Render Backfaces");
-            ui.baboon_checkbox(&mut state.h2_game_shaders, "Game Shaders")
+            ui.baboon_checkbox(&mut state.game_shaders, "Game Shaders")
                 .on_hover_text(
                     "Draw Halo CE, Halo 2 and Halo 3 materials through the game's own \
                      shaders, lit by its default lighting.",
@@ -1594,31 +1594,31 @@ fn draw_model_view_settings_menu(
             let halo_ce = data.preview.game == Some(GameId::HaloCe);
             if !halo_ce {
                 ui.add_enabled(
-                    state.h2_game_shaders,
-                    ThemedCheckbox::new(&mut state.h2_default_lights, "Default Lights"),
+                    state.game_shaders,
+                    ThemedCheckbox::new(&mut state.default_lights, "Default Lights"),
                 )
                 .on_hover_text(
                     "Light Halo 2 models as the game does in a level with no lightmaps: \
                      fixed lighting plus two sphere lights. Off, they are lit as an \
                      object in a level with lightmaps.",
                 );
-                ui.add_enabled(state.h2_game_shaders, ThemedCheckbox::new(&mut state.h2_prt, "PRT"))
+                ui.add_enabled(state.game_shaders, ThemedCheckbox::new(&mut state.prt, "PRT"))
                     .on_hover_text(
                         "Use the occlusion Halo 2 and Halo 3 models bake into their vertices. \
                          Off, they light as though nothing shades them.",
                     );
             }
             ui.add_enabled(
-                state.h2_game_shaders && (halo_ce || !state.h2_default_lights),
-                ThemedCheckbox::new(&mut state.h2_light_follows_camera, "Light Follows Camera"),
+                state.game_shaders && (halo_ce || !state.default_lights),
+                ThemedCheckbox::new(&mut state.light_follows_camera, "Light Follows Camera"),
             )
             .on_hover_text(
                 "Keep the main light of Halo 2 and Halo 3 models beside the viewer as you \
                  orbit. This is the preview's own. Off, it stays fixed to the model.",
             );
             ui.add_enabled(
-                state.h2_game_shaders,
-                ThemedCheckbox::new(&mut state.h2_active_camo, "Active Camo"),
+                state.game_shaders,
+                ThemedCheckbox::new(&mut state.active_camo, "Active Camo"),
             )
             .on_hover_text(
                 "Draw a Halo 2 or Halo 3 model through its active camouflage, for \
@@ -1626,8 +1626,8 @@ fn draw_model_view_settings_menu(
             );
             if !halo_ce {
                 ui.add_enabled(
-                    state.h2_game_shaders,
-                    ThemedCheckbox::new(&mut state.h2_bloom, "Bloom"),
+                    state.game_shaders,
+                    ThemedCheckbox::new(&mut state.bloom, "Bloom"),
                 )
                 .on_hover_text(
                     "Add the glow of Halo 2 and Halo 3 materials with a bloom pass. The \
@@ -1637,8 +1637,8 @@ fn draw_model_view_settings_menu(
             }
             if !halo_ce {
                 ui.add_enabled(
-                    state.h2_game_shaders,
-                    ThemedCheckbox::new(&mut state.h2_self_shadow, "Self Shadow"),
+                    state.game_shaders,
+                    ThemedCheckbox::new(&mut state.self_shadow, "Self Shadow"),
                 )
                 .on_hover_text(
                     "Shadow Halo 2 and Halo 3 models from their main light. Halo 3 uses the \
@@ -1938,7 +1938,7 @@ fn draw_model_viewport_with_stats(
         && let Some((summary, detail)) = texture_resolve_note(
             textures,
             &data.preview.materials,
-            state.h2_game_shaders,
+            state.game_shaders,
         )
     {
         ui.label(RichText::new(summary).small().color(subtle_dark()))

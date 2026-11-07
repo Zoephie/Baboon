@@ -362,7 +362,7 @@ fn h2_held_layers(
     data: &ModelPreviewData,
     state: &ModelPreviewState,
 ) -> Vec<super::weapons::PoseLayer> {
-    let (Some(weapons), Some(clip)) = (data.h2_weapons.as_ref(), clips.get(index)) else {
+    let (Some(weapons), Some(clip)) = (data.weapons.as_ref(), clips.get(index)) else {
         return Vec::new();
     };
     let names: Vec<_> = clips.iter().map(|clip| clip.name.as_str()).collect();
@@ -461,7 +461,7 @@ fn apply_weapon_ik(
         return;
     };
     for point in &data.preview.weapon_ik {
-        let runs = match &data.h2_weapons {
+        let runs = match &data.weapons {
             Some(weapons) => weapons.ik_runs_through(clip, &point.scope),
             None => point.runs_through(clip),
         };
@@ -1692,7 +1692,7 @@ impl Baboon {
                             class,
                         );
                     }
-                    if let Some(weapons) = data.h2_weapons.as_mut() {
+                    if let Some(weapons) = data.weapons.as_mut() {
                         let (class, kinds) = weapons
                             .held(state.weapon.as_deref(), state.secondary_weapon.as_deref());
                         let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();
