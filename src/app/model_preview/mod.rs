@@ -85,6 +85,9 @@ pub(crate) struct RenderModelPreview {
     /// The game the opened tag is from: the tag's own generation for Halo CE
     /// and Halo 2, else its kit's. None for geometry no game's tag gave.
     pub game: Option<GameId>,
+    /// The opened tag's engine generation, which a preview of no game is
+    /// drawn by. None for geometry no tag gave.
+    pub generation: Option<blam_tags::game::Game>,
     pub regions: Vec<RenderModelPreviewRegion>,
     pub vertices: Vec<RenderModelPreviewVertex>,
     pub indices: Vec<u32>,

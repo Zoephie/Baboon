@@ -295,13 +295,16 @@ pub(super) fn load_model_preview(
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
     let mut data = load_tag_preview(model_tag, entry, names, source, settings)?;
-    let game = match blam_tags::game::Game::of(model_tag) {
+    let generation = blam_tags::game::Game::of(model_tag);
+    let game = match generation {
         blam_tags::game::Game::Halo1 => Some(GameId::HaloCe),
         blam_tags::game::Game::Halo2 => Some(GameId::Halo2),
         blam_tags::game::Game::Halo3 => source.and_then(TagSource::game),
     };
     // Just built: no other handle shares it, so this does not copy.
-    Arc::make_mut(&mut data.preview).game = game;
+    let preview = Arc::make_mut(&mut data.preview);
+    preview.game = game;
+    preview.generation = Some(generation);
     if let Some(source) = source.filter(|source| source.game() == Some(GameId::Halo4)) {
         // Just built: no other handle shares it, so this does not copy.
         Arc::make_mut(&mut data.preview).h4_color_grading = super::h4::lighting::read_h4_color_grading(source);
@@ -4760,20 +4763,24 @@ pub(super) mod kit_object_tests {
     }
 
     /// A preview knows the game it came from: a Halo CE tag's, a Halo 2
-    /// tag's, and a gen3 tag's by its kit.
+    /// tag's, and a gen3 tag's by its kit; and its tag's generation either way.
     #[test]
     fn a_preview_knows_its_game() {
+        use blam_tags::game::Game;
         let (Ok(ce), Ok(h2)) = (std::env::var("BLAM_TEST_HCEEK"), std::env::var("BLAM_TEST_H2EK")) else {
             eprintln!("skipping: BLAM_TEST_HCEEK or BLAM_TEST_H2EK is not set");
             return;
         };
         let cyborg = kit_preview(&ce, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd");
         assert_eq!(cyborg.preview.game, Some(GameId::HaloCe));
+        assert_eq!(cyborg.preview.generation, Some(Game::Halo1));
         let blade = kit_preview(&h2, GameId::Halo2, "objects\\weapons\\melee\\energy_blade\\energy_blade", "weapon", b"weap");
         assert_eq!(blade.preview.game, Some(GameId::Halo2));
+        assert_eq!(blade.preview.generation, Some(Game::Halo2));
         if let Ok(reach) = std::env::var("BLAM_TEST_HREK") {
             let spartan = kit_preview(&reach, GameId::HaloReach, "objects\\characters\\spartans\\spartans", "biped", b"bipd");
             assert_eq!(spartan.preview.game, Some(GameId::HaloReach));
+            assert_eq!(spartan.preview.generation, Some(Game::Halo3));
         }
     }
 
