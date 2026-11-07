@@ -341,7 +341,7 @@ pub(in crate::app::model_preview) struct H3SlotTextures {
     materials: Vec<HashMap<String, glow::NativeTexture>>,
     /// The shield's noise, by uniform.
     shield: HashMap<String, glow::NativeTexture>,
-    /// Each of `h3_lights`' gels, of `id`.
+    /// Each of `h3.lights`' gels, of `id`.
     gels: Vec<Option<glow::NativeTexture>>,
 }
 
@@ -687,12 +687,12 @@ impl RenderCore {
 
     /// `cloth_render_opaque` builds its mesh from where the sheet is now.
     pub(in crate::app::model_preview) unsafe fn move_cloth(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
-        if frame.preview.h3_cloth.is_empty() {
+        if frame.preview.cloth.is_empty() {
             return;
         }
         let uploaded = &mut self.slots[slot];
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-        let written = uploaded.simulations.cloth.advance(&frame.preview.h3_cloth, bones, frame.time);
+        let written = uploaded.simulations.cloth.advance(&frame.preview.cloth, bones, frame.time);
         for (first, moved) in written {
             unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
         }
@@ -765,9 +765,9 @@ impl Gen3State {
             }
             let shields = frame.textures.iter().flat_map(|textures| textures.iter());
             let global = shields.filter_map(|texture| texture.h3.as_ref()?.shield.as_ref()).next();
-            let settings = frame.preview.h3_shield.as_ref().or(global.map(|shield| &shield.settings));
-            let reach = frame.preview.reach_shield.as_ref().map(|shield| shield.settings.textures.iter());
-            let h4 = frame.preview.h4_shield.as_ref().map(|shield| shield.textures.iter());
+            let settings = frame.preview.h3.shield.as_ref().or(global.map(|shield| &shield.settings));
+            let reach = frame.preview.reach.shield.as_ref().map(|shield| shield.settings.textures.iter());
+            let h4 = frame.preview.h4.shield.as_ref().map(|shield| shield.textures.iter());
             for texture in reach.into_iter().flatten().chain(h4.into_iter().flatten()) {
                 if let Some(found) = upload_h2_image_linear(gl, &texture.image, texture.texels, &texture.mips, texture.sampler) {
                     uploaded.shield.insert(texture.uniform.clone(), found);
@@ -782,7 +782,7 @@ impl Gen3State {
             }
             uploaded.gels = frame
                 .preview
-                .h3_lights
+                .h3.lights
                 .iter()
                 .map(|light| light.gel.as_ref().and_then(|gel| upload_h2_image_linear(gl, gel, H3Texels::Srgb, &[], None)))
                 .collect();
@@ -871,7 +871,7 @@ impl Gen3State {
                     let mut values = submit.draw_values(draw, &drawn, h4_hologram_node(frame));
                     // Only the opened object's count is read; attached Halo 4
                     // objects bring geometry alone.
-                    let count = if owner == 0 { frame.preview.h4_change_color_count } else { 0 };
+                    let count = if owner == 0 { frame.preview.h4.change_color_count } else { 0 };
                     let colors = super::super::h4::submit::object_parameters(frame.change_colors_of(object), count);
                     values.insert("ps_material_object_parameters".to_owned(), H3Value::FloatArray(colors));
                     values
@@ -972,7 +972,7 @@ impl Gen3State {
                     if let Some(value) = state.pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
                         set_value(gl, location.as_ref(), ty, &H3Value::Floats(*value));
                     }
-                    let settings = frame.preview.h3_shield.as_ref().or(shield.map(|shield| &shield.settings));
+                    let settings = frame.preview.h3.shield.as_ref().or(shield.map(|shield| &shield.settings));
                     if let Some(value) = shield.and(settings).and_then(|settings| settings.values.get(name)) {
                         set_value(gl, location.as_ref(), ty, value);
                     }
@@ -1155,7 +1155,7 @@ impl Gen3State {
                 let values = |object: u8| frame.function_values_of_object(object);
                 let view = ce_flare_view(&frame.camera);
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-                let effects = &frame.preview.h3_screen_effects;
+                let effects = &frame.preview.gen3.screen_effects;
                 gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
             };
             self.stops = game.stops(&screen);
@@ -1240,7 +1240,7 @@ impl Gen3State {
             // `submit_visibility_and_render`: additive, each light on its own.
             gl.blend_func(glow::ONE, glow::ONE);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-            for (index, light) in frame.preview.h3_lights.iter().enumerate() {
+            for (index, light) in frame.preview.h3.lights.iter().enumerate() {
                 if !frame.h3_lights_shown.get(index).copied().unwrap_or(true) {
                     continue;
                 }
@@ -1273,7 +1273,7 @@ impl Gen3State {
                     self.depth_copy = Some(targets.depth_copy);
                     // `submit_distortions`.
                     self.distorted = false;
-                    if frame.preview.h3_particles.iter().any(|system| system.look.shader.distortion.is_some()) {
+                    if frame.preview.particles.iter().any(|system| system.look.shader.distortion.is_some()) {
                         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.distortion_framebuffer));
                         gl.clear_color(0.0, 0.0, 0.0, 0.0);
                         gl.clear(glow::COLOR_BUFFER_BIT);
@@ -1370,7 +1370,7 @@ impl Gen3State {
                 for (batch, material) in &batches {
                     if let Some(shield) = material.shield.as_ref() {
                         // `render_object_shield_impact`: by the settings that win.
-                        let settings = frame.preview.h3_shield.as_ref().unwrap_or(&shield.settings);
+                        let settings = frame.preview.h3.shield.as_ref().unwrap_or(&shield.settings);
                         let pass = shield.procedural.as_ref().filter(|_| settings.procedural).unwrap_or(&shield.pass);
                         self.draw_pass(core, gl, frame, slot, batch, material, pass, Some(shield));
                     }
@@ -1432,7 +1432,7 @@ impl Gen3State {
     /// shield, through 61 or 119, added over what lies behind with no depth
     /// written and no face culled.
     pub(in crate::app::model_preview) unsafe fn draw_reach_shield(&mut self, core: &mut RenderCore, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
-        let Some(shield) = frame.preview.reach_shield.clone() else {
+        let Some(shield) = frame.preview.reach.shield.clone() else {
             return;
         };
         let damage = frame.function_values.as_ref().and_then(|values| values.get(H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
@@ -1547,8 +1547,8 @@ impl Gen3State {
         shaders: &[gen3::screen_effects::H3ScreenShader],
     ) {
         let blur = screen.blur();
-        let vision = frame.preview.h3_vision.clone().filter(|_| screen.vision() > 0.0);
-        let suck = frame.preview.h3_motion_blur.zip(screen.suck());
+        let vision = frame.preview.h3.vision.clone().filter(|_| screen.vision() > 0.0);
+        let suck = frame.preview.h3.motion_blur.zip(screen.suck());
         if !shaders.iter().any(gen3::screen_effects::H3ScreenShader::at_frame_end)
             && blur.is_none()
             && vision.is_none()
@@ -1910,7 +1910,7 @@ pub(in crate::app::model_preview) unsafe fn h3_apply_sampler(gl: &glow::Context,
 /// What `render_mesh_part_default` lights a part with.
 fn h3_lit_pass<'a>(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch, material: &'a H3Material) -> &'a Arc<H3Pass> {
     let vertex = frame.preview.indices.get(batch.index_start as usize).copied().unwrap_or(0);
-    let prt = frame.preview.h3_prt.as_ref().filter(|_| frame.prt);
+    let prt = frame.preview.gen3.prt.as_ref().filter(|_| frame.prt);
     let kind = prt.map_or(H3PrtKind::None, |prt| prt.kind_at(vertex));
     let slot = match kind {
         H3PrtKind::Ambient => Some(0),

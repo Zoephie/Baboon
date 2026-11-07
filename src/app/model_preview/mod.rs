@@ -110,102 +110,26 @@ pub(crate) struct RenderModelPreview {
     pub errors: Vec<ModelErrorPrimitive>,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
-    /// Halo 2 precomputed radiance transfer, on the few models that have it.
-    pub h2_prt: Option<h2::prt::H2Prt>,
-    /// Halo 2: the function whose value above nothing turns on the model's
-    /// hologram shader.
-    pub h2_hologram_control: Option<String>,
     /// Halo CE: where a held weapon pulls the unit's hands.
     pub weapon_ik: Vec<ce::attachments::CeWeaponIk>,
-    /// Halo CE: the lens flares of the object and what it holds.
-    pub ce_lights: Vec<ce::lights::CeLight>,
-    /// Halo 2 lens flares, on the markers of the object and what it holds.
-    pub h2_flares: Vec<h2::lights::H2FlareAt>,
-    /// Halo 2 sphere lights on the object and what it holds.
-    pub h2_point_lights: Vec<h2::lights::H2PointLight>,
-    pub h2_gel_lights: Vec<h2::lights::H2GelLight>,
-    pub h2_light_volumes: Vec<h2::light_volumes::H2LightVolume>,
-    pub h2_contrails: Vec<h2::contrails::H2ContrailAt>,
-    pub h2_liquids: Vec<h2::liquid::H2LiquidAt>,
-    pub h3_prt: Option<gen3::prt::H3Prt>,
-    /// The model's own `shield impact parameter override`.
-    pub h3_shield: Option<Arc<gen3::shaders::H3ShieldSettings>>,
-    pub h3_lights: Vec<h3::lights::H3Light>,
-    /// Reach's attached `light`s and `cheap_light`s.
-    pub reach_lights: Vec<reach::lights::ReachLight>,
-    pub reach_cheap_lights: Vec<reach::lights::ReachCheapLight>,
-    /// Reach's cheap particle emitters, on its attached effects' parts.
-    pub reach_cheap_emitters: Vec<particles::cheap::ReachCheapEmitterAt>,
-    /// `light_apply`, `_frustum`, `_specular` and `_frustum_specular`, by
-    /// `combo` (frustum 1, specular 2), for its screen-space lights.
-    pub reach_light_passes: Vec<Option<Arc<gen3::shaders::H3Pass>>>,
-    /// Halo 4's attached `light`s and `cheap_light`s.
-    pub h4_lights: Vec<h4::lights::H4Light>,
-    pub h4_cheap_lights: Vec<h4::lights::H4CheapLight>,
-    /// Explicit 187 and 204's screen-space passes, by (physically correct,
-    /// technique).
-    pub h4_light_passes: std::collections::BTreeMap<(bool, usize), Arc<gen3::shaders::H3Pass>>,
-    /// Halo 4's attached `lens_flare`s, and explicit 46's pass that draws them.
-    pub h4_flares: Vec<h4::flares::H4FlareAt>,
-    pub h4_flare_pass: Option<Arc<gen3::shaders::H3Pass>>,
-    /// `globals`' active camo, for a Halo 4 object.
-    pub h4_camo: Option<Arc<h4::camo::H4Camo>>,
-    /// A Halo 4 object's shield impact.
-    pub h4_shield: Option<Arc<h4::shield::H4Shield>>,
-    /// Whether a Halo 4 object shadows itself, and how.
-    pub h4_shadow_caster: Option<h4::shadow::H4ShadowCaster>,
-    /// Reach's shield impact, as its damage sections choose it.
-    pub reach_shield: Option<Arc<reach::shield::ReachShield>>,
-    /// `globals`' active camo curves, for a Reach object.
-    pub reach_camo: Option<Arc<reach::camo::ReachCamo>>,
-    /// Whether a Reach object shadows itself, and its map's biases.
-    pub reach_shadow_caster: Option<reach::shadow::ReachShadowCaster>,
-    /// The markers a Reach unit's IK chains can reach for: its own and its
-    /// held weapons', in bind space on the nodes they ride.
-    pub reach_ik_markers: Vec<animation::reach_ik::ReachIkMarker>,
-    pub h3_flares: Vec<h3::lights::H3FlareAt>,
-    pub h3_light_volumes: Vec<gen3::light_volumes::H3LightVolumeAt>,
-    /// Halo 4's point-to-point tracers.
-    pub h4_tracers: Vec<h4::tracers::H4TracerAt>,
-    pub h3_particles: Vec<Arc<particles::H3ParticleSystem>>,
-    pub h3_strips: Vec<Arc<gen3::strips::H3StripAt>>,
-    pub h3_cloth: Vec<cloth::H3ClothAt>,
-    pub h3_leaves: Vec<Arc<h3::leaves::H3LeavesAt>>,
-    pub h3_screen_effects: Vec<gen3::screen_effects::H3ScreenEffectAt>,
-    /// ODST's VISR, for an object with an effect that turns it on.
-    pub h3_vision: Option<Arc<h3::vision::H3Vision>>,
-    /// ODST's motion blur, for an object with an effect that moves the view.
-    pub h3_motion_blur: Option<h3::vision::H3MotionBlur>,
-    /// Reach's final composite noise map, for an object with an area screen
-    /// effect that adds bright or dark noise.
-    pub reach_screen_noise: Option<materials::H3Bitmap>,
-    /// Halo 4's final composite colour grading: the default camera fx
-    /// settings' 16-cube lookup.
-    pub h4_color_grading: Option<materials::H3Bitmap>,
-    /// A Halo 4 object's `bounding offset` (in its node 0's frame) and
-    /// `bounding radius`, which its holograms frame their screen effects by.
-    pub h4_bounding_sphere: Option<([f32; 3], f32)>,
-    /// How many change colours a Halo 4 object has (its `change colors`
-    /// block, at most four): those its materials read as theirs, the rest
-    /// as white.
-    pub h4_change_color_count: u8,
+    pub particles: Vec<Arc<particles::H3ParticleSystem>>,
+    pub cloth: Vec<cloth::H3ClothAt>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
-    pub h2_antennas: Vec<h2::lights::H2Antenna>,
-    /// Halo CE: the antennas among the object's widgets.
-    pub ce_antennas: Vec<ce::lights::CeAntenna>,
-    /// Halo CE effects the object's attachments hang on it, then those it
-    /// names for its events.
-    pub ce_effects: Vec<ce::particles::CeEffectAt>,
-    /// Halo CE weapons whose triggers the panel fires: the opened one, or
-    /// the one the opened unit holds.
-    pub ce_firing: Vec<ce::firing::CeWeaponFiring>,
-    pub ce_contrails: Vec<ce::contrails::CeContrailAt>,
-    pub ce_light_volumes: Vec<ce::widgets::CeLightVolume>,
-    pub ce_lightning: Vec<ce::widgets::CeLightning>,
-    pub ce_glows: Vec<ce::widgets::CeGlow>,
-    pub ce_flags: Vec<ce::flags::CeFlagAt>,
-    pub ce_particle_systems: Vec<ce::particle_systems::CeParticleSystemAt>,
+    pub antennas: Vec<h2::lights::H2Antenna>,
+    /// Halo 2's own features.
+    pub h2: h2::H2Features,
+    /// What more than one gen3 game shares.
+    pub gen3: gen3::Gen3Features,
+    /// Halo 3's and ODST's own features.
+    pub h3: h3::H3Features,
+    /// Reach's own features.
+    pub reach: reach::ReachFeatures,
+    /// Halo 4's own features.
+    pub h4: h4::H4Features,
+    /// Halo CE's own features. Last, as its fields were: the load gate's
+    /// lines for a group read as if its fields were inline here.
+    pub ce: ce::CeFeatures,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1266,8 +1190,8 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
     };
     let time = renderer::preview_clock(ui);
     let controls = ce::functions::CeEffectControls {
-        effects: &data.preview.ce_effects,
-        firing: &data.preview.ce_firing,
+        effects: &data.preview.ce.effects,
+        firing: &data.preview.ce.firing,
         geometry: data.geometry_id,
         counts: &mut state.ce_event_counts,
         shots: &mut state.ce_shots,
@@ -1301,13 +1225,13 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
                 }
             }
             let preview = &data.preview;
-            ce::lights::mark_outputs_read(&preview.ce_lights, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce_effects, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce_contrails, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce_particle_systems, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce_light_volumes, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce_lightning, object, &mut read);
-            ce::functions::mark_outputs_read(&preview.ce_glows, object, &mut read);
+            ce::lights::mark_outputs_read(&preview.ce.lights, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce.effects, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce.contrails, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce.particle_systems, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce.light_volumes, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce.lightning, object, &mut read);
+            ce::functions::mark_outputs_read(&preview.ce.glows, object, &mut read);
             read
         })
     };
@@ -1324,7 +1248,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
             (data.geometry_id, object),
             &mut state.ce_function_inputs,
             read(object),
-            ce::firing::fired_input(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, object, time),
+            ce::firing::fired_input(&data.preview.ce.firing, &state.ce_shots, data.geometry_id, object, time),
         );
     }
 }

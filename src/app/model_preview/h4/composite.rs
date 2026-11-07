@@ -27,7 +27,7 @@ impl H4Game {
         frame: &ModelGpuFrame,
         slot: usize,
     ) {
-        let Some(shield) = frame.preview.h4_shield.clone() else {
+        let Some(shield) = frame.preview.h4.shield.clone() else {
             return;
         };
         let damage = frame.function_values.as_ref().and_then(|values| values.get(H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
@@ -91,7 +91,7 @@ impl H4Game {
     /// pass reads its texel centres (`SetColorGradingParameters`).
     pub(super) unsafe fn grading_texture(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) -> Option<super::bloom::H4BloomGrading> {
         unsafe {
-            let grading = frame.preview.h4_color_grading.as_ref();
+            let grading = frame.preview.h4.color_grading.as_ref();
             let key = grading.map(|(image, ..)| Arc::as_ptr(image) as usize);
             if self.grading.map(|(known, _)| Some(known)) != Some(key) {
                 if let Some((_, texture)) = self.grading.take() {

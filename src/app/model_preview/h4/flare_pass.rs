@@ -46,7 +46,7 @@ pub(in crate::app::model_preview) unsafe fn h4_flare_images(
     };
     frame
         .preview
-        .h4_flares
+        .h4.flares
         .iter()
         .map(|at| {
             at.flare
@@ -73,10 +73,10 @@ impl H4Game {
         frame: &ModelGpuFrame,
         slot: usize,
     ) {
-        let Some(pass) = frame.preview.h4_flare_pass.clone() else {
+        let Some(pass) = frame.preview.h4.flare_pass.clone() else {
             return;
         };
-        if frame.preview.h4_flares.is_empty() {
+        if frame.preview.h4.flares.is_empty() {
             return;
         }
         unsafe {
@@ -107,7 +107,7 @@ impl H4Game {
             let shown = |index: usize| {
                 frame
                     .h3_flares_shown
-                    .get(frame.preview.h3_flares.len() + index)
+                    .get(frame.preview.gen3.flares.len() + index)
                     .copied()
                     .unwrap_or(true)
             };
@@ -123,7 +123,7 @@ impl H4Game {
             gl.disable(glow::CULL_FACE);
             gl.color_mask(false, false, false, false);
             let mut drawn: Vec<(usize, Vec<H4FlareDraw>)> = Vec::new();
-            for (index, at) in frame.preview.h4_flares.iter().enumerate() {
+            for (index, at) in frame.preview.h4.flares.iter().enumerate() {
                 if !shown(index) {
                     continue;
                 }
@@ -200,7 +200,7 @@ impl H4Game {
                     .as_ref()
                     .map_or([1, 1], |targets| targets.size);
                 let textures = this.slots[slot].flare_textures.clone();
-                let first = frame.preview.h3_flares.len();
+                let first = frame.preview.gen3.flares.len();
                 for (index, draws) in drawn {
                     let images = textures.get(first + index);
                     for draw in draws {

@@ -12,7 +12,7 @@ pub(in crate::app::model_preview) struct H3Slot {
     pub(in crate::app::model_preview) leaves: super::leaves::H3LeafField,
     /// How long VISR has been on, as of when.
     pub(in crate::app::model_preview) vision_clock: Option<(f32, f32)>,
-    /// Each of `h3_leaves`' maps, of `textures_for`.
+    /// Each of `h3.leaves`' maps, of `textures_for`.
     pub(in crate::app::model_preview) leaf_textures: Vec<[Option<glow::NativeTexture>; 4]>,
     textures_for: Option<u64>,
 }
@@ -34,7 +34,7 @@ impl H3Slot {
             for texture in self.leaf_textures.drain(..).flatten().flatten() {
                 gl.delete_texture(texture);
             }
-            self.leaf_textures = frame.preview.h3_leaves.iter().map(|leaves| sprite_maps(gl, leaves.shader())).collect();
+            self.leaf_textures = frame.preview.h3.leaves.iter().map(|leaves| sprite_maps(gl, leaves.shader())).collect();
         }
         self.textures_for = Some(frame.geometry_id);
     }

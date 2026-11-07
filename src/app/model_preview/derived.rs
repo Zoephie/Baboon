@@ -1427,10 +1427,10 @@ pub(super) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderMod
         dst.vertices.push(*vertex);
     }
     // The PRT attributes stay parallel to the vertices: overlays have none.
-    if let Some(prt) = dst.h2_prt.as_mut() {
+    if let Some(prt) = dst.h2.prt.as_mut() {
         prt.pad(src.vertices.len());
     }
-    if let Some(prt) = dst.h3_prt.as_mut() {
+    if let Some(prt) = dst.gen3.prt.as_mut() {
         prt.pad(src.vertices.len());
     }
     for batch in &src.batches {

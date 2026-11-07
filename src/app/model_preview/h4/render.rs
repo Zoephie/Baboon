@@ -51,7 +51,7 @@ impl Gen3Game for H4Game {
             batches.drain(..).partition(|(_, material)| draws_as_hologram(material));
         *batches = rest;
         self.holograms = holograms;
-        self.camo = frame.preview.h4_camo.as_ref().filter(|_| frame.active_camo).map(|camo| camo.draw(1.0, frame.time));
+        self.camo = frame.preview.h4.camo.as_ref().filter(|_| frame.active_camo).map(|camo| camo.draw(1.0, frame.time));
         self.camo_batches = match self.camo {
             Some(draw) if !draw.has_base => batches.drain(..).chain(self.holograms.drain(..)).collect(),
             Some(_) => batches.clone(),
@@ -180,9 +180,9 @@ impl Gen3Game for H4Game {
         let frame = cx.frame;
         let h4 = self.slots.of(cx.slot, cx.uploads);
         unsafe { h4.sync_effects(cx.gl, frame) };
-        if frame.preview.h4_tracers.iter().any(|tracer| tracer.trails()) {
+        if frame.preview.h4.tracers.iter().any(|tracer| tracer.trails()) {
             let values = |object: u8| frame.function_values_of_object(object).cloned();
-            let tracers = &frame.preview.h4_tracers;
+            let tracers = &frame.preview.h4.tracers;
             h4.trails.advance(tracers, values, cx.onsets, cx.bones, cx.view.eye, frame.time);
         }
     }
@@ -196,7 +196,7 @@ impl Gen3Game for H4Game {
         let drew = unsafe {
             match sprite {
                 Gen3Sprite::Tracer(index) => {
-                    let at = &frame.preview.h4_tracers[index];
+                    let at = &frame.preview.h4.tracers[index];
                     let values = frame.function_values_of_object(at.object);
                     let onset = cx.onsets.of(at.object, at.scale_name(), values, frame.time);
                     let draw = if at.trails() {
@@ -215,7 +215,7 @@ impl Gen3Game for H4Game {
                 }
                 Gen3Sprite::Leaves(_) => return false,
                 Gen3Sprite::Volume(index) => {
-                    let at = &frame.preview.h3_light_volumes[index];
+                    let at = &frame.preview.gen3.light_volumes[index];
                     let Some(material) = at.h4_material() else {
                         return false;
                     };
@@ -233,7 +233,7 @@ impl Gen3Game for H4Game {
                     }
                 }
                 Gen3Sprite::System(index) => {
-                    let system = &frame.preview.h3_particles[index];
+                    let system = &frame.preview.particles[index];
                     let Some(render) = system.look.h4.as_ref() else {
                         return false;
                     };

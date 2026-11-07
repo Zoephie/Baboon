@@ -48,11 +48,11 @@ pub(in crate::app::model_preview) fn fold_attached(
         super::super::h2::attached::read_h2_attached_features(source, object, owner, &attached.markers, &frame, name, preview);
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
-    if let Some(prt) = preview.h2_prt.as_mut() {
+    if let Some(prt) = preview.h2.prt.as_mut() {
         prt.pad(attached.vertices.len());
     }
-    if let Some(prt) = preview.h3_prt.as_mut() {
-        match attached.h3_prt.as_ref().filter(|own| own.vertices.len() == attached.vertices.len()) {
+    if let Some(prt) = preview.gen3.prt.as_mut() {
+        match attached.gen3.prt.as_ref().filter(|own| own.vertices.len() == attached.vertices.len()) {
             Some(own) => prt.append(own),
             None => prt.pad(attached.vertices.len()),
         }
@@ -97,15 +97,15 @@ pub(in crate::app::model_preview) fn read_extension_weapons<F: Fn(&RenderModelPr
             continue;
         }
         let particles = super::super::particles::read_h3_particles(source, &weapon, owner, markers, frame);
-        preview.h3_particles.extend(named(particles, within).map(Arc::new));
+        preview.particles.extend(named(particles, within).map(Arc::new));
         let (flares, lights, gels) = super::super::h2::lights::read_h2_flares(source, &weapon, owner, markers, frame);
-        preview.h2_flares.extend(named(flares, within));
-        preview.h2_point_lights.extend(named(lights, within));
-        preview.h2_gel_lights.extend(named(gels, within));
+        preview.h2.flares.extend(named(flares, within));
+        preview.h2.point_lights.extend(named(lights, within));
+        preview.h2.gel_lights.extend(named(gels, within));
         let volumes = super::super::h2::light_volumes::read_h2_light_volumes(source, &weapon, owner, markers, frame);
-        preview.h2_light_volumes.extend(named(volumes, within));
+        preview.h2.light_volumes.extend(named(volumes, within));
         let contrails = super::super::h2::contrails::read_h2_contrails(source, &weapon, owner, markers, frame);
-        preview.h2_contrails.extend(named(contrails, within));
+        preview.h2.contrails.extend(named(contrails, within));
     }
 }
 

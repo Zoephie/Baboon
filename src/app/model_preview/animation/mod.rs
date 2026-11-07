@@ -336,10 +336,10 @@ pub(super) fn animation_skinning_rows(
     apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
     // `biped_postprocess_node_matrices` (X360 0x84B1A738): the IK set, then
     // the chains.
-    super::animation::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, &data.preview.reach_ik_markers, nodes, &inverse_binds, &mut matrices);
+    super::animation::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, &data.preview.gen3.ik_markers, nodes, &inverse_binds, &mut matrices);
     super::animation::reach_ik::apply_reach_ik(
         &pose.reach_ik,
-        &data.preview.reach_ik_markers,
+        &data.preview.gen3.ik_markers,
         nodes,
         &inverse_binds,
         &mut matrices,
@@ -515,7 +515,7 @@ pub(super) fn armature_node_positions(
         apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
         if let Some(pose) = state.animation.pose.as_ref() {
             let frames = self::sampled_frames(&state.animation, pose.frames.len());
-            let markers = &data.preview.reach_ik_markers;
+            let markers = &data.preview.gen3.ik_markers;
             super::animation::h4_ik::apply_h4_ik_set(&pose.h4_ik_set, markers, nodes, &inverse_binds, &mut matrices);
             super::animation::reach_ik::apply_reach_ik(&pose.reach_ik, markers, nodes, &inverse_binds, &mut matrices, frames);
         }

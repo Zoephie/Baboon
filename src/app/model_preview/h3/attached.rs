@@ -23,20 +23,20 @@ pub(in crate::app::model_preview) fn read_h3_attached_features<F: Fn(&RenderMode
     let lights = super::super::h3::lights::read_h3_lights(source, object, owner, markers, frame);
     let flares = super::super::h3::lights::read_h3_flares(source, object, owner, markers, frame);
     let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
-    preview.h3_light_volumes.extend(named(volumes, name));
+    preview.gen3.light_volumes.extend(named(volumes, name));
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
     let particles: Vec<_> = named(particles, name).map(Arc::new).collect();
     let carried = super::super::particles::carried_strips(&particles);
-    preview.h3_particles.extend(particles);
-    preview.h3_strips.extend(carried);
+    preview.particles.extend(particles);
+    preview.gen3.strips.extend(carried);
     let strips = super::super::gen3::strips::read_h3_strips(source, object, owner, markers, frame);
-    preview.h3_strips.extend(named(strips, name).map(Arc::new));
+    preview.gen3.strips.extend(named(strips, name).map(Arc::new));
     super::super::cloth::read_h3_cloth(source, object, owner, markers, frame, preview, ClothGame::Halo3, [0.0; 3]);
     let screens = super::super::gen3::screen_effects::read_h3_screen_effects(source, object, owner, markers, frame);
-    preview.h3_screen_effects.extend(screens);
+    preview.gen3.screen_effects.extend(screens);
     super::super::gen3::screen_effects::add_screen_shader_materials(preview);
     let lights: Vec<_> = named(lights, name).collect();
-    preview.h3_flares.extend(named(flares, name));
-    preview.h3_flares.extend(super::super::h3::lights::light_flares(&lights));
-    preview.h3_lights.extend(lights);
+    preview.gen3.flares.extend(named(flares, name));
+    preview.gen3.flares.extend(super::super::h3::lights::light_flares(&lights));
+    preview.h3.lights.extend(lights);
 }

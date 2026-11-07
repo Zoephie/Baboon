@@ -13,11 +13,11 @@ use super::super::renderer::{ModelGpuFrame, upload_h2_image};
 /// The maps Halo 2's sprites draw with, uploaded once per geometry.
 #[derive(Default)]
 pub(in crate::app::model_preview) struct H2Textures {
-    /// Each flare's images, of `h2_flares`.
+    /// Each flare's images, of `h2.flares`.
     pub(in crate::app::model_preview) flares: Vec<Vec<Option<glow::NativeTexture>>>,
-    /// Each of `h2_light_volumes`' bitmaps, by volume.
+    /// Each of `h2.light_volumes`' bitmaps, by volume.
     pub(in crate::app::model_preview) light_volumes: Vec<Vec<Option<glow::NativeTexture>>>,
-    /// Each of `h2_liquids`' arcs' bitmaps.
+    /// Each of `h2.liquids`' arcs' bitmaps.
     pub(in crate::app::model_preview) liquids: Vec<Vec<Option<glow::NativeTexture>>>,
     pub(in crate::app::model_preview) contrails: Vec<Option<glow::NativeTexture>>,
 }
@@ -37,18 +37,18 @@ impl H2Textures {
         let preview = &frame.preview;
         let image = |image: &Arc<H2Image>| unsafe { upload_h2_image(gl, image) };
         Self {
-            flares: preview.h2_flares.iter().map(|at| at.flare.images.iter().map(image).collect()).collect(),
+            flares: preview.h2.flares.iter().map(|at| at.flare.images.iter().map(image).collect()).collect(),
             light_volumes: preview
-                .h2_light_volumes
+                .h2.light_volumes
                 .iter()
                 .map(|at| at.volumes().iter().map(|volume| volume.bitmap().and_then(image)).collect())
                 .collect(),
             liquids: preview
-                .h2_liquids
+                .h2.liquids
                 .iter()
                 .map(|at| at.arcs().iter().map(|arc| arc.bitmap().and_then(image)).collect())
                 .collect(),
-            contrails: preview.h2_contrails.iter().map(|at| at.bitmap().and_then(image)).collect(),
+            contrails: preview.h2.contrails.iter().map(|at| at.bitmap().and_then(image)).collect(),
         }
     }
 }
@@ -60,7 +60,7 @@ pub(in crate::app::model_preview) struct H2Slot {
     /// The geometry `textures` are for.
     textures_for: Option<u64>,
     pub(in crate::app::model_preview) textures: H2Textures,
-    /// Each of `h2_gel_lights`' gels, of `gels_for`.
+    /// Each of `h2.gel_lights`' gels, of `gels_for`.
     gels: Vec<Option<glow::NativeTexture>>,
     gels_for: Option<u64>,
 }
@@ -94,7 +94,7 @@ impl H2Slot {
             for texture in self.gels.drain(..).flatten() {
                 unsafe { gl.delete_texture(texture) };
             }
-            let gels = frame.preview.h2_gel_lights.iter().map(|light| light.gel());
+            let gels = frame.preview.h2.gel_lights.iter().map(|light| light.gel());
             self.gels = gels.map(|gel| gel.and_then(|gel| unsafe { upload_h2_image(gl, gel) })).collect();
             self.gels_for = Some(frame.geometry_id);
         }

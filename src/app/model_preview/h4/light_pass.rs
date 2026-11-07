@@ -18,7 +18,7 @@ impl H4Game {
     fn frame_lights_of(frame: &ModelGpuFrame) -> Vec<H4LitLight> {
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let eye = h2_eye_position(&frame.camera);
-        let before = frame.preview.reach_lights.len() + frame.preview.reach_cheap_lights.len();
+        let before = frame.preview.reach.lights.len() + frame.preview.reach.cheap_lights.len();
         let shown = |index: usize| {
             frame
                 .reach_lights_shown
@@ -27,7 +27,7 @@ impl H4Game {
                 .unwrap_or(true)
         };
         let mut lit = Vec::new();
-        for (index, light) in frame.preview.h4_lights.iter().enumerate() {
+        for (index, light) in frame.preview.h4.lights.iter().enumerate() {
             if !shown(index) {
                 continue;
             }
@@ -35,8 +35,8 @@ impl H4Game {
             let colors = frame.change_colors_of_object(light.object);
             lit.extend(light.lit(values, &colors, bones, frame.time, eye));
         }
-        let lights = frame.preview.h4_lights.len();
-        for (index, light) in frame.preview.h4_cheap_lights.iter().enumerate() {
+        let lights = frame.preview.h4.lights.len();
+        for (index, light) in frame.preview.h4.cheap_lights.iter().enumerate() {
             if !shown(lights + index) {
                 continue;
             }
@@ -85,7 +85,7 @@ impl H4Game {
             for light in &lit {
                 let Some(pass) = frame
                     .preview
-                    .h4_light_passes
+                    .h4.light_passes
                     .get(&(light.physical, light.technique()))
                     .cloned()
                 else {

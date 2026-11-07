@@ -580,7 +580,7 @@ pub(in crate::app::model_preview) fn read_reach_screen_noise(source: &TagSource)
 pub(in crate::app::model_preview) fn add_screen_shader_materials(preview: &mut RenderModelPreview) {
     let group = u32::from_be_bytes(*b"rmss");
     let wanted: Vec<String> = preview
-        .h3_screen_effects
+        .gen3.screen_effects
         .iter()
         .flat_map(|effect| effect.definitions.iter())
         .filter_map(|definition| definition.shader.as_ref().map(|(path, ..)| path.clone()))

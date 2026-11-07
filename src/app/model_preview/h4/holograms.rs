@@ -163,7 +163,7 @@ pub(in crate::app::model_preview) fn hologram_screen(
 /// With no bounding sphere read, the preview's bounds stand in.
 fn hologram_sphere(frame: &ModelGpuFrame) -> ([f32; 3], f32) {
     let preview = &frame.preview;
-    let Some((offset, radius)) = preview.h4_bounding_sphere else {
+    let Some((offset, radius)) = preview.h4.bounding_sphere else {
         let (low, high) = (preview.bounds_min, preview.bounds_max);
         let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
         return (center, (0..3).map(|axis| (high[axis] - center[axis]).powi(2)).sum::<f32>().sqrt());

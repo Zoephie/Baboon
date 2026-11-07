@@ -27,16 +27,16 @@ impl Dx9Game for CeGame {
         unsafe {
             let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
             let ce = self.slots.of(slot, cx.core.slot_uploads(slot));
-            if !frame.preview.ce_flags.is_empty() {
+            if !frame.preview.ce.flags.is_empty() {
                 cx.core.move_ce_flags(gl, frame, slot, ce);
             }
             // Halo CE's effects advance once a frame, here, before anything
             // draws or lights by them.
-            if !frame.preview.ce_effects.is_empty() {
+            if !frame.preview.ce.effects.is_empty() {
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 advance_ce_effects(ce, frame, bones);
                 let made: Vec<super::lights::CeLight> =
-                    ce.simulations.particles.lights(&frame.preview.ce_effects).into_iter().map(|(_, _, light)| light).collect();
+                    ce.simulations.particles.lights(&frame.preview.ce.effects).into_iter().map(|(_, _, light)| light).collect();
                 if !made.is_empty() {
                     cx.core.ce_points_now = Some(frame.ce_point_lights_with(&made));
                 }
@@ -88,7 +88,7 @@ impl Dx9Game for CeGame {
         let camera = &frame.camera;
         let ce = self.slots.of(slot, uploads);
         unsafe {
-            for (index, light) in frame.preview.ce_lights.iter().enumerate() {
+            for (index, light) in frame.preview.ce.lights.iter().enumerate() {
                 let state = frame.object_states.get(usize::from(light.object));
                 let outputs = state.map_or([0.0; 4], |state| state.outputs);
                 let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
@@ -104,7 +104,7 @@ impl Dx9Game for CeGame {
                 };
                 draw_flare_sprites(gl, flares, camera, view, &sprites, textures);
             }
-            for (effect, def, light) in ce.simulations.particles.lights(&frame.preview.ce_effects) {
+            for (effect, def, light) in ce.simulations.particles.lights(&frame.preview.ce.effects) {
                 let state = frame.object_states.get(usize::from(light.object));
                 let outputs = state.map_or([0.0; 4], |state| state.outputs);
                 let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);

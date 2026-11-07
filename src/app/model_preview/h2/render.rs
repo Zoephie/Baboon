@@ -23,7 +23,7 @@ impl Dx9Game for H2Game {
     /// sprites' maps.
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
-            if cx.frame.preview.h3_cloth.first().is_some_and(|cloth| cloth.halo2()) {
+            if cx.frame.preview.cloth.first().is_some_and(|cloth| cloth.halo2()) {
                 cx.core.move_cloth(cx.gl, cx.frame, cx.slot);
             }
             let h2 = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
@@ -45,9 +45,9 @@ impl Dx9Game for H2Game {
         let camera = &frame.camera;
         let h2 = self.slots.of(slot, uploads);
         let values = |object: u8| frame.function_values_of_object(object).cloned();
-        h2.contrails.advance(&frame.preview.h2_contrails, values, bones, frame.time);
+        h2.contrails.advance(&frame.preview.h2.contrails, values, bones, frame.time);
         unsafe {
-            let volumes = frame.preview.h2_light_volumes.iter().zip(&h2.textures.light_volumes);
+            let volumes = frame.preview.h2.light_volumes.iter().zip(&h2.textures.light_volumes);
             for (index, (at, textures)) in volumes.enumerate() {
                 if !is_shown(&frame.h2_shown.volumes, index) {
                     continue;
@@ -66,7 +66,7 @@ impl Dx9Game for H2Game {
                     }
                 }
             }
-            let liquids = frame.preview.h2_liquids.iter().zip(&h2.textures.liquids);
+            let liquids = frame.preview.h2.liquids.iter().zip(&h2.textures.liquids);
             for (index, (at, textures)) in liquids.enumerate() {
                 if !is_shown(&frame.h2_shown.liquids, index) {
                     continue;
@@ -83,7 +83,7 @@ impl Dx9Game for H2Game {
                     }
                 }
             }
-            let contrails = frame.preview.h2_contrails.iter().zip(&h2.textures.contrails);
+            let contrails = frame.preview.h2.contrails.iter().zip(&h2.textures.contrails);
             for (index, (at, texture)) in contrails.enumerate() {
                 if !is_shown(&frame.h2_shown.contrails, index) {
                     continue;
@@ -105,7 +105,7 @@ impl Dx9Game for H2Game {
         let camera = &frame.camera;
         let h2 = self.slots.of(slot, uploads);
         unsafe {
-            for (index, at) in frame.preview.h2_flares.iter().enumerate() {
+            for (index, at) in frame.preview.h2.flares.iter().enumerate() {
                 if !frame.h2_flares_shown.get(index).copied().unwrap_or(true) {
                     continue;
                 }

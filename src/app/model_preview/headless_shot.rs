@@ -386,50 +386,50 @@ pub(super) fn render(
         }
     }
     data.textures = Some(Arc::new(textures));
-    eprintln!("NOTE {} cheap particle emitters", data.preview.reach_cheap_emitters.len());
+    eprintln!("NOTE {} cheap particle emitters", data.preview.gen3.cheap_emitters.len());
     eprintln!(
         "NOTE H4 {} lights, {} cheap lights, {} light passes, {} flares, {} particle systems ({} on materials), {} light volumes ({} on materials), {} tracers",
-        data.preview.h4_lights.len(),
-        data.preview.h4_cheap_lights.len(),
-        data.preview.h4_light_passes.len(),
-        data.preview.h4_flares.len(),
-        data.preview.h3_particles.len(),
-        data.preview.h3_particles.iter().filter(|system| system.look.h4.is_some()).count(),
-        data.preview.h3_light_volumes.len(),
-        data.preview.h3_light_volumes.iter().filter(|volume| volume.h4_material().is_some()).count(),
-        data.preview.h4_tracers.len()
+        data.preview.h4.lights.len(),
+        data.preview.h4.cheap_lights.len(),
+        data.preview.h4.light_passes.len(),
+        data.preview.h4.flares.len(),
+        data.preview.particles.len(),
+        data.preview.particles.iter().filter(|system| system.look.h4.is_some()).count(),
+        data.preview.gen3.light_volumes.len(),
+        data.preview.gen3.light_volumes.iter().filter(|volume| volume.h4_material().is_some()).count(),
+        data.preview.h4.tracers.len()
     );
     // Whole features left out, to see one on its own.
     if !options.dropped.is_empty() {
         let preview = Arc::make_mut(&mut data.preview);
         for feature in &options.dropped {
             match feature.as_str() {
-                "particles" => preview.h3_particles.clear(),
-                "flares" => preview.h2_flares.clear(),
-                "lights" => preview.h2_point_lights.clear(),
-                "gels" => preview.h2_gel_lights.clear(),
-                "volumes" => preview.h2_light_volumes.clear(),
-                "h3_volumes" => preview.h3_light_volumes.clear(),
-                "h4_tracers" => preview.h4_tracers.clear(),
-                "cheap_particles" => preview.reach_cheap_emitters.clear(),
-                "contrails" => preview.h2_contrails.clear(),
-                "prt" => preview.h3_prt = None,
-                "shield" => preview.reach_shield = None,
-                "antennas" => preview.h2_antennas.clear(),
+                "particles" => preview.particles.clear(),
+                "flares" => preview.h2.flares.clear(),
+                "lights" => preview.h2.point_lights.clear(),
+                "gels" => preview.h2.gel_lights.clear(),
+                "volumes" => preview.h2.light_volumes.clear(),
+                "h3_volumes" => preview.gen3.light_volumes.clear(),
+                "h4_tracers" => preview.h4.tracers.clear(),
+                "cheap_particles" => preview.gen3.cheap_emitters.clear(),
+                "contrails" => preview.h2.contrails.clear(),
+                "prt" => preview.gen3.prt = None,
+                "shield" => preview.reach.shield = None,
+                "antennas" => preview.antennas.clear(),
                 // The sheet's own batches go with it; its vertices stay, unused.
                 "cloth" => {
-                    preview.h3_cloth.clear();
+                    preview.cloth.clear();
                     preview.batches.retain(|batch| batch.permutation_name != "cloth");
                 }
                 "reach_lights" => {
-                    preview.reach_lights.clear();
-                    preview.reach_cheap_lights.clear();
+                    preview.reach.lights.clear();
+                    preview.reach.cheap_lights.clear();
                 }
                 "h4_lights" => {
-                    preview.h4_lights.clear();
-                    preview.h4_cheap_lights.clear();
+                    preview.h4.lights.clear();
+                    preview.h4.cheap_lights.clear();
                 }
-                "h4_flares" => preview.h4_flares.clear(),
+                "h4_flares" => preview.h4.flares.clear(),
                 other => panic!("H2_SHOT_DROP: no feature {other}"),
             }
         }
@@ -523,15 +523,15 @@ pub(super) fn render(
             frame.time = end - before.parse::<f32>().unwrap();
             renderer.paint(gl, &frame);
             if fire {
-                let weapon = data.preview.ce_firing.last().expect("a weapon to fire");
+                let weapon = data.preview.ce.firing.last().expect("a weapon to fire");
                 let fired = state.ce_shots.entry((data.geometry_id, weapon.object)).or_default();
                 let effect = fired.fire(weapon, text.parse().unwrap(), state.ce_event_scales[0], frame.time);
-                eprintln!("NOTE fired, playing {:?}", effect.and_then(|at| data.preview.ce_effects[at].event.as_ref()));
+                eprintln!("NOTE fired, playing {:?}", effect.and_then(|at| data.preview.ce.effects[at].event.as_ref()));
                 if let Some(effect) = effect {
                     frame.ce_plays.counts[effect] += 1;
                 }
             }
-            for (index, effect) in data.preview.ce_effects.iter().enumerate() {
+            for (index, effect) in data.preview.ce.effects.iter().enumerate() {
                 if let Some(event) = effect.event.as_ref().filter(|event| !fire && event.name.contains(text)) {
                     eprintln!("NOTE playing {}", event.name);
                     frame.ce_plays.counts[index] += 1;
@@ -1273,7 +1273,7 @@ fn h4_chief_left_hand_holds_the_assault_rifle() {
         let at = [marker.bind.m[0][3], marker.bind.m[1][3], marker.bind.m[2][3]];
         std::array::from_fn::<f32, 3, _>(|row| skin[row][0] * at[0] + skin[row][1] * at[1] + skin[row][2] * at[2] + skin[row][3])
     };
-    let markers = &data.preview.reach_ik_markers;
+    let markers = &data.preview.gen3.ik_markers;
     let find = |holder, name: &str| markers.iter().find(|marker| marker.holder == holder && marker.name.eq_ignore_ascii_case(name));
     let mut solved = 0;
     for point in points.iter() {

@@ -256,30 +256,92 @@ impl std::fmt::Write for FieldLines<'_> {
     }
 }
 
+impl<'a> FieldLines<'a> {
+    fn new(out: &'a mut String, prefix: &'a str) -> Self {
+        FieldLines {
+            out,
+            prefix,
+            field: None,
+            depth: 0,
+            quoted: false,
+            escaped: false,
+            naming: None,
+            braced: false,
+            named: String::new(),
+            whole: (0, 0xcbf2_9ce4_8422_2325),
+            split: false,
+        }
+    }
+}
+
 /// A line per top-level field of `value`'s `Debug`.
 pub(super) fn field_lines(out: &mut String, prefix: &str, value: &impl std::fmt::Debug) {
-    let mut lines = FieldLines {
-        out,
-        prefix,
-        field: None,
-        depth: 0,
-        quoted: false,
-        escaped: false,
-        naming: None,
-        braced: false,
-        named: String::new(),
-        whole: (0, 0xcbf2_9ce4_8422_2325),
-        split: false,
-    };
+    let mut lines = FieldLines::new(out, prefix);
     let _ = write!(lines, "{value:?}");
     lines.close();
+}
+
+/// A line per field of a struct that is itself a field, read as though its
+/// fields were its holder's own: its closing ` }` becomes the `,` that would
+/// follow them there, or stays for the holder's `last` field.
+fn inline_field_lines(out: &mut String, prefix: &str, value: &dyn std::fmt::Debug, last: bool) {
+    /// The bytes but the last two, which are the struct's ` }`.
+    struct Held<'a> {
+        lines: FieldLines<'a>,
+        held: std::collections::VecDeque<u8>,
+    }
+    impl std::fmt::Write for Held<'_> {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            for byte in text.bytes() {
+                self.held.push_back(byte);
+                if self.held.len() > 2 {
+                    let byte = self.held.pop_front().unwrap_or_default();
+                    self.lines.step(byte);
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut held = Held { lines: FieldLines::new(out, prefix), held: std::collections::VecDeque::new() };
+    let _ = write!(held, "{value:?}");
+    let Held { mut lines, held } = held;
+    let ending: Vec<u8> = if held.iter().eq(b" }") && !last { b",".to_vec() } else { held.into() };
+    ending.into_iter().for_each(|byte| lines.step(byte));
+    lines.close();
+}
+
+/// A line per field of the preview, and for each game's group of fields a line
+/// per field in it, named `group.field`, as though the group's fields were the
+/// preview's own (as they were before they were grouped).
+fn preview_lines(out: &mut String, preview: &super::RenderModelPreview) {
+    let groups: [(&str, &dyn std::fmt::Debug); 6] = [
+        ("preview.h2", &preview.h2),
+        ("preview.gen3", &preview.gen3),
+        ("preview.h3", &preview.h3),
+        ("preview.reach", &preview.reach),
+        ("preview.h4", &preview.h4),
+        ("preview.ce", &preview.ce),
+    ];
+    let mut top = String::new();
+    field_lines(&mut top, "preview", preview);
+    let count = top.lines().count();
+    for (at, row) in top.lines().enumerate() {
+        let name = row.split(' ').next().unwrap_or_default();
+        match groups.iter().find(|(group, _)| *group == name) {
+            Some((group, value)) => inline_field_lines(out, group, *value, at + 1 == count),
+            None => {
+                out.push_str(row);
+                out.push('\n');
+            }
+        }
+    }
 }
 
 /// What a load produced, without the ids that count loads.
 fn load_snapshot(data: &ModelPreviewData) -> String {
     let mut out = String::new();
     line(&mut out, "render_model_path", &data.render_model_path);
-    field_lines(&mut out, "preview", &data.preview);
+    preview_lines(&mut out, &data.preview);
     for variant in &data.variants {
         let mut regions: Vec<_> = variant.regions.iter().collect();
         regions.sort();

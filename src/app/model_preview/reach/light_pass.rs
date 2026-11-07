@@ -31,9 +31,9 @@ impl ReachGame {
         let (frame, slot) = (cx.frame, cx.slot);
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let mut lit = Vec::new();
-        let lights = frame.preview.reach_lights.len();
+        let lights = frame.preview.reach.lights.len();
         let shown = |index: usize| frame.reach_lights_shown.get(index).copied().unwrap_or(true);
-        for (index, light) in frame.preview.reach_cheap_lights.iter().enumerate() {
+        for (index, light) in frame.preview.reach.cheap_lights.iter().enumerate() {
             if !shown(lights + index) {
                 continue;
             }
@@ -41,7 +41,7 @@ impl ReachGame {
             let colors = frame.change_colors_of_object(light.object);
             lit.extend(light.lit(values, &colors, bones, frame.time));
         }
-        for (index, light) in frame.preview.reach_lights.iter().enumerate() {
+        for (index, light) in frame.preview.reach.lights.iter().enumerate() {
             if !shown(index) {
                 continue;
             }
@@ -80,7 +80,7 @@ impl ReachGame {
             state.begin_screen_lights(gl, size, accumulation_target, depth_copy_framebuffer);
             for light in screen {
                 let combo = usize::from(light.frustum) + 2 * usize::from(light.specular);
-                let Some(pass) = frame.preview.reach_light_passes.get(combo).cloned().flatten() else {
+                let Some(pass) = frame.preview.reach.light_passes.get(combo).cloned().flatten() else {
                     continue;
                 };
                 let fade = near_fade(light, eye);

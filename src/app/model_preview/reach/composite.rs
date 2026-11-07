@@ -25,7 +25,7 @@ impl ReachGame {
     ) {
         let (gl, core) = (cx.gl, &mut *cx.core);
         let state = &mut *cx.state;
-        let noise = cx.frame.preview.reach_screen_noise.as_ref();
+        let noise = cx.frame.preview.reach.screen_noise.as_ref();
         unsafe {
             if self.noise.is_none()
                 && let Some((image, texels, mips)) = noise

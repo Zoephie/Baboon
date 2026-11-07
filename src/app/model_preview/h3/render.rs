@@ -30,7 +30,7 @@ impl Gen3Game for H3Game {
     unsafe fn advance_own_sprites(&mut self, cx: &mut Gen3Sprites<'_>) {
         let h3 = self.slots.of(cx.slot, cx.uploads);
         unsafe { h3.sync_textures(cx.gl, cx.frame) };
-        h3.leaves.advance(&cx.frame.preview.h3_leaves, cx.frame.time);
+        h3.leaves.advance(&cx.frame.preview.h3.leaves, cx.frame.time);
     }
 
     /// The leaves, through the particle program.
@@ -39,7 +39,7 @@ impl Gen3Game for H3Game {
             return false;
         };
         let frame = cx.frame;
-        let leaves = &frame.preview.h3_leaves[index];
+        let leaves = &frame.preview.h3.leaves[index];
         let Some(particles) = cx.particle_gl else {
             return true;
         };

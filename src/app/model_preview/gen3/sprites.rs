@@ -102,28 +102,28 @@ impl Gen3State {
                 (0..3).map(|axis| (origin[axis] - view.eye[axis]) * view.forward[axis]).sum::<f32>()
             };
             let layered = h3_layered_distance;
-            let volumes = frame.preview.h3_light_volumes.iter().enumerate();
+            let volumes = frame.preview.gen3.light_volumes.iter().enumerate();
             let volumes = volumes
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
                 .map(|(at, volume)| (layered(volume.sort_layer(), eye_distance(volume.origin(bones))), Sprites::Volume(at)));
-            let tracers = frame.preview.h4_tracers.iter().enumerate();
+            let tracers = frame.preview.h4.tracers.iter().enumerate();
             let tracers = tracers.filter(|_| !matches!(stage, SpriteStage::Distortions)).map(|(at, tracer)| {
                 let distance = eye_distance(tracer.origin(bones)) - tracer.sort_bias();
                 (layered(tracer.sort_layer(), distance), Sprites::Tracer(at))
             });
-            let systems = frame.preview.h3_particles.iter().enumerate();
+            let systems = frame.preview.particles.iter().enumerate();
             let distorting = matches!(stage, SpriteStage::Distortions);
             let systems = systems
                 .filter(|(_, system)| system.look.shader.distortion.is_some() == distorting)
                 .map(|(at, system)| (layered(system.look.shader.sort_layer, uploaded.simulations.particles.distance(at, system, bones, &view)), Sprites::System(at)));
-            let strips = frame.preview.h3_strips.iter().enumerate();
+            let strips = frame.preview.gen3.strips.iter().enumerate();
             let strips = strips
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
                 .map(|(at, strip)| {
                     let distance = eye_distance(strip.origin(bones)) - strip.sort_bias();
                     (layered(strip.shader().sort_layer, distance), Sprites::Strip(at))
                 });
-            let leaves = frame.preview.h3_leaves.iter().enumerate();
+            let leaves = frame.preview.h3.leaves.iter().enumerate();
             let leaves = leaves
                 .filter(|_| !matches!(stage, SpriteStage::Distortions))
                 .map(|(at, leaves)| (layered(2, eye_distance(leaves.origin())), Sprites::Leaves(at)));
@@ -152,7 +152,7 @@ impl Gen3State {
                         }
                     }
                     Sprites::Volume(index) => {
-                        let at = &frame.preview.h3_light_volumes[index];
+                        let at = &frame.preview.gen3.light_volumes[index];
                         if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
                             continue;
                         }
@@ -216,7 +216,7 @@ impl Gen3State {
                         game.draw_own_sprite(&mut sprites!(uploaded), Gen3Sprite::Leaves(index));
                     }
                     Sprites::Strip(index) => {
-                        let strip = &frame.preview.h3_strips[index];
+                        let strip = &frame.preview.gen3.strips[index];
                         if !frame.h3_strips_shown.get(index).copied().unwrap_or(true) {
                             continue;
                         }
@@ -242,7 +242,7 @@ impl Gen3State {
             // `s_cheap_particle_system::render`: after every other
             // transparent, in one batch, in ring-slot order.
             if matches!(stage, SpriteStage::Rest)
-                && let (Some(first), Some(texture)) = (frame.preview.reach_cheap_emitters.first(), uploaded.reach_cheap_texture)
+                && let (Some(first), Some(texture)) = (frame.preview.gen3.cheap_emitters.first(), uploaded.reach_cheap_texture)
             {
                 let drawn = uploaded.simulations.reach_cheap.vertices(first.library(), &view);
                 if !drawn.is_empty()
@@ -280,7 +280,7 @@ impl Gen3State {
             begin_flares(gl, flares, core.placeholder);
             let viewport = core.scene.as_ref().map_or([1, 1], |scene| scene.size);
             let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
-            for (index, at) in frame.preview.h3_flares.iter().enumerate() {
+            for (index, at) in frame.preview.gen3.flares.iter().enumerate() {
                 if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
                     continue;
                 }
@@ -315,13 +315,13 @@ impl Gen3State {
 /// A sprite a game may draw as its own, inside the gen3 sprite pass.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::app::model_preview) enum Gen3Sprite {
-    /// Of `h4_tracers`.
+    /// Of `h4.tracers`.
     Tracer(usize),
-    /// Of `h3_light_volumes`.
+    /// Of `gen3.light_volumes`.
     Volume(usize),
-    /// Of `h3_particles`.
+    /// Of `particles`.
     System(usize),
-    /// Of `h3_leaves`.
+    /// Of `h3.leaves`.
     Leaves(usize),
 }
 

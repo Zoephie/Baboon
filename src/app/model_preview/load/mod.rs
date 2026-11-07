@@ -290,7 +290,7 @@ pub(super) fn load_model_preview(
     preview.generation = Some(generation);
     if let Some(source) = source.filter(|source| source.game() == Some(GameId::Halo4)) {
         // Just built: no other handle shares it, so this does not copy.
-        Arc::make_mut(&mut data.preview).h4_color_grading = super::h4::lighting::read_h4_color_grading(source);
+        Arc::make_mut(&mut data.preview).h4.color_grading = super::h4::lighting::read_h4_color_grading(source);
     }
     Ok(data)
 }
@@ -453,14 +453,14 @@ fn load_tag_preview(
             let functions = || super::functions::read_object_functions(model_tag, Some(model));
             data.h2_object_functions = feature(&mut notes, "its functions", functions);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
-            preview.h4_bounding_sphere = super::h4::object::read_h4_bounding_sphere(model_tag);
-            preview.h4_change_color_count = super::h4::object::read_h4_change_color_count(model_tag);
-            preview.h4_camo = super::h4::camo::H4Camo::read(source).map(std::sync::Arc::new);
-            preview.h4_shield = super::h4::shield::read_h4_shield(source, model);
-            preview.h4_shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
+            preview.h4.bounding_sphere = super::h4::object::read_h4_bounding_sphere(model_tag);
+            preview.h4.change_color_count = super::h4::object::read_h4_change_color_count(model_tag);
+            preview.h4.camo = super::h4::camo::H4Camo::read(source).map(std::sync::Arc::new);
+            preview.h4.shield = super::h4::shield::read_h4_shield(source, model);
+            preview.h4.shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
             // The unit's markers its IK sets and chains place.
             let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
-            preview.reach_ik_markers = super::animation::reach_ik::reach_ik_markers(preview, super::animation::reach_ik::ReachIkHolder::Unit, own, None);
+            preview.gen3.ik_markers = super::animation::reach_ik::reach_ik_markers(preview, super::animation::reach_ik::ReachIkHolder::Unit, own, None);
             let markers = preview.markers.clone();
             let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
             let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
@@ -670,7 +670,7 @@ fn load_tag_preview(
     {
         let control = model_tag.root().read_string_id("hologram control function").filter(|name| !name.is_empty());
         if let Some(control) = control {
-            preview.h2_hologram_control = Some(control);
+            preview.h2.hologram_control = Some(control);
             preview.materials.push(RenderModelPreviewMaterial {
                 shader_path,
                 shader_group,
@@ -890,11 +890,11 @@ pub(in crate::app) fn build_render_preview(
             material.permutation = permutation.unwrap_or(0).max(0) as usize;
         }
     }
-    preview.h2_prt = read_h2_prt(render_tag, &render_model, &render_meshes, &h2_prt_lights())
+    preview.h2.prt = read_h2_prt(render_tag, &render_model, &render_meshes, &h2_prt_lights())
         .filter(|prt| prt.vertices.len() == preview.vertices.len());
     // Instances draw `static_lighting_sh`, with no transfer of their own.
     let instance_vertices = preview.instances.vertex_count;
-    preview.h3_prt = super::gen3::prt::read_h3_prt(render_tag, &render_model, &render_meshes)
+    preview.gen3.prt = super::gen3::prt::read_h3_prt(render_tag, &render_model, &render_meshes)
         .map(|mut prt| {
             prt.pad(instance_vertices);
             prt
@@ -2264,13 +2264,13 @@ pub(super) mod kit_object_tests {
             return;
         };
         let warthog = kit_preview(&root, GameId::Halo4, "objects\\vehicles\\human\\storm_warthog\\storm_warthog", "vehicle", b"vehi");
-        assert!(!warthog.preview.h2_antennas.is_empty(), "{:?}", warthog.notes);
+        assert!(!warthog.preview.antennas.is_empty(), "{:?}", warthog.notes);
         let lasky = kit_preview(&root, GameId::Halo4, "objects\\characters\\storm_lasky\\storm_lasky", "biped", b"bipd");
-        assert!(lasky.preview.h2_antennas.is_empty());
+        assert!(lasky.preview.antennas.is_empty());
         let flag = kit_preview(&root, GameId::Halo4, "objects\\weapons\\multiplayer\\flag\\flag", "weapon", b"weap");
-        assert!(!flag.preview.h3_cloth.is_empty(), "{:?}", flag.notes);
+        assert!(!flag.preview.cloth.is_empty(), "{:?}", flag.notes);
         let chief = kit_preview(&root, GameId::Halo4, "objects\\characters\\storm_masterchief\\storm_masterchief", "biped", b"bipd");
-        assert!(chief.preview.h2_antennas.is_empty() && chief.preview.h3_cloth.is_empty());
+        assert!(chief.preview.antennas.is_empty() && chief.preview.cloth.is_empty());
     }
 
     pub(in crate::app::model_preview) fn kit_preview(
@@ -2354,7 +2354,7 @@ pub(super) mod kit_object_tests {
         let data = kit_preview(&root, GameId::Halo3, path, "vehicle", b"vehi");
         // The weapon's `firing` light, attached with the primary scale
         // `illumination`; the vehicle has none of its own.
-        let firing = data.preview.h3_lights.iter().filter(|light| light.scale_name() == "illumination");
+        let firing = data.preview.h3.lights.iter().filter(|light| light.scale_name() == "illumination");
         assert_eq!(firing.count(), 1, "the gun's firing light");
     }
 
@@ -2369,7 +2369,7 @@ pub(super) mod kit_object_tests {
         };
         let path = "objects\\vehicles\\human\\warthog\\warthog";
         let data = kit_preview(&root, GameId::HaloReach, path, "vehicle", b"vehi");
-        let antennas = &data.preview.h2_antennas;
+        let antennas = &data.preview.antennas;
         assert_eq!(antennas.len(), 1);
         let antenna = &antennas[0];
         assert!(antenna.is_reach() && antenna.h3_bitmap.is_some());
@@ -2405,7 +2405,7 @@ pub(super) mod kit_object_tests {
         };
         let path = "objects\\vehicles\\human\\scorpion\\scorpion";
         let data = kit_preview(&root, GameId::HaloReach, path, "vehicle", b"vehi");
-        let antennas = &data.preview.h2_antennas;
+        let antennas = &data.preview.antennas;
         assert_eq!(antennas.len(), 2, "short_antenna and medium_antenna");
         assert!(antennas.iter().all(|antenna| antenna.is_reach()));
         let lengths: Vec<f32> = antennas.iter().map(|antenna| antenna.reach_spring().unwrap().length).collect();
@@ -2422,7 +2422,7 @@ pub(super) mod kit_object_tests {
         };
         let path = "objects\\characters\\marine\\marine";
         let data = kit_preview(&root, GameId::HaloReach, path, "biped", b"bipd");
-        let antennas = &data.preview.h2_antennas;
+        let antennas = &data.preview.antennas;
         assert_eq!(antennas.len(), 1);
         let under = antennas[0].only_under().map(|(region, permutation)| (region.as_str(), permutation.as_str()));
         assert_eq!(under, Some(("flair_backpack", "trooper_radio")));
@@ -2438,7 +2438,7 @@ pub(super) mod kit_object_tests {
         };
         let path = "objects\\weapons\\multiplayer\\flag\\flag";
         let data = kit_preview(&root, GameId::HaloReach, path, "weapon", b"weap");
-        let cloths = &data.preview.h3_cloth;
+        let cloths = &data.preview.cloth;
         assert_eq!(cloths.len(), 1);
         assert_eq!(cloths[0].game(), super::super::cloth::ClothGame::Reach);
         assert_eq!(cloths[0].pinned_vertices(), [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
@@ -2461,14 +2461,14 @@ pub(super) mod kit_object_tests {
         };
         let path = "objects\\weapons\\multiplayer\\flag\\flag";
         let data = kit_preview(&root, GameId::Halo3, path, "weapon", b"weap");
-        let cloths = &data.preview.h3_cloth;
+        let cloths = &data.preview.cloth;
         assert_eq!(cloths.len(), 1);
         assert_eq!(cloths[0].game(), super::super::cloth::ClothGame::Halo3);
         assert!(cloths[0].pinned_vertices().len() <= 6);
         let path = "objects\\vehicles\\warthog\\warthog";
         let data = kit_preview(&root, GameId::Halo3, path, "vehicle", b"vehi");
-        assert!(!data.preview.h2_antennas.is_empty());
-        assert!(data.preview.h2_antennas.iter().all(|antenna| !antenna.is_reach()));
+        assert!(!data.preview.antennas.is_empty());
+        assert!(data.preview.antennas.iter().all(|antenna| !antenna.is_reach()));
     }
 
     /// With `BLAM_TEST_H2EK`: an effect's `lens_flare` and `light_volume`
@@ -2482,11 +2482,11 @@ pub(super) mod kit_object_tests {
         };
         let path = "objects\\weapons\\melee\\energy_blade\\energy_blade";
         let sword = kit_preview(&root, GameId::Halo2, path, "weapon", b"weap");
-        let flares = sword.preview.h2_flares.iter().filter(|flare| flare.effect_part().is_some());
+        let flares = sword.preview.h2.flares.iter().filter(|flare| flare.effect_part().is_some());
         assert!(flares.count() > 0, "the blade's effects' lens flares");
         let path = "objects\\weapons\\support_high\\flak_cannon\\projectiles\\flak_bolt\\flak_bolt";
         let bolt = kit_preview(&root, GameId::Halo2, path, "projectile", b"proj");
-        let volumes = bolt.preview.h2_light_volumes.iter().filter(|volume| volume.effect_part().is_some());
+        let volumes = bolt.preview.h2.light_volumes.iter().filter(|volume| volume.effect_part().is_some());
         assert!(volumes.count() > 0, "the armed bolt's light volume");
     }
 
@@ -2499,7 +2499,7 @@ pub(super) mod kit_object_tests {
             return;
         };
         let data = kit_preview(&root, GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap");
-        let flags = &data.preview.ce_flags;
+        let flags = &data.preview.ce.flags;
         assert!(!flags.is_empty(), "the flag weapon's flag");
         let at_open = super::super::ce::flags::CeFlagField::default().advance(flags, None, 0.0, 0.0);
         let a_minute_in = super::super::ce::flags::CeFlagField::default().advance(flags, None, 0.0, 60.0);
@@ -2516,7 +2516,7 @@ pub(super) mod kit_object_tests {
             return;
         };
         let data = kit_preview(&root, GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap");
-        let flags = &data.preview.ce_flags;
+        let flags = &data.preview.ce.flags;
         let mut field = super::super::ce::flags::CeFlagField::default();
         let mut last = field.advance(flags, None, 0.0, 10.0);
         let mut moved = Vec::new();
@@ -2619,7 +2619,7 @@ pub(super) mod kit_object_tests {
                 continue;
             };
             let data = kit_preview(&root, game, path, "device_machine", b"mach");
-            let from_lights = data.preview.h3_flares.iter().filter(|at| at.light().is_some()).count();
+            let from_lights = data.preview.gen3.flares.iter().filter(|at| at.light().is_some()).count();
             assert_eq!(from_lights, 1, "{env}: the light's flare");
         }
     }
@@ -2634,7 +2634,7 @@ pub(super) mod kit_object_tests {
         };
         let path = "objects\\levels\\solo\\030_outskirts\\hog_light\\hog_light";
         let data = kit_preview(&root, GameId::Halo3, path, "scenery", b"scen");
-        assert_eq!(data.preview.h3_lights.len(), 1);
+        assert_eq!(data.preview.h3.lights.len(), 1);
         assert!(super::super::renderer::has_effects(&data.preview));
     }
 
@@ -2687,7 +2687,7 @@ pub(super) mod kit_object_tests {
         let rifle = "weapons\\assault rifle\\assault rifle";
         let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
         let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
-        let effects = &data.preview.ce_effects;
+        let effects = &data.preview.ce.effects;
         let fire = effects
             .iter()
             .position(|effect| effect.object == 1 && effect.event.as_ref().is_some_and(|event| event.name == "firing effect: fire bullet"))
@@ -2764,19 +2764,19 @@ pub(super) mod kit_object_tests {
         let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
         let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
         let preview = &data.preview;
-        let weapon = preview.ce_firing.iter().find(|weapon| weapon.object == 1).expect("the held rifle fires");
+        let weapon = preview.ce.firing.iter().find(|weapon| weapon.object == 1).expect("the held rifle fires");
         let functions = data.ce_attached[0].functions.as_ref().expect("the rifle's functions");
         let flash = functions.output_named("muzzle flash").expect("the rifle's muzzle flash function");
         let mut shots = super::super::ce::firing::CeShots::new();
         let at = |shots: &super::super::ce::firing::CeShots, time: f32| {
-            let fired = fired_input(&preview.ce_firing, shots, data.geometry_id, 1, time);
+            let fired = fired_input(&preview.ce.firing, shots, data.geometry_id, 1, time);
             let inputs = functions.with_fired(functions.inputs_for(&Default::default(), (data.geometry_id, 1)), fired);
             functions.outputs(&inputs, time)[flash]
         };
         assert_eq!(at(&shots, 10.0), 0.0, "unfired, the muzzle is dark");
         let fired: &mut CeWeaponShots = shots.entry((data.geometry_id, 1)).or_default();
         let effect = fired.fire(weapon, 0, 1.0, 10.0).expect("the trigger has a firing effect");
-        let name = preview.ce_effects[effect].event.as_ref().map(|event| event.name.as_str());
+        let name = preview.ce.effects[effect].event.as_ref().map(|event| event.name.as_str());
         assert_eq!(name, Some("firing effect: fire bullet"));
         assert!(at(&shots, 10.01) > 0.0, "the shot lights the muzzle");
         assert_eq!(at(&shots, 15.0), 0.0, "and it goes dark");
@@ -2796,7 +2796,7 @@ pub(super) mod kit_object_tests {
         let rifle = "weapons\\plasma rifle\\plasma rifle";
         let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
         let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
-        let effects = &data.preview.ce_effects;
+        let effects = &data.preview.ce.effects;
         let overheated = effects
             .iter()
             .position(|effect| effect.event.as_ref().is_some_and(|event| event.name.ends_with(": overheated")))
@@ -2826,7 +2826,7 @@ pub(super) mod kit_object_tests {
             return;
         };
         let data = kit_preview(&root, GameId::HaloCe, "scenery\\emitters\\steam jets\\steam jets", "scenery", b"scen");
-        let systems = &data.preview.ce_particle_systems;
+        let systems = &data.preview.ce.particle_systems;
         let on = |_: u8| ([1.0; 4], [true; 4], [[1.0; 3]; 4]);
         let made = |others: usize| {
             let mut field = CeParticleSystemField::default();

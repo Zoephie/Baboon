@@ -78,7 +78,7 @@ impl Gen3Game for ReachGame {
     /// Full camo, through `globals`' curves: only where the object has it.
     fn camo(&mut self, cx: &mut Gen3Cx<'_>) -> Option<bool> {
         let (frame, state) = (cx.frame, &mut *cx.state);
-        let draw = frame.preview.reach_camo.as_ref().map(|camo| camo.draw(1.0))?;
+        let draw = frame.preview.reach.camo.as_ref().map(|camo| camo.draw(1.0))?;
         let values = [("k_vs_active_camo_factor", draw.factor), ("p_lighting_constant_9", draw.factor)];
         state.pass_values = Some(values.into_iter().collect());
         frame.active_camo.then_some(draw.opaque)

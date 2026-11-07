@@ -21,7 +21,7 @@ pub(in crate::app::model_preview) trait Dx9Game {
         unsafe { cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None) }
     }
 
-    /// The gel lights' maps, by `h2_gel_lights`, while the lights draw.
+    /// The gel lights' maps, by `h2.gel_lights`, while the lights draw.
     unsafe fn gel_maps(&mut self, _cx: &mut FrameCx<'_>) -> Vec<Option<glow::NativeTexture>> {
         Vec::new()
     }
@@ -102,7 +102,7 @@ impl RenderCore {
                 }
                 // `render_lights`: real lights draw whichever rig stands behind them.
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-                for (index, point) in frame.preview.h2_point_lights.iter().enumerate() {
+                for (index, point) in frame.preview.h2.point_lights.iter().enumerate() {
                     if !is_shown(&frame.h2_shown.points, index) {
                         continue;
                     }
@@ -124,7 +124,7 @@ impl RenderCore {
                 }
                 let gels = game.gel_maps(&mut FrameCx { gl, frame, core: self, slot });
                 let mut masked = false;
-                for (index, gel) in frame.preview.h2_gel_lights.iter().enumerate() {
+                for (index, gel) in frame.preview.h2.gel_lights.iter().enumerate() {
                     if !is_shown(&frame.h2_shown.gels, index) {
                         continue;
                     }

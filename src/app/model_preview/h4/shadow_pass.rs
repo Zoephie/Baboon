@@ -171,7 +171,7 @@ impl H4Game {
         let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
         let core: &mut RenderCore = cx.core;
         let state: &mut Gen3State = cx.state;
-        let caster = frame.preview.h4_shadow_caster?;
+        let caster = frame.preview.h4.shadow_caster?;
         let (size, albedo_framebuffer, normal, depth_copy, depth_copy_framebuffer) =
             state.targets.as_ref().map(|targets| {
                 (

@@ -78,7 +78,7 @@ impl RenderCore {
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             gl.color_mask(true, true, true, false);
             advance_sprite_simulations(uploaded, frame, bones, &view, &mut self.sprites_advanced);
-            let systems = frame.preview.h3_particles.iter().enumerate();
+            let systems = frame.preview.particles.iter().enumerate();
             let mut sorted: Vec<_> = systems
                 .filter(|(_, system)| system.look.shader.distortion.is_none())
                 .map(|(at, system)| {

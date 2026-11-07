@@ -95,25 +95,25 @@ impl CeTextures {
             let images = light.flare.iter().flat_map(|flare| &flare.images);
             images.map(|image| unsafe { upload_h2_image(gl, image) }).collect()
         };
-        let reachable = super::particles::reachable_defs(&preview.ce_effects);
+        let reachable = super::particles::reachable_defs(&preview.ce.effects);
         let by_effect = |def: &Arc<super::particles::CeEffectDef>| super::particles::def_key(def);
         unsafe {
             Self {
-                light_flares: preview.ce_lights.iter().map(flare).collect(),
+                light_flares: preview.ce.lights.iter().map(flare).collect(),
                 effect_flares: reachable
                     .iter()
                     .map(|def| (by_effect(def), def.lights.iter().map(|light| flare(&light.light)).collect()))
                     .collect(),
-                antennas: preview.ce_antennas.iter().map(|antenna| upload_h2_image(gl, &antenna.image)).collect(),
+                antennas: preview.ce.antennas.iter().map(|antenna| upload_h2_image(gl, &antenna.image)).collect(),
                 particles: reachable
                     .iter()
                     .map(|def| (by_effect(def), def.particles.iter().map(|particle| particle.images.iter().map(image).collect()).collect()))
                     .collect(),
-                contrails: preview.ce_contrails.iter().map(|contrail| contrail.def.images.iter().map(image).collect()).collect(),
-                light_volumes: preview.ce_light_volumes.iter().map(|volume| upload_h2_image(gl, &volume.image)).collect(),
-                lightning: preview.ce_lightning.iter().map(|lightning| upload_h2_image(gl, &lightning.image)).collect(),
-                glows: preview.ce_glows.iter().map(|glow| upload_h2_image(gl, &glow.image)).collect(),
-                pctl: preview.ce_particle_systems.iter().map(|system| sheets(&system.def.sheets)).collect(),
+                contrails: preview.ce.contrails.iter().map(|contrail| contrail.def.images.iter().map(image).collect()).collect(),
+                light_volumes: preview.ce.light_volumes.iter().map(|volume| upload_h2_image(gl, &volume.image)).collect(),
+                lightning: preview.ce.lightning.iter().map(|lightning| upload_h2_image(gl, &lightning.image)).collect(),
+                glows: preview.ce.glows.iter().map(|glow| upload_h2_image(gl, &glow.image)).collect(),
+                pctl: preview.ce.particle_systems.iter().map(|system| sheets(&system.def.sheets)).collect(),
                 effect_pctl: reachable
                     .iter()
                     .map(|def| (by_effect(def), def.systems.iter().map(|system| sheets(&system.sheets)).collect()))

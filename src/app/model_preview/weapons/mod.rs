@@ -594,7 +594,7 @@ pub(in crate::app::model_preview) fn attach_weapon(
         };
         let holder = super::animation::reach_ik::ReachIkHolder::Weapon(owner);
         let node = Some(parent.node.max(0) as usize);
-        preview.reach_ik_markers.extend(super::animation::reach_ik::reach_ik_markers(&attached, holder, place, node));
+        preview.gen3.ik_markers.extend(super::animation::reach_ik::reach_ik_markers(&attached, holder, place, node));
     }
     if let Some(weapons) = ik {
         let class = string_id_in(&weapon, "weapon class");

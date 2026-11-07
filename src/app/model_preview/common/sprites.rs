@@ -22,9 +22,9 @@ impl RenderCore {
         unsafe {
             let h3 = self.h3_draws(frame);
             let flares = self.sprite_gl.get_or_insert_with(|| link_sprite_gl(gl, self.program)).as_ref()?;
-            if !(frame.preview.h3_particles.is_empty()
-                && frame.preview.h3_strips.is_empty()
-                && frame.preview.h3_leaves.is_empty())
+            if !(frame.preview.particles.is_empty()
+                && frame.preview.gen3.strips.is_empty()
+                && frame.preview.h3.leaves.is_empty())
             {
                 self.particle_gl.get_or_insert_with(|| h3_particle_gl(gl, self.program));
             }
@@ -120,26 +120,26 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
         return;
     }
     let simulations = &mut uploaded.simulations;
-    if !frame.preview.h3_particles.is_empty() {
-        let systems = &frame.preview.h3_particles;
+    if !frame.preview.particles.is_empty() {
+        let systems = &frame.preview.particles;
         let values = |object: u8| frame.function_values_of_object(object).cloned();
         // The grid, or under the object if that hangs below it.
         let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
         let ground = lowest.fold(0.0, f32::min);
         simulations.particles.advance(systems, values, &mut simulations.effect_onsets, bones, view.eye, ground, frame.time);
     }
-    if !frame.preview.reach_cheap_emitters.is_empty() {
+    if !frame.preview.gen3.cheap_emitters.is_empty() {
         let values = |object: u8| frame.function_values_of_object(object).cloned();
-        let (emitters, shown) = (&frame.preview.reach_cheap_emitters, &frame.reach_cheap_shown);
+        let (emitters, shown) = (&frame.preview.gen3.cheap_emitters, &frame.reach_cheap_shown);
         simulations.reach_cheap.advance(emitters, shown, values, &mut simulations.effect_onsets, bones, view.eye, frame.time);
     }
-    if !frame.preview.h3_strips.is_empty() {
+    if !frame.preview.gen3.strips.is_empty() {
         let values = |object: u8| frame.function_values_of_object(object).cloned();
-        let (systems, particles) = (&frame.preview.h3_particles, &simulations.particles);
+        let (systems, particles) = (&frame.preview.particles, &simulations.particles);
         let tracks = |strip: &std::sync::Arc<gen3::strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
             particles.tracks_of(systems, strip).into_iter().map(|track| (track.id, track.place)).collect()
         };
-        simulations.h3_strips.advance(&frame.preview.h3_strips, values, &mut simulations.effect_onsets, tracks, bones, frame.time);
+        simulations.h3_strips.advance(&frame.preview.gen3.strips, values, &mut simulations.effect_onsets, tracks, bones, frame.time);
     }
 }
 
@@ -165,7 +165,7 @@ pub(in crate::app::model_preview) unsafe fn draw_antennas(
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         }
         gl.color_mask(true, true, true, h3);
-        let tips = springs.advance(&frame.preview.h2_antennas, bones, frame.time);
+        let tips = springs.advance(&frame.preview.antennas, bones, frame.time);
         for (quads, texture, reach) in h2_antennas(frame, textures, bones, view, &tips) {
             if reach {
                 // `draw_textured_transparent_quad`'s blend mode 3: source
@@ -210,7 +210,7 @@ pub(in crate::app::model_preview) unsafe fn draw_particle_system(
     targets: ParticleTargets<'_>,
 ) {
     unsafe {
-        let system = &frame.preview.h3_particles[index];
+        let system = &frame.preview.particles[index];
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let camera = &frame.camera;
         let values = frame.function_values_of_object(system.object);

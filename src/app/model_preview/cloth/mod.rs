@@ -694,13 +694,13 @@ pub(super) fn read_h3_cloth(
             sort_position: None,
         });
         // Either game's PRT attributes stay parallel to the vertices.
-        if let Some(prt) = preview.h2_prt.as_mut() {
+        if let Some(prt) = preview.h2.prt.as_mut() {
             prt.pad(cloth.places.len() * 2);
         }
-        if let Some(prt) = preview.h3_prt.as_mut() {
+        if let Some(prt) = preview.gen3.prt.as_mut() {
             prt.pad(cloth.places.len() * 2);
         }
-        preview.h3_cloth.push(cloth);
+        preview.cloth.push(cloth);
     }
 }
 

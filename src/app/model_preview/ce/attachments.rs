@@ -487,7 +487,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
         preview.weapon_ik.extend(weapon_ik(preview, &attached, &hold.class, parent, child, marker, attach_to));
     }
     let lights = super::lights::read_attached_lights(source, &weapon, 1, &attached, parent, child);
-    preview.ce_lights.extend(lights);
+    preview.ce.lights.extend(lights);
     let markers = attached
         .markers
         .iter()

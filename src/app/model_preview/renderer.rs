@@ -114,7 +114,7 @@ pub(super) fn draw_model_viewport(
     let camera = PreviewCamera::new(data, state, rect);
     let bones = frame.bones.clone();
     let skinning_rows = bones.as_deref().map(Vec::as_slice);
-    let firing = ce::firing::shots_moving(&data.preview.ce_firing, &state.ce_shots, data.geometry_id, time);
+    let firing = ce::firing::shots_moving(&data.preview.ce.firing, &state.ce_shots, data.geometry_id, time);
     if frame.moves() || ce_events_running(data.geometry_id) || firing {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     }
@@ -398,60 +398,60 @@ fn visible_instances(preview: &RenderModelPreview, state: &ModelPreviewState) ->
 /// Which of the preview's Halo 3 flares have a marker under what is selected.
 fn h3_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    let h4 = preview.h4_flares.iter().map(|at| at.only_under().is_none_or(shown));
-    preview.h3_flares.iter().map(|at| at.only_under().is_none_or(shown)).chain(h4).collect()
+    let h4 = preview.h4.flares.iter().map(|at| at.only_under().is_none_or(shown));
+    preview.gen3.flares.iter().map(|at| at.only_under().is_none_or(shown)).chain(h4).collect()
 }
 
 /// The same of Reach's lights and then its cheap lights, then Halo 4's.
 pub(super) fn reach_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    let lights = preview.reach_lights.iter().map(|light| light.only_under().is_none_or(shown));
-    let cheap = preview.reach_cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
-    let h4 = preview.h4_lights.iter().map(|light| light.only_under().is_none_or(shown));
-    let h4_cheap = preview.h4_cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
+    let lights = preview.reach.lights.iter().map(|light| light.only_under().is_none_or(shown));
+    let cheap = preview.reach.cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
+    let h4 = preview.h4.lights.iter().map(|light| light.only_under().is_none_or(shown));
+    let h4_cheap = preview.h4.cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
     lights.chain(cheap).chain(h4).chain(h4_cheap).collect()
 }
 
 /// The same of Halo 3's lights.
 fn h3_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    preview.h3_lights.iter().map(|light| light.only_under().is_none_or(shown)).collect()
+    preview.h3.lights.iter().map(|light| light.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Halo 3's light volumes.
 fn h3_volumes_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    preview.h3_light_volumes.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+    preview.gen3.light_volumes.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Halo 4's tracers.
 fn h4_tracers_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    preview.h4_tracers.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+    preview.h4.tracers.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Reach's cheap particle emitters.
 fn reach_cheap_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    preview.reach_cheap_emitters.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+    preview.gen3.cheap_emitters.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Halo 3's beams and contrails.
 fn h3_strips_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    preview.h3_strips.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+    preview.gen3.strips.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Halo 3's particle systems.
 fn h3_systems_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    preview.h3_particles.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+    preview.particles.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Halo 2's.
 fn h2_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
-    preview.h2_flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+    preview.h2.flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// Which of Halo 2's other lights and effects have a marker under what is
@@ -471,12 +471,12 @@ impl H2Shown {
     pub(super) fn of(preview: &RenderModelPreview, state: &ModelPreviewState) -> Self {
         let shown = |only: Option<&(String, String)>| only.is_none_or(|only| marker_active(only, &state.region_selections));
         Self {
-            points: preview.h2_point_lights.iter().map(|at| shown(at.only_under())).collect(),
-            gels: preview.h2_gel_lights.iter().map(|at| shown(at.only_under())).collect(),
-            volumes: preview.h2_light_volumes.iter().map(|at| shown(at.only_under())).collect(),
-            contrails: preview.h2_contrails.iter().map(|at| shown(at.only_under())).collect(),
-            liquids: preview.h2_liquids.iter().map(|at| shown(at.only_under())).collect(),
-            antennas: preview.h2_antennas.iter().map(|at| shown(at.only_under())).collect(),
+            points: preview.h2.point_lights.iter().map(|at| shown(at.only_under())).collect(),
+            gels: preview.h2.gel_lights.iter().map(|at| shown(at.only_under())).collect(),
+            volumes: preview.h2.light_volumes.iter().map(|at| shown(at.only_under())).collect(),
+            contrails: preview.h2.contrails.iter().map(|at| shown(at.only_under())).collect(),
+            liquids: preview.h2.liquids.iter().map(|at| shown(at.only_under())).collect(),
+            antennas: preview.antennas.iter().map(|at| shown(at.only_under())).collect(),
         }
     }
 }
@@ -1018,25 +1018,25 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
         .map(|(_, texture)| texture)
         .collect();
     let passes = owned.iter().flat_map(|texture| texture.h2_layers.iter().flatten());
-    let flares = data.preview.h2_flares.iter().filter(|at| at.object == object).map(|at| at.scale_name());
-    let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == object);
-    let h3_lights = data.preview.h3_lights.iter().filter(|light| light.object == object);
-    let reach_lights = data.preview.reach_lights.iter().filter(|light| light.object == object);
-    let reach_cheap = data.preview.reach_cheap_lights.iter().filter(|light| light.object == object);
-    let h4_lights = data.preview.h4_lights.iter().filter(|light| light.object == object);
-    let h4_cheap = data.preview.h4_cheap_lights.iter().filter(|light| light.object == object);
-    let h4_flares = data.preview.h4_flares.iter().filter(|at| at.object == object);
-    let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == object);
-    let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == object);
-    let h4_tracers = data.preview.h4_tracers.iter().filter(|at| at.object == object);
-    let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == object);
-    let h3_strips = data.preview.h3_strips.iter().filter(|at| at.object == object);
-    let reach_emitters = data.preview.reach_cheap_emitters.iter().filter(|at| at.object == object);
-    let h3_screens = data.preview.h3_screen_effects.iter().filter(|at| at.object == object);
-    let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == object);
-    let h2_volumes = data.preview.h2_light_volumes.iter().filter(|at| at.object == object).map(|at| at.scale_name());
-    let h2_contrails = data.preview.h2_contrails.iter().filter(|at| at.object == object).map(|at| at.scale_name());
-    let h2_liquids = data.preview.h2_liquids.iter().filter(|at| at.object == object).map(|at| at.scale_name());
+    let flares = data.preview.h2.flares.iter().filter(|at| at.object == object).map(|at| at.scale_name());
+    let lights = data.preview.h2.point_lights.iter().filter(|light| light.object == object);
+    let h3_lights = data.preview.h3.lights.iter().filter(|light| light.object == object);
+    let reach_lights = data.preview.reach.lights.iter().filter(|light| light.object == object);
+    let reach_cheap = data.preview.reach.cheap_lights.iter().filter(|light| light.object == object);
+    let h4_lights = data.preview.h4.lights.iter().filter(|light| light.object == object);
+    let h4_cheap = data.preview.h4.cheap_lights.iter().filter(|light| light.object == object);
+    let h4_flares = data.preview.h4.flares.iter().filter(|at| at.object == object);
+    let h3_flares = data.preview.gen3.flares.iter().filter(|at| at.object == object);
+    let h3_volumes = data.preview.gen3.light_volumes.iter().filter(|at| at.object == object);
+    let h4_tracers = data.preview.h4.tracers.iter().filter(|at| at.object == object);
+    let h3_systems = data.preview.particles.iter().filter(|at| at.object == object);
+    let h3_strips = data.preview.gen3.strips.iter().filter(|at| at.object == object);
+    let reach_emitters = data.preview.gen3.cheap_emitters.iter().filter(|at| at.object == object);
+    let h3_screens = data.preview.gen3.screen_effects.iter().filter(|at| at.object == object);
+    let gels = data.preview.h2.gel_lights.iter().filter(|light| light.object == object);
+    let h2_volumes = data.preview.h2.light_volumes.iter().filter(|at| at.object == object).map(|at| at.scale_name());
+    let h2_contrails = data.preview.h2.contrails.iter().filter(|at| at.object == object).map(|at| at.scale_name());
+    let h2_liquids = data.preview.h2.liquids.iter().filter(|at| at.object == object).map(|at| at.scale_name());
     let h3 = owned.iter().filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
     let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
     let h4 = owned.iter().filter_map(|texture| texture.h3.as_ref()).filter_map(|material| material.h4.as_ref());
@@ -1069,7 +1069,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
     // `sub_6C18F0` gates the shield overlay on this itself.
     let h3_shield = owned.iter().filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
     let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(H2Layer::ShieldDamaged));
-    let reach_shield = object == 0 && (data.preview.reach_shield.is_some() || data.preview.h4_shield.is_some());
+    let reach_shield = object == 0 && (data.preview.reach.shield.is_some() || data.preview.h4.shield.is_some());
     let gate = (shield || h3_shield || reach_shield).then_some("current_shield_damage");
     let gate = gate.into_iter().chain(h3_shield.then_some(gen3::pipeline::H3_OVERSHIELD));
     for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares).chain(gate) {
@@ -1115,9 +1115,9 @@ fn function_values_for(
     set: &functions::FunctionInputs,
     time: f32,
 ) -> Option<functions::FunctionValues> {
-    let flares = data.preview.h2_flares.iter().any(|at| !at.scale_name().is_empty())
-        || data.preview.h2_point_lights.iter().any(|light| !light.scale_name().is_empty())
-        || data.preview.h2_gel_lights.iter().any(|light| !light.scale_name().is_empty());
+    let flares = data.preview.h2.flares.iter().any(|at| !at.scale_name().is_empty())
+        || data.preview.h2.point_lights.iter().any(|light| !light.scale_name().is_empty())
+        || data.preview.h2.gel_lights.iter().any(|light| !light.scale_name().is_empty());
     let h3 = data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| texture.h3.is_some());
     (data.h2_object_functions.is_some() || flares || h3).then(|| h2_function_values(data, set, time))
 }
@@ -1131,34 +1131,34 @@ pub(super) fn object_moves(
 ) -> bool {
     object_functions(data).any(|functions| functions.move_at_rest())
         || h2_functions_move(data, set, time)
-        || data.preview.h2_flares.iter().any(|at| at.animates())
-        || data.preview.h2_point_lights.iter().any(|light| light.animates())
-        || data.preview.h2_gel_lights.iter().any(|light| light.animates())
-        || data.preview.h3_lights.iter().any(|light| light.animates())
-        || data.preview.reach_lights.iter().any(|light| light.animates())
-        || data.preview.reach_cheap_lights.iter().any(|light| light.animates())
-        || data.preview.h4_lights.iter().any(|light| light.animates())
-        || data.preview.h4_cheap_lights.iter().any(|light| light.animates())
-        || data.preview.h4_flares.iter().any(|at| at.animates())
-        || data.preview.h3_flares.iter().any(|at| at.animates())
-        || data.preview.h3_light_volumes.iter().any(|at| at.animates())
-        || !data.preview.h4_tracers.is_empty()
-        || !data.preview.h3_particles.is_empty()
-        || !data.preview.reach_cheap_emitters.is_empty()
-        || !data.preview.h3_strips.is_empty()
-        || !data.preview.h3_screen_effects.is_empty()
-        || !data.preview.h3_cloth.is_empty()
-        || !data.preview.h2_liquids.is_empty()
-        || !data.preview.h2_contrails.is_empty()
+        || data.preview.h2.flares.iter().any(|at| at.animates())
+        || data.preview.h2.point_lights.iter().any(|light| light.animates())
+        || data.preview.h2.gel_lights.iter().any(|light| light.animates())
+        || data.preview.h3.lights.iter().any(|light| light.animates())
+        || data.preview.reach.lights.iter().any(|light| light.animates())
+        || data.preview.reach.cheap_lights.iter().any(|light| light.animates())
+        || data.preview.h4.lights.iter().any(|light| light.animates())
+        || data.preview.h4.cheap_lights.iter().any(|light| light.animates())
+        || data.preview.h4.flares.iter().any(|at| at.animates())
+        || data.preview.gen3.flares.iter().any(|at| at.animates())
+        || data.preview.gen3.light_volumes.iter().any(|at| at.animates())
+        || !data.preview.h4.tracers.is_empty()
+        || !data.preview.particles.is_empty()
+        || !data.preview.gen3.cheap_emitters.is_empty()
+        || !data.preview.gen3.strips.is_empty()
+        || !data.preview.gen3.screen_effects.is_empty()
+        || !data.preview.cloth.is_empty()
+        || !data.preview.h2.liquids.is_empty()
+        || !data.preview.h2.contrails.is_empty()
         // An event's effect runs only when played, and asks for frames then.
-        || data.preview.ce_effects.iter().any(|effect| effect.event.is_none())
-        || !data.preview.ce_contrails.is_empty()
-        || !data.preview.ce_lightning.is_empty()
-        || !data.preview.ce_glows.is_empty()
-        || !data.preview.ce_particle_systems.is_empty()
-        || !data.preview.ce_flags.is_empty()
-        || !data.preview.h3_leaves.is_empty()
-        || data.preview.reach_shield.as_ref().is_some_and(|shield| {
+        || data.preview.ce.effects.iter().any(|effect| effect.event.is_none())
+        || !data.preview.ce.contrails.is_empty()
+        || !data.preview.ce.lightning.is_empty()
+        || !data.preview.ce.glows.is_empty()
+        || !data.preview.ce.particle_systems.is_empty()
+        || !data.preview.ce.flags.is_empty()
+        || !data.preview.h3.leaves.is_empty()
+        || data.preview.reach.shield.as_ref().is_some_and(|shield| {
             let damage = function_values.and_then(|values| values.get(gen3::pipeline::H3_SHIELD_DAMAGE)).copied().unwrap_or(0.0);
             shield.settings.showing(damage)
         })
@@ -1173,37 +1173,37 @@ pub(super) fn object_moves(
 
 /// Whether anything draws, lights or simulates outside the materials' passes.
 pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
-    !(preview.ce_lights.is_empty()
-        && preview.ce_antennas.is_empty()
-        && preview.ce_effects.is_empty()
-        && preview.ce_contrails.is_empty()
-        && preview.ce_light_volumes.is_empty()
-        && preview.ce_lightning.is_empty()
-        && preview.ce_glows.is_empty()
-        && preview.ce_particle_systems.is_empty()
-        && preview.ce_flags.is_empty()
-        && preview.h2_antennas.is_empty()
-        && preview.h2_flares.is_empty()
-        && preview.h2_point_lights.is_empty()
-        && preview.h2_gel_lights.is_empty()
-        && preview.h2_light_volumes.is_empty()
-        && preview.h2_contrails.is_empty()
-        && preview.h2_liquids.is_empty()
-        && preview.h3_lights.is_empty()
-        && preview.reach_lights.is_empty()
-        && preview.reach_cheap_lights.is_empty()
-        && preview.h4_lights.is_empty()
-        && preview.h4_cheap_lights.is_empty()
-        && preview.h4_flares.is_empty()
-        && preview.h3_flares.is_empty()
-        && preview.h3_light_volumes.is_empty()
-        && preview.h4_tracers.is_empty()
-        && preview.h3_particles.is_empty()
-        && preview.reach_cheap_emitters.is_empty()
-        && preview.h3_strips.is_empty()
-        && preview.h3_leaves.is_empty()
-        && preview.h3_cloth.is_empty()
-        && preview.h3_screen_effects.is_empty())
+    !(preview.ce.lights.is_empty()
+        && preview.ce.antennas.is_empty()
+        && preview.ce.effects.is_empty()
+        && preview.ce.contrails.is_empty()
+        && preview.ce.light_volumes.is_empty()
+        && preview.ce.lightning.is_empty()
+        && preview.ce.glows.is_empty()
+        && preview.ce.particle_systems.is_empty()
+        && preview.ce.flags.is_empty()
+        && preview.antennas.is_empty()
+        && preview.h2.flares.is_empty()
+        && preview.h2.point_lights.is_empty()
+        && preview.h2.gel_lights.is_empty()
+        && preview.h2.light_volumes.is_empty()
+        && preview.h2.contrails.is_empty()
+        && preview.h2.liquids.is_empty()
+        && preview.h3.lights.is_empty()
+        && preview.reach.lights.is_empty()
+        && preview.reach.cheap_lights.is_empty()
+        && preview.h4.lights.is_empty()
+        && preview.h4.cheap_lights.is_empty()
+        && preview.h4.flares.is_empty()
+        && preview.gen3.flares.is_empty()
+        && preview.gen3.light_volumes.is_empty()
+        && preview.h4.tracers.is_empty()
+        && preview.particles.is_empty()
+        && preview.gen3.cheap_emitters.is_empty()
+        && preview.gen3.strips.is_empty()
+        && preview.h3.leaves.is_empty()
+        && preview.cloth.is_empty()
+        && preview.gen3.screen_effects.is_empty())
 }
 
 fn h2_functions_move(
@@ -1239,7 +1239,7 @@ fn object_states(
 ) -> Vec<CeObjectState> {
     let state = |functions: Option<&ce::functions::CeObjectFunctions>, object, colors| {
         let (outputs, active) = functions.map_or(([0.0; 4], [false; 4]), |functions| {
-            let fired = ce::firing::fired_input(&data.preview.ce_firing, shots, data.geometry_id, object, time);
+            let fired = ce::firing::fired_input(&data.preview.ce.firing, shots, data.geometry_id, object, time);
             let inputs = functions.with_fired(functions.inputs_for(set, (data.geometry_id, object)), fired);
             functions.outputs_active(&inputs, ce::functions::object_time(time, object))
         });
@@ -1301,7 +1301,7 @@ impl ModelGpuFrame {
     }
 
     pub(super) fn h2_object_prt_clusters(&self) -> Option<[Vec<[f32; 4]>; 2]> {
-        let prt = self.preview.h2_prt.as_ref().filter(|_| self.prt && self.game_shaders && !self.default_lights)?;
+        let prt = self.preview.h2.prt.as_ref().filter(|_| self.prt && self.game_shaders && !self.default_lights)?;
         let (lights, ambient) = h2_prt_object_lights(self.h2_object_light());
         Some([prt.clusters_lit_by(&lights, ambient), prt.clusters_lit_by(&lights[..1], ambient)])
     }
@@ -1314,13 +1314,13 @@ impl ModelGpuFrame {
 
     /// The same, with lights the object's effects have made besides.
     pub(super) fn ce_point_lights_with(&self, made: &[ce::lights::CeLight]) -> Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]> {
-        if self.preview.ce_lights.is_empty() && made.is_empty() {
+        if self.preview.ce.lights.is_empty() && made.is_empty() {
             return Vec::new();
         }
         let lights: std::borrow::Cow<'_, [ce::lights::CeLight]> = if made.is_empty() {
-            std::borrow::Cow::Borrowed(&self.preview.ce_lights)
+            std::borrow::Cow::Borrowed(&self.preview.ce.lights)
         } else {
-            std::borrow::Cow::Owned(self.preview.ce_lights.iter().chain(made).cloned().collect())
+            std::borrow::Cow::Owned(self.preview.ce.lights.iter().chain(made).cloned().collect())
         };
         let (low, high) = (self.preview.bounds_min, self.preview.bounds_max);
         let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
@@ -1425,7 +1425,7 @@ pub(super) fn ce_event_plays(
     counts: &ce::functions::CeEventCounts,
     scales: [f32; 2],
 ) -> ce::particles::CeEventPlays {
-    let effects = &data.preview.ce_effects;
+    let effects = &data.preview.ce.effects;
     let count = |index| counts.get(&(data.geometry_id, index)).copied().unwrap_or(0);
     ce::particles::CeEventPlays { counts: (0..effects.len()).map(count).collect(), scales }
 }
@@ -2177,7 +2177,7 @@ impl ModelGpuSlot {
                 slice_bytes(&frame.preview.indices),
                 glow::STATIC_DRAW,
             );
-            match &frame.preview.h2_prt {
+            match &frame.preview.h2.prt {
                 Some(prt) => {
                     gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
                     gl.buffer_data_u8_slice(
@@ -2210,7 +2210,7 @@ impl ModelGpuSlot {
                     gl.disable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
                 }
             }
-            match &frame.preview.h3_prt {
+            match &frame.preview.gen3.prt {
                 Some(prt) => {
                     gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
                     gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&prt.vertices), glow::STATIC_DRAW);
@@ -2250,19 +2250,19 @@ impl ModelGpuSlot {
             }
             let maps = |look: &particles::H3SpriteShader| sprite_maps(gl, look);
             self.particle_textures =
-                frame.preview.h3_particles.iter().map(|system| maps(&system.look.shader)).collect();
-            self.strip_textures = frame.preview.h3_strips.iter().map(|strip| maps(strip.shader())).collect();
+                frame.preview.particles.iter().map(|system| maps(&system.look.shader)).collect();
+            self.strip_textures = frame.preview.gen3.strips.iter().map(|strip| maps(strip.shader())).collect();
             if let Some(texture) = self.reach_cheap_texture.take() {
                 gl.delete_texture(texture);
             }
-            let render = frame.preview.reach_cheap_emitters.first().and_then(|at| at.library().render_texture());
+            let render = frame.preview.gen3.cheap_emitters.first().and_then(|at| at.library().render_texture());
             self.reach_cheap_texture = render.and_then(|render| upload_cheap_render_texture(gl, render));
             for texture in self.flare_textures.drain(..).flatten().flatten() {
                 gl.delete_texture(texture);
             }
             self.flare_textures = frame
                 .preview
-                .h3_flares
+                .gen3.flares
                 .iter()
                 .map(|at| {
                     let (image, texels, mips) = at.bitmap();
@@ -2275,7 +2275,7 @@ impl ModelGpuSlot {
             }
             self.antenna_textures = frame
                 .preview
-                .h2_antennas
+                .antennas
                 .iter()
                 .map(|antenna| match &antenna.h3_bitmap {
                     // `build_sprite`. Reach's `draw_textured_transparent_quad`
@@ -2295,7 +2295,7 @@ impl ModelGpuSlot {
             }
             self.volume_textures = frame
                 .preview
-                .h3_light_volumes
+                .gen3.light_volumes
                 .iter()
                 .map(|at| {
                     let (image, texels, mips) = at.bitmap()?;
@@ -2702,7 +2702,7 @@ pub(in crate::app::model_preview) fn advance_ce_effects(ce: &mut ce::slot::CeSlo
     let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
     let ground = lowest.fold(0.0, f32::min);
     let others = ce.simulations.pctl.particle_count();
-    let effects = &frame.preview.ce_effects;
+    let effects = &frame.preview.ce.effects;
     ce.simulations.particles.advance(effects, &frame.ce_plays, inputs, bones, ground, frame.time, others);
     let running = ce.simulations.particles.runs_played(effects.len());
     CE_EVENTS_RUNNING.with(|set| {
@@ -2820,7 +2820,7 @@ pub(in crate::app::model_preview) fn ce_groups(
     view: &common::view::ViewFrame,
 ) -> Vec<CeGroup> {
     let camera = &frame.camera;
-    let effects = &frame.preview.ce_effects;
+    let effects = &frame.preview.ce.effects;
     let states = &frame.object_states;
     let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
     let ground = lowest.fold(0.0, f32::min);
@@ -2833,7 +2833,7 @@ pub(in crate::app::model_preview) fn ce_groups(
         let side = ce_flare_clip(camera, std::array::from_fn(|axis| center[axis] + view.right[axis] * radius));
         ((side[0] / side[3] - middle[0] / middle[3]).abs() * half_width * 2.0).max(0.0)
     };
-    let contrails = &frame.preview.ce_contrails;
+    let contrails = &frame.preview.ce.contrails;
     let switched = |object: u8| {
         states.get(object as usize).map_or(([0.0; 4], [false; 4]), |state| (state.outputs, state.active))
     };
@@ -2842,7 +2842,7 @@ pub(in crate::app::model_preview) fn ce_groups(
     let mut sprites = CeSpriteGroups::default();
     // Made afresh every frame, as the game draws it.
     let seed = (frame.time * 1000.0) as u32;
-    for (index, lightning) in frame.preview.ce_lightning.iter().enumerate() {
+    for (index, lightning) in frame.preview.ce.lightning.iter().enumerate() {
         let Some(texture) = ce.textures.lightning.get(index).copied().flatten() else {
             continue;
         };
@@ -2872,7 +2872,7 @@ pub(in crate::app::model_preview) fn ce_groups(
         }
     }
     // And those on the object's attachments.
-    let systems = &frame.preview.ce_particle_systems;
+    let systems = &frame.preview.ce.particle_systems;
     if !systems.is_empty() {
         let inputs = |object: u8| {
             let state = states.get(usize::from(object));
@@ -2894,7 +2894,7 @@ pub(in crate::app::model_preview) fn ce_groups(
         }
     }
     // `glow_render`, through `global_shader_effect_additive`.
-    let glows = &frame.preview.ce_glows;
+    let glows = &frame.preview.ce.glows;
     // `glow_update` reads an output only while it is on, else nothing.
     let read_if_on = |object: u8| {
         let (outputs, active) = switched(object);
@@ -2932,7 +2932,7 @@ pub(in crate::app::model_preview) fn ce_groups(
     }
     let mut groups: Vec<CeGroup> = sprites.sorted_by(view).collect();
     // `antenna_render_proper`: one group each, at the mean of its sprites.
-    for (antenna, texture) in frame.preview.ce_antennas.iter().zip(&ce.textures.antennas) {
+    for (antenna, texture) in frame.preview.ce.antennas.iter().zip(&ce.textures.antennas) {
         let Some(texture) = *texture else {
             continue;
         };
@@ -2942,7 +2942,7 @@ pub(in crate::app::model_preview) fn ce_groups(
         groups.push(CeGroup { z_sort: ce_z_sort(view, centroid, false), draw });
     }
     // `light_volume_submit`: one group each, at its marker.
-    for (volume, texture) in frame.preview.ce_light_volumes.iter().zip(&ce.textures.light_volumes) {
+    for (volume, texture) in frame.preview.ce.light_volumes.iter().zip(&ce.textures.light_volumes) {
         let Some(texture) = *texture else {
             continue;
         };
@@ -4005,7 +4005,7 @@ impl RenderCore {
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
         let ground = lowest.fold(0.0, f32::min);
-        let written = ce.simulations.flags.advance(&frame.preview.ce_flags, bones, ground, frame.time);
+        let written = ce.simulations.flags.advance(&frame.preview.ce.flags, bones, ground, frame.time);
         for (first, moved) in written {
             let moved = moved.into_iter().map(|(position, normal)| (position, normal, None));
             unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
@@ -4282,27 +4282,27 @@ impl RenderCore {
         let preview = &frame.preview;
         frame.game_shaders
             && self.shaders_supported
-            && !(preview.ce_lights.is_empty()
-                && preview.ce_antennas.is_empty()
-                && preview.ce_effects.is_empty()
-                && preview.ce_contrails.is_empty()
-                && preview.ce_light_volumes.is_empty()
-                && preview.ce_lightning.is_empty()
-                && preview.ce_glows.is_empty()
-                && preview.ce_particle_systems.is_empty()
-                && preview.h2_antennas.is_empty()
-                && preview.h2_flares.is_empty()
-                && preview.h3_flares.is_empty()
-                && preview.h4_flares.is_empty()
-                && preview.h3_light_volumes.is_empty()
-                && preview.h4_tracers.is_empty()
-                && preview.h2_light_volumes.is_empty()
-                && preview.h2_contrails.is_empty()
-                && preview.h2_liquids.is_empty()
-                && preview.h3_particles.is_empty()
-                && preview.reach_cheap_emitters.is_empty()
-                && preview.h3_strips.is_empty()
-                && preview.h3_leaves.is_empty())
+            && !(preview.ce.lights.is_empty()
+                && preview.ce.antennas.is_empty()
+                && preview.ce.effects.is_empty()
+                && preview.ce.contrails.is_empty()
+                && preview.ce.light_volumes.is_empty()
+                && preview.ce.lightning.is_empty()
+                && preview.ce.glows.is_empty()
+                && preview.ce.particle_systems.is_empty()
+                && preview.antennas.is_empty()
+                && preview.h2.flares.is_empty()
+                && preview.gen3.flares.is_empty()
+                && preview.h4.flares.is_empty()
+                && preview.gen3.light_volumes.is_empty()
+                && preview.h4.tracers.is_empty()
+                && preview.h2.light_volumes.is_empty()
+                && preview.h2.contrails.is_empty()
+                && preview.h2.liquids.is_empty()
+                && preview.particles.is_empty()
+                && preview.gen3.cheap_emitters.is_empty()
+                && preview.gen3.strips.is_empty()
+                && preview.h3.leaves.is_empty())
     }
 
     /// Halo CE's transparents as `rasterizer_transparent_geometry_draw` draws
@@ -4436,7 +4436,7 @@ impl RenderCore {
         let passes = Self::h2_passes(frame, material, layer);
         self.shaders_supported
             && !passes.is_empty()
-            && (layer != H2Layer::Prt || (frame.prt && frame.preview.h2_prt.is_some()))
+            && (layer != H2Layer::Prt || (frame.prt && frame.preview.h2.prt.is_some()))
             && passes.iter().all(|pass| {
                 self.h2_programs
                     .get(&(pass.stage, pass.fragment.clone()))
@@ -4655,7 +4655,7 @@ impl RenderCore {
             gl.color_mask(true, true, true, true);
             self.draw_h2_passes(gl, frame, slot, order, H2Layer::Bloom, None);
             // `sub_6C18F0`: the hologram shader draws while its control is up.
-            let hologram = frame.preview.h2_hologram_control.as_deref().is_some_and(|name| {
+            let hologram = frame.preview.h2.hologram_control.as_deref().is_some_and(|name| {
                 frame.function_values.as_ref().and_then(|values| values.get(name)).is_some_and(|value| *value > 0.0)
             });
             if hologram {
@@ -4936,7 +4936,7 @@ impl RenderCore {
                     gl.uniform_3_f32_slice(location.as_ref(), &vector);
                 }
             }
-            if let Some(prt) = &frame.preview.h2_prt {
+            if let Some(prt) = &frame.preview.h2.prt {
                 let location = program.location(gl, "u_prt");
                 if location.is_some() {
                     let clusters = match &frame.h2_prt_clusters {
@@ -6770,7 +6770,7 @@ pub(in crate::app::model_preview) fn h2_antennas(
 ) -> Vec<(Vec<ce::lights::CeAntennaQuad>, glow::NativeTexture, bool)> {
     let preview = &frame.preview;
     preview
-        .h2_antennas
+        .antennas
         .iter()
         .zip(textures)
         .enumerate()
@@ -6785,13 +6785,13 @@ pub(in crate::app::model_preview) fn h2_antennas(
 /// Whether the preview has any of Halo CE's effects, particle systems, glows,
 /// contrails, lightning, antennas or light volumes.
 pub(in crate::app::model_preview) fn ce_has_groups(preview: &RenderModelPreview) -> bool {
-    !(preview.ce_effects.is_empty()
-        && preview.ce_particle_systems.is_empty()
-        && preview.ce_glows.is_empty()
-        && preview.ce_contrails.is_empty()
-        && preview.ce_lightning.is_empty()
-        && preview.ce_antennas.is_empty()
-        && preview.ce_light_volumes.is_empty())
+    !(preview.ce.effects.is_empty()
+        && preview.ce.particle_systems.is_empty()
+        && preview.ce.glows.is_empty()
+        && preview.ce.contrails.is_empty()
+        && preview.ce.lightning.is_empty()
+        && preview.ce.antennas.is_empty()
+        && preview.ce.light_volumes.is_empty())
 }
 
 /// Whether Halo CE's effects sort in among the model's transparent parts, as

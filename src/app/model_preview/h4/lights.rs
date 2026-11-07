@@ -633,7 +633,7 @@ fn read_cheap_light(source: &TagSource, path: &str) -> Option<H4CheapLight> {
 /// spot brings both.
 pub(crate) fn read_h4_light_passes(source: &TagSource, preview: &mut RenderModelPreview) {
     let mut wanted: Vec<(bool, usize)> = Vec::new();
-    for light in &preview.h4_lights {
+    for light in &preview.h4.lights {
         let tag = &light.tag;
         let specular = if tag.specular > SMALLEST {
             TECHNIQUE_SPECULAR
@@ -645,10 +645,10 @@ pub(crate) fn read_h4_light_passes(source: &TagSource, preview: &mut RenderModel
             wanted.push((tag.physical, specular | TECHNIQUE_SPOT));
         }
     }
-    if !preview.h4_cheap_lights.is_empty() {
+    if !preview.h4.cheap_lights.is_empty() {
         wanted.push((false, 0));
     }
-    wanted.retain(|key| !preview.h4_light_passes.contains_key(key));
+    wanted.retain(|key| !preview.h4.light_passes.contains_key(key));
     if wanted.is_empty() {
         return;
     }
@@ -661,7 +661,7 @@ pub(crate) fn read_h4_light_passes(source: &TagSource, preview: &mut RenderModel
             continue;
         };
         if let Ok(pass) = h4_light_pass(program, key.1) {
-            preview.h4_light_passes.insert(key, Arc::new(pass));
+            preview.h4.light_passes.insert(key, Arc::new(pass));
         }
     }
 }
