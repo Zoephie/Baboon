@@ -1448,7 +1448,7 @@ impl Gen3State {
                 let index = batch.material_index as usize;
                 let material = core.h3_material(frame, index)?;
                 let textures = frame.textures.as_ref()?.get(index)?;
-                super::super::reach::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
+                super::super::gen3::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
                     .then(|| (batch.clone(), Arc::clone(material)))
             })
             .collect();
@@ -1462,10 +1462,10 @@ impl Gen3State {
         let camera = &frame.camera;
         let eye = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
         values.insert(
-            super::super::reach::shield::DEPTH_DECODE,
+            super::super::gen3::shield::DEPTH_DECODE,
             [camera.depth_scale * camera.depth_map[0], camera.depth_map[1], camera.perspective, eye],
         );
-        values.insert(super::super::reach::shield::WORLD_SCALE, [camera.scale; 4]);
+        values.insert(super::super::gen3::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
             // What the pass fades against: everything drawn so far.
             if let Some(targets) = self.targets.as_ref() {

@@ -66,7 +66,7 @@ impl ReachGame {
             // `real_random`'s two draws, new each frame.
             self.noise_frame = self.noise_frame.wrapping_add(1);
             let frame_number = self.noise_frame as f32;
-            let random = [0, 1].map(|salt| super::shield::real_random(frame_number, salt));
+            let random = [0, 1].map(|salt| super::super::gen3::shield::real_random(frame_number, salt));
             let [x, y] = reach_noise_offset(self.noise_frame, random);
             gl.uniform_2_f32(gl.get_uniform_location(program, "noise_offset").as_ref(), x, y);
             gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), REACH_DARK_MULTIPLIER);

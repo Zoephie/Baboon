@@ -660,7 +660,7 @@ fn reach_shield_passes_link() {
     let passes: Vec<_> = shield.passes().collect();
     assert_eq!(passes.len(), 2, "both explicit shaders");
     for pass in passes {
-        assert!(pass.pixel.contains(super::reach::shield::DEPTH_DECODE), "the depth read is the preview's");
+        assert!(pass.pixel.contains(super::gen3::shield::DEPTH_DECODE), "the depth read is the preview's");
         assert!(!pass.pixel.contains("depth_constants.z - "), "Reach's own depth read is gone");
         assert!(!pass.vertex.contains("GlobalTexture_shield_impact_noise_texture"), "the vertex stage reads oscillation");
         unsafe {

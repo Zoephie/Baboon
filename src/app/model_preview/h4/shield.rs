@@ -14,7 +14,7 @@ use blam_tags::TagFile;
 use super::super::common::fields::elements;
 use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::{H3Pass, H3Texture};
-use super::super::reach::shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
+use super::super::gen3::shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::{Scalar, Type};
@@ -23,8 +23,8 @@ use crate::core::source::TagSource;
 /// `rasterizer_globals`' explicit shader 61, `shield_impact`.
 const SHIELD_IMPACT: usize = 61;
 /// What the preview's depth reads back as world distance with: as Reach's.
-pub(crate) const DEPTH_DECODE: &str = super::super::reach::shield::DEPTH_DECODE;
-pub(crate) const WORLD_SCALE: &str = super::super::reach::shield::WORLD_SCALE;
+pub(crate) const DEPTH_DECODE: &str = super::super::gen3::shield::DEPTH_DECODE;
+pub(crate) const WORLD_SCALE: &str = super::super::gen3::shield::WORLD_SCALE;
 
 /// The shield's settings, its textures under Halo 4's names, and its pass.
 #[derive(Debug)]

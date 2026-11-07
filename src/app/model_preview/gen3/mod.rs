@@ -12,6 +12,7 @@ pub(crate) mod screen_effects;
 pub(in crate::app::model_preview) mod screen_lights;
 pub(crate) mod shaders;
 pub(in crate::app::model_preview) mod shadow;
+pub(crate) mod shield;
 pub(in crate::app::model_preview) mod sprites;
 pub(in crate::app::model_preview) mod state;
 pub(crate) mod strips;

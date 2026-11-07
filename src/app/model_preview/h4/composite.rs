@@ -42,7 +42,7 @@ impl H4Game {
                 let index = batch.material_index as usize;
                 let material = core.h3_material(frame, index)?;
                 let textures = frame.textures.as_ref()?.get(index)?;
-                super::super::reach::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
+                super::super::gen3::shield::draws_shield(textures.shield_only, textures.never_shield, material.decal)
                     .then(|| (batch.clone(), Arc::clone(material)))
             })
             .collect();
