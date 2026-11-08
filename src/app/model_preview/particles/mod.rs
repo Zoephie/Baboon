@@ -27,7 +27,6 @@ use super::renderer::{H3_EXPOSURE, reach_alt_exposure, reach_exposure, reach_lig
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::game::GameId;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::random::{high_bits, lcg_step};
 use crate::app::model_preview::common::attached::attached;
@@ -667,32 +666,32 @@ fn collides(flagged: impl Fn(&str) -> bool) -> bool {
 /// (`sub_140A84700`): the emitter's own, else its template's and on up the
 /// template chain (`sub_140A848F0`), else a constant 1.
 fn movement_parameter(
-    source: &TagSource,
+    reader: &TagReader,
     movement: TagStruct<'_>,
     kind: &str,
     id: i128,
     seeds: &mut SeedAllocator,
 ) -> Option<H3ParticleProperty> {
-    movement_parameter_or(source, movement, kind, id, 1.0, seeds)
+    movement_parameter_or(reader, movement, kind, id, 1.0, seeds)
 }
 
 /// [`movement_parameter`], with the constant tool fills in where it differs.
 fn movement_parameter_or(
-    source: &TagSource,
+    reader: &TagReader,
     movement: TagStruct<'_>,
     kind: &str,
     id: i128,
     default: f32,
     seeds: &mut SeedAllocator,
 ) -> Option<H3ParticleProperty> {
-    chained_parameter(source, movement, kind, id, seeds, MOST_TEMPLATES).or_else(|| H3ParticleProperty::fixed(default))
+    chained_parameter(reader, movement, kind, id, seeds, MOST_TEMPLATES).or_else(|| H3ParticleProperty::fixed(default))
 }
 
 /// How deep a template chain is followed, against one that names itself.
 const MOST_TEMPLATES: usize = 8;
 
 fn chained_parameter(
-    source: &TagSource,
+    reader: &TagReader,
     holder: TagStruct<'_>,
     kind: &str,
     id: i128,
@@ -706,8 +705,8 @@ fn chained_parameter(
         return H3ParticleProperty::named(found, "property", seeds);
     }
     let path = holder.read_tag_ref_path("template").filter(|path| !path.is_empty() && depth > 0)?;
-    let template = load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok()?;
-    chained_parameter(source, template.root(), kind, id, seeds, depth - 1)
+    let template = reader.load(&path, "particle_physics", b"pmov").ok()?;
+    chained_parameter(reader, template.root(), kind, id, seeds, depth - 1)
 }
 
 /// A particle's physical rotation at birth, in turns: random with `random
@@ -1049,16 +1048,16 @@ pub(super) fn h3_sort_layer(shader: TagStruct<'_>) -> i32 {
 /// A sprite system's `actual shader?`, by its options' names. Reach's options
 /// (`shaders\particle.render_method_definition`) read their parameters
 /// through the resolver, falling to what their option tags default them to.
-pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> Option<H3SpriteShader> {
+pub(super) fn read_sprite_shader(reader: &TagReader, shader: TagStruct<'_>) -> Option<H3SpriteShader> {
     let definition = shader.read_tag_ref_path("definition").filter(|path| !path.is_empty())?;
-    let definition = read_h3_definition(source, &definition)?;
+    let definition = read_h3_definition(reader, &definition)?;
     let options: Vec<usize> = elements(shader, "options")
         .iter()
         .map(|option| option.read_int_any("short").unwrap_or(0).max(0) as usize)
         .collect();
     let chosen = |category: &str| definition.chosen(category, &options).unwrap_or_default().to_owned();
-    let reach_method = ParticleRules::of(source.game()).reach_render_method;
-    let resolved = resolve_embedded_method(source, shader);
+    let reach_method = ParticleRules::of(reader.source.game()).reach_render_method;
+    let resolved = resolve_embedded_method(reader, shader);
     let resolved_real = |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
     let add = parameter(shader, "self_illum_color")
         .filter(|_| chosen("self_illumination") == "constant_color")
@@ -1066,7 +1065,7 @@ pub(super) fn read_sprite_shader(source: &TagSource, shader: TagStruct<'_>) -> O
         .and_then(|animated| tag_function_at(&animated, "function"))
         .map(|function| function.evaluate_color(0.0, 0.0))
         .map_or([0.0; 3], |color| [color.red, color.green, color.blue]);
-    let ([base_map, alpha_map, palette_map, second_map], samplers) = read_maps(source, shader);
+    let ([base_map, alpha_map, palette_map, second_map], samplers) = read_maps(reader, shader);
     let depth_fade = chosen("depth_fade");
     // `compute_depth_fade`: Reach's `low_res` is `on` on DirectX 11, its
     // four taps being the 360's alone, and `palette_shift` fades as `on` does.
@@ -1152,19 +1151,19 @@ fn parameter<'a>(shader: TagStruct<'a>, name: &str) -> Option<TagStruct<'a>> {
     parameters.into_iter().find(|parameter| parameter.read_string_id("parameter name").as_deref() == Some(name))
 }
 
-fn read_map(source: &TagSource, shader: TagStruct<'_>, name: &str) -> Option<H3Bitmap> {
+fn read_map(reader: &TagReader, shader: TagStruct<'_>, name: &str) -> Option<H3Bitmap> {
     let path = parameter(shader, name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
+    read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
 }
 
 /// A sprite shader's maps, and the sampler each is baked with. Failing to
 /// resolve leaves what it authored, on the preview's default sampler.
-fn read_maps(source: &TagSource, shader: TagStruct<'_>) -> ([Option<H3Bitmap>; 4], [Option<H3Sampler>; 4]) {
+fn read_maps(reader: &TagReader, shader: TagStruct<'_>) -> ([Option<H3Bitmap>; 4], [Option<H3Sampler>; 4]) {
     const MAPS: [&str; 4] = ["base_map", "alpha_map", "palette", "base_map2"];
-    let Some(resolved) = resolve_embedded_method(source, shader) else {
-        return (MAPS.map(|name| read_map(source, shader, name)), [None; 4]);
+    let Some(resolved) = resolve_embedded_method(reader, shader) else {
+        return (MAPS.map(|name| read_map(reader, shader, name)), [None; 4]);
     };
-    let mut maps = MAPS.map(|name| read_resolved_map(source, &resolved, name)).into_iter();
+    let mut maps = MAPS.map(|name| read_resolved_map(reader, &resolved, name)).into_iter();
     let (bitmaps, samplers): (Vec<_>, Vec<_>) = std::array::from_fn::<_, 4, _>(|_| maps.next().flatten())
         .map(|map| map.map_or((None, None), |(bitmap, sampler)| (Some(bitmap), Some(sampler))))
         .into_iter()
@@ -1240,7 +1239,7 @@ pub(in crate::app::model_preview) fn sprite_corner(rect: [f32; 4], center: [f32;
 /// `postprocess_frame_animation`: the quad from the first sequence's sprite at
 /// the starting frame, and the frames from `first + 1`'s, manual ones first.
 fn read_frames(
-    source: &TagSource,
+    reader: &TagReader,
     shader: TagStruct<'_>,
     first: usize,
     offset: [f32; 2],
@@ -1250,7 +1249,7 @@ fn read_frames(
     let whole = vec![[0.0, 0.0, 1.0, 1.0]];
     let tag = parameter(shader, "base_map")
         .and_then(|base| base.read_tag_ref_path("bitmap"))
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "bitmap", b"bitm").ok());
+        .and_then(|path| reader.load(&path, "bitmap", b"bitm").ok());
     let Some(tag) = tag else {
         return (whole, sprite_corner([0.0, 1.0, 0.0, 1.0], [0.5, 0.5], offset, 1.0));
     };
@@ -1293,8 +1292,8 @@ fn read_frames(
 }
 
 /// A `particle_model`'s meshes, each a triangle list.
-fn read_particle_mesh(source: &TagSource, path: &str) -> Option<Vec<Vec<blam_tags::ParticleVertex>>> {
-    let tag = load_referenced_tag_from_source(source, path, "particle_model", b"pmdf").ok()?;
+fn read_particle_mesh(reader: &TagReader, path: &str) -> Option<Vec<Vec<blam_tags::ParticleVertex>>> {
+    let tag = reader.load(path, "particle_model", b"pmdf").ok()?;
     let meshes = blam_tags::particle_model_meshes(&tag, "particle_model").ok()?;
     let triangles = |mesh: &blam_tags::ParticleObjectMesh| {
         mesh.indices.iter().filter_map(|index| mesh.vertices.get(*index as usize).copied()).collect::<Vec<_>>()
@@ -1303,25 +1302,25 @@ fn read_particle_mesh(source: &TagSource, path: &str) -> Option<Vec<Vec<blam_tag
     (!meshes.is_empty()).then_some(meshes)
 }
 
-fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
-    let tag = load_referenced_tag_from_source(source, path, "particle", b"prt3").ok()?;
+fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook> {
+    let tag = reader.load(path, "particle", b"prt3").ok()?;
     let root = tag.root();
     let model = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
-        Some(model) => Some(read_particle_mesh(source, &model)?),
+        Some(model) => Some(read_particle_mesh(reader, &model)?),
         None => None,
     };
-    let rules = ParticleRules::of(source.game());
+    let rules = ParticleRules::of(reader.source.game());
     let h4 = match rules.draws_through_material {
         true => {
             // The GPU draws a model's strip whole, variant by variant.
             let strip = match root.read_tag_ref_path("Model").filter(|model| !model.is_empty()) {
                 Some(path) => {
-                    let tag = load_referenced_tag_from_source(source, &path, "particle_model", b"pmdf").ok()?;
+                    let tag = reader.load(&path, "particle_model", b"pmdf").ok()?;
                     Some(blam_tags::particle_model_strip(&tag).ok()?)
                 }
                 None => None,
             };
-            Some(Arc::new(super::h4::particles::read_h4_particle_render(source, root, strip.as_ref()).ok()?))
+            Some(Arc::new(super::h4::particles::read_h4_particle_render(reader, root, strip.as_ref()).ok()?))
         }
         false => None,
     };
@@ -1333,7 +1332,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     let start = tag_function_at(&root.descend("frame index")?, "Mapping").map_or(0.0, |function| function.evaluate(0.0, 0.0));
     let one_shot = animated("frame animation one shot");
     let (frames, corner) = match shader.filter(|_| !rules.draws_through_material) {
-        Some(shader) => read_frames(source, shader, first, [offset.x, offset.y], start, one_shot),
+        Some(shader) => read_frames(reader, shader, first, [offset.x, offset.y], start, one_shot),
         None => (vec![[0.0, 0.0, 1.0, 1.0]], [0.0, 0.0, 1.0, 1.0]),
     };
     let billboard = H3Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
@@ -1352,7 +1351,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     properties.iter_mut().for_each(|property| property.allocate(&mut seeds));
     let [aspect, color, intensity, alpha, frame, rate, palette] = properties;
     let mut sprite_shader = match shader.filter(|_| !rules.draws_through_material) {
-        Some(shader) => read_sprite_shader(source, shader)?,
+        Some(shader) => read_sprite_shader(reader, shader)?,
         None => H3SpriteShader::plain(H3Blend::Additive),
     };
     // `default_vs`: Reach's constant self-illumination is at `V_ILLUM_EXPOSURE`.
@@ -1366,7 +1365,7 @@ fn read_look(source: &TagSource, path: &str) -> Option<H3ParticleLook> {
     }
     Some(H3ParticleLook {
         billboard,
-        still_moves: still_particles_move(source.game(), billboard),
+        still_moves: still_particles_move(reader.source.game(), billboard),
         flip_u: flagged("random u mirror"),
         flip_v: flagged("random v mirror"),
         random_rotation: flagged("random starting rotation"),
@@ -1468,10 +1467,10 @@ pub(in crate::app::model_preview) struct H3CustomPoint {
 }
 
 /// A `particle_emitter_custom_points`.
-fn read_custom_points(source: &TagSource, emitter: TagStruct<'_>) -> Vec<H3CustomPoint> {
+fn read_custom_points(reader: &TagReader, emitter: TagStruct<'_>) -> Vec<H3CustomPoint> {
     let path = emitter.read_tag_ref_path("custom shape").filter(|path| !path.is_empty());
     let tag = path.and_then(|path| {
-        load_referenced_tag_from_source(source, &path, "particle_emitter_custom_points", b"pecp").ok()
+        reader.load(&path, "particle_emitter_custom_points", b"pecp").ok()
     });
     let Some(tag) = tag else {
         return Vec::new();
@@ -1560,24 +1559,24 @@ pub(in crate::app::model_preview) struct H3ParticleCollider {
 /// structure, the only thing the preview's ground stands for
 /// (`update_particles_collider`): friction is parameter 0 and elasticity 1.
 fn read_collider(
-    source: &TagSource,
+    reader: &TagReader,
     emitter: TagStruct<'_>,
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
 ) -> Option<H3ParticleCollider> {
     let movement = emitter.descend("particle movement").filter(|_| flagged("collide with structure"))?;
-    let friction = movement_parameter(source, movement, "collider", 0, seeds)?;
-    Some(H3ParticleCollider { elasticity: movement_parameter(source, movement, "collider", 1, seeds)?, friction })
+    let friction = movement_parameter(reader, movement, "collider", 0, seeds)?;
+    Some(H3ParticleCollider { elasticity: movement_parameter(reader, movement, "collider", 1, seeds)?, friction })
 }
 
 /// A Halo 2 `particle_physics`' `collider` movement, its own or its
 /// template's, if it collides with structure: friction is parameter 0 and
 /// elasticity 1, as `sub_53DF20` reads them.
-pub(in crate::app::model_preview) fn read_collider_of(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
+pub(in crate::app::model_preview) fn read_collider_of(reader: &TagReader, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticleCollider> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+        .and_then(|path| reader.load(&path, "particle_physics", b"pmov").ok());
     let own = elements(movement, "movements");
     let held = template.as_ref().map(|tag| tag.root());
     let collides = |holder: Option<TagStruct<'_>>| {
@@ -1626,13 +1625,13 @@ const PUSH_OUT: f32 = 0.005;
 
 /// A Halo 3 or ODST emitter's `swarm` movement, when its flags name one.
 fn read_flock(
-    source: &TagSource,
+    reader: &TagReader,
     emitter: TagStruct<'_>,
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
 ) -> Option<H3ParticleFlock> {
     let movement = emitter.descend("particle movement").filter(|_| flagged("swarm"))?;
-    let mut by_id = |id: i128| movement_parameter(source, movement, "swarm", id, seeds);
+    let mut by_id = |id: i128| movement_parameter(reader, movement, "swarm", id, seeds);
     Some(H3ParticleFlock {
         separation_distance: by_id(0)?,
         separation_weight: by_id(1)?,
@@ -1930,22 +1929,22 @@ impl H4EmitterTerms {
 /// A Halo 3 or ODST emitter's `physics` movement, when its flags name one:
 /// gravity is parameter 0, air friction 1 and rotational friction 2.
 fn read_physics(
-    source: &TagSource,
+    reader: &TagReader,
     emitter: TagStruct<'_>,
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
 ) -> Option<H3ParticlePhysics> {
     let movement = emitter.descend("particle movement").filter(|_| flagged("physics"))?;
-    let mut parameter = |id: i128| movement_parameter(source, movement, "physics", id, seeds);
+    let mut parameter = |id: i128| movement_parameter(reader, movement, "physics", id, seeds);
     Some(H3ParticlePhysics { gravity: parameter(0), air_friction: parameter(1), rotational_friction: parameter(2) })
 }
 
 /// A Halo 2 `particle_physics`' physics movement, its own or its template's.
-pub(in crate::app::model_preview) fn read_movement(source: &TagSource, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
+pub(in crate::app::model_preview) fn read_movement(reader: &TagReader, movement: TagStruct<'_>, seeds: &mut SeedAllocator) -> Option<H3ParticlePhysics> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+        .and_then(|path| reader.load(&path, "particle_physics", b"pmov").ok());
     let own = elements(movement, "movements");
     let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
     let physics = movements.into_iter().find(|entry| entry.read_enum_option("type").as_deref() == Some("physics"))?;
@@ -1999,14 +1998,14 @@ fn emitter_seed_order(reach_postprocess: bool) -> [usize; 18] {
 /// A Halo 3, ODST or Reach emitter of `look`'s particles; `system_flagged`
 /// reads its system's flags.
 fn read_emitter(
-    source: &TagSource,
+    reader: &TagReader,
     emitter: TagStruct<'_>,
     system_flagged: impl Fn(&str) -> bool,
     look: &H3ParticleLook,
     size_scale: f32,
 ) -> Option<H3Emitter> {
     // Halo 4 seeds and moves as Reach does, with terms of its own.
-    let rules = ParticleRules::of(source.game());
+    let rules = ParticleRules::of(reader.source.game());
     let shape = H3EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
     let mut properties = unallocated_properties(emitter, EMITTER_PROPERTIES)?;
     let movement = emitter.descend("particle movement");
@@ -2021,10 +2020,10 @@ fn read_emitter(
         // The preview reads no wind, nor swarm's parameter 5, so what those
         // take is not counted.
         let mut seeds = [(); 4].map(|_| SeedAllocator::reach_controller());
-        physics = read_physics(source, emitter, movement_flagged, &mut seeds[0]);
-        flock = read_flock(source, emitter, movement_flagged, &mut seeds[1]);
-        collider = read_collider(source, emitter, movement_flagged, &mut seeds[2]);
-        turbulence = read_turbulence(source, emitter, movement_flagged, &mut seeds[3]);
+        physics = read_physics(reader, emitter, movement_flagged, &mut seeds[0]);
+        flock = read_flock(reader, emitter, movement_flagged, &mut seeds[1]);
+        collider = read_collider(reader, emitter, movement_flagged, &mut seeds[2]);
+        turbulence = read_turbulence(reader, emitter, movement_flagged, &mut seeds[3]);
         // `get_used_particle_states` (0x140DD9B40) of the movement, the
         // emitter's own postprocess (0x140AE36E0), then its particle's.
         let movement_used = seeds.iter().fold(0, |used, seeds| used | seeds.used());
@@ -2038,9 +2037,9 @@ fn read_emitter(
         for at in emitter_seed_order(false) {
             properties[at].allocate(&mut seeds);
         }
-        physics = read_physics(source, emitter, movement_flagged, &mut seeds);
-        flock = read_flock(source, emitter, movement_flagged, &mut seeds);
-        collider = read_collider(source, emitter, movement_flagged, &mut seeds);
+        physics = read_physics(reader, emitter, movement_flagged, &mut seeds);
+        flock = read_flock(reader, emitter, movement_flagged, &mut seeds);
+        collider = read_collider(reader, emitter, movement_flagged, &mut seeds);
         turbulence = None;
     }
     let [
@@ -2079,7 +2078,7 @@ fn read_emitter(
         axis_angle,
         scroll: [scroll.i, scroll.j],
         controllers,
-        points: read_custom_points(source, emitter),
+        points: read_custom_points(reader, emitter),
         shape, offset, direction, radius, angle, starting, most, rate, lifespan, acceleration, speed,
         rotation, rotation_rate, size, scale, tint, alpha, black_point, physics, flock, collider,
         one_at_a_time: false,
@@ -2132,13 +2131,13 @@ const DEFAULT_TURBULENCE: &str = "fx\\bitmaps\\turbulence\\default_turbulence";
 /// table (0x1427E4208) fills in a missing parameter 0 with 1, 1 and 2 with 0,
 /// 3 with 1 and 4 with 0.3.
 fn read_turbulence(
-    source: &TagSource,
+    reader: &TagReader,
     emitter: TagStruct<'_>,
     flagged: impl Fn(&str) -> bool,
     seeds: &mut SeedAllocator,
 ) -> Option<H3ParticleTurbulence> {
     let movement = emitter.descend("particle movement").filter(|_| flagged("turbulence"))?;
-    let mut parameter = |id: i128, default: f32| movement_parameter_or(source, movement, "turbulence", id, default, seeds);
+    let mut parameter = |id: i128, default: f32| movement_parameter_or(reader, movement, "turbulence", id, default, seeds);
     let strength = parameter(0, 1.0)?;
     let defaults = [(1, 0.0), (2, 0.0), (3, 1.0), (4, 0.3)];
     let [u_offset, v_offset, u_scale, v_scale] = defaults.map(|(id, default)| parameter(id, default));
@@ -2146,11 +2145,11 @@ fn read_turbulence(
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+        .and_then(|path| reader.load(&path, "particle_physics", b"pmov").ok());
     let path = named(movement)
         .or_else(|| template.as_ref().and_then(|tag| named(tag.root())))
         .unwrap_or_else(|| DEFAULT_TURBULENCE.to_owned());
-    let image = match decode_h2_image(source, &path, SamplerKind::Texture2D, 0)? {
+    let image = match decode_h2_image(reader, &path, SamplerKind::Texture2D, 0)? {
         H2Image::Flat(image) if image.whole() && image.width > 0 && image.height > 0 => image,
         _ => return None,
     };
@@ -2245,21 +2244,21 @@ const LOD_ALWAYS_ONE: [&str; 3] = ["lod always 1.0", "ignore lod (render always)
 /// A system's `particles die when effect ends`, and its older label.
 const DIE_WITH_EFFECT: [&str; 2] = ["particles die when effect ends", "die when orphaned"];
 
-fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3SystemParts> {
+fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Option<H3SystemParts> {
     let flagged = |wanted: &str| has_flag(system, "flags", wanted);
     if !part_runs_by(system, "environment", "disposition") {
         return None;
     }
     let path = system.read_tag_ref_path("particle").filter(|path| !path.is_empty())?;
-    let h2 = source.game() == Some(GameId::Halo2);
+    let h2 = reader.source.game() == Some(GameId::Halo2);
     let (look, emitters): (Arc<H3ParticleLook>, Vec<_>) = if h2 {
-        let (look, scale, rotation) = super::h2::particles::read_h2_look(source, &path)?;
-        let read = |emitter: &TagStruct<'_>| super::h2::particles::read_h2_emitter(source, *emitter, scale.clone(), rotation.clone(), &flagged);
+        let (look, scale, rotation) = super::h2::particles::read_h2_look(reader, &path)?;
+        let read = |emitter: &TagStruct<'_>| super::h2::particles::read_h2_emitter(reader, *emitter, scale.clone(), rotation.clone(), &flagged);
         (Arc::new(look), elements(system, "emitters").iter().filter_map(read).map(Arc::new).collect())
     } else {
-        let look = read_look(source, &path).map(Arc::new)?;
+        let look = read_look(reader, &path).map(Arc::new)?;
         let size_scale = system.read_real("size scale").unwrap_or(1.0);
-        let read = |emitter: &TagStruct<'_>| read_emitter(source, *emitter, flagged, &look, size_scale).map(Arc::new);
+        let read = |emitter: &TagStruct<'_>| read_emitter(reader, *emitter, flagged, &look, size_scale).map(Arc::new);
         let emitters = elements(system, "emitters").iter().filter_map(read).collect();
         (look, emitters)
     };
@@ -2299,28 +2298,28 @@ fn read_system_parts(source: &TagSource, system: TagStruct<'_>) -> Option<H3Syst
 
 /// The systems of the effects a look's particles start, and their events.
 fn read_attached_parts(
-    source: &TagSource,
+    reader: &TagReader,
     look: &H3ParticleLook,
 ) -> Vec<(H3ParticleTrigger, H3SystemParts, Arc<EffectTimes>, usize)> {
     let mut parts = Vec::new();
     for (trigger, path) in &look.attachments {
-        let Ok(effect) = load_referenced_tag_from_source(source, path, "effect", b"effe") else {
+        let Ok(effect) = reader.load(path, "effect", b"effe") else {
             continue;
         };
         let times = Arc::new(EffectTimes::read(effect.root()));
         for (at, event) in elements(effect.root(), "events").into_iter().enumerate() {
             for system in elements(event, "particle systems") {
-                if let Some(read) = read_system_parts(source, system) {
+                if let Some(read) = read_system_parts(reader, system) {
                     parts.push((*trigger, read, Arc::clone(&times), at));
                 }
             }
         }
     }
     let carried = look.carried_systems.as_ref();
-    if let Some(tag) = carried.and_then(|path| load_referenced_tag_from_source(source, path, "particle", b"prt3").ok()) {
+    if let Some(tag) = carried.and_then(|path| reader.load(path, "particle", b"prt3").ok()) {
         let lasting = Arc::new(EffectTimes::lasting());
         for system in elements(tag.root(), "attached particle systems") {
-            if let Some(read) = read_system_parts(source, system) {
+            if let Some(read) = read_system_parts(reader, system) {
                 parts.push((H3ParticleTrigger::Carried, read, Arc::clone(&lasting), 0));
             }
         }
@@ -2353,15 +2352,15 @@ impl H3ParticleSystem {
 
 /// The systems of an object's attached effects, one at each marker of a location.
 pub(super) fn read_h3_particles(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
 ) -> Vec<H3ParticleSystem> {
     let mut systems = Vec::new();
-    for object_effect in object_effects(source, object) {
-        let Ok(effect) = load_referenced_tag_from_source(source, &object_effect.path, "effect", b"effe") else {
+    for object_effect in object_effects(reader, object) {
+        let Ok(effect) = reader.load(&object_effect.path, "effect", b"effe") else {
             continue;
         };
         let locations = elements(effect.root(), "locations");
@@ -2374,16 +2373,16 @@ pub(super) fn read_h3_particles(
                     continue;
                 };
                 let name = object_effect.marker_of(*location);
-                let Some(parts) = read_system_parts(source, system) else {
+                let Some(parts) = read_system_parts(reader, system) else {
                     continue;
                 };
-                let children = read_attached_parts(source, &parts.look);
+                let children = read_attached_parts(reader, &parts.look);
                 let carried: Vec<_> = parts
                     .look
                     .attachments
                     .iter()
                     .filter(|(trigger, _)| *trigger == H3ParticleTrigger::Birth)
-                    .flat_map(|(_, path)| read_carried_strips(source, path))
+                    .flat_map(|(_, path)| read_carried_strips(reader, path))
                     .map(Arc::new)
                     .collect();
                 for marker in &object_effect.locations(markers, &name, &frame) {
@@ -3984,7 +3983,7 @@ mod tests {
         let effect = load_referenced_tag_from_source(&source, path, "effect", b"effe").unwrap();
         let event = elements(effect.root(), "events").into_iter().next().unwrap();
         let system = elements(event, "particle systems").into_iter().next().unwrap();
-        Arc::clone(&read_system_parts(&source, system).unwrap().emitters[0])
+        Arc::clone(&read_system_parts(&crate::app::model_preview::load::TagReader::new(&source), system).unwrap().emitters[0])
     }
 
     /// With `BLAM_TEST_H3EK`: plain physics goes on the card, colliding stays
@@ -4544,16 +4543,16 @@ mod tests {
             return;
         };
         let source = reach_source(&root);
-        let plasma = read_look(&source, "fx\\particles\\plasma\\plasma_blue_medium").unwrap();
+        let plasma = read_look(&crate::app::model_preview::load::TagReader::new(&source), "fx\\particles\\plasma\\plasma_blue_medium").unwrap();
         assert!(plasma.reach && !plasma.cheap);
         assert_eq!(plasma.shader.albedo, H3ParticleAlbedo::Palette2dPlasma);
         assert!(plasma.shader.plasma_second_sprite);
         assert_eq!(plasma.shader.sphere_warp, Some(0.2));
         assert_eq!(plasma.shader.depth_fade, Some(0.25));
         assert_ne!(plasma.used_states & 1 << 25, 0, "its first random took seed 8: {:#x}", plasma.used_states);
-        let paper = read_look(&source, "fx\\particles\\models\\debris\\blowing_paper\\blowing_paper").unwrap();
+        let paper = read_look(&crate::app::model_preview::load::TagReader::new(&source), "fx\\particles\\models\\debris\\blowing_paper\\blowing_paper").unwrap();
         assert!(paper.shader.smooth_contrast().is_some());
-        let shards = read_look(&source, "fx\\particles\\models\\weapons\\needler_shards\\needler_shards").unwrap();
+        let shards = read_look(&crate::app::model_preview::load::TagReader::new(&source), "fx\\particles\\models\\weapons\\needler_shards\\needler_shards").unwrap();
         assert!(shards.cheap && shards.shader.sphere_warp.is_none() && shards.shader.smooth_contrast().is_none());
     }
 
@@ -4569,7 +4568,7 @@ mod tests {
         let path = "fx\\fx_library\\ambient\\nature\\bug_swarm\\fly_swarm";
         let effect = load_referenced_tag_from_source(&source, path, "effect", b"effe").unwrap();
         let systems = elements(effect.root(), "events").into_iter().flat_map(|event| elements(event, "particle systems"));
-        let parts = systems.filter_map(|system| read_system_parts(&source, system));
+        let parts = systems.filter_map(|system| read_system_parts(&crate::app::model_preview::load::TagReader::new(&source), system));
         let emitters: Vec<_> = parts.flat_map(|parts| parts.emitters).collect();
         let plane = emitters.iter().find(|emitter| emitter.shape == H3EmissionShape::Plane).expect("a plane emitter");
         assert_eq!(plane.axis_scale, [0.0, 2.0, 2.0]);

@@ -751,9 +751,9 @@ pub(super) fn read_cloth<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize
     game: ClothGame,
     center: [f32; 3],
 ) {
-    let super::load::LoadCx { source, object, owner, markers, frame, .. } = *cx;
+    let super::load::LoadCx { reader, object, owner, markers, frame, .. } = *cx;
     for path in cloth_tags(object) {
-        let Ok(tag) = load_referenced_tag_from_source(source, &path, "cloth", b"clwd") else {
+        let Ok(tag) = reader.load(&path, "cloth", b"clwd") else {
             continue;
         };
         let root = tag.root();

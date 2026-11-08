@@ -16,7 +16,6 @@ use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, nonzero_unit};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
@@ -72,8 +71,8 @@ fn read_frame(frame: TagStruct<'_>) -> LightVolumeFrame {
     }
 }
 
-fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightVolume> {
-    let tag = load_referenced_tag_from_source(source, path, "light_volume", b"mgs2").ok()?;
+fn read_light_volume(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightVolume> {
+    let tag = reader.load(path, "light_volume", b"mgs2").ok()?;
     let root = tag.root();
     let frame = read_frame(*elements(root, "frames").first()?);
     let count = root.read_int_any("count").unwrap_or(0).max(0) as usize;
@@ -85,14 +84,14 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
     // `rasterizer_widget_set_texture`: no map is the globals' `glow`.
     let image = match root.read_tag_ref_path("map").filter(|path| !path.is_empty()) {
         Some(map) => {
-            let bitmap = load_referenced_tag_from_source(source, &map, "bitmap", b"bitm").ok()?;
+            let bitmap = reader.load(&map, "bitmap", b"bitm").ok()?;
             let sequence = root.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
             let index = elements(bitmap.root(), "sequences")
                 .get(sequence)
                 .map_or(0, |sequence| sequence.read_int_any("first bitmap index").unwrap_or(0).max(0) as usize);
-            Arc::new(decode_h2_image(source, &map, SamplerKind::Texture2D, index)?)
+            Arc::new(decode_h2_image(reader, &map, SamplerKind::Texture2D, index)?)
         }
-        None => super::super::h2::light_volumes::read_glow(source)?,
+        None => super::super::h2::light_volumes::read_glow(reader)?,
     };
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let mut brightness = [real("perpendicular brightness scale"), real("parallel brightness scale")];
@@ -120,7 +119,7 @@ fn read_light_volume(source: &TagSource, path: &str, owner: u8, markers: &[Rende
 
 /// The light volumes among `object`'s widgets.
 pub(in crate::app::model_preview) fn read_ce_light_volumes(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -133,7 +132,7 @@ pub(in crate::app::model_preview) fn read_ce_light_volumes(
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(kind, path)| *kind == group && !path.is_empty())
-        .filter_map(|(_, path)| read_light_volume(source, &path, owner, markers))
+        .filter_map(|(_, path)| read_light_volume(reader, &path, owner, markers))
         .collect()
 }
 
@@ -284,8 +283,8 @@ pub(crate) struct CeLightningQuad {
     pub(crate) colors: [[f32; 4]; 4],
 }
 
-fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightning> {
-    let tag = load_referenced_tag_from_source(source, path, "lightning", b"elec").ok()?;
+fn read_lightning(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeLightning> {
+    let tag = reader.load(path, "lightning", b"elec").ok()?;
     let root = tag.root();
     // `lightning_submit` draws nothing unless the first marker is found; an
     // empty name counts, as the object's origin.
@@ -326,7 +325,7 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
         return None;
     }
     let bitmap = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    let image = Arc::new(decode_h2_image(source, &bitmap, SamplerKind::Texture2D, 0)?);
+    let image = Arc::new(decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, 0)?);
     let shader = elements(root, "shader").first().copied();
     let (blend, nonlinear_tint, sort_bias) = match shader {
         Some(shader) => (
@@ -355,7 +354,7 @@ fn read_lightning(source: &TagSource, path: &str, owner: u8, markers: &[RenderMo
 
 /// The lightning among `object`'s widgets.
 pub(in crate::app::model_preview) fn read_ce_lightning(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -368,7 +367,7 @@ pub(in crate::app::model_preview) fn read_ce_lightning(
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(kind, path)| *kind == group && !path.is_empty())
-        .filter_map(|(_, path)| read_lightning(source, &path, owner, markers))
+        .filter_map(|(_, path)| read_lightning(reader, &path, owner, markers))
         .collect()
 }
 
@@ -588,8 +587,8 @@ fn read_bounds(root: TagStruct<'_>, name: &str) -> [f32; 2] {
     }
 }
 
-fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeGlow> {
-    let tag = load_referenced_tag_from_source(source, path, "glow", b"glw!").ok()?;
+fn read_glow(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeGlow> {
+    let tag = reader.load(path, "glow", b"glw!").ok()?;
     let root = tag.root();
     let name = root.read_string("attachment marker").unwrap_or_default();
     // What is not found is the origin.
@@ -604,7 +603,7 @@ fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPr
     }
     // `glow_new`: only a bitmap of sprites makes one.
     let bitmap_path = root.read_tag_ref_path("texture").filter(|path| !path.is_empty())?;
-    let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
+    let bitmap = reader.load(&bitmap_path, "bitmap", b"bitm").ok()?;
     if !bitmap.root().field("type").is_some_and(|field| field.enum_is("sprites")) {
         return None;
     }
@@ -618,7 +617,7 @@ fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPr
         .get(index)
         .map_or(1.0, |image| image.read_int_any("width").unwrap_or(1).max(1) as f32);
     let dimension = ((rect[1] - rect[0]) * image_width).trunc();
-    let image = Arc::new(decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, index)?);
+    let image = Arc::new(decode_h2_image(reader, &bitmap_path, SamplerKind::Texture2D, index)?);
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let attachment = |n: usize| function_slot(root.fields().filter(|field| field.name() == "attachment").nth(n));
     let [color_low, color_high] = [argb(root, "color_bound_0"), argb(root, "color_bound_1")];
@@ -677,7 +676,7 @@ fn read_glow(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPr
 }
 
 /// The glows among `object`'s widgets.
-pub(in crate::app::model_preview) fn read_ce_glows(source: &TagSource, object: &TagFile, owner: u8, markers: &[RenderModelPreviewMarker]) -> Vec<CeGlow> {
+pub(in crate::app::model_preview) fn read_ce_glows(reader: &TagReader, object: &TagFile, owner: u8, markers: &[RenderModelPreviewMarker]) -> Vec<CeGlow> {
     let Some(block) = object_block(object, "widgets") else {
         return Vec::new();
     };
@@ -686,7 +685,7 @@ pub(in crate::app::model_preview) fn read_ce_glows(source: &TagSource, object: &
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(kind, path)| *kind == group && !path.is_empty())
-        .filter_map(|(_, path)| read_glow(source, &path, owner, markers))
+        .filter_map(|(_, path)| read_glow(reader, &path, owner, markers))
         .collect()
 }
 

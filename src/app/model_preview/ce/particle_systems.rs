@@ -19,7 +19,6 @@ use super::super::common::fields::{elements, function_slot_of, has_flag, has_fla
 use super::super::common::view::{ViewFrame, posed_on};
 use super::particles::{CePointPhysics, CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use super::super::*;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
@@ -223,14 +222,14 @@ fn constants_of(holder: TagStruct<'_>) -> [f32; 3] {
     std::array::from_fn(|at| found.get(at).and_then(|constant| constant.read_real("k")).unwrap_or(0.0))
 }
 
-fn read_physics(source: &TagSource, holder: TagStruct<'_>) -> Option<CePointPhysics> {
+fn read_physics(reader: &TagReader, holder: TagStruct<'_>) -> Option<CePointPhysics> {
     let path = holder.read_tag_ref_path("point physics").filter(|path| !path.is_empty())?;
-    let tag = load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok()?;
+    let tag = reader.load(&path, "point_physics", b"pphy").ok()?;
     Some(CePointPhysics::read(&tag))
 }
 
-pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &str) -> Option<CePctlDef> {
-    let tag = load_referenced_tag_from_source(source, path, "particle_system", b"pctl").ok()?;
+pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &str) -> Option<CePctlDef> {
+    let tag = reader.load(path, "particle_system", b"pctl").ok()?;
     let root = tag.root();
     let mut sheets: Vec<Arc<CeSpriteSheet>> = Vec::new();
     let mut sheet_paths: Vec<String> = Vec::new();
@@ -271,7 +270,7 @@ pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &st
             let sheet_index = match sheet_paths.iter().position(|known| *known == bitmap) {
                 Some(at) => at,
                 None => {
-                    let Some(sheet) = read_sprite_sheet(source, &bitmap) else {
+                    let Some(sheet) = read_sprite_sheet(reader, &bitmap) else {
                         continue;
                     };
                     sheets.push(Arc::new(sheet));
@@ -292,12 +291,12 @@ pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &st
                 colors: [argb_of(state, "color 1"), argb_of(state, "color 2")],
                 // Tool's `sub_49BFE0`.
                 radius: Some(real("radius multiplier")).filter(|radius| *radius > 0.0).unwrap_or(1.0),
-                physics: read_physics(source, state),
+                physics: read_physics(reader, state),
                 blend: FramebufferBlend::read(state),
                 map_flags: state.read_int_any("map flags").unwrap_or(0),
                 nonlinear_tint: has_flag(state, "shader flags", "nonlinear tint"),
                 sort_bias: has_flag(state, "shader flags", "sort bias"),
-                secondary: read_secondary_map(source, state, "bitmap"),
+                secondary: read_secondary_map(reader, state, "bitmap"),
             });
         }
         types.push(ParticleType {
@@ -315,12 +314,12 @@ pub(in crate::app::model_preview) fn read_pctl_def(source: &TagSource, path: &st
     if types.is_empty() || types.iter().any(|kind| kind.states.is_empty()) {
         return None;
     }
-    Some(CePctlDef { types, physics: read_physics(source, root), sheets })
+    Some(CePctlDef { types, physics: read_physics(reader, root), sheets })
 }
 
 /// The particle systems among the object's attachments.
 pub(in crate::app::model_preview) fn read_ce_particle_systems(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -337,7 +336,7 @@ pub(in crate::app::model_preview) fn read_ce_particle_systems(
         if kind != group || path.is_empty() {
             continue;
         }
-        let Some(def) = read_pctl_def(source, &path) else {
+        let Some(def) = read_pctl_def(reader, &path) else {
             continue;
         };
         let name = attachment.read_string("marker").unwrap_or_default();

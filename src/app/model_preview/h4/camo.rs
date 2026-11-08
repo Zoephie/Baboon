@@ -3,11 +3,10 @@
 //! 0x140914160) hands each material's `active_camo` entry point. See
 //! `docs/h4-preview-research/shadow-camo-shields.md` §2.
 
+use crate::app::model_preview::load::TagReader;
 use blam_tags::{TagFieldData, TagFunction};
 
 use super::super::common::named_function::tag_function_at;
-use crate::app::export::geometry::load_referenced_tag_from_source;
-use crate::core::source::TagSource;
 
 /// `active camo[0]`'s third person curves and its distortion texture's
 /// placement.
@@ -45,9 +44,9 @@ fn read_vector(holder: blam_tags::TagStruct<'_>, name: &str) -> Option<[f32; 2]>
 }
 
 impl H4Camo {
-    pub(crate) fn read(source: &TagSource) -> Option<Self> {
+    pub(crate) fn read(reader: &TagReader) -> Option<Self> {
         let globals =
-            load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
+            reader.load("globals\\globals", "globals", b"matg").ok()?;
         let root = globals.root();
         let camo = super::super::common::fields::elements(root, "active camo")
             .into_iter()
@@ -90,6 +89,7 @@ impl H4Camo {
 
 #[cfg(test)]
 mod tests {
+    use crate::core::source::TagSource;
     use super::*;
 
     /// The kit's curves at full camo (`shadow-camo-shields.md` §2.2): fully
@@ -107,7 +107,7 @@ mod tests {
             game: Some(crate::core::game::GameId::Halo4),
             definitions_root: crate::core::test_kits::definitions().to_path_buf(),
         };
-        let camo = H4Camo::read(&source).expect("globals' active camo");
+        let camo = H4Camo::read(&crate::app::model_preview::load::TagReader::new(&source)).expect("globals' active camo");
         let full = camo.draw(1.0, 100.0);
         assert_eq!(full.factor[0], 1.0);
         assert!((full.factor[1] - 0.8914).abs() < 1e-3, "{full:?}");

@@ -33,7 +33,7 @@ use super::super::materials::*;
 /// transparent families are effects drawn blended; the preview draws opaque,
 /// so they stay untextured rather than turning into solid quads.
 pub(in crate::app::model_preview) fn resolve_ce_shader(
-    source: &TagSource,
+    reader: &TagReader,
     shader: &TagFile,
     group: [u8; 4],
     permutation: usize,
@@ -48,7 +48,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
     let factor = |value: Option<f32>| value.filter(|v| v.is_finite() && *v != 0.0).unwrap_or(1.0);
     let mut bind = |path: Option<String>, scale: [f32; 2]| {
         let path = path.filter(|path| !path.is_empty())?;
-        let image_index = ce_image_index(source, &path, permutation, &mut caches.ce_image_counts);
+        let image_index = ce_image_index(reader, &path, permutation, &mut caches.ce_image_counts);
         let binding = SlotBitmap {
             path,
             image_index: image_index as i16,
@@ -56,7 +56,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
             repeat_y: true,
             scale,
         };
-        cached_bitmap(source, &binding, caches)
+        cached_bitmap(reader, &binding, caches)
     };
     let detail_function = |name: Option<String>| match name.as_deref() {
         Some("multiply") => DetailFunction::Multiply,
@@ -109,20 +109,20 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
     }
     let mut common = caches.ce_model_common.take();
     let mut bitmap = |path: &str, kind: SamplerKind| {
-        let image = ce_image_index(source, path, permutation, &mut caches.ce_image_counts);
+        let image = ce_image_index(reader, path, permutation, &mut caches.ce_image_counts);
         let key = (path.to_owned(), kind, image);
         if let Some(cached) = caches.h2_images.get(&key) {
             return cached.clone();
         }
-        let decoded = decode_h2_image(source, path, kind, image).map(Arc::new);
+        let decoded = decode_h2_image(reader, path, kind, image).map(Arc::new);
         caches.h2_images.insert(key, decoded.clone());
         decoded
     };
     textures.h2_layers[H2Layer::Lightmap as usize] =
-        ce_model_passes(source, root, &group, &flags, &mut common, &mut bitmap);
-    let transparent = ce_transparent_passes(source, root, &group, &mut bitmap);
+        ce_model_passes(reader, root, &group, &flags, &mut common, &mut bitmap);
+    let transparent = ce_transparent_passes(reader, root, &group, &mut bitmap);
     if matches!(&group, b"soso" | b"senv") {
-        let settings = caches.ce_camo.get_or_insert_with(|| read_ce_camo_settings(source));
+        let settings = caches.ce_camo.get_or_insert_with(|| read_ce_camo_settings(reader));
         if let Some(settings) = settings {
             let two_sided = flags.has("two-sided");
             textures.h2_layers[H2Layer::ActiveCamo as usize] =
@@ -130,7 +130,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         }
     }
     textures.h2_layers[H2Layer::Transparent as usize] =
-        expand_ce_digits(source, transparent, permutation, caches);
+        expand_ce_digits(reader, transparent, permutation, caches);
     caches.ce_model_common = common;
     if !textures.h2_layers[H2Layer::Transparent as usize].is_empty() {
         return textures;
@@ -148,7 +148,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
 
 /// Split each numeric pass into one per digit its bitmap holds.
 fn expand_ce_digits(
-    source: &TagSource,
+    reader: &TagReader,
     passes: Vec<H2DrawPass>,
     place: usize,
     caches: &mut ResolveCaches,
@@ -161,7 +161,7 @@ fn expand_ce_digits(
         };
         // `ce_image_index` wraps at the count, so this is the count itself.
         let count = caches.ce_image_counts.get(&numeric.map).copied().unwrap_or_else(|| {
-            load_referenced_tag_from_source(source, &numeric.map, "bitmap", b"bitm")
+            reader.load(&numeric.map, "bitmap", b"bitm")
                 .ok()
                 .and_then(|tag| blam_tags::bitmap::Bitmap::new(&tag).ok().map(|bitmap| bitmap.len()))
                 .unwrap_or(1)
@@ -172,7 +172,7 @@ fn expand_ce_digits(
                 .h2_images
                 .entry(key)
                 .or_insert_with(|| {
-                    decode_h2_image(source, &numeric.map, SamplerKind::Texture2D, digit).map(Arc::new)
+                    decode_h2_image(reader, &numeric.map, SamplerKind::Texture2D, digit).map(Arc::new)
                 })
                 .clone();
             let mut pass = pass.clone();
@@ -203,7 +203,7 @@ pub(in crate::app::model_preview) const CE_DETAIL_MASKS: [&str; 9] = [
 /// The image a Halo CE permutation picks of a bitmap: `rasterizer_set_texture`
 /// wraps it at the bitmap's count.
 fn ce_image_index(
-    source: &TagSource,
+    reader: &TagReader,
     path: &str,
     permutation: usize,
     counts: &mut HashMap<String, usize>,
@@ -212,7 +212,7 @@ fn ce_image_index(
         return 0;
     }
     let count = *counts.entry(path.to_owned()).or_insert_with(|| {
-        load_referenced_tag_from_source(source, path, "bitmap", b"bitm")
+        reader.load(path, "bitmap", b"bitm")
             .ok()
             .and_then(|tag| blam_tags::bitmap::Bitmap::new(&tag).ok().map(|bitmap| bitmap.len()))
             .unwrap_or(1)

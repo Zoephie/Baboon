@@ -851,9 +851,9 @@ fn scale_row(row: &mut [f32; 4], components: &str, [x, y]: [f32; 2]) -> Option<H
 
 /// The passes of one layer of `shader`, in template order. `load` reads a tag
 /// by path, extension and group; a shader with no template has no passes.
-pub(in crate::app) fn resolve_h2_layer_passes(
+pub(in crate::app) fn resolve_h2_layer_passes<T: std::borrow::Borrow<TagFile>>(
     shader: &TagFile,
-    mut load: impl FnMut(&str, &str, &[u8; 4]) -> Option<TagFile>,
+    mut load: impl FnMut(&str, &str, &[u8; 4]) -> Option<T>,
     layer: &str,
     implementation: usize,
 ) -> Result<Vec<H2Pass>, String> {
@@ -865,7 +865,7 @@ pub(in crate::app) fn resolve_h2_layer_passes(
     };
     let template = load(&template_path, "shader_template", b"stem")
         .ok_or_else(|| format!("Cannot read {template_path}"))?;
-    let template_root = template.root();
+    let template_root = template.borrow().root();
     let shader_levels = shader_parameters(root);
     let template_levels = template_parameters(template_root);
 
@@ -879,7 +879,7 @@ pub(in crate::app) fn resolve_h2_layer_passes(
             .ok_or_else(|| format!("Cannot read {path}"))?;
         passes.push(read_pass(
             &path,
-            pass.root(),
+            pass.borrow().root(),
             implementation,
             &shader_levels,
             &template_levels,

@@ -17,7 +17,6 @@ use super::super::particles::{
     H3ParticleVertex, H3SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader, slerped,
 };
 use super::super::*;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 use crate::app::model_preview::common::attached::attached;
@@ -295,9 +294,9 @@ fn strip_fade(range: f32, cutoff: f32, scale: f32, by_range: bool) -> Option<[f3
 }
 
 /// `beam` is a `beam_system`'s, else a `contrail_system`'s.
-fn read_strip_look(source: &TagSource, element: TagStruct<'_>, beam: bool) -> Option<StripLook> {
-    let reach = source.game() == Some(GameId::HaloReach);
-    let mut shader = read_sprite_shader(source, element.descend("actual shader?")?)?;
+fn read_strip_look(reader: &TagReader, element: TagStruct<'_>, beam: bool) -> Option<StripLook> {
+    let reach = reader.source.game() == Some(GameId::HaloReach);
+    let mut shader = read_sprite_shader(reader, element.descend("actual shader?")?)?;
     if reach && beam {
         // `effects__beam.hlsl`'s `sample_diffuse` (l.373–458): the strip's one
         // texcoord, a `particle_alpha` of 1, and no palette shift.
@@ -464,7 +463,7 @@ fn seeds_of(index: usize) -> [f32; OWN_SEEDS] {
 /// The beams and contrails of an object's attached effects, one at each marker
 /// of a location.
 pub(in crate::app::model_preview) fn read_h3_strips(
-    source: &TagSource,
+    reader: &TagReader,
     object: &blam_tags::TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -473,7 +472,7 @@ pub(in crate::app::model_preview) fn read_h3_strips(
     let mut strips = Vec::new();
     let beam_group = u32::from_be_bytes(*b"beam");
     let contrail_group = u32::from_be_bytes(*b"cntl");
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         type Read = fn(TagStruct<'_>) -> Option<StripKind>;
         let beam = part.group == beam_group;
         let (blocks, group_name, code, read): (&str, &str, &[u8; 4], Read) = if beam {
@@ -483,12 +482,12 @@ pub(in crate::app::model_preview) fn read_h3_strips(
             } else {
                 return;
             };
-        let Ok(tag) = load_referenced_tag_from_source(source, &part.path, group_name, code) else {
+        let Ok(tag) = reader.load(&part.path, group_name, code) else {
             return;
         };
         let (offset, yaw, pitch) = read_part_placement(part.part);
         for element in elements(tag.root(), blocks) {
-            let (Some(look), Some(kind)) = (read_strip_look(source, element, beam), read(element)) else {
+            let (Some(look), Some(kind)) = (read_strip_look(reader, element, beam), read(element)) else {
                 continue;
             };
             let (look, kind) = (Arc::new(look), Arc::new(kind));
@@ -525,9 +524,9 @@ pub(in crate::app::model_preview) fn read_h3_strips(
 }
 
 /// The contrails an effect holds, as a particle starts them.
-pub(in crate::app::model_preview) fn read_carried_strips(source: &TagSource, path: &str) -> Vec<H3StripAt> {
+pub(in crate::app::model_preview) fn read_carried_strips(reader: &TagReader, path: &str) -> Vec<H3StripAt> {
     let mut strips = Vec::new();
-    let Ok(effect) = load_referenced_tag_from_source(source, path, "effect", b"effe") else {
+    let Ok(effect) = reader.load(path, "effect", b"effe") else {
         return strips;
     };
     let times = Arc::new(EffectTimes::read(effect.root()));
@@ -540,11 +539,11 @@ pub(in crate::app::model_preview) fn read_carried_strips(source: &TagSource, pat
             if group != contrail_group || path.is_empty() {
                 continue;
             }
-            let Ok(tag) = load_referenced_tag_from_source(source, &path, "contrail_system", b"cntl") else {
+            let Ok(tag) = reader.load(&path, "contrail_system", b"cntl") else {
                 continue;
             };
             for element in elements(tag.root(), "contrails") {
-                let (Some(look), Some(contrail)) = (read_strip_look(source, element, false), read_contrail(element)) else {
+                let (Some(look), Some(contrail)) = (read_strip_look(reader, element, false), read_contrail(element)) else {
                     continue;
                 };
                 strips.push(H3StripAt {
@@ -1473,7 +1472,7 @@ mod tests {
     fn looks_of(source: &TagSource, path: &str, group: &str, code: &[u8; 4], blocks: &str) -> Vec<StripLook> {
         let tag = load_referenced_tag_from_source(source, path, group, code).expect(path);
         let beam = blocks == "beams";
-        elements(tag.root(), blocks).into_iter().map(|element| read_strip_look(source, element, beam).expect(path)).collect()
+        elements(tag.root(), blocks).into_iter().map(|element| read_strip_look(&crate::app::model_preview::load::TagReader::new(source), element, beam).expect(path)).collect()
     }
 
     /// With `BLAM_TEST_HREK`: the focus rifle's beams read Reach's plasma

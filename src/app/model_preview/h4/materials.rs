@@ -85,20 +85,20 @@ fn h4_address(address: u8) -> BitmapAddressMode {
 }
 
 /// Whether a bitmap tag exists, and whether its first image is a cube.
-fn bitmap_kind(source: &TagSource, path: &str, caches: &mut ResolveCaches) -> Option<bool> {
+fn bitmap_kind(reader: &TagReader, path: &str, caches: &mut ResolveCaches) -> Option<bool> {
     if let Some(known) = caches.h4_bitmap_kinds.get(path) {
         return *known;
     }
-    let found = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok().map(|tag| {
+    let found = reader.load(path, "bitmap", b"bitm").ok().map(|tag| {
         elements(tag.root(), "bitmaps*").first().and_then(|image| image.field("type")).is_some_and(|kind| kind.enum_is("cube map"))
     });
     caches.h4_bitmap_kinds.insert(path.to_owned(), found);
     found
 }
 
-fn read_shader(source: &TagSource, path: &str) -> Result<H4Shader, String> {
-    let tag = load_referenced_tag_from_source(source, path, "material_shader", b"mats").map_err(|error| error.to_string())?;
-    let program = H4ShaderSource::read(source, path)?.program(&H4_DEFINES)?;
+fn read_shader(reader: &TagReader, path: &str) -> Result<H4Shader, String> {
+    let tag = reader.load(path, "material_shader", b"mats").map_err(|error| error.to_string())?;
+    let program = H4ShaderSource::read(reader, path)?.program(&H4_DEFINES)?;
     Ok(H4Shader { shader: MaterialShader::from_tag(&tag), program, passes: HashMap::new() })
 }
 
@@ -150,16 +150,16 @@ pub(in crate::app::model_preview) fn h4_screen_vertex() -> &'static str {
 
 /// One of `rasterizer_globals`' explicit shaders that is a `material`, baked
 /// as any material is, its one pass (`screen`) over the picture.
-fn screen_material(source: &TagSource, path: &str, caches: &mut ResolveCaches) -> Result<H4ScreenMaterial, String> {
-    let tag = load_referenced_tag_from_source(source, path, "material", b"mat ").map_err(|error| error.to_string())?;
+fn screen_material(reader: &TagReader, path: &str, caches: &mut ResolveCaches) -> Result<H4ScreenMaterial, String> {
+    let tag = reader.load(path, "material", b"mat ").map_err(|error| error.to_string())?;
     let material = Material::from_tag(&tag);
     let shader = match caches.h4_shaders.remove(&material.shader) {
         Some(known) => known.map_err(|error| error.to_string()),
-        None => read_shader(source, &material.shader),
+        None => read_shader(reader, &material.shader),
     }?;
     let pixel = translate_pass(&shader.program, "", "screen", Stage::Pixel);
     let baked = {
-        let lookup = std::cell::RefCell::new(|path: &str| bitmap_kind(source, path, caches));
+        let lookup = std::cell::RefCell::new(|path: &str| bitmap_kind(reader, path, caches));
         bake(&material, &shader.shader, &|path: &str| (lookup.borrow_mut())(path))
     };
     caches.h4_shaders.insert(material.shader.clone(), Ok(shader));
@@ -177,7 +177,7 @@ fn screen_material(source: &TagSource, path: &str, caches: &mut ResolveCaches) -
         if textures.iter().any(|known| known.uniform == uniform) {
             continue;
         }
-        let Some((image, texels, mips)) = h3_image(source, &texture.bitmap, 0, SamplerKind::Texture2D, caches) else { continue };
+        let Some((image, texels, mips)) = h3_image(reader, &texture.bitmap, 0, SamplerKind::Texture2D, caches) else { continue };
         let sampler = H3Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
         textures.push(H3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
     }
@@ -188,7 +188,7 @@ fn screen_material(source: &TagSource, path: &str, caches: &mut ResolveCaches) -
 
 /// `rasterizer_globals`' explicit shaders 22 ("postprocess hologram") and 24
 /// ("hologram composite"), whose pixel shaders are `material`s, read once.
-fn hologram_post(source: &TagSource, caches: &mut ResolveCaches) -> Option<Arc<H4HologramPost>> {
+fn hologram_post(reader: &TagReader, caches: &mut ResolveCaches) -> Option<Arc<H4HologramPost>> {
     const POSTPROCESS_HOLOGRAM: usize = 22;
     const HOLOGRAM_COMPOSITE: usize = 24;
     if let Some(known) = &caches.h4_hologram_post {
@@ -196,13 +196,13 @@ fn hologram_post(source: &TagSource, caches: &mut ResolveCaches) -> Option<Arc<H
     }
     let post = (|| {
         let globals =
-            load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+            reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
         let explicit = elements(globals.root(), "explicit shaders");
         let path = |index: usize| explicit.get(index)?.read_tag_ref_path("explicit pixel shader").filter(|path| !path.is_empty());
         let (combine, composite) = (path(POSTPROCESS_HOLOGRAM)?, path(HOLOGRAM_COMPOSITE)?);
         Some(Arc::new(H4HologramPost {
-            combine: screen_material(source, &combine, caches).ok()?,
-            composite: screen_material(source, &composite, caches).ok()?,
+            combine: screen_material(reader, &combine, caches).ok()?,
+            composite: screen_material(reader, &composite, caches).ok()?,
         }))
     })();
     caches.h4_hologram_post = Some(post.clone());
@@ -218,14 +218,14 @@ fn texture_uniform<'a>(wanted: &'a [(String, TextureKind)], parameter: &str) -> 
     wanted.iter().find(|(name, _)| name.eq_ignore_ascii_case(&lowercase)).map(|(name, kind)| (name.as_str(), kind))
 }
 
-pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag: &TagFile, caches: &mut ResolveCaches) -> MaterialTextures {
+pub(in crate::app::model_preview) fn resolve_h4_material(reader: &TagReader, tag: &TagFile, caches: &mut ResolveCaches) -> MaterialTextures {
     let material = Material::from_tag(tag);
     if material.shader.is_empty() {
         return MaterialTextures::failed("the material names no material shader");
     }
     let shader = match caches.h4_shaders.remove(&material.shader) {
         Some(known) => known,
-        None => read_shader(source, &material.shader).map_err(Arc::<str>::from),
+        None => read_shader(reader, &material.shader).map_err(Arc::<str>::from),
     };
     let mut shader = match shader {
         Ok(shader) => shader,
@@ -235,7 +235,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag
         }
     };
     let baked = {
-        let lookup = |path: &str| bitmap_kind(source, path, caches);
+        let lookup = |path: &str| bitmap_kind(reader, path, caches);
         // The lookup needs the caches mutably; the bake only reads.
         let lookup = std::cell::RefCell::new(lookup);
         bake(&material, &shader.shader, &|path: &str| (lookup.borrow_mut())(path))
@@ -282,7 +282,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag
         Some((lit, lit_entry)) => {
             // `handle_object_part` clips a blended hologram below full alpha.
             let clip = (hologram || blended_hologram).then_some(if blended_hologram { 1.0 } else { 0.0 });
-            let post = clip.and_then(|_| hologram_post(source, caches));
+            let post = clip.and_then(|_| hologram_post(reader, caches));
             let submit = H4Submit::new(baked.clone(), ENTRY_ALBEDO, lit_entry, clip).with_post(post);
             let values = submit.baked_values();
             let mut h3 = H3Material {
@@ -321,16 +321,16 @@ pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag
                     TextureKind::Volume => SamplerKind::Volume,
                     _ => SamplerKind::Texture2D,
                 };
-                let Some((image, texels, mips)) = h3_image(source, &texture.bitmap, 0, kind, caches) else { continue };
+                let Some((image, texels, mips)) = h3_image(reader, &texture.bitmap, 0, kind, caches) else { continue };
                 // A frame-index function picks among the bitmap's images per draw.
                 let frames: Vec<_> = match texture.frame_index_function {
                     Some(function) => {
-                        let tag = load_referenced_tag_from_source(source, &texture.bitmap, "bitmap", b"bitm").ok();
+                        let tag = reader.load(&texture.bitmap, "bitmap", b"bitm").ok();
                         let count = tag.as_ref().map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
                         if count > 1 {
                             submit_frames.push((uniform.clone(), function, count));
                         }
-                        (0..count).filter_map(|at| h3_image(source, &texture.bitmap, at as i16, kind, caches)).map(|(image, ..)| image).collect()
+                        (0..count).filter_map(|at| h3_image(reader, &texture.bitmap, at as i16, kind, caches)).map(|(image, ..)| image).collect()
                     }
                     None => Vec::new(),
                 };
@@ -349,13 +349,13 @@ pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag
             // `c_render_active_camo` binds `globals`' distortion texture at s13.
             let camo_texture = caches
                 .h4_camo_texture
-                .get_or_insert_with(|| super::super::h4::camo::H4Camo::read(source).and_then(|camo| camo.texture))
+                .get_or_insert_with(|| super::super::h4::camo::H4Camo::read(reader).and_then(|camo| camo.texture))
                 .clone();
             let camo_uniform = h3.camo.as_ref().and_then(|pass| {
                 pass.textures.iter().find(|(name, _)| name == "distortionTexture_texture").map(|(name, _)| name.clone())
             });
             if let (Some(path), Some(uniform)) = (camo_texture, camo_uniform)
-                && let Some((image, texels, mips)) = h3_image(source, &path, 0, SamplerKind::Texture2D, caches)
+                && let Some((image, texels, mips)) = h3_image(reader, &path, 0, SamplerKind::Texture2D, caches)
             {
                 // Address 0 (wrap), filter 2 (bilinear).
                 let sampler = H3Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Bilinear };
@@ -380,7 +380,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(source: &TagSource, tag
             repeat_y: true,
             scale: baked.texture_constants.get(usize::from(color.sampler)).map_or([1.0, 1.0], |xform| [xform[0], xform[1]]),
         };
-        textures.slots[TextureSlot::Base as usize] = cached_bitmap(source, &binding, caches);
+        textures.slots[TextureSlot::Base as usize] = cached_bitmap(reader, &binding, caches);
     }
     match result {
         Ok(h3) => textures.h3 = Some(Arc::new(h3)),
@@ -454,7 +454,7 @@ impl H4EffectMaterial {
 /// Bake `material` and translate its `_default` technique's `vertex_pass`
 /// with its `_default` pixel shader.
 pub(in crate::app::model_preview) fn resolve_h4_effect_material(
-    source: &TagSource,
+    reader: &TagReader,
     material: &Material,
     vertex_pass: &str,
 ) -> Result<H4EffectMaterial, String> {
@@ -463,7 +463,7 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
     if material.shader.is_empty() {
         return Err("the material names no material shader".to_owned());
     }
-    let shader = read_shader(source, &material.shader)?;
+    let shader = read_shader(reader, &material.shader)?;
     let vertex = translate_pass(&shader.program, "_default", vertex_pass, Stage::Vertex)?;
     let pixel = translate_pass(&shader.program, "_default", "_default", Stage::Pixel)?;
     let mut pass = super::super::gen3::shaders::pass_of(vertex, pixel);
@@ -473,7 +473,7 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
     }
     let pass = Arc::new(pass);
     let baked = {
-        let lookup = std::cell::RefCell::new(|path: &str| bitmap_kind(source, path, caches));
+        let lookup = std::cell::RefCell::new(|path: &str| bitmap_kind(reader, path, caches));
         bake(material, &shader.shader, &|path: &str| (lookup.borrow_mut())(path))
     };
     // A parameter's value: the material's, else the shader's default.
@@ -495,13 +495,13 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
             TextureKind::Volume => SamplerKind::Volume,
             _ => SamplerKind::Texture2D,
         };
-        let Some((image, texels, mips)) = h3_image(source, &texture.bitmap, 0, sampler_kind, caches) else { continue };
+        let Some((image, texels, mips)) = h3_image(reader, &texture.bitmap, 0, sampler_kind, caches) else { continue };
         // A texture array holds the bitmap's images as its layers.
         let frames = if *kind == TextureKind::FlatArray {
-            let tag = load_referenced_tag_from_source(source, &texture.bitmap, "bitmap", b"bitm").ok();
+            let tag = reader.load(&texture.bitmap, "bitmap", b"bitm").ok();
             let count = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len().max(1));
             (0..count)
-                .filter_map(|at| h3_image(source, &texture.bitmap, at as i16, SamplerKind::Texture2D, caches))
+                .filter_map(|at| h3_image(reader, &texture.bitmap, at as i16, SamplerKind::Texture2D, caches))
                 .map(|(image, ..)| image)
                 .collect()
         } else {

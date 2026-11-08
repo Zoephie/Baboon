@@ -3,13 +3,13 @@
 //! it shares with Halo 4 are in `gen3::shield`. See
 //! `docs/reach-preview-research/shield.md`.
 
+use crate::app::model_preview::load::TagReader;
 use std::sync::Arc;
 
 use blam_tags::TagFile;
 
 use super::super::gen3::shaders::{H3Pass, H3Sources};
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
-use crate::core::source::TagSource;
 use super::super::gen3::shield::{DEPTH_DECODE, OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 
 /// The two explicit shaders and the settings that pick between them.
@@ -35,10 +35,10 @@ impl ReachShield {
 }
 
 /// The model's shield, with both its passes, if it has one.
-pub(crate) fn read_reach_shield(source: &TagSource, model: &TagFile) -> Option<Arc<ReachShield>> {
+pub(crate) fn read_reach_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<ReachShield>> {
     let path = shield_impact_path(model)?;
-    let settings = ReachShieldSettings::read(source, &path)?;
-    let mut sources = H3Sources::new(source);
+    let settings = ReachShieldSettings::read(reader, &path)?;
+    let mut sources = H3Sources::new(&reader.source);
     let pass = Arc::new(shield_pass(&*sources.explicit_pass("shield_impact").ok()?));
     let procedural = sources.explicit_pass("shield_impact_procedural_uv").ok().map(|pass| Arc::new(shield_pass(&pass)));
     Some(Arc::new(ReachShield { settings, pass, procedural }))

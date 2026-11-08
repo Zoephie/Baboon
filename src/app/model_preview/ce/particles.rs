@@ -29,7 +29,6 @@ use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high24_over_2_24, high_bits, lcg_step};
 
@@ -349,9 +348,9 @@ pub(crate) struct CeSecondaryDraw {
 }
 
 /// An effect shader's `bitmap` and how it is laid, by the field's name.
-pub(in crate::app::model_preview) fn read_secondary_map(source: &TagSource, holder: TagStruct<'_>, bitmap_field: &str) -> Option<Arc<CeSecondaryMap>> {
+pub(in crate::app::model_preview) fn read_secondary_map(reader: &TagReader, holder: TagStruct<'_>, bitmap_field: &str) -> Option<Arc<CeSecondaryMap>> {
     let path = holder.read_tag_ref_path(bitmap_field).filter(|path| !path.is_empty())?;
-    let image = decode_h2_image(source, &path, SamplerKind::Texture2D, 0)?;
+    let image = decode_h2_image(reader, &path, SamplerKind::Texture2D, 0)?;
     Some(Arc::new(CeSecondaryMap {
         anchor: Anchor::read(holder),
         image: Arc::new(image),
@@ -388,8 +387,8 @@ pub(crate) struct CeSpriteSheet {
     pub(crate) images: Vec<Option<Arc<H2Image>>>,
 }
 
-pub(in crate::app::model_preview) fn read_sprite_sheet(source: &TagSource, bitmap_path: &str) -> Option<CeSpriteSheet> {
-    let bitmap = load_referenced_tag_from_source(source, bitmap_path, "bitmap", b"bitm").ok()?;
+pub(in crate::app::model_preview) fn read_sprite_sheet(reader: &TagReader, bitmap_path: &str) -> Option<CeSpriteSheet> {
+    let bitmap = reader.load(bitmap_path, "bitmap", b"bitm").ok()?;
     let sizes: Vec<[f32; 2]> = elements(bitmap.root(), "bitmaps")
         .iter()
         .map(|image| {
@@ -418,7 +417,7 @@ pub(in crate::app::model_preview) fn read_sprite_sheet(source: &TagSource, bitma
     let images = (0..sizes.len())
         .map(|index| {
             used.contains(&index)
-                .then(|| decode_h2_image(source, bitmap_path, SamplerKind::Texture2D, index))
+                .then(|| decode_h2_image(reader, bitmap_path, SamplerKind::Texture2D, index))
                 .flatten()
                 .map(Arc::new)
         })
@@ -513,12 +512,12 @@ fn nth_field_path(holder: TagStruct<'_>, name: &str, n: usize) -> Option<String>
 pub(in crate::app::model_preview) struct CeEffectCache(std::collections::HashMap<String, Option<Arc<CeEffectDef>>>);
 
 impl CeEffectCache {
-    fn effect(&mut self, source: &TagSource, path: &str) -> Option<Arc<CeEffectDef>> {
+    fn effect(&mut self, reader: &TagReader, path: &str) -> Option<Arc<CeEffectDef>> {
         if let Some(known) = self.0.get(path) {
             return known.clone();
         }
         self.0.insert(path.to_owned(), None);
-        let def = read_effect_def(source, path, self).map(Arc::new);
+        let def = read_effect_def(reader, path, self).map(Arc::new);
         self.0.insert(path.to_owned(), def.clone());
         def
     }
@@ -543,12 +542,12 @@ impl CeParticleDef {
     }
 }
 
-fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) -> Option<CeParticleDef> {
-    let tag = load_referenced_tag_from_source(source, path, "particle", b"part").ok()?;
+fn read_particle_def(reader: &TagReader, path: &str, cache: &mut CeEffectCache) -> Option<CeParticleDef> {
+    let tag = reader.load(path, "particle", b"part").ok()?;
     let root = tag.root();
     let flags = ParticleFlags::read(root);
     let bitmap_path = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    let CeSpriteSheet { sizes, sequences, images } = read_sprite_sheet(source, &bitmap_path)?;
+    let CeSpriteSheet { sizes, sequences, images } = read_sprite_sheet(reader, &bitmap_path)?;
     let short = |name: &str| root.read_int_any(name).unwrap_or(0) as i32;
     let first_sequence = short("first sequence index");
     let sequence_counts = [short("initial sequence count"), short("looping sequence count"), short("final sequence count")];
@@ -585,7 +584,7 @@ fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) 
     let physics = root
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok())
+        .and_then(|path| reader.load(&path, "point_physics", b"pphy").ok())
         .map(|tag| CePointPhysics::read(&tag));
     Some(CeParticleDef {
         flags,
@@ -606,9 +605,9 @@ fn read_particle_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) 
         nonlinear_tint: has_flag(root, "shader flags", "nonlinear tint"),
         sort_bias: has_flag(root, "shader flags", "sort bias"),
         sprite_scale: if widest > 0.0 { 1.0 / widest } else { 1.0 },
-        secondary: nth_field_path(root, "bitmap", 1).and_then(|field| read_secondary_map(source, root, &field)),
-        collision_effect: spawned_effect(source, root, "collision effect", cache),
-        death_effect: spawned_effect(source, root, "death effect", cache),
+        secondary: nth_field_path(root, "bitmap", 1).and_then(|field| read_secondary_map(reader, root, &field)),
+        collision_effect: spawned_effect(reader, root, "collision effect", cache),
+        death_effect: spawned_effect(reader, root, "death effect", cache),
         sequences,
         image_widths: sizes.iter().map(|size| size[0]).collect(),
         images,
@@ -711,13 +710,13 @@ fn direction_of(holder: TagStruct<'_>, name: &str) -> [f32; 3] {
 }
 
 /// A particle's effect reference, where it names an effect.
-fn spawned_effect(source: &TagSource, root: TagStruct<'_>, name: &str, cache: &mut CeEffectCache) -> Option<Arc<CeEffectDef>> {
+fn spawned_effect(reader: &TagReader, root: TagStruct<'_>, name: &str, cache: &mut CeEffectCache) -> Option<Arc<CeEffectDef>> {
     let (group, path) = root.read_tag_ref_with_group(name)?;
-    (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then(|| cache.effect(source, &path)).flatten()
+    (group == u32::from_be_bytes(*b"effe") && !path.is_empty()).then(|| cache.effect(reader, &path)).flatten()
 }
 
-fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) -> Option<CeEffectDef> {
-    let tag = load_referenced_tag_from_source(source, path, "effect", b"effe").ok()?;
+fn read_effect_def(reader: &TagReader, path: &str, cache: &mut CeEffectCache) -> Option<CeEffectDef> {
+    let tag = reader.load(path, "effect", b"effe").ok()?;
     let root = tag.root();
     let index = |name: &str| usize::try_from(root.read_int_any(name).unwrap_or(-1)).ok();
     let locations = elements(root, "locations")
@@ -747,7 +746,7 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
                 let system = match system_paths.iter().position(|known| *known == path) {
                     Some(at) => at,
                     None => {
-                        let Some(def) = read_pctl_def(source, &path) else {
+                        let Some(def) = read_pctl_def(reader, &path) else {
                             continue;
                         };
                         systems.push(Arc::new(def));
@@ -773,7 +772,7 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
             let light = match light_paths.iter().position(|known| *known == path) {
                 Some(at) => at,
                 None => {
-                    let Some(light) = read_effect_light(source, &path) else {
+                    let Some(light) = read_effect_light(reader, &path) else {
                         continue;
                     };
                     lights.push(light);
@@ -797,7 +796,7 @@ fn read_effect_def(source: &TagSource, path: &str, cache: &mut CeEffectCache) ->
             let def = match paths.iter().position(|known| *known == path) {
                 Some(at) => at,
                 None => {
-                    let Some(def) = read_particle_def(source, &path, cache) else {
+                    let Some(def) = read_particle_def(reader, &path, cache) else {
                         continue;
                     };
                     particles.push(def);
@@ -913,7 +912,7 @@ impl super::functions::ReadsOutputs for CeEffectAt {
 
 /// The effects among `object`'s attachments.
 pub(in crate::app::model_preview) fn read_ce_effects(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -932,7 +931,7 @@ pub(in crate::app::model_preview) fn read_ce_effects(
         if group != effect_group || path.is_empty() {
             continue;
         }
-        let Some(def) = cache.effect(source, &path) else {
+        let Some(def) = cache.effect(reader, &path) else {
             continue;
         };
         let locations = locate(&def, markers);
@@ -978,7 +977,7 @@ fn locate(def: &CeEffectDef, markers: &[RenderModelPreviewMarker]) -> Vec<Vec<Ce
 /// makes them with `effect_new_from_object` on the object's markers: not
 /// looping, white, and deleted once their events have run.
 pub(in crate::app::model_preview) fn read_ce_event_effects(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -994,7 +993,7 @@ pub(in crate::app::model_preview) fn read_ce_event_effects(
         }
         // One with nothing the preview draws, such as a sound alone, has
         // nothing to play.
-        let Some(def) = cache.effect(source, &path) else {
+        let Some(def) = cache.effect(reader, &path) else {
             continue;
         };
         let locations = locate(&def, markers);

@@ -16,7 +16,6 @@ use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_up};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
@@ -128,7 +127,7 @@ struct PointState {
     scaled: StateScales,
 }
 
-fn read_state(source: &TagSource, state: TagStruct<'_>) -> PointState {
+fn read_state(reader: &TagReader, state: TagStruct<'_>) -> PointState {
     let bounds = |name: &str| {
         let bounds = state.read_real_bounds(name);
         [bounds.lower, bounds.upper]
@@ -136,7 +135,7 @@ fn read_state(source: &TagSource, state: TagStruct<'_>) -> PointState {
     let physics = state
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok())
+        .and_then(|path| reader.load(&path, "point_physics", b"pphy").ok())
         .map(|tag| CePointPhysics::read(&tag));
     let color = |name: &str| {
         let [red, green, blue, alpha] = argb(state, name);
@@ -191,10 +190,10 @@ pub(crate) struct CeContrailAt {
     markers: Vec<(usize, [f32; 3], [f32; 3])>,
 }
 
-fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
-    let tag = load_referenced_tag_from_source(source, path, "contrail", b"cont").ok()?;
+fn read_contrail(reader: &TagReader, path: &str) -> Option<CeContrailDef> {
+    let tag = reader.load(path, "contrail", b"cont").ok()?;
     let root = tag.root();
-    let states: Vec<PointState> = elements(root, "point states").into_iter().map(|state| read_state(source, state)).collect();
+    let states: Vec<PointState> = elements(root, "point states").into_iter().map(|state| read_state(reader, state)).collect();
     if states.is_empty() {
         return None;
     }
@@ -203,7 +202,7 @@ fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
     let short = |name: &str| root.read_int_any(name).unwrap_or(0) as i32;
     let bitmap_path = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
     let (sequences, images) = match &bitmap_path {
-        Some(path) => match load_referenced_tag_from_source(source, path, "bitmap", b"bitm") {
+        Some(path) => match reader.load(path, "bitmap", b"bitm") {
             Ok(bitmap) => {
                 let sequences = elements(bitmap.root(), "sequences")
                     .iter()
@@ -215,7 +214,7 @@ fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
                     .collect();
                 let count = elements(bitmap.root(), "bitmaps").len();
                 let images = (0..count)
-                    .map(|index| decode_h2_image(source, path, SamplerKind::Texture2D, index).map(Arc::new))
+                    .map(|index| decode_h2_image(reader, path, SamplerKind::Texture2D, index).map(Arc::new))
                     .collect();
                 (sequences, images)
             }
@@ -250,7 +249,7 @@ fn read_contrail(source: &TagSource, path: &str) -> Option<CeContrailDef> {
 
 /// The contrails among `object`'s attachments.
 pub(in crate::app::model_preview) fn read_ce_contrails(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -267,7 +266,7 @@ pub(in crate::app::model_preview) fn read_ce_contrails(
         if kind != group || path.is_empty() {
             continue;
         }
-        let Some(def) = read_contrail(source, &path) else {
+        let Some(def) = read_contrail(reader, &path) else {
             continue;
         };
         let name = attachment.read_string("marker").unwrap_or_default();

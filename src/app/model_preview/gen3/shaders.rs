@@ -91,9 +91,9 @@ pub(crate) struct H3Definition {
     pixel_vertex_type: usize,
 }
 
-pub(crate) fn read_h3_definition(source: &TagSource, path: &str) -> Option<H3Definition> {
-    let dialect = RenderMethodDialect::of(source);
-    let tag = load_referenced_tag_from_source(source, path, "render_method_definition", b"rmdf").ok()?;
+pub(crate) fn read_h3_definition(reader: &TagReader, path: &str) -> Option<H3Definition> {
+    let dialect = RenderMethodDialect::of(&reader.source);
+    let tag = reader.load(path, "render_method_definition", b"rmdf").ok()?;
     let root = tag.root();
     let function = |holder: TagStruct<'_>, name: &str| holder.read_string_id(name).filter(|name| !name.is_empty());
     let categories = elements(root, "categories")
@@ -384,7 +384,8 @@ fn include_tag(dialect: RenderMethodDialect, name: &str) -> String {
 
 /// A kit's sources, read once.
 pub(crate) struct H3Sources {
-    source: TagSource,
+    /// Its own reader: the definitions and files below keep what it reads.
+    reader: TagReader,
     dialect: RenderMethodDialect,
     definitions: HashMap<String, Option<Arc<H3Definition>>>,
     files: HashMap<String, Option<Arc<str>>>,
@@ -394,8 +395,8 @@ pub(crate) struct H3Sources {
 impl H3Sources {
     pub(crate) fn new(source: &TagSource) -> Self {
         let dialect = RenderMethodDialect::of(source);
-        let source = source.clone();
-        Self { source, dialect, definitions: HashMap::new(), files: HashMap::new(), passes: HashMap::new() }
+        let reader = TagReader::new(source);
+        Self { reader, dialect, definitions: HashMap::new(), files: HashMap::new(), passes: HashMap::new() }
     }
 
     pub(crate) fn dialect(&self) -> RenderMethodDialect {
@@ -403,19 +404,19 @@ impl H3Sources {
     }
 
     pub(crate) fn definition(&mut self, path: &str) -> Option<Arc<H3Definition>> {
-        let source = &self.source;
+        let reader = &self.reader;
         self.definitions
             .entry(path.to_owned())
-            .or_insert_with(|| read_h3_definition(source, path).map(Arc::new))
+            .or_insert_with(|| read_h3_definition(reader, path).map(Arc::new))
             .clone()
     }
 
     fn file(&mut self, name: &str) -> Option<Arc<str>> {
-        let (source, dialect) = (&self.source, self.dialect);
+        let (reader, dialect) = (&self.reader, self.dialect);
         self.files
             .entry(name.to_owned())
             .or_insert_with(|| {
-                let tag = load_referenced_tag_from_source(source, &include_tag(dialect, name), "hlsl_include", b"hlsl").ok()?;
+                let tag = reader.load(&include_tag(dialect, name), "hlsl_include", b"hlsl").ok()?;
                 let data = tag.root().field("include file")?.as_data()?.to_vec();
                 Some(Arc::from(String::from_utf8_lossy(&data).trim_end_matches('\0')))
             })

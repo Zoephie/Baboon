@@ -19,7 +19,6 @@ use super::super::common::named_function::NamedFunction;
 use super::super::gen3::flares::{H3EffectScale, H3Flare, read_h3_flare};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot};
 use crate::app::model_preview::common::attached::attached;
 
@@ -237,8 +236,8 @@ impl H3Light {
     }
 }
 
-fn read_h3_light(source: &TagSource, path: &str) -> Option<H3LightTag> {
-    let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
+fn read_h3_light(reader: &TagReader, path: &str) -> Option<H3LightTag> {
+    let tag = reader.load(path, "light", b"ligh").ok()?;
     let root = tag.root();
     if has_flag(root, "flags", "render first person only") {
         return None;
@@ -246,7 +245,7 @@ fn read_h3_light(source: &TagSource, path: &str) -> Option<H3LightTag> {
     let gel = root.read_tag_ref_path("gel bitmap").filter(|gel| !gel.is_empty());
     let gel = gel
         .filter(|_| has_flag_labelled(root, "flags", &SHADOWS_AND_GELS))
-        .and_then(|gel| decode_h2_image(source, &gel, SamplerKind::Texture2D, 0))
+        .and_then(|gel| decode_h2_image(reader, &gel, SamplerKind::Texture2D, 0))
         .map(Arc::new);
     Some(H3LightTag {
         frustum: root.field("type").is_some_and(|field| field.enum_is("frustum")),
@@ -264,7 +263,7 @@ fn read_h3_light(source: &TagSource, path: &str) -> Option<H3LightTag> {
         flare: root
             .read_tag_ref_path("Lens Flare")
             .filter(|path| !path.is_empty())
-            .and_then(|path| read_h3_flare(source, &path))
+            .and_then(|path| read_h3_flare(reader, &path))
             .map(Arc::new),
     })
 }
@@ -289,7 +288,7 @@ struct H3LightTag {
 /// An object's attached `light`s, at the first marker of each name, and those
 /// its attached effects make, `light_new_unattached` at each of a location's.
 pub(in crate::app::model_preview) fn read_h3_lights(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -341,7 +340,7 @@ pub(in crate::app::model_preview) fn read_h3_lights(
         if group != light_group || path.is_empty() {
             continue;
         }
-        let Some(tag) = read_h3_light(source, &path) else {
+        let Some(tag) = read_h3_light(reader, &path) else {
             continue;
         };
         let name = marker_name(attachment, "marker");
@@ -353,13 +352,13 @@ pub(in crate::app::model_preview) fn read_h3_lights(
         let change_color = function_slot_of(attachment, "change color");
         lights.push(place_light(tag, place, node, None, scale_by, change_color, None, None, false));
     }
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         if part.group != light_group {
             return;
         }
         let (offset, yaw, pitch) = read_part_placement(part.part);
         for marker in &part.effect.locations(markers, &part.marker, &frame) {
-            let Some(tag) = read_h3_light(source, &part.path) else {
+            let Some(tag) = read_h3_light(reader, &part.path) else {
                 return;
             };
             let (place, node) = frame(marker);

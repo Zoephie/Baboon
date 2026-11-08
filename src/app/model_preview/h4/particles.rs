@@ -3,13 +3,12 @@
 //! `pack_particle_state` packs it for the vertex shader to unpack. See
 //! `docs/h4-preview-research/particles.md`.
 
+use crate::app::model_preview::load::TagReader;
 use blam_tags::TagStruct;
 
 use super::super::common::fields::elements;
 use super::super::common::named_function::tag_function_at;
 use super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
-use crate::app::export::geometry::load_referenced_tag_from_source;
-use crate::core::source::TagSource;
 
 /// `alpha_blend_mode_enum` values the draw tells apart.
 const BLEND_OPAQUE: u8 = 0;
@@ -181,7 +180,7 @@ impl H4ParticleRender {
 /// `c_particle_definition::postprocess` and `postprocess_frame_animation`
 /// (X360 0x831F1FE0) for the particle at `root`.
 pub(crate) fn read_h4_particle_render(
-    source: &TagSource,
+    reader: &TagReader,
     root: TagStruct<'_>,
     model: Option<&blam_tags::ParticleModelStrip>,
 ) -> Result<H4ParticleRender, String> {
@@ -195,7 +194,7 @@ pub(crate) fn read_h4_particle_render(
     } else {
         "particle"
     };
-    let material = resolve_h4_effect_material(source, &material, pass)?;
+    let material = resolve_h4_effect_material(reader, &material, pass)?;
     let int = |name: &str| root.read_int_any(name).unwrap_or(0) as u32;
     let mut main = int("main flags");
     if elements(root, "attachments").is_empty() {
@@ -248,7 +247,7 @@ pub(crate) fn read_h4_particle_render(
     let bitmap = material
         .first_bitmap
         .as_deref()
-        .and_then(|path| load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok());
+        .and_then(|path| reader.load(path, "bitmap", b"bitm").ok());
     let placement = sprite_placement(
         bitmap.as_ref().map(|tag| tag.root()),
         first,
@@ -578,6 +577,8 @@ pub(crate) fn custom_vert_registers(sets: &[[[f32; 2]; 4]; 5]) -> [[f32; 4]; 10]
 
 #[cfg(test)]
 mod tests {
+    use crate::core::source::TagSource;
+    use crate::app::export::load_referenced_tag_from_source;
     use super::*;
 
     #[test]
@@ -744,7 +745,7 @@ mod tests {
             b"prt3",
         )
         .unwrap();
-        let render = read_h4_particle_render(&source, tag.root(), None).unwrap();
+        let render = read_h4_particle_render(&crate::app::model_preview::load::TagReader::new(&source), tag.root(), None).unwrap();
         assert_eq!(render.flags, [0x40, DEPTH_FADE, STATIC_FRAME]);
         assert_eq!(render.material.blend_mode, BLEND_ADD_SRC_TIMES_SRCALPHA);
         assert_eq!(render.sprite, [-1.0, -1.0, 2.0, 2.0]);

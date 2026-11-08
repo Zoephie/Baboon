@@ -11,7 +11,6 @@ use super::super::common::fields::{elements, object_block};
 use super::super::common::view::posed_on;
 use super::particles::CePointPhysics;
 use super::super::*;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
 /// The time `flag_render` gives the update that settles a flag first.
@@ -43,13 +42,13 @@ pub(crate) struct CeFlagAt {
 }
 
 fn read_flag(
-    source: &TagSource,
+    reader: &TagReader,
     path: &str,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     preview: &mut RenderModelPreview,
 ) -> Option<CeFlagAt> {
-    let tag = load_referenced_tag_from_source(source, path, "flag", b"flag").ok()?;
+    let tag = reader.load(path, "flag", b"flag").ok()?;
     let root = tag.root();
     let width = root.read_int_any("width").unwrap_or(0);
     let height = root.read_int_any("height").unwrap_or(0);
@@ -65,7 +64,7 @@ fn read_flag(
     let (shader_group, shader_path) =
         root.read_tag_ref_with_group("red flag shader").filter(|(_, path)| !path.is_empty()).unwrap_or(blue);
     let physics_path = root.read_tag_ref_path("physics").filter(|path| !path.is_empty())?;
-    let physics = load_referenced_tag_from_source(source, &physics_path, "point_physics", b"pphy").ok()?;
+    let physics = reader.load(&physics_path, "point_physics", b"pphy").ok()?;
     let attachments: Vec<FlagAttachment> = elements(root, "attachment points")
         .iter()
         .map(|point| {
@@ -204,7 +203,7 @@ fn cell_shapes(root: TagStruct<'_>, width: usize, height: usize, attachments: &[
 /// `markers` are the object's own, in the preview's space; `owner` is 0 for
 /// the opened object and 1 for the weapon it holds.
 pub(in crate::app::model_preview) fn read_ce_flags(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -220,7 +219,7 @@ pub(in crate::app::model_preview) fn read_ce_flags(
         .filter(|(kind, path)| *kind == group && !path.is_empty())
         .map(|(_, path)| path)
         .collect();
-    paths.iter().filter_map(|path| read_flag(source, path, owner, markers, preview)).collect()
+    paths.iter().filter_map(|path| read_flag(reader, path, owner, markers, preview)).collect()
 }
 
 /// Each flag's first vertex and its vertices' places and normals.

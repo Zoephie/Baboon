@@ -22,7 +22,6 @@ use super::super::effects::{
 use super::super::particles::{PRE_ROLL, Random, particle_game_time};
 use super::super::reach::lights::object_value;
 use super::super::*;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::attached::attached;
 
@@ -96,8 +95,8 @@ pub(crate) struct CheapTexels {
 
 impl CheapTexels {
     /// The top level of a bitmap's first image.
-    fn read(source: &TagSource, path: &str) -> Option<Self> {
-        let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok()?;
+    fn read(reader: &TagReader, path: &str) -> Option<Self> {
+        let tag = reader.load(path, "bitmap", b"bitm").ok()?;
         let bitmap = blam_tags::bitmap::Bitmap::new(&tag).ok()?;
         let image = bitmap.image(0)?;
         let format = image.format().ok()?;
@@ -138,8 +137,8 @@ pub(crate) struct CheapRenderTexture {
 }
 
 impl CheapRenderTexture {
-    fn read(source: &TagSource, path: &str) -> Option<Self> {
-        let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok()?;
+    fn read(reader: &TagReader, path: &str) -> Option<Self> {
+        let tag = reader.load(path, "bitmap", b"bitm").ok()?;
         let bitmap = blam_tags::bitmap::Bitmap::new(&tag).ok()?;
         let image = bitmap.image(0).filter(|image| image.is_array())?;
         let format = image.format().ok()?;
@@ -288,10 +287,10 @@ struct CheapTurbulence {
 }
 
 impl CheapTurbulence {
-    fn read(source: &TagSource, holder: TagStruct<'_>, centered: bool) -> Option<Self> {
+    fn read(reader: &TagReader, holder: TagStruct<'_>, centered: bool) -> Option<Self> {
         let path = holder.read_tag_ref_path("turbulence").filter(|path| !path.is_empty())?;
         Some(Self {
-            texels: CheapTexels::read(source, &path)?,
+            texels: CheapTexels::read(reader, &path)?,
             rates: ["turb du dt", "turb dv dt", "turb du dp", "turb dv dp"].map(|name| holder.read_real(name).unwrap_or(0.0)),
             centered,
         })
@@ -321,21 +320,21 @@ pub(crate) struct CheapLibrary {
 }
 
 impl CheapLibrary {
-    fn read(source: &TagSource, path: &str) -> Option<Self> {
-        let tag = load_referenced_tag_from_source(source, path, "cheap_particle_type_library", b"cptl").ok()?;
+    fn read(reader: &TagReader, path: &str) -> Option<Self> {
+        let tag = reader.load(path, "cheap_particle_type_library", b"cptl").ok()?;
         let root = tag.root();
         let textures = elements(root, "textures").len();
         let types = elements(root, "types");
         let map = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
-        let halo4 = source.game() == Some(GameId::Halo4);
+        let halo4 = reader.source.game() == Some(GameId::Halo4);
         // Halo 4 binds `turbulenceTexture`, an array the tool builds from
         // these; the kit's is stale (8 layers for 4 types, none matching),
         // so each type's own map stands in [inferred].
         let turbulence: Vec<CheapTurbulence> = if halo4 {
             let kinds = elements(root, "turbulence types");
-            kinds.iter().map(|kind| CheapTurbulence::read(source, *kind, true)).collect::<Option<_>>()?
+            kinds.iter().map(|kind| CheapTurbulence::read(reader, *kind, true)).collect::<Option<_>>()?
         } else {
-            vec![CheapTurbulence::read(source, root, false)?]
+            vec![CheapTurbulence::read(reader, root, false)?]
         };
         Some(Self {
             names: types.iter().map(|element| element.read_string_id("name").unwrap_or_default()).collect(),
@@ -344,9 +343,9 @@ impl CheapLibrary {
                 .enumerate()
                 .map(|(at, element)| CheapTypeTag::read(*element).compiled(at, textures, halo4))
                 .collect(),
-            random: CheapTexels::read(source, &map("random")?)?,
+            random: CheapTexels::read(reader, &map("random")?)?,
             turbulence,
-            render: map("render_texture").and_then(|path| CheapRenderTexture::read(source, &path)),
+            render: map("render_texture").and_then(|path| CheapRenderTexture::read(reader, &path)),
             halo4,
         })
     }
@@ -627,22 +626,22 @@ pub(crate) struct CheapEmitterDefinition {
 
 impl CheapEmitterDefinition {
     fn read(
-        source: &TagSource,
+        reader: &TagReader,
         path: &str,
         libraries: &mut HashMap<String, Option<Arc<CheapLibrary>>>,
         maps: &mut HashMap<String, Option<Arc<CheapTexels>>>,
     ) -> Option<Self> {
-        let tag = load_referenced_tag_from_source(source, path, "cheap_particle_emitter", b"cpem").ok()?;
+        let tag = reader.load(path, "cheap_particle_emitter", b"cpem").ok()?;
         let root = tag.root();
         let emitter = CheapEmitterTag::read(root).upgraded();
         let library_path = root.read_tag_ref_path("global type library").filter(|path| !path.is_empty())?;
         let library = libraries
             .entry(library_path.to_ascii_lowercase())
-            .or_insert_with(|| CheapLibrary::read(source, &library_path).map(Arc::new))
+            .or_insert_with(|| CheapLibrary::read(reader, &library_path).map(Arc::new))
             .clone()?;
         let mut map = |field: &str, default: &str| {
             let path = root.read_tag_ref_path(field).filter(|path| !path.is_empty()).unwrap_or_else(|| default.to_owned());
-            maps.entry(path.to_ascii_lowercase()).or_insert_with(|| CheapTexels::read(source, &path).map(Arc::new)).clone()
+            maps.entry(path.to_ascii_lowercase()).or_insert_with(|| CheapTexels::read(reader, &path).map(Arc::new)).clone()
         };
         let (position, velocity) = (map("position texture", DEFAULT_POSITION)?, map("velocity texture", DEFAULT_VELOCITY)?);
         let flagged = |wanted: &str| has_flag(root, "flags", wanted);
@@ -758,7 +757,7 @@ pub(crate) struct ReachCheapEmitterAt {
 /// The cheap particle emitters an object's attached effects run, one at each
 /// marker of a part's location.
 pub(in crate::app::model_preview) fn read_reach_cheap_emitters(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -766,13 +765,13 @@ pub(in crate::app::model_preview) fn read_reach_cheap_emitters(
 ) -> Vec<ReachCheapEmitterAt> {
     let mut emitters = Vec::new();
     let (mut definitions, mut libraries, mut maps) = (HashMap::new(), HashMap::new(), HashMap::new());
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         if part.group != CHEAP_PARTICLE_EMITTER {
             return;
         }
         let definition = definitions
             .entry(part.path.to_ascii_lowercase())
-            .or_insert_with(|| CheapEmitterDefinition::read(source, &part.path, &mut libraries, &mut maps).map(Arc::new))
+            .or_insert_with(|| CheapEmitterDefinition::read(reader, &part.path, &mut libraries, &mut maps).map(Arc::new))
             .clone();
         let Some(definition) = definition else {
             return;
@@ -1682,7 +1681,7 @@ mod tests {
             return;
         };
         let source = super::super::super::particles::loose_kit(&root, GameId::Halo4);
-        let library = CheapLibrary::read(&source, "fx\\cheap_particles\\global").expect("the library");
+        let library = CheapLibrary::read(&crate::app::model_preview::load::TagReader::new(&source), "fx\\cheap_particles\\global").expect("the library");
         assert!(library.halo4());
         assert_eq!((library.types.len(), library.turbulence.len()), (152, 4));
         let tag = load_referenced_tag_from_source(&source, "fx\\cheap_particles\\global_type_texture", "bitmap", b"bitm").unwrap();
@@ -1713,7 +1712,7 @@ mod tests {
             return;
         };
         let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
-        let library = CheapLibrary::read(&source, "globals\\global").expect("the library");
+        let library = CheapLibrary::read(&crate::app::model_preview::load::TagReader::new(&source), "globals\\global").expect("the library");
         assert_eq!(library.types.len(), 60);
         let tag = load_referenced_tag_from_source(&source, "globals\\global_type_texture", "bitmap", b"bitm").unwrap();
         let bitmap = blam_tags::bitmap::Bitmap::new(&tag).unwrap();
@@ -1758,7 +1757,7 @@ mod tests {
         let frame = |marker: &RenderModelPreviewMarker| {
             (MarkerFrame { axes: marker.axes, position: marker.position, node: marker.node_index }, 0)
         };
-        let emitters = read_reach_cheap_emitters(&source, &object, 0, &[marker], frame);
+        let emitters = read_reach_cheap_emitters(&crate::app::model_preview::load::TagReader::new(&source), &object, 0, &[marker], frame);
         assert_eq!(emitters.len(), 1, "one cpem part");
         let definition = &*emitters[0].definition;
         assert!(definition.correlate && definition.position_local && definition.velocity_local && definition.rotate_up);
@@ -1802,7 +1801,7 @@ mod tests {
         let frame = |marker: &RenderModelPreviewMarker| {
             (MarkerFrame { axes: marker.axes, position: marker.position, node: marker.node_index }, 0)
         };
-        let emitters = read_reach_cheap_emitters(&source, &object, 0, &[marker], frame);
+        let emitters = read_reach_cheap_emitters(&crate::app::model_preview::load::TagReader::new(&source), &object, 0, &[marker], frame);
         assert_eq!(emitters.len(), 1, "one cpem part, though the model has no `up` marker");
         let emitter = &emitters[0];
         assert_eq!(emitter.position, [1.0, 2.0, 3.0], "at the attachment's marker");

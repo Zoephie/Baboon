@@ -14,7 +14,6 @@ use super::super::gen3::materials::read_h3_bitmap;
 use super::super::renderer::H3_EXPOSURE;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
 
@@ -213,7 +212,7 @@ impl H3LeavesAt {
 /// What an object's `leaf_system`s come to: at their marker, or the middle of
 /// the object as `object_get_bounding_sphere` has it.
 pub(in crate::app::model_preview) fn read_h3_leaves(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     markers: &[RenderModelPreviewMarker],
     middle: [f32; 3],
@@ -228,14 +227,14 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
         if found != group || path.is_empty() {
             continue;
         }
-        let Ok(tag) = load_referenced_tag_from_source(source, &path, "leaf_system", b"lswd") else {
+        let Ok(tag) = reader.load(&path, "leaf_system", b"lswd") else {
             continue;
         };
         let root = tag.root();
         let Some(plate) = root.read_tag_ref_path("bitmap sprite plate").filter(|path| !path.is_empty()) else {
             continue;
         };
-        let bitmap = load_referenced_tag_from_source(source, &plate, "bitmap", b"bitm").ok();
+        let bitmap = reader.load(&plate, "bitmap", b"bitm").ok();
         let sprites = bitmap.as_ref().map_or(Vec::new(), |bitmap| {
             elements(bitmap.root(), "sequences").first().map_or(Vec::new(), |sequence| elements(*sequence, "sprites"))
         });
@@ -273,7 +272,7 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
                 }
             })
             .collect();
-        let Some(map) = read_h3_bitmap(source, &plate, bitmap_index, SamplerKind::Texture2D) else {
+        let Some(map) = read_h3_bitmap(reader, &plate, bitmap_index, SamplerKind::Texture2D) else {
             continue;
         };
         let name = marker_name(root, "marker attach name");

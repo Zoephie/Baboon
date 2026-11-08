@@ -18,7 +18,6 @@ use super::super::gen3::shaders::H3Blend;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{checked_unit, cross};
 use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
 use crate::app::model_preview::common::attached::attached;
@@ -110,7 +109,7 @@ pub(crate) struct H2ContrailAt {
     bitmap: Option<Arc<H2Image>>,
 }
 
-fn read_state(source: &TagSource, state: TagStruct<'_>) -> Option<PointState> {
+fn read_state(reader: &TagReader, state: TagStruct<'_>) -> Option<PointState> {
     let duration = state.read_real_bounds("duration");
     let transition = state.read_real_bounds("transition duration");
     let color = |name: &str| {
@@ -121,7 +120,7 @@ fn read_state(source: &TagSource, state: TagStruct<'_>) -> Option<PointState> {
     };
     let flagged = |wanted: &str| has_flag(state, "scale flags", wanted);
     let physics = state.read_tag_ref_path("physics").filter(|path| !path.is_empty());
-    let physics = physics.and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok());
+    let physics = physics.and_then(|path| reader.load(&path, "point_physics", b"pphy").ok());
     Some(PointState {
         duration: [duration.lower, duration.upper],
         transition: [transition.lower, transition.upper],
@@ -146,7 +145,7 @@ fn blend_named(name: &str) -> H3Blend {
 
 /// `object_attachment`s of group `cont`, at every marker of their name.
 pub(in crate::app::model_preview) fn read_h2_contrails(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -164,18 +163,18 @@ pub(in crate::app::model_preview) fn read_h2_contrails(
         if kind != group || path.is_empty() {
             continue;
         }
-        let Ok(tag) = load_referenced_tag_from_source(source, &path, "contrail", b"cont") else {
+        let Ok(tag) = reader.load(&path, "contrail", b"cont") else {
             continue;
         };
         let root = tag.root();
-        let states: Vec<PointState> = elements(root, "point states").into_iter().filter_map(|state| read_state(source, state)).collect();
+        let states: Vec<PointState> = elements(root, "point states").into_iter().filter_map(|state| read_state(reader, state)).collect();
         if states.len() < 2 {
             continue;
         }
         let flagged = |wanted: &str| has_flag(root, "flags", wanted);
         let speed = root.read_real_bounds("point velocity");
         let bitmap = root.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
-        let bitmap = bitmap.and_then(|path| decode_h2_image(source, &path, SamplerKind::Texture2D, 0)).map(Arc::new);
+        let bitmap = bitmap.and_then(|path| decode_h2_image(reader, &path, SamplerKind::Texture2D, 0)).map(Arc::new);
         let states = Arc::new(states);
         let name = marker_name(attachment, "marker");
         for marker in markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name)) {

@@ -21,7 +21,6 @@ use super::super::gen3::shaders::H3Pass;
 use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::hlsl::emit::Stage;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
@@ -129,8 +128,8 @@ fn read_rgb(holder: TagStruct<'_>, name: &str) -> [f32; 3] {
     }
 }
 
-fn read_light_tag(source: &TagSource, path: &str) -> Option<H4LightTag> {
-    let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
+fn read_light_tag(reader: &TagReader, path: &str) -> Option<H4LightTag> {
+    let tag = reader.load(path, "light", b"ligh").ok()?;
     let root = tag.root().descend("Midnight_Light_Parameters")?;
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let is = |name: &str, option: &str| root.field(name).is_some_and(|field| field.enum_is(option));
@@ -544,7 +543,7 @@ impl H4LitLight {
 /// each name, first-person-only lights left out of a third-person view.
 /// `lone_weapon` is a weapon opened on its own.
 pub(crate) fn read_h4_lights(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -560,7 +559,7 @@ pub(crate) fn read_h4_lights(
         if group == light_group {
             let tag = light_tags
                 .entry(path.clone())
-                .or_insert_with(|| read_light_tag(source, &path).map(Arc::new));
+                .or_insert_with(|| read_light_tag(reader, &path).map(Arc::new));
             let Some(tag) = tag.clone().filter(|tag| !tag.first_person_only) else {
                 continue;
             };
@@ -580,7 +579,7 @@ pub(crate) fn read_h4_lights(
                     tag: Arc::clone(&tag),
                 });
             }
-        } else if let Some(read) = read_cheap_light(source, &path) {
+        } else if let Some(read) = read_cheap_light(reader, &path) {
             for marker in part_markers(markers, &name, false) {
                 let (place, node) = frame(&marker);
                 cheap.push(H4CheapLight {
@@ -599,8 +598,8 @@ pub(crate) fn read_h4_lights(
     (lights, cheap)
 }
 
-fn read_cheap_light(source: &TagSource, path: &str) -> Option<H4CheapLight> {
-    let tag = load_referenced_tag_from_source(source, path, "cheap_light", b"gldf").ok()?;
+fn read_cheap_light(reader: &TagReader, path: &str) -> Option<H4CheapLight> {
+    let tag = reader.load(path, "cheap_light", b"gldf").ok()?;
     let root = tag.root();
     let function = |name: &str| {
         root.descend(name)
@@ -631,7 +630,7 @@ fn read_cheap_light(source: &TagSource, path: &str) -> Option<H4CheapLight> {
 /// correct, technique): explicit 187 or 204's `tiny_position` pixel shader
 /// over a full-screen triangle. A spot's cone may close to a point's, so a
 /// spot brings both.
-pub(crate) fn read_h4_light_passes(source: &TagSource, preview: &mut RenderModelPreview) {
+pub(crate) fn read_h4_light_passes(reader: &TagReader, preview: &mut RenderModelPreview) {
     let mut wanted: Vec<(bool, usize)> = Vec::new();
     for light in &preview.h4.lights {
         let tag = &light.tag;
@@ -656,7 +655,7 @@ pub(crate) fn read_h4_light_passes(source: &TagSource, preview: &mut RenderModel
     for key in wanted {
         let program = programs
             .entry(key.0)
-            .or_insert_with(|| h4_light_program(source, key.0));
+            .or_insert_with(|| h4_light_program(reader, key.0));
         let Some(program) = program.as_ref() else {
             continue;
         };
@@ -668,12 +667,10 @@ pub(crate) fn read_h4_light_passes(source: &TagSource, preview: &mut RenderModel
 
 /// Explicit 204's effect when `physical`, else 187's, parsed.
 pub(crate) fn h4_light_program(
-    source: &TagSource,
+    reader: &TagReader,
     physical: bool,
 ) -> Option<crate::core::hlsl::parse::Program> {
-    let globals = load_referenced_tag_from_source(
-        source,
-        "globals\\rasterizer_globals",
+    let globals = reader.load("globals\\rasterizer_globals",
         "rasterizer_globals",
         b"rasg",
     )
@@ -688,7 +685,7 @@ pub(crate) fn h4_light_program(
         .get(index)?
         .read_tag_ref_path("explicit pixel shader")
         .filter(|path| !path.is_empty())?;
-    let shader = super::shaders::H4ShaderSource::read(source, &path).ok()?;
+    let shader = super::shaders::H4ShaderSource::read(reader, &path).ok()?;
     shader.program(&super::shaders::H4_DEFINES).ok()
 }
 
@@ -769,7 +766,7 @@ mod tests {
     fn the_forge_light_draws_and_the_monocle_light_does_not() {
         let Some(source) = kit() else { return };
         let forge = read_light_tag(
-            &source,
+            &crate::app::model_preview::load::TagReader::new(&source),
             "objects\\levels\\forge\\ff_light_white\\ff_light_white",
         )
         .unwrap();
@@ -785,7 +782,7 @@ mod tests {
             lit.outer
         );
         let monocle =
-            read_light_tag(&source, "objects\\characters\\marine\\fx\\monocle_light").unwrap();
+            read_light_tag(&crate::app::model_preview::load::TagReader::new(&source), "objects\\characters\\marine\\fx\\monocle_light").unwrap();
         assert!(
             attached(monocle)
                 .lit(None, &[[1.0; 3]; 4], None, 0.0, [3.0, 0.0, 0.0])
@@ -810,7 +807,7 @@ mod tests {
         let Some(source) = kit() else { return };
         let light = H4CheapLight {
             scale_by: "alive".to_owned(),
-            ..read_cheap_light(&source, "objects\\characters\\storm_jackal\\fx\\sniper_eye")
+            ..read_cheap_light(&crate::app::model_preview::load::TagReader::new(&source), "objects\\characters\\storm_jackal\\fx\\sniper_eye")
                 .unwrap()
         };
         assert!(!light.on_time);

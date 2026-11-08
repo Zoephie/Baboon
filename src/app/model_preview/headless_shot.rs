@@ -655,7 +655,7 @@ fn reach_shield_passes_link() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let model = load_referenced_tag_from_source(&source, "objects\\characters\\spartans\\spartans", "model", b"hlmt").unwrap();
-    let shield = super::reach::shield::read_reach_shield(&source, &model).expect("the Spartan's shield");
+    let shield = super::reach::shield::read_reach_shield(&crate::app::model_preview::load::TagReader::new(&source), &model).expect("the Spartan's shield");
     let gl = headless_gl();
     let passes: Vec<_> = shield.passes().collect();
     assert_eq!(passes.len(), 2, "both explicit shaders");
@@ -717,7 +717,7 @@ fn h4_light_passes_link() {
     };
     let gl = headless_gl();
     for physical in [false, true] {
-        let program = super::h4::lights::h4_light_program(&source, physical).expect("the light shader");
+        let program = super::h4::lights::h4_light_program(&crate::app::model_preview::load::TagReader::new(&source), physical).expect("the light shader");
         for technique in 0..16 {
             let pass = super::h4::lights::h4_light_pass(&program, technique).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));
             unsafe {
@@ -741,7 +741,7 @@ fn h4_flare_pass_links() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = headless_gl();
-    let pass = super::h4::flares::h4_flare_pass(&source).expect("the flare pass");
+    let pass = super::h4::flares::h4_flare_pass(&crate::app::model_preview::load::TagReader::new(&source)).expect("the flare pass");
     for (name, _) in &pass.uniforms {
         eprintln!("NOTE flare UNIFORM {name}");
     }
@@ -774,7 +774,7 @@ fn h4_effect_passes_link() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(stem) = name.strip_suffix(".material_shader") else { continue };
         let path = format!("shaders\\material_shaders\\fx\\{stem}");
-        let program = H4ShaderSource::read(&source, &path).and_then(|shader| shader.program(&H4_DEFINES)).unwrap();
+        let program = H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), &path).and_then(|shader| shader.program(&H4_DEFINES)).unwrap();
         let Some(technique) = program.techniques.iter().find(|technique| &*technique.name == "_default") else { continue };
         let Ok(pixel) = translate_pass(&program, "_default", "_default", Stage::Pixel) else { continue };
         for (pass, _) in technique.passes.iter().filter(|(pass, _)| &**pass != "_default") {
@@ -835,7 +835,7 @@ fn h3_pass_inputs() {
         H3Sources::new(&source).explicit_pass(file).unwrap()
     } else {
         let [family, template, entry]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
-        let definition = read_h3_definition(&source, &format!("shaders\\{family}")).unwrap();
+        let definition = read_h3_definition(&crate::app::model_preview::load::TagReader::new(&source), &format!("shaders\\{family}")).unwrap();
         let options: Vec<usize> = template.split('_').filter_map(|digit| digit.parse().ok()).collect();
         Arc::new(H3Sources::new(&source).translate_entry(&definition, &options, entry, VERTEX_SKINNED).unwrap())
     };
@@ -873,7 +873,7 @@ fn h3_sweep() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = headless_gl();
-    let definition = read_h3_definition(&source, &format!("shaders\\{family}")).unwrap();
+    let definition = read_h3_definition(&crate::app::model_preview::load::TagReader::new(&source), &format!("shaders\\{family}")).unwrap();
     let mut sources = H3Sources::new(&source);
     let folder = format!("{root}/shaders/{family}_templates");
     let mut templates: Vec<String> = std::fs::read_dir(&folder)
@@ -1021,7 +1021,7 @@ fn h4_sweep() {
         }
     };
     if let Ok(needle) = std::env::var("H4_DUMP") {
-        let shader = H4ShaderSource::read(&source, &tags[0]).unwrap();
+        let shader = H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), &tags[0]).unwrap();
         let tokens = shader.tokens(&H4_DEFINES).unwrap();
         let text: Vec<&str> = tokens.iter().map(|token| &*token.text).collect();
         let at = text.iter().position(|token| *token == needle).unwrap_or(0);
@@ -1030,7 +1030,7 @@ fn h4_sweep() {
     }
     let (mut good, mut parse_failed, mut translation, mut driver) = (0, 0, 0, 0);
     for tag in tags.iter().take(limit) {
-        let program = match H4ShaderSource::read(&source, tag).and_then(|shader| shader.program(&H4_DEFINES)) {
+        let program = match H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), tag).and_then(|shader| shader.program(&H4_DEFINES)) {
             Ok(program) => program,
             Err(error) => {
                 parse_failed += 1;
@@ -1115,7 +1115,7 @@ fn h4_pass_inputs() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let [shader, technique, pass]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
-    let program = H4ShaderSource::read(&source, shader).unwrap().program(&H4_DEFINES).unwrap();
+    let program = H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), shader).unwrap().program(&H4_DEFINES).unwrap();
     for technique in &program.techniques {
         let passes: Vec<String> = technique
             .passes

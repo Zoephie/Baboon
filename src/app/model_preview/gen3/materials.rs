@@ -22,7 +22,7 @@ use super::super::materials::*;
 
 /// A bitmap for a pass, and whether `curve` has the card decode it.
 pub(in crate::app::model_preview) fn h3_image(
-    source: &TagSource,
+    reader: &TagReader,
     path: &str,
     index: i16,
     kind: SamplerKind,
@@ -32,7 +32,7 @@ pub(in crate::app::model_preview) fn h3_image(
     if let Some(found) = caches.h3_images.get(&key) {
         return found.clone();
     }
-    let found = read_h3_bitmap(source, path, index, kind);
+    let found = read_h3_bitmap(reader, path, index, kind);
     caches.h3_images.insert(key, found.clone());
     found
 }
@@ -113,12 +113,12 @@ fn red_only(image: &mut H2Image) {
     }
 }
 
-pub(in crate::app::model_preview) fn read_h3_bitmap(source: &TagSource, path: &str, index: i16, kind: SamplerKind) -> Option<H3Bitmap> {
-    let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok();
+pub(in crate::app::model_preview) fn read_h3_bitmap(reader: &TagReader, path: &str, index: i16, kind: SamplerKind) -> Option<H3Bitmap> {
+    let tag = reader.load(path, "bitmap", b"bitm").ok();
     // `render_method_submit`: an index past the last image takes the last.
     let images = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len());
     let index = (index.max(0) as usize).min(images.saturating_sub(1)) as i16;
-    let image = decode_h2_image(source, path, kind, index as usize);
+    let image = decode_h2_image(reader, path, kind, index as usize);
     image.map(|mut image| {
         // `c_rasterizer_texture_ref::allocate`: xRGB and sRGB curves.
         let curve = tag.as_ref().and_then(|tag| {
@@ -127,7 +127,7 @@ pub(in crate::app::model_preview) fn read_h3_bitmap(source: &TagSource, path: &s
         let format = tag.as_ref().and_then(|tag| {
             blam_tags::bitmap::Bitmap::new(tag).ok()?.image(index.max(0) as usize)?.format().ok()
         });
-        let halo4 = source.game() == Some(crate::core::game::GameId::Halo4);
+        let halo4 = reader.source.game() == Some(crate::core::game::GameId::Halo4);
         let texels = format.map_or(H3Texels::Linear, |format| {
             if halo4 {
                 return H3Texels::of_halo4(format, curve.unwrap_or(0));
@@ -166,7 +166,7 @@ pub(in crate::app::model_preview) fn reach_version_update(method: &mut RenderMet
 /// (`postprocess_as_child`, 0x141166270) lays under it before the bake. A
 /// shader naming itself has none, as tool refuses it.
 pub(in crate::app::model_preview) fn reach_reference(
-    source: &TagSource,
+    reader: &TagReader,
     method: &RenderMethod,
     own_path: &str,
     definition: &RenderMethodDefinition,
@@ -180,7 +180,7 @@ pub(in crate::app::model_preview) fn reach_reference(
         .entry(path.to_ascii_lowercase())
         .or_insert_with(|| {
             let extension = blam_tags::paths::group_tag_to_extension(*group)?;
-            let tag = load_referenced_tag_from_source(source, path, extension, &group.to_be_bytes()).ok()?;
+            let tag = reader.load(path, extension, &group.to_be_bytes()).ok()?;
             let mut reference = RenderMethod::from_tag(&tag).ok()?;
             reach_version_update(&mut reference, definition);
             Some(Arc::new(reference))
@@ -189,16 +189,15 @@ pub(in crate::app::model_preview) fn reach_reference(
 }
 
 /// A render method held inside another tag, resolved as the bake would.
-pub(in crate::app::model_preview) fn resolve_embedded_method(source: &TagSource, shader: TagStruct<'_>) -> Option<ResolvedRenderMethod> {
+pub(in crate::app::model_preview) fn resolve_embedded_method(reader: &TagReader, shader: TagStruct<'_>) -> Option<ResolvedRenderMethod> {
     let mut method = RenderMethod::from_struct(&shader).ok()?;
-    let definition = cached_render_method_definition(source, &method.definition_path, &mut HashMap::new())?;
-    if source.game() == Some(GameId::HaloReach) {
-        let reference = reach_reference(source, &method, "", &definition, &mut HashMap::new());
+    let definition = reader.render_method_definition(&method.definition_path)?;
+    if reader.source.game() == Some(GameId::HaloReach) {
+        let reference = reach_reference(reader, &method, "", &definition, &mut HashMap::new());
         method.apply_reference_shader(&definition, reference.as_deref());
     }
-    let mut options = HashMap::new();
     let resolved = ResolvedRenderMethod::resolve(&method, &definition, |option_path| {
-        cached_render_method_option(source, option_path, &mut options).map(|option| (*option).clone())
+        reader.render_method_option(option_path).map(|option| (*option).clone())
     });
     Some(resolved)
 }
@@ -206,14 +205,14 @@ pub(in crate::app::model_preview) fn resolve_embedded_method(source: &TagSource,
 /// A map of a resolved method, with the sampler the bake gave it: the option's
 /// default wherever the shader's `bitmap flags` claim no field of it.
 pub(in crate::app::model_preview) fn read_resolved_map(
-    source: &TagSource,
+    reader: &TagReader,
     resolved: &ResolvedRenderMethod,
     name: &str,
 ) -> Option<(H3Bitmap, H3Sampler)> {
     let ParameterSource::Inline(ResolvedValue::Bitmap(binding)) = &resolved.find(name)?.source else {
         return None;
     };
-    let bitmap = read_h3_bitmap(source, &binding.bitmap_path, binding.bitmap_index, SamplerKind::Texture2D)?;
+    let bitmap = read_h3_bitmap(reader, &binding.bitmap_path, binding.bitmap_index, SamplerKind::Texture2D)?;
     let sampler = H3Sampler {
         address: [binding.address_mode_x, binding.address_mode_y],
         filter: binding.filter_mode,
@@ -291,12 +290,12 @@ fn h3_extern_change_color(name: &str) -> Option<usize> {
 const H3_LIT_ENTRIES: [&str; 3] = ["static_sh", "static_per_vertex", "default"];
 
 pub(in crate::app::model_preview) fn prepare_h3_material(
-    source: &TagSource,
+    reader: &TagReader,
     values: &Values<'_>,
     caches: &mut ResolveCaches,
 ) -> Result<H3Material, String> {
     let method = values.method;
-    let compiled = compile_passes(source, method, caches)?;
+    let compiled = compile_passes(reader, method, caches)?;
     let mut material = H3Material {
         dialect: compiled.dialect.into(),
         albedo: compiled.albedo,
@@ -319,16 +318,16 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
         fringe: None,
     };
     if compiled.blend == H3Blend::Opaque {
-        material.shield = h3_shield(source, caches);
+        material.shield = h3_shield(reader, caches);
     }
     let passes = material_passes(&material);
-    let clock = animation_clock(source, compiled.screen);
+    let clock = animation_clock(reader, compiled.screen);
     material.animations = parameter_animations(method, clock);
     for pass in &passes {
         bind_pass_values(values, pass, &mut material);
-        bind_pass_textures(source, values, pass, &mut material, caches);
+        bind_pass_textures(reader, values, pass, &mut material, caches);
         if compiled.dialect == RenderMethodDialect::Reach {
-            reach_environment_maps(source, pass, &mut material, caches);
+            reach_environment_maps(reader, pass, &mut material, caches);
         }
     }
     Ok(material)
@@ -355,11 +354,11 @@ struct CompiledPasses {
 /// The method's definition read, and each entry point it draws through
 /// compiled for its options.
 fn compile_passes(
-    source: &TagSource,
+    reader: &TagReader,
     method: &RenderMethod,
     caches: &mut ResolveCaches,
 ) -> Result<CompiledPasses, String> {
-    let sources = caches.h3_sources.get_or_insert_with(|| H3Sources::new(source));
+    let sources = caches.h3_sources.get_or_insert_with(|| H3Sources::new(&reader.source));
     let definition = sources
         .definition(&method.definition_path)
         .ok_or_else(|| format!("{} did not read", method.definition_path))?;
@@ -461,8 +460,8 @@ fn material_passes(material: &H3Material) -> Vec<Arc<H3Pass>> {
 }
 
 /// Which clock the material's animated parameters run by.
-fn animation_clock(source: &TagSource, screen: bool) -> H3Clock {
-    match (source.game(), screen) {
+fn animation_clock(reader: &TagReader, screen: bool) -> H3Clock {
+    match (reader.source.game(), screen) {
         (Some(GameId::Halo3Odst), true) => H3Clock::OdstScreen,
         (Some(GameId::Halo3Odst), false) => H3Clock::Odst,
         (Some(GameId::HaloReach), _) => H3Clock::Reach,
@@ -553,7 +552,7 @@ fn bind_pass_values(values: &Values<'_>, pass: &H3Pass, material: &mut H3Materia
 /// The bitmaps `pass`'s user textures bind, each once, with an animated one's
 /// frames.
 fn bind_pass_textures(
-    source: &TagSource,
+    reader: &TagReader,
     values: &Values<'_>,
     pass: &H3Pass,
     material: &mut H3Material,
@@ -591,17 +590,17 @@ fn bind_pass_textures(
             TextureKind::Volume => SamplerKind::Volume,
             _ => SamplerKind::Texture2D,
         };
-        let Some((image, texels, mips)) = h3_image(source, &path, index, kind, caches) else {
+        let Some((image, texels, mips)) = h3_image(reader, &path, index, kind, caches) else {
             continue;
         };
         let animated = material.animations.iter().any(|animation| {
             animation.writes == H3Animated::Frame && animation.uniform == *uniform
         });
         let frames = if animated {
-            let tag = load_referenced_tag_from_source(source, &path, "bitmap", b"bitm").ok();
+            let tag = reader.load(&path, "bitmap", b"bitm").ok();
             let count = tag.as_ref().map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
             (0..count)
-                .filter_map(|at| h3_image(source, &path, at as i16, kind, caches))
+                .filter_map(|at| h3_image(reader, &path, at as i16, kind, caches))
                 .map(|(image, _, _)| image)
                 .collect()
         } else {
@@ -614,7 +613,7 @@ fn bind_pass_textures(
 /// Reach's cube maps are the rasterizer's own, not a shader's externs. With no
 /// level, `render_method_submit_dynamic_cubemap` (MCC `sub_140817F70`) binds
 /// `rasterizer_globals`' default bitmap 2 to both, clamped, trilinear.
-fn reach_environment_maps(source: &TagSource, pass: &H3Pass, material: &mut H3Material, caches: &mut ResolveCaches) {
+fn reach_environment_maps(reader: &TagReader, pass: &H3Pass, material: &mut H3Material, caches: &mut ResolveCaches) {
     const DEFAULT_CUBE: &str = "shaders\\default_bitmaps\\bitmaps\\default_dynamic_cube_map";
     for (uniform, _) in &pass.textures {
         let wanted = matches!(
@@ -624,7 +623,7 @@ fn reach_environment_maps(source: &TagSource, pass: &H3Pass, material: &mut H3Ma
         if !wanted || material.textures.iter().any(|known| known.uniform == *uniform) {
             continue;
         }
-        let Some((image, texels, mips)) = h3_image(source, DEFAULT_CUBE, 0, SamplerKind::Cube, caches) else {
+        let Some((image, texels, mips)) = h3_image(reader, DEFAULT_CUBE, 0, SamplerKind::Cube, caches) else {
             continue;
         };
         let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Trilinear };
@@ -641,8 +640,8 @@ fn reach_environment_maps(source: &TagSource, pass: &H3Pass, material: &mut H3Ma
 
 /// A `shield_impact` tag's constants and noise, as `render_object_context`
 /// submits them.
-pub(in crate::app::model_preview) fn read_h3_shield_settings(source: &TagSource, path: &str) -> Option<Arc<H3ShieldSettings>> {
-    let tag = load_referenced_tag_from_source(source, path, "shield_impact", b"shit").ok()?;
+pub(in crate::app::model_preview) fn read_h3_shield_settings(reader: &TagReader, path: &str) -> Option<Arc<H3ShieldSettings>> {
+    let tag = reader.load(path, "shield_impact", b"shit").ok()?;
     let root = tag.root();
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let tinted = |color: &str, intensity: &str| {
@@ -676,7 +675,7 @@ pub(in crate::app::model_preview) fn read_h3_shield_settings(source: &TagSource,
         ("Shield Impact Noise Texture 2", "shield_impact_noise_texture2"),
     ] {
         let bitmap = root.read_tag_ref_path(field).filter(|bitmap| !bitmap.is_empty())?;
-        let image = Arc::new(decode_h2_image(source, &bitmap, SamplerKind::Texture2D, 0)?);
+        let image = Arc::new(decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, 0)?);
         textures.push(H3Texture {
             uniform: uniform.to_owned(),
             image,
@@ -690,12 +689,12 @@ pub(in crate::app::model_preview) fn read_h3_shield_settings(source: &TagSource,
 }
 
 /// The pass, on the global settings a model that names none of its own uses.
-fn h3_shield(source: &TagSource, caches: &mut ResolveCaches) -> Option<Arc<H3Shield>> {
+fn h3_shield(reader: &TagReader, caches: &mut ResolveCaches) -> Option<Arc<H3Shield>> {
     if let Some(found) = &caches.h3_shield {
         return found.clone();
     }
-    let settings = read_h3_shield_settings(source, "globals\\global_shield_impact_settings");
-    let sources = caches.h3_sources.get_or_insert_with(|| H3Sources::new(source));
+    let settings = read_h3_shield_settings(reader, "globals\\global_shield_impact_settings");
+    let sources = caches.h3_sources.get_or_insert_with(|| H3Sources::new(&reader.source));
     let shield = settings.and_then(|settings| {
         let pass = sources.explicit_pass("shield_impact").ok()?;
         let procedural = sources.explicit_pass("shield_impact_procedural_uv").ok();
@@ -724,7 +723,7 @@ mod tests {
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
         let first_texel = |path: &str| {
-            let (image, _, _) = read_h3_bitmap(&source, path, 0, SamplerKind::Texture2D).expect(path);
+            let (image, _, _) = read_h3_bitmap(&crate::app::model_preview::load::TagReader::new(&source), path, 0, SamplerKind::Texture2D).expect(path);
             let H2Image::Flat(flat) = &*image else {
                 panic!("{path} should be flat");
             };

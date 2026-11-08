@@ -10,7 +10,6 @@ use super::attachment::{MarkerFrame, perpendicular};
 use super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::functions::FunctionValues;
 use super::*;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 
 /// `effect_build_locations`: a location of this name takes the attachment's marker.
@@ -338,12 +337,12 @@ fn part_made(group: u32, generated: bool, disabled: bool) -> bool {
 
 /// Every part of every effect `object` attaches, with its effect held open.
 pub(in crate::app::model_preview) fn for_each_attached_part(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     mut visit: impl for<'a> FnMut(EffectPart<'a>),
 ) {
-    for object_effect in object_effects(source, object) {
-        let Ok(effect) = load_referenced_tag_from_source(source, &object_effect.path, "effect", b"effe") else {
+    for object_effect in object_effects(reader, object) {
+        let Ok(effect) = reader.load(&object_effect.path, "effect", b"effe") else {
             continue;
         };
         let locations = elements(effect.root(), "locations");
@@ -537,10 +536,10 @@ fn axes_of_vector(forward: [f32; 3]) -> [[f32; 3]; 3] {
 }
 
 /// Every effect `object` and its `.model` name, attachments first.
-pub(in crate::app::model_preview) fn object_effects(source: &TagSource, object: &TagFile) -> Vec<ObjectEffect> {
+pub(in crate::app::model_preview) fn object_effects(reader: &TagReader, object: &TagFile) -> Vec<ObjectEffect> {
     let mut effects = Vec::new();
     let effect_group = u32::from_be_bytes(*b"effe");
-    let reach = source.game() == Some(crate::core::game::GameId::HaloReach);
+    let reach = reader.source.game() == Some(crate::core::game::GameId::HaloReach);
     if let Some(block) = object_block(object, "attachments") {
         for attachment in elements(block, "attachments") {
             let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
@@ -562,7 +561,7 @@ pub(in crate::app::model_preview) fn object_effects(source: &TagSource, object: 
     let mut named = Vec::new();
     collect_event_effects(object.root(), &mut named);
     let model = object_reference(object, "model")
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "model", b"hlmt").ok());
+        .and_then(|path| reader.load(&path, "model", b"hlmt").ok());
     if let Some(model) = &model {
         collect_event_effects(model.root(), &mut named);
     }
@@ -580,7 +579,7 @@ pub(in crate::app::model_preview) fn object_effects(source: &TagSource, object: 
             });
         }
     }
-    with_nested_effects(source, effects)
+    with_nested_effects(reader, effects)
 }
 
 const WORLD_AXES: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
@@ -607,13 +606,13 @@ const MOST_NESTING: usize = 3;
 
 /// Each effect, then those its parts name, at those parts' locations. A part's
 /// effect is played by its event, once, under the same function.
-fn with_nested_effects(source: &TagSource, mut effects: Vec<ObjectEffect>) -> Vec<ObjectEffect> {
+fn with_nested_effects(reader: &TagReader, mut effects: Vec<ObjectEffect>) -> Vec<ObjectEffect> {
     let effect_group = u32::from_be_bytes(*b"effe");
     let mut level = 0..effects.len();
     for _ in 0..MOST_NESTING {
         let mut nested = Vec::new();
         for outer in &effects[level.clone()] {
-            let Ok(tag) = load_referenced_tag_from_source(source, &outer.path, "effect", b"effe") else {
+            let Ok(tag) = reader.load(&outer.path, "effect", b"effe") else {
                 continue;
             };
             let locations = elements(tag.root(), "locations");

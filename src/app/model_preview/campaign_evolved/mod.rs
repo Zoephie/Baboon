@@ -30,10 +30,11 @@ const CE_HV: EIoContainerHeaderVersion = EIoContainerHeaderVersion::SoftPackageR
 pub(super) fn load_campaign_evolved_preview(
     model_tag: &TagFile,
     entry: &TagEntry,
-    source: Option<&TagSource>,
+    reader: Option<&TagReader>,
     high_detail: bool,
 ) -> Option<Result<ModelPreviewData, String>> {
-    let Some(src @ TagSource::IoStoreContainerSet { containers, .. }) = source else {
+    let reader = reader?;
+    let TagSource::IoStoreContainerSet { containers, .. } = &reader.source else {
         return None;
     };
     if &model_tag.header.group_tag.to_be_bytes() != b"hlmt" {
@@ -47,7 +48,7 @@ pub(super) fn load_campaign_evolved_preview(
     Some(build_campaign_evolved_preview(
         model_tag,
         entry,
-        src,
+        reader,
         containers,
         &skel_ref,
         high_detail,
@@ -67,15 +68,14 @@ struct CeModelMeshes {
 fn resolve_ce_model_meshes(
     model_tag: &TagFile,
     entry: &TagEntry,
-    source: &TagSource,
+    reader: &TagReader,
     containers: &[MountedContainer],
     skel_ref: &str,
     high_detail: bool,
 ) -> Result<CeModelMeshes, String> {
     // 1. Resolve the skeleton_model (node skeleton + markers + regions) through
     //    the container tag index — the same read the browser tree performs.
-    let skel = source
-        .read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), skel_ref)
+    let skel = reader.source.read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), skel_ref)
         .map_err(|e| e.to_string())?;
 
     // 2. This model's package key, as DA_MeshSynchronization imports it
@@ -220,7 +220,7 @@ fn ce_mesh_parts(
 fn build_campaign_evolved_preview(
     model_tag: &TagFile,
     entry: &TagEntry,
-    source: &TagSource,
+    reader: &TagReader,
     containers: &[MountedContainer],
     skel_ref: &str,
     high_detail: bool,
@@ -230,7 +230,7 @@ fn build_campaign_evolved_preview(
         variants,
         meshes,
         render_path,
-    } = resolve_ce_model_meshes(model_tag, entry, source, containers, skel_ref, high_detail)?;
+    } = resolve_ce_model_meshes(model_tag, entry, reader, containers, skel_ref, high_detail)?;
     let (parts, static_parts, world_parts) = ce_mesh_parts(&meshes);
 
     // 5. Reconstruct the cross-game RenderModel and run the standard pipeline.
@@ -261,11 +261,13 @@ pub(in crate::app) fn campaign_evolved_render_jms(
     source: &TagSource,
     skel_ref: &str,
 ) -> Result<blam_tags::jms::JmsFile, String> {
+    // An extraction is a load of its own.
+    let reader = &TagReader::new(source);
     let TagSource::IoStoreContainerSet { containers, .. } = source else {
         return Err("CE render extraction requires an IoStore container source.".to_owned());
     };
     let CeModelMeshes { skel, meshes, .. } =
-        resolve_ce_model_meshes(model_tag, entry, source, containers, skel_ref, true)?;
+        resolve_ce_model_meshes(model_tag, entry, reader, containers, skel_ref, true)?;
     let (parts, static_parts, world_parts) = ce_mesh_parts(&meshes);
     let mut jms =
         blam_tags::jms::JmsFile::from_ue_meshes(&parts, &static_parts, &world_parts, &skel)
@@ -1774,7 +1776,7 @@ mod tests {
         let data = load_campaign_evolved_preview(
             &tag,
             &entry,
-            Some(source),
+            Some(&crate::app::model_preview::load::TagReader::new(source)),
             std::env::var("CE_HD").is_ok(),
         )
         .expect("recognized as CE model")

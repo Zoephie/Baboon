@@ -22,7 +22,6 @@ use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
 use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_unless_under_micro};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
@@ -186,8 +185,8 @@ fn block_function(root: TagStruct<'_>, block: &str) -> Option<Arc<TagFunction>> 
     tag_function_at(&first, "function").map(Arc::new)
 }
 
-pub(crate) fn read_h4_lens_flare(source: &TagSource, path: &str) -> Option<H4LensFlare> {
-    let tag = load_referenced_tag_from_source(source, path, "lens_flare", b"lens").ok()?;
+pub(crate) fn read_h4_lens_flare(reader: &TagReader, path: &str) -> Option<H4LensFlare> {
+    let tag = reader.load(path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let flags = H4FlareFlags::read(root);
@@ -216,7 +215,7 @@ pub(crate) fn read_h4_lens_flare(source: &TagSource, path: &str) -> Option<H4Len
         {
             Some(image) => image,
             None => {
-                let Some(read) = read_h3_bitmap(source, &path, index, SamplerKind::Texture2D)
+                let Some(read) = read_h3_bitmap(reader, &path, index, SamplerKind::Texture2D)
                 else {
                     continue;
                 };
@@ -764,7 +763,7 @@ impl H4FlareAt {
 /// An object's attached `lens_flare`s, at every marker of each name; none
 /// that draw only in first person.
 pub(crate) fn read_h4_flares(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -778,7 +777,7 @@ pub(crate) fn read_h4_flares(
         let flare = match read.iter().find(|(known, _)| *known == path) {
             Some((_, flare)) => flare.clone(),
             None => {
-                let flare = read_h4_lens_flare(source, &path).map(Arc::new);
+                let flare = read_h4_lens_flare(reader, &path).map(Arc::new);
                 read.push((path.clone(), flare.clone()));
                 flare
             }
@@ -808,11 +807,9 @@ pub(crate) fn read_h4_flares(
 /// technique's `screen` pass draws every reflection.
 const LENS_FLARE: usize = 46;
 
-pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::super::gen3::shaders::H3Pass, String> {
+pub(crate) fn h4_flare_pass(reader: &TagReader) -> Result<super::super::gen3::shaders::H3Pass, String> {
     use crate::core::hlsl::emit::Stage;
-    let globals = load_referenced_tag_from_source(
-        source,
-        "globals\\rasterizer_globals",
+    let globals = reader.load("globals\\rasterizer_globals",
         "rasterizer_globals",
         b"rasg",
     )
@@ -826,7 +823,7 @@ pub(crate) fn h4_flare_pass(source: &TagSource) -> Result<super::super::gen3::sh
             .ok_or(format!("no {field}"))
     };
     let program = |path: &str| -> Result<_, String> {
-        super::shaders::H4ShaderSource::read(source, path)?
+        super::shaders::H4ShaderSource::read(reader, path)?
             .program(&super::shaders::H4_DEFINES)
     };
     let vertex = super::shaders::translate_technique(
@@ -864,7 +861,7 @@ mod tests {
     }
 
     fn sniper_eye(source: &TagSource) -> H4FlareAt {
-        let flare = read_h4_lens_flare(source, "objects\\characters\\storm_jackal\\fx\\sniper_eye")
+        let flare = read_h4_lens_flare(&crate::app::model_preview::load::TagReader::new(source), "objects\\characters\\storm_jackal\\fx\\sniper_eye")
             .expect("the sniper eye flare");
         H4FlareAt {
             object: 0,

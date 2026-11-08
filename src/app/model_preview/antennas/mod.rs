@@ -19,7 +19,6 @@ use super::materials::decode_h2_image;
 use super::*;
 use crate::app::model_preview::common::attached::{Attached, attached};
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use spring::{ReachAntennaSpring, posed_marker};
 
 pub(in crate::app::model_preview) mod ce;
@@ -300,20 +299,20 @@ impl Antenna {
 }
 
 fn read_antenna(
-    source: &TagSource,
+    reader: &TagReader,
     path: &str,
     markers: &[RenderModelPreviewMarker],
 ) -> Option<Antenna> {
     /// The pixels `antenna_render` takes an antenna to cover, whatever it does.
     const PIXELS: f32 = 100.0;
-    let tag = load_referenced_tag_from_source(source, path, "antenna", b"ant!").ok()?;
+    let tag = reader.load(path, "antenna", b"ant!").ok()?;
     let root = tag.root();
     let name = root
         .read_string_id("attachment marker name")
         .or_else(|| root.read_string("attachment marker name"))?;
     let marker = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name))?;
     let bitmap_path = root.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty())?;
-    let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
+    let bitmap = reader.load(&bitmap_path, "bitmap", b"bitm").ok()?;
     let falloff = root.read_real("falloff pixels").unwrap_or(0.0);
     let cutoff = root.read_real("cutoff pixels").unwrap_or(0.0);
     // Halo 3 bakes these out of the tags it ships.
@@ -348,8 +347,8 @@ fn read_antenna(
             width: None,
         });
     }
-    let image = decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, 0)?;
-    let h3_bitmap = curve.and_then(|_| read_h3_bitmap(source, &bitmap_path, 0, SamplerKind::Texture2D));
+    let image = decode_h2_image(reader, &bitmap_path, SamplerKind::Texture2D, 0)?;
+    let h3_bitmap = curve.and_then(|_| read_h3_bitmap(reader, &bitmap_path, 0, SamplerKind::Texture2D));
     Some(Antenna {
         node: marker.node_index.max(0) as usize,
         position: marker.position,
@@ -365,7 +364,7 @@ fn read_antenna(
 
 /// The antennas among `object`'s widgets.
 pub(in crate::app::model_preview) fn read_antennas(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     markers: &[RenderModelPreviewMarker],
 ) -> Vec<Antenna> {
@@ -377,7 +376,7 @@ pub(in crate::app::model_preview) fn read_antennas(
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("type"))
         .filter(|(group, _)| *group == antenna_group)
-        .filter_map(|(_, path)| read_antenna(source, &path, markers))
+        .filter_map(|(_, path)| read_antenna(reader, &path, markers))
         .collect()
 }
 
@@ -386,14 +385,14 @@ pub(in crate::app::model_preview) fn read_antennas(
 /// fewer than two vertices. Its marker is placed by `frame`, so an attached
 /// object's lands on its parent.
 fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
+    reader: &TagReader,
     path: &str,
     markers: &[RenderModelPreviewMarker],
     frame: &F,
 ) -> Option<Antenna> {
     /// What `antenna_postprocess` (0x84C26A00) floors a total length at.
     const SHORTEST: f32 = 1e-4;
-    let tag = load_referenced_tag_from_source(source, path, "antenna", b"ant!").ok()?;
+    let tag = reader.load(path, "antenna", b"ant!").ok()?;
     let root = tag.root();
     let name = root
         .read_string_id("attachment marker name")
@@ -404,7 +403,7 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         return None;
     }
     let bitmap_path = root.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty())?;
-    let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
+    let bitmap = reader.load(&bitmap_path, "bitmap", b"bitm").ok()?;
     let texel_scale = root.read_real("texel to world width scale").unwrap_or(0.0);
     // `falloff pixels`, `cutoff pixels`, `LOD color`, `angles` and `vector to
     // next` are read by nothing that draws or moves it.
@@ -449,7 +448,7 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     let physics = root
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "point_physics", b"pphy").ok())
+        .and_then(|path| reader.load(&path, "point_physics", b"pphy").ok())
         .map(|tag| super::ce::particles::CePointPhysics::read(&tag));
     let reach = ReachAntennaSpring {
         strength: root.read_real("spring strength coefficient").unwrap_or(0.0),
@@ -457,8 +456,8 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         physics,
     };
     let image_index = image_index.unwrap_or(0);
-    let image = decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, image_index)?;
-    let h3_bitmap = read_h3_bitmap(source, &bitmap_path, image_index as i16, SamplerKind::Texture2D);
+    let image = decode_h2_image(reader, &bitmap_path, SamplerKind::Texture2D, image_index)?;
+    let h3_bitmap = read_h3_bitmap(reader, &bitmap_path, image_index as i16, SamplerKind::Texture2D);
     let (place, node) = frame(marker);
     Some(Antenna {
         node,
@@ -476,7 +475,7 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
 /// Reach's antennas among `object`'s widgets (`widgets_new`, the 360's
 /// 0x82BCBFC0), named after the attached object they hang on, if any.
 pub(in crate::app::model_preview) fn read_reach_antennas<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     markers: &[RenderModelPreviewMarker],
     frame: &F,
@@ -490,7 +489,7 @@ pub(in crate::app::model_preview) fn read_reach_antennas<F: Fn(&RenderModelPrevi
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("type"))
         .filter(|(group, path)| *group == antenna_group && !path.is_empty())
-        .filter_map(|(_, path)| read_reach_antenna(source, &path, markers, frame))
+        .filter_map(|(_, path)| read_reach_antenna(reader, &path, markers, frame))
         .map(|antenna| match name {
             Some(name) => antenna.on_attached(name),
             None => antenna,

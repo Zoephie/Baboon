@@ -3,6 +3,7 @@
 //! from them each frame, which damage section's impact an object takes, and
 //! which parts draw it. See `docs/reach-preview-research/shield.md`.
 
+use crate::app::model_preview::load::TagReader;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -13,8 +14,6 @@ use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::{H3Texels, H3Texture};
 use super::super::materials::decode_h2_image;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::app::export::geometry::load_referenced_tag_from_source;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::named_function::NamedFunction;
 
 /// `shield_impact` `flags`.
@@ -139,8 +138,8 @@ fn edge_lines(outer: f32, center: f32, inner: f32) -> ([f32; 2], [f32; 2]) {
 }
 
 impl ReachShieldSettings {
-    pub(crate) fn read(source: &TagSource, path: &str) -> Option<Self> {
-        let tag = load_referenced_tag_from_source(source, path, "shield_impact", b"shit").ok()?;
+    pub(crate) fn read(reader: &TagReader, path: &str) -> Option<Self> {
+        let tag = reader.load(path, "shield_impact", b"shit").ok()?;
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let flagged = |wanted: &str| has_flag(root, "flags", wanted);
@@ -168,7 +167,7 @@ impl ReachShieldSettings {
             let Some(bitmap) = root.read_tag_ref_path(field).filter(|bitmap| !bitmap.is_empty()) else {
                 continue;
             };
-            let Some(image) = decode_h2_image(source, &bitmap, SamplerKind::Texture2D, 0) else {
+            let Some(image) = decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, 0) else {
                 continue;
             };
             textures.push(H3Texture {
@@ -292,6 +291,7 @@ pub(crate) fn draws_shield(shield_only: bool, never_shield: bool, decal: bool) -
 
 #[cfg(test)]
 mod tests {
+    use crate::core::source::TagSource;
     use super::*;
     use crate::app::export::geometry::load_referenced_tag_from_source;
 
@@ -358,7 +358,7 @@ mod tests {
         let Some(source) = kit() else {
             return;
         };
-        let settings = ReachShieldSettings::read(&source, "fx\\shield_impacts\\spartan_3p").unwrap();
+        let settings = ReachShieldSettings::read(&crate::app::model_preview::load::TagReader::new(&source), "fx\\shield_impacts\\spartan_3p").unwrap();
         let close = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-3);
         assert!(close(settings.edge_scales, [2.5, -4.0, 4.0, -4.0]), "{:?}", settings.edge_scales);
         assert!(close(settings.edge_offsets, [-0.875, 4.0, 0.0, 2.0]), "{:?}", settings.edge_offsets);

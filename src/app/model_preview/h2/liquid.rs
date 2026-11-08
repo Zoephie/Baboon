@@ -18,7 +18,6 @@ use super::super::common::image::H2Image;
 use super::super::common::named_function::tag_function_at;
 use super::super::effects::marker_name;
 use super::super::*;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot};
 use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
 use crate::app::model_preview::common::attached::attached;
@@ -78,7 +77,7 @@ fn function_of(holder: TagStruct<'_>, name: &str) -> Option<TagFunction> {
     tag_function_at(&holder.descend(name)?, "function")
 }
 
-fn read_arc(source: &TagSource, arc: TagStruct<'_>, glow: Option<&Arc<H2Image>>) -> Option<LiquidArc> {
+fn read_arc(reader: &TagReader, arc: TagStruct<'_>, glow: Option<&Arc<H2Image>>) -> Option<LiquidArc> {
     let sprites = arc.read_enum_option("sprite count")?.split(' ').next()?.parse().ok()?;
     let cores = elements(arc, "cores").into_iter().filter_map(|core| {
         Some(LiquidCore {
@@ -90,7 +89,7 @@ fn read_arc(source: &TagSource, arc: TagStruct<'_>, glow: Option<&Arc<H2Image>>)
         })
     });
     let own = arc.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
-    let bitmap = own.and_then(|path| read_h2_bitmap(source, &path)).or_else(|| glow.cloned());
+    let bitmap = own.and_then(|path| read_h2_bitmap(reader, &path)).or_else(|| glow.cloned());
     Some(LiquidArc {
         sprites,
         relative_up: has_flag(arc, "flags", "basis marker-relative"),
@@ -115,7 +114,7 @@ fn read_arc(source: &TagSource, arc: TagStruct<'_>, glow: Option<&Arc<H2Image>>)
 
 /// The attachment whose effect has a part of this `liquid`, and so runs it:
 /// `standard` ones start at nothing until `liquid_set_scale`.
-fn driver_of(source: &TagSource, object: &TagFile, liquid: &str) -> Option<String> {
+fn driver_of(reader: &TagReader, object: &TagFile, liquid: &str) -> Option<String> {
     let block = object_block(object, "attachments")?;
     let group = u32::from_be_bytes(*b"effe");
     let wanted = u32::from_be_bytes(*b"tdtl");
@@ -124,7 +123,7 @@ fn driver_of(source: &TagSource, object: &TagFile, liquid: &str) -> Option<Strin
         if kind != group || path.is_empty() {
             return None;
         }
-        let effect = load_referenced_tag_from_source(source, &path, "effect", b"effe").ok()?;
+        let effect = reader.load(&path, "effect", b"effe").ok()?;
         let events = elements(effect.root(), "events");
         let found = events.iter().flat_map(|event| elements(*event, "parts")).any(|part| {
             part.read_tag_ref_with_group("type")
@@ -136,7 +135,7 @@ fn driver_of(source: &TagSource, object: &TagFile, liquid: &str) -> Option<Strin
 
 /// `liquid_new` for an object's `widgets`.
 pub(in crate::app::model_preview) fn read_h2_liquids(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -156,16 +155,16 @@ pub(in crate::app::model_preview) fn read_h2_liquids(
     if paths.is_empty() {
         return found;
     }
-    let glow = read_glow(source);
+    let glow = read_glow(reader);
     for path in paths {
-        let Ok(tag) = load_referenced_tag_from_source(source, &path, "liquid", b"tdtl") else {
+        let Ok(tag) = reader.load(&path, "liquid", b"tdtl") else {
             continue;
         };
         let root = tag.root();
         if root.read_enum_option("type").as_deref() != Some("standard") {
             continue;
         }
-        let Some(scale_by) = driver_of(source, object, &path) else {
+        let Some(scale_by) = driver_of(reader, object, &path) else {
             continue;
         };
         let name = marker_name(root, "attachment marker name");
@@ -173,7 +172,7 @@ pub(in crate::app::model_preview) fn read_h2_liquids(
         let Some(marker) = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name)) else {
             continue;
         };
-        let arcs = elements(root, "arcs").into_iter().filter_map(|arc| read_arc(source, arc, glow.as_ref())).collect();
+        let arcs = elements(root, "arcs").into_iter().filter_map(|arc| read_arc(reader, arc, glow.as_ref())).collect();
         let (place, node) = frame(marker);
         found.push(H2LiquidAt {
             object: owner,

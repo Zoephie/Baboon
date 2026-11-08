@@ -23,7 +23,6 @@ use super::super::renderer::H3_EXPOSURE as EXPOSURE;
 use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 use crate::app::model_preview::common::attached::attached;
 
@@ -210,8 +209,8 @@ fn block_function(root: TagStruct<'_>, block: &str) -> Option<Arc<TagFunction>> 
     tag_function_at(&first, "function").map(Arc::new)
 }
 
-pub(in crate::app::model_preview) fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
-    let tag = load_referenced_tag_from_source(source, path, "lens_flare", b"lens").ok()?;
+pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &str) -> Option<H3Flare> {
+    let tag = reader.load(path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
     if has_flag(root, "flags", "only render in first person") {
         return None;
@@ -222,7 +221,7 @@ pub(in crate::app::model_preview) fn read_h3_flare(source: &TagSource, path: &st
     let override_map = reflection.read_tag_ref_path("bitmapOverride").filter(|bitmap| !bitmap.is_empty());
     let bitmap = override_map.or(bitmap)?;
     let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
-    let bitmap = read_h3_bitmap(source, &bitmap, index as i16, SamplerKind::Texture2D)?;
+    let bitmap = read_h3_bitmap(reader, &bitmap, index as i16, SamplerKind::Texture2D)?;
     let (width, height) = match &*bitmap.0 {
         H2Image::Flat(image) => (image.width as f32, image.height as f32),
         _ => (1.0, 1.0),
@@ -281,7 +280,7 @@ pub(in crate::app::model_preview) fn read_h3_flare(source: &TagSource, path: &st
 
 /// An object's attached `lens_flare`s, at every marker of each name.
 pub(in crate::app::model_preview) fn read_h3_flares(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -299,7 +298,7 @@ pub(in crate::app::model_preview) fn read_h3_flares(
                            by_effect: Option<H3EffectScale>,
                            event: Option<(Arc<EffectTimes>, usize)>,
                            placed: &dyn Fn(MarkerFrame, usize) -> (MarkerFrame, usize)| {
-        let Some(flare) = read_h3_flare(source, path).map(Arc::new) else {
+        let Some(flare) = read_h3_flare(reader, path).map(Arc::new) else {
             return;
         };
         for marker in &found {
@@ -332,7 +331,7 @@ pub(in crate::app::model_preview) fn read_h3_flares(
             place_flare(&path, part_markers(markers, &name, false), scale_by, secondary_by, None, None, &|place, node| (place, node));
         }
     }
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         if part.group == flare_group {
             let by_effect = Some(H3EffectScale { scaled: part.scaled });
             let event = Some((Arc::clone(&part.times), part.event));
@@ -650,13 +649,13 @@ mod tests {
         };
         if let Some(reach) = source("BLAM_TEST_HREK", crate::core::game::GameId::HaloReach) {
             let path = "objects\\props\\human\\unsc\\light_fixture_telescoping\\fx\\wide_flare";
-            let flare = read_h3_flare(&reach, path).unwrap();
+            let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&reach), path).unwrap();
             assert!(flare.curves.is_some());
             assert!(matches!(flare.inner, FlareInner::Fraction(_)), "{:?}", flare.inner);
         }
         if let Some(halo3) = source("BLAM_TEST_H3EK", crate::core::game::GameId::Halo3) {
             let path = "objects\\vehicles\\warthog\\fx\\running\\headlights";
-            let flare = read_h3_flare(&halo3, path).unwrap();
+            let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&halo3), path).unwrap();
             assert!(flare.curves.is_none());
             assert!(matches!(flare.inner, FlareInner::Halved(_)), "{:?}", flare.inner);
         }
@@ -701,7 +700,7 @@ mod tests {
                 definitions_root: crate::core::bundled::locate_definitions_root(),
             };
             for (path, direction) in paths.into_iter().zip(directions) {
-                let flare = read_h3_flare(&source, path).unwrap_or_else(|| panic!("{path}"));
+                let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&source), path).unwrap_or_else(|| panic!("{path}"));
                 assert_eq!(flare.occlusion_offset_direction, direction, "{path}");
             }
         }

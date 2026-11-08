@@ -9,7 +9,6 @@ use super::super::gen3::shaders::H3Blend;
 use super::super::particles::*;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 
 /// Halo 2 tool's particle system postprocess (`sub_80D2A0`): out and its
 /// feather default to 30 and 10, and only a system shown in any camera mode
@@ -38,11 +37,11 @@ pub(in crate::app::model_preview) fn h2_baked_lod(raw: [f32; 4], any_camera: boo
 }
 
 /// A Halo 2 `particle_physics`' movements, its own or its template's.
-fn h2_controllers(source: &TagSource, movement: TagStruct<'_>) -> Vec<H3ParticleController> {
+fn h2_controllers(reader: &TagReader, movement: TagStruct<'_>) -> Vec<H3ParticleController> {
     let template = movement
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
+        .and_then(|path| reader.load(&path, "particle_physics", b"pmov").ok());
     let own = elements(movement, "movements");
     let movements = if own.is_empty() { template.as_ref().map_or(Vec::new(), |tag| elements(tag.root(), "movements")) } else { own };
     movements
@@ -99,8 +98,8 @@ fn h2_particle_pass(template: &str) -> Option<(H3ParticleAlbedo, H3Blend, bool)>
 
 /// A Halo 2 `.particle`, and the two properties of a quad that Halo 3 moved to
 /// its emitters.
-pub(in crate::app::model_preview) fn read_h2_look(source: &TagSource, path: &str) -> Option<(H3ParticleLook, H3ParticleProperty, H3ParticleProperty)> {
-    let tag = load_referenced_tag_from_source(source, path, "particle", b"prt3").ok()?;
+pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str) -> Option<(H3ParticleLook, H3ParticleProperty, H3ParticleProperty)> {
+    let tag = reader.load(path, "particle", b"prt3").ok()?;
     let root = tag.root();
     let template = root.read_tag_ref_path("shader template")?;
     let (albedo, blend, alpha_test) = h2_particle_pass(template.trim_end_matches(".shader_template"))?;
@@ -109,7 +108,7 @@ pub(in crate::app::model_preview) fn read_h2_look(source: &TagSource, path: &str
     let distorts = albedo == H3ParticleAlbedo::H2Distortion;
     let map_name = if distorts { "bump_map" } else { "alpha_map_texture" };
     let map = parameter(map_name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
-    let plate = load_referenced_tag_from_source(source, &map, "bitmap", b"bitm").ok()?;
+    let plate = reader.load(&map, "bitmap", b"bitm").ok()?;
     let flagged = |wanted: &str| has_flag(root, "flags", wanted);
     let first = root.read_int_any("first sequence index").unwrap_or(0).max(0) as usize;
     let (frames, corner) = read_h2_frames(&plate, first);
@@ -132,7 +131,7 @@ pub(in crate::app::model_preview) fn read_h2_look(source: &TagSource, path: &str
         albedo,
         alpha_test,
         frame_blend: !flagged("disable frame blending"),
-        base_map: Some(read_h3_bitmap(source, &map, 0, SamplerKind::Texture2D)?),
+        base_map: Some(read_h3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?),
         constants: H3AlbedoConstants { modulation, ..Default::default() },
         ..H3SpriteShader::plain(blend)
     };
@@ -198,7 +197,7 @@ pub(in crate::app::model_preview) fn read_h2_look(source: &TagSource, path: &str
 /// A Halo 2 emitter: Halo 3's without what it added, its rates in ticks and
 /// degrees, and `size` and `rotation` scaled by the `.particle`'s.
 pub(in crate::app::model_preview) fn read_h2_emitter(
-    source: &TagSource,
+    reader: &TagReader,
     emitter: TagStruct<'_>,
     scale: H3ParticleProperty,
     rotation: H3ParticleProperty,
@@ -227,11 +226,11 @@ pub(in crate::app::model_preview) fn read_h2_emitter(
     let movement = emitter
         .read_tag_ref_path("particle physics")
         .filter(|path| !path.is_empty())
-        .and_then(|path| load_referenced_tag_from_source(source, &path, "particle_physics", b"pmov").ok());
-    let physics = movement.as_ref().and_then(|tag| read_movement(source, tag.root(), &mut seeds));
-    let collider = movement.as_ref().and_then(|tag| read_collider_of(source, tag.root(), &mut seeds));
+        .and_then(|path| reader.load(&path, "particle_physics", b"pmov").ok());
+    let physics = movement.as_ref().and_then(|tag| read_movement(reader, tag.root(), &mut seeds));
+    let collider = movement.as_ref().and_then(|tag| read_collider_of(reader, tag.root(), &mut seeds));
     // In the order the tag lists them, as the game runs its movements.
-    let controllers = movement.as_ref().map_or_else(Vec::new, |tag| h2_controllers(source, tag.root()));
+    let controllers = movement.as_ref().map_or_else(Vec::new, |tag| h2_controllers(reader, tag.root()));
     let controllers = controllers
         .into_iter()
         .filter(|controller| match controller {

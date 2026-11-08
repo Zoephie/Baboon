@@ -6,6 +6,7 @@
 //! `rasterizer_model_draw_environment_shader_pp`; the lighting is
 //! `default_object_lighting`, what the game falls back on with no level.
 
+use crate::app::model_preview::load::TagReader;
 use std::sync::{Arc, LazyLock};
 
 use blam_tags::{TagBlock, TagFieldData, TagStruct};
@@ -17,7 +18,6 @@ use super::super::dx9::passes::{
 use super::super::common::image::H2Image;
 use super::super::common::fields::{has_flag, has_flag_in_any};
 use super::super::dx9::stage::{H2_TEXTURE_ROWS, H2VertexStage};
-use super::super::load_referenced_tag_from_source;
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;
@@ -501,8 +501,8 @@ impl CeModelAnimation {
 pub(in crate::app::model_preview) type CeModelCommon = Arc<TranslatedFxShader>;
 
 /// The kit's `shaders/fx` folder, beside `tags`.
-fn read_common(source: &TagSource) -> Option<CeModelCommon> {
-    let directory = shader_directory(source)?;
+fn read_common(reader: &TagReader) -> Option<CeModelCommon> {
+    let directory = shader_directory(reader)?;
     let read = |name: &str| read_shader_source(&directory, name);
     match translate_fx(COMMON_FILE, H2_GLSL_VERSION, &[], read) {
         Ok(shader) => Some(Arc::new(shader)),
@@ -1122,8 +1122,8 @@ fn read_shader_source(directory: &std::path::Path, name: &str) -> Result<String,
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn shader_directory(source: &TagSource) -> Option<std::path::PathBuf> {
-    let TagSource::LooseFolder { root, .. } = source else {
+fn shader_directory(reader: &TagReader) -> Option<std::path::PathBuf> {
+    let TagSource::LooseFolder { root, .. } = &reader.source else {
         return None;
     };
     Some(root.parent()?.join("shaders").join("fx"))
@@ -1281,12 +1281,12 @@ impl<'a> ShaderFlags<'a> {
 /// A transparent shader's passes: its extra layers, then itself. Empty for
 /// any other group, or where the kit has no shaders.
 pub(in crate::app::model_preview) fn ce_transparent_passes(
-    source: &TagSource,
+    reader: &TagReader,
     root: TagStruct<'_>,
     group: &[u8; 4],
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Vec<H2DrawPass> {
-    let Some(directory) = shader_directory(source) else {
+    let Some(directory) = shader_directory(reader) else {
         return Vec::new();
     };
     let single = match group {
@@ -1323,8 +1323,8 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
             continue;
         };
         for (extension, layer_group) in LAYER_GROUPS {
-            if let Ok(tag) = load_referenced_tag_from_source(source, &path, extension, layer_group) {
-                passes.extend(ce_transparent_passes(source, tag.root(), layer_group, bitmap));
+            if let Ok(tag) = reader.load(&path, extension, layer_group) {
+                passes.extend(ce_transparent_passes(reader, tag.root(), layer_group, bitmap));
                 break;
             }
         }
@@ -1679,9 +1679,9 @@ pub(in crate::app::model_preview) struct CeCamoSettings {
 }
 
 /// `globals\globals`'s rasterizer data, and the kit's shader for it.
-pub(in crate::app::model_preview) fn read_ce_camo_settings(source: &TagSource) -> Option<CeCamoSettings> {
-    let directory = shader_directory(source)?;
-    let globals = load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
+pub(in crate::app::model_preview) fn read_ce_camo_settings(reader: &TagReader) -> Option<CeCamoSettings> {
+    let directory = shader_directory(reader)?;
+    let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
     let root = globals.root();
     let data = root.descend("rasterizer data[0]")?;
     let tint = data.read_rgb("tint color");
@@ -1818,7 +1818,7 @@ const LAYER_GROUPS: [(&str, &[u8; 4]); 3] = [
 /// The passes of a `shader_model` or `shader_environment`, empty for any other
 /// group and where the kit has no shaders, which keeps the slots drawing.
 pub(in crate::app::model_preview) fn ce_model_passes(
-    source: &TagSource,
+    reader: &TagReader,
     root: TagStruct<'_>,
     group: &[u8; 4],
     flags: &ShaderFlags<'_>,
@@ -1828,7 +1828,7 @@ pub(in crate::app::model_preview) fn ce_model_passes(
     if !matches!(group, b"soso" | b"senv") {
         return Vec::new();
     }
-    let Some(common) = common.get_or_insert_with(|| read_common(source)).clone() else {
+    let Some(common) = common.get_or_insert_with(|| read_common(reader)).clone() else {
         return Vec::new();
     };
     let has = |flag: &str| flags.has(flag);
@@ -1927,6 +1927,7 @@ pub(in crate::app::model_preview) fn ce_model_passes(
 
 #[cfg(test)]
 mod tests {
+    use crate::app::export::load_referenced_tag_from_source;
     use super::*;
 
     const SINGLE_GROUPS: [(&str, &[u8; 4]); 4] = [
@@ -1953,7 +1954,7 @@ mod tests {
             game: Some(crate::core::game::GameId::HaloCe),
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
-        let common = read_common(&source).expect("the kit's model shader translates");
+        let common = read_common(&crate::app::model_preview::load::TagReader::new(&source)).expect("the kit's model shader translates");
         let dir = crate::core::test_kits::unique_temp_dir("ce_model_shaders");
         let (vertex, pixel) = (dir.join("pass.vert"), dir.join("pass.frag"));
         std::fs::write(&vertex, H2VertexStage::CeModel.source(H2_GLSL_VERSION)).unwrap();
@@ -1996,7 +1997,7 @@ mod tests {
             game: Some(crate::core::game::GameId::HaloCe),
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
-        let settings = read_ce_camo_settings(&source).expect("the kit's camo reads");
+        let settings = read_ce_camo_settings(&crate::app::model_preview::load::TagReader::new(&source)).expect("the kit's camo reads");
         assert!(settings.refraction > 0.0);
         assert!(settings.distortion.is_some());
         let pass = ce_camo_pass(&settings, false, &mut |_, _| None);
@@ -2055,7 +2056,7 @@ mod tests {
                 let relative = relative.to_string_lossy().replace('/', "\\");
                 let tag = load_referenced_tag_from_source(&source, &relative, extension, group).unwrap();
                 shaders += 1;
-                let passes = ce_transparent_passes(&source, tag.root(), group, &mut |_, kind| {
+                let passes = ce_transparent_passes(&crate::app::model_preview::load::TagReader::new(&source), tag.root(), group, &mut |_, kind| {
                     match kind {
                         SamplerKind::Cube => Some(Arc::new(H2Image::Cube {
                             size: 1,

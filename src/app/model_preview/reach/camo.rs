@@ -4,13 +4,12 @@
 
 
 
+use crate::app::model_preview::load::TagReader;
 use blam_tags::TagFunction;
 
 use super::super::common::named_function::tag_function_at;
 use super::super::gen3::shaders::H3Pass;
 use super::super::renderer::REACH_DARK_MULTIPLIER;
-use crate::app::export::geometry::load_referenced_tag_from_source;
-use crate::core::source::TagSource;
 
 /// `active camo[0]`'s third person curves.
 #[derive(Debug)]
@@ -29,8 +28,8 @@ pub(crate) struct ReachCamoDraw {
 }
 
 impl ReachCamo {
-    pub(crate) fn read(source: &TagSource) -> Option<Self> {
-        let globals = load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
+    pub(crate) fn read(reader: &TagReader) -> Option<Self> {
+        let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
         let root = globals.root();
         let camo = super::super::common::fields::elements(root, "active camo").into_iter().next()?;
         let curve = |name: &str| tag_function_at(&camo.descend(name)?, "function");
@@ -87,6 +86,7 @@ return vec4(l_camo_encoded * l_camo_encoded / {REACH_DARK_MULTIPLIER:?}, g_k_ps_
 
 #[cfg(test)]
 mod tests {
+    use crate::core::source::TagSource;
     use super::*;
 
     #[test]
@@ -119,7 +119,7 @@ mod tests {
             game: Some(crate::core::game::GameId::HaloReach),
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
-        let camo = ReachCamo::read(&source).expect("globals' active camo");
+        let camo = ReachCamo::read(&crate::app::model_preview::load::TagReader::new(&source)).expect("globals' active camo");
         let full = camo.draw(1.0);
         eprintln!("NOTE full camo {full:?}, half {:?}", camo.draw(0.5));
         assert!(full.factor[1] > 0.0, "it distorts");

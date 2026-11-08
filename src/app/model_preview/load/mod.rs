@@ -7,6 +7,9 @@ use super::h2::prt::read_h2_prt;
 use std::sync::Arc;
 use super::common::geometry::{Overflow, VertexBase};
 
+pub(in crate::app::model_preview) mod reader;
+pub(in crate::app) use reader::TagReader;
+
 
 /// The load-affecting slice of [`ModelPreviewState`], snapshotted before the
 /// parse so the loader never holds the mutable state alongside it.
@@ -278,7 +281,10 @@ pub(super) fn load_model_preview(
     source: Option<&TagSource>,
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
-    let mut data = load_tag_preview(model_tag, entry, names, source, settings)?;
+    // One load, one reader: what it reads is read once, and dropped with it.
+    let reader = source.map(TagReader::new);
+    let reader = reader.as_ref();
+    let mut data = load_tag_preview(model_tag, entry, names, reader, settings)?;
     let generation = blam_tags::game::Game::of(model_tag);
     let game = match generation {
         blam_tags::game::Game::Halo1 => Some(GameId::HaloCe),
@@ -289,9 +295,9 @@ pub(super) fn load_model_preview(
     let preview = Arc::make_mut(&mut data.preview);
     preview.game = game;
     preview.generation = Some(generation);
-    if let Some(source) = source.filter(|source| source.game() == Some(GameId::Halo4)) {
+    if let Some(reader) = reader.filter(|reader| reader.source.game() == Some(GameId::Halo4)) {
         // Just built: no other handle shares it, so this does not copy.
-        Arc::make_mut(&mut data.preview).h4.color_grading = super::h4::lighting::read_h4_color_grading(source);
+        Arc::make_mut(&mut data.preview).h4.color_grading = super::h4::lighting::read_h4_color_grading(reader);
     }
     Ok(data)
 }
@@ -305,7 +311,7 @@ fn load_tag_preview(
     model_tag: &TagFile,
     entry: &TagEntry,
     names: &TagNameIndex,
-    source: Option<&TagSource>,
+    reader: Option<&TagReader>,
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
     if blam_tags::is_particle_model_group(model_tag.header.group_tag) {
@@ -316,29 +322,29 @@ fn load_tag_preview(
         return load_render_tag(model_tag, entry);
     }
     if blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1
-        && is_object_family_group(model_tag.header.group_tag, source.and_then(TagSource::game))
+        && is_object_family_group(model_tag.header.group_tag, reader.and_then(|reader| reader.source.game()))
     {
-        return load_ce_object(model_tag, entry, source, settings);
+        return load_ce_object(model_tag, entry, reader, settings);
     }
-    if is_object_family_group(model_tag.header.group_tag, source.and_then(TagSource::game)) {
-        return load_object(model_tag, entry, names, source, settings);
+    if is_object_family_group(model_tag.header.group_tag, reader.and_then(|reader| reader.source.game())) {
+        return load_object(model_tag, entry, names, reader, settings);
     }
     if matches!(&group, b"coll" | b"phmo") {
-        return load_collision_or_physics(model_tag, entry, source);
+        return load_collision_or_physics(model_tag, entry, reader);
     }
     if &group == b"sbsp" {
         return load_structure_bsp(model_tag, entry);
     }
     if &group == b"scnr" {
-        return load_scenario(model_tag, entry, source, settings);
+        return load_scenario(model_tag, entry, reader, settings);
     }
     // Halo: Campaign Evolved — the `.model` (hlmt) has no `render model` ref;
     // geometry lives in UE5 SkeletalMeshes reached via `DA_MeshSynchronization`.
     // Reconstruct the cross-game RenderModel and feed the standard pipeline.
-    if let Some(result) = load_campaign_evolved_preview(model_tag, entry, source, settings.high_detail) {
+    if let Some(result) = load_campaign_evolved_preview(model_tag, entry, reader, settings.high_detail) {
         return result;
     }
-    load_model(model_tag, entry, names, source)
+    load_model(model_tag, entry, names, reader)
 }
 
 /// `particle_model` carries its geometry inline with no wrapper, but
@@ -383,15 +389,15 @@ fn load_render_tag(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPreview
 fn load_ce_object(
     model_tag: &TagFile,
     entry: &TagEntry,
-    source: Option<&TagSource>,
+    reader: Option<&TagReader>,
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
-    let Some(source) = source else {
+    let Some(reader) = reader else {
         return Err("Halo CE object preview requires a loaded source.".to_owned());
     };
     let reference = object_reference(model_tag, "model")
         .ok_or("This object references no gbxmodel.")?;
-    let render = load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2")
+    let render = reader.load(&reference, "gbxmodel", b"mod2")
         .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;
     let mut preview = build_render_preview(&render)?;
     if preview.batches.is_empty() {
@@ -419,7 +425,7 @@ fn load_ce_object(
     let chosen = settings.weapon.as_deref();
     let weapons = feature(&mut notes, "the biped's weapons", || {
         let known = settings.ce_equippable.as_deref();
-        is_biped.then(|| super::ce::attachments::biped_weapons(source, model_tag, chosen, known))
+        is_biped.then(|| super::ce::attachments::biped_weapons(reader, model_tag, chosen, known))
     });
     let held = match &weapons {
         Some(weapons) => chosen
@@ -429,7 +435,7 @@ fn load_ce_object(
     };
     let attached = held.and_then(|path| {
         let attach = |preview: &mut RenderModelPreview| {
-            super::ce::attachments::attach_ce_weapon(source, model_tag, &path, preview)
+            super::ce::attachments::attach_ce_weapon(reader, model_tag, &path, preview)
         };
         let attached = feature_into(&mut notes, "the held weapon", &mut preview, attach);
         if attached.is_none() {
@@ -438,7 +444,7 @@ fn load_ce_object(
         attached
     });
     feature_into(&mut notes, "its lights and effects", &mut preview, |preview| {
-        super::ce::object::read_ce_object_features(source, model_tag, attached.as_ref(), preview);
+        super::ce::object::read_ce_object_features(reader, model_tag, attached.as_ref(), preview);
     });
     let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
     data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
@@ -457,26 +463,26 @@ fn load_object(
     model_tag: &TagFile,
     entry: &TagEntry,
     names: &TagNameIndex,
-    source: Option<&TagSource>,
+    reader: Option<&TagReader>,
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
-    let Some(source) = source else {
+    let Some(reader) = reader else {
         return Err("Object preview requires a loaded source.".to_owned());
     };
     // Previewing the object itself again would come straight back here.
-    let Some(model) = preview_model_tag(source, model_tag)? else {
+    let Some(model) = preview_model_tag(&reader.source, model_tag)? else {
         return Err("This object has no model to preview.".to_owned());
     };
     let model = &model;
     // `load_tag_preview`, not `load_model_preview`: the object's own load
     // already adds what that adds (the H4 colour grading, read once).
-    let mut data = load_tag_preview(model, entry, names, Some(source), settings)?;
+    let mut data = load_tag_preview(model, entry, names, Some(reader), settings)?;
     data.default_variant = object_default_variant(model_tag);
     let mut notes = std::mem::take(&mut data.notes);
-    let object = ObjectLoad { source, object: model_tag, model };
+    let object = ObjectLoad { reader, object: model_tag, model };
     object.read_features(&mut data, &mut notes);
     let weapons_family = matches!(
-        source,
+        &reader.source,
         TagSource::LooseFolder {
             game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
             ..
@@ -489,7 +495,7 @@ fn load_object(
         let preview = std::sync::Arc::make_mut(&mut data.preview);
         let variants = &mut data.variants;
         let attach = |preview: &mut RenderModelPreview| {
-            super::weapons::variants::attach_variant_objects(source, model, variants, preview)
+            super::weapons::variants::attach_variant_objects(reader, model, variants, preview)
         };
         data.attached.extend(feature_into(&mut notes, "the variants' children", preview, attach));
     }
@@ -500,7 +506,7 @@ fn load_object(
 /// A later object being previewed: the kit, the object's own tag, and the
 /// `.model` it names.
 struct ObjectLoad<'a> {
-    source: &'a TagSource,
+    reader: &'a TagReader,
     object: &'a TagFile,
     model: &'a TagFile,
 }
@@ -509,34 +515,34 @@ impl ObjectLoad<'_> {
     /// The object's change colors, functions and its game's own features,
     /// each noted if its reader crashes.
     fn read_features(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>) {
-        let Self { source, object: model_tag, model } = *self;
-        if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
+        let Self { reader, object: model_tag, model } = *self;
+        if matches!(&reader.source, TagSource::LooseFolder { game: Some(GameId::Halo3 | GameId::Halo3Odst), .. }) {
             self.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(notes, "its lights and effects", preview, |preview| {
-                super::h3::object::read_h3_object_features(source, model_tag, model, preview);
+                super::h3::object::read_h3_object_features(reader, model_tag, model, preview);
             });
         }
         // Reach's attachments, lights and effects read differently, and wait
         // on their own readers; what the object's shaders read does not.
-        if matches!(source, TagSource::LooseFolder { game: Some(GameId::HaloReach), .. }) {
+        if matches!(&reader.source, TagSource::LooseFolder { game: Some(GameId::HaloReach), .. }) {
             self.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(notes, "its flares and lights", preview, |preview| {
-                super::reach::object::read_reach_object_features(source, model_tag, model, preview);
+                super::reach::object::read_reach_object_features(reader, model_tag, model, preview);
             });
         }
         // Halo 4's functions and switches feed its materials' functions; its
         // attachments, lights and effects wait on their own readers.
-        if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo4), .. }) {
+        if matches!(&reader.source, TagSource::LooseFolder { game: Some(GameId::Halo4), .. }) {
             self.read_colors_and_functions(data, notes);
             self.read_h4_features(data, notes);
         }
-        if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
+        if matches!(&reader.source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             self.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(notes, "its lights and effects", preview, |preview| {
-                super::h2::object::read_h2_object_features(source, model_tag, preview);
+                super::h2::object::read_h2_object_features(reader, model_tag, preview);
             });
         }
     }
@@ -552,12 +558,12 @@ impl ObjectLoad<'_> {
     /// Halo 4's object reads: its bounds, change color count, camo, shield,
     /// shadow caster, IK markers, then its antennas and cloth.
     fn read_h4_features(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>) {
-        let Self { source, object: model_tag, model } = *self;
+        let Self { reader, object: model_tag, model } = *self;
         let preview = std::sync::Arc::make_mut(&mut data.preview);
         preview.h4.bounding_sphere = super::h4::object::read_h4_bounding_sphere(model_tag);
         preview.h4.change_color_count = super::h4::object::read_h4_change_color_count(model_tag);
-        preview.h4.camo = super::h4::camo::H4Camo::read(source).map(std::sync::Arc::new);
-        preview.h4.shield = super::h4::shield::read_h4_shield(source, model);
+        preview.h4.camo = super::h4::camo::H4Camo::read(reader).map(std::sync::Arc::new);
+        preview.h4.shield = super::h4::shield::read_h4_shield(reader, model);
         preview.h4.shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
         // The unit's markers its IK sets and chains place.
         let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
@@ -566,7 +572,7 @@ impl ObjectLoad<'_> {
         let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
         let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
         feature_into(notes, "its antennas and cloth", preview, |preview| {
-            let cx = LoadCx { source, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
+            let cx = LoadCx { reader, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
             super::h4::attached::read_h4_attached_features(&cx, center, preview);
         });
     }
@@ -574,15 +580,15 @@ impl ObjectLoad<'_> {
     /// What a biped holds: the settings' primary in its right hand and
     /// secondary in its left, each noted if it will not attach.
     fn attach_unit_weapons(&self, data: &mut ModelPreviewData, notes: &mut Vec<String>, settings: &PreviewLoadSettings) {
-        let Self { source, object: model_tag, .. } = *self;
+        let Self { reader, object: model_tag, .. } = *self;
         // Halo 4's kit graphs all use data-driven animation, which places the
         // hands by IK sets and chains (`biped_postprocess_node_matrices`,
         // X360 0x84B1A738), never the legacy `weapon ik`.
-        let legacy_weapon_ik = source.game() != Some(GameId::Halo4);
+        let legacy_weapon_ik = reader.source.game() != Some(GameId::Halo4);
         let known = settings.h2_equippable.as_deref();
         let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
         let weapons = feature(notes, "the unit's weapons", || {
-            is_biped.then(|| super::weapons::unit_weapons(source, model_tag, known))
+            is_biped.then(|| super::weapons::unit_weapons(reader, model_tag, known))
         });
         if let Some(weapons) = weapons {
             let preview = std::sync::Arc::make_mut(&mut data.preview);
@@ -595,7 +601,7 @@ impl ObjectLoad<'_> {
                 // `unit_apply_ik` leaves two weapons in their own hands.
                 let ik = (secondary.is_none() && legacy_weapon_ik).then_some(&weapons);
                 let attach = |preview: &mut RenderModelPreview| {
-                    super::weapons::attach_weapon(source, model_tag, path, left, owner, ik, preview)
+                    super::weapons::attach_weapon(reader, model_tag, path, left, owner, ik, preview)
                 };
                 let attached = feature_into(notes, "a held weapon", preview, attach);
                 if attached.is_none() {
@@ -615,10 +621,10 @@ impl ObjectLoad<'_> {
 fn load_collision_or_physics(
     model_tag: &TagFile,
     entry: &TagEntry,
-    source: Option<&TagSource>,
+    reader: Option<&TagReader>,
 ) -> Result<ModelPreviewData, String> {
     let group = model_tag.header.group_tag.to_be_bytes();
-    let skeleton = source.and_then(|source| owning_model_skeleton(source, entry));
+    let skeleton = reader.and_then(|reader| owning_model_skeleton(&reader.source, entry));
     let nodes = skeleton.as_ref().map(|skeleton| skeleton.nodes());
     let preview = if &group == b"coll" {
         build_collision_preview(model_tag, nodes)?
@@ -653,7 +659,7 @@ fn load_structure_bsp(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPrev
 fn load_scenario(
     model_tag: &TagFile,
     entry: &TagEntry,
-    source: Option<&TagSource>,
+    reader: Option<&TagReader>,
     settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
     let bsps = scenario_bsp_paths(model_tag);
@@ -663,7 +669,7 @@ fn load_scenario(
     let mut preview = RenderModelPreview::default();
     let mut notes = Vec::new();
     if !settings.scenario_selection.is_empty() {
-        let Some(source) = source else {
+        let Some(reader) = reader else {
             return Err("Scenario preview requires a loaded source.".to_owned());
         };
         preview.bounds_min = [f32::INFINITY; 3];
@@ -674,7 +680,7 @@ fn load_scenario(
             };
             // One BSP that will not read leaves the rest showing.
             let read = || {
-                let tag = load_referenced_tag_from_source(source, reference, "scenario_structure_bsp", b"sbsp")
+                let tag = reader.load(reference, "scenario_structure_bsp", b"sbsp")
                     .map_err(|error| format!("Could not load {reference}: {error}"))?;
                 build_sbsp_preview(&tag, true).map_err(|error| format!("{reference}: {error}"))
             };
@@ -710,9 +716,9 @@ fn load_model(
     model_tag: &TagFile,
     entry: &TagEntry,
     names: &TagNameIndex,
-    source: Option<&TagSource>,
+    reader: Option<&TagReader>,
 ) -> Result<ModelPreviewData, String> {
-    let (render_entry, normalized, render_tag) = read_model_render(model_tag, names, source)?;
+    let (render_entry, normalized, render_tag) = read_model_render(model_tag, names, reader)?;
     let mut preview = build_render_preview(&render_tag)?;
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
@@ -725,26 +731,26 @@ fn load_model(
     // draw-time filters from then on.
     // Halo 4 shows every instance for a NONE group as Reach does (the 360's
     // 0x8325C1B8).
-    let reach = source.is_some_and(|source| matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4)));
+    let reach = reader.is_some_and(|reader| matches!(reader.source.game(), Some(GameId::HaloReach | GameId::Halo4)));
     preview.instances.variants = read_variant_instances(model_tag, &preview.instances.names, reach);
     let mut data = model_preview_data(render_entry.key, normalized, preview, read_model_variants(model_tag));
     // The `.model` opened itself lists what its variants attach. An object
     // reaches here for its `.model` and attaches them once it has read its own.
     let opened = entry.group_tag == u32::from_be_bytes(*b"hlmt");
-    let source = source.filter(|source| {
+    let reader = reader.filter(|reader| {
         matches!(
-            source,
+            &reader.source,
             TagSource::LooseFolder {
                 game: Some(GameId::Halo2 | GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach | GameId::Halo4),
                 ..
             }
         )
     });
-    if let Some(source) = source.filter(|_| opened) {
+    if let Some(reader) = reader.filter(|_| opened) {
         let preview = std::sync::Arc::make_mut(&mut data.preview);
         let variants = &mut data.variants;
         let attach = |preview: &mut RenderModelPreview| {
-            super::weapons::variants::attach_variant_objects(source, model_tag, variants, preview)
+            super::weapons::variants::attach_variant_objects(reader, model_tag, variants, preview)
         };
         data.attached.extend(feature_into(&mut data.notes, "the variants' children", preview, attach));
     }
@@ -756,7 +762,7 @@ fn load_model(
 fn read_model_render(
     model_tag: &TagFile,
     names: &TagNameIndex,
-    source: Option<&TagSource>,
+    reader: Option<&TagReader>,
 ) -> Result<(TagEntry, String, TagFile), String> {
     let Some((group_tag, rel_path)) = model_tag.root().read_tag_ref_with_group("render model")
     else {
@@ -765,7 +771,7 @@ fn read_model_render(
     if rel_path.trim().is_empty() {
         return Err("This model tag has an empty render model reference.".to_owned());
     }
-    let Some(TagSource::LooseFolder { root, .. }) = source else {
+    let Some(TagSource::LooseFolder { root, .. }) = reader.map(|reader| &reader.source) else {
         return Err("Render model preview requires a loaded loose-folder editing kit.".to_owned());
     };
     let extension = names
@@ -791,7 +797,7 @@ fn read_model_render(
         location: TagEntryLocation::LooseFile(path),
     };
     let render_tag =
-        read_entry(source.unwrap(), &render_entry).map_err(|error| error.to_string())?;
+        read_entry(&reader.unwrap().source, &render_entry).map_err(|error| error.to_string())?;
     Ok((render_entry, normalized, render_tag))
 }
 
@@ -849,7 +855,7 @@ fn add_overlay_shaders(model_tag: &TagFile, preview: &mut RenderModelPreview) {
 /// owner its features hang on, its markers and where `frame` places each, and
 /// the name an attached object goes by (none for the previewed object).
 pub(in crate::app::model_preview) struct LoadCx<'a, F> {
-    pub(in crate::app::model_preview) source: &'a TagSource,
+    pub(in crate::app::model_preview) reader: &'a TagReader,
     pub(in crate::app::model_preview) object: &'a TagFile,
     pub(in crate::app::model_preview) owner: u8,
     pub(in crate::app::model_preview) markers: &'a [RenderModelPreviewMarker],

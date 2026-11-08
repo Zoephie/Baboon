@@ -6,6 +6,7 @@
 //! from the shield's damage section. See
 //! `docs/h4-preview-research/shadow-camo-shields.md` §3.
 
+use crate::app::model_preview::load::TagReader;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -15,10 +16,8 @@ use super::super::common::fields::elements;
 use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::{H3Pass, H3Texture};
 use super::super::gen3::shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
-use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::hlsl::emit::Stage;
 use crate::core::hlsl::parse::{Scalar, Type};
-use crate::core::source::TagSource;
 
 /// `rasterizer_globals`' explicit shader 61, `shield_impact`.
 const SHIELD_IMPACT: usize = 61;
@@ -54,10 +53,10 @@ impl H4Shield {
 
 /// The model's shield and its pass, if it has one: technique 0, as no hit
 /// lands in the preview for the hit blob (technique 1) to shape.
-pub(crate) fn read_h4_shield(source: &TagSource, model: &TagFile) -> Option<Arc<H4Shield>> {
+pub(crate) fn read_h4_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<H4Shield>> {
     let path = shield_impact_path(model)?;
-    let settings = ReachShieldSettings::read(source, &path)?;
-    let pass = Arc::new(h4_shield_pass(source, 0).ok()?);
+    let settings = ReachShieldSettings::read(reader, &path)?;
+    let pass = Arc::new(h4_shield_pass(reader, 0).ok()?);
     let rename = |name: &str| {
         match name {
             name if name == PLASMA[0] => "shield_impact_noise_texture1_texture",
@@ -116,10 +115,8 @@ float l_sceneDepth = ((l_window_ndc - {DEPTH_DECODE}.y) / ({DEPTH_DECODE}.x - l_
 /// Explicit 61's `technique` on the preview's skinned vertices, made to read
 /// the preview's depth: `ComputeDepthFade`'s `psDepthConstants` decode is
 /// the game's reversed depth, here the preview's window depth to world units.
-pub(crate) fn h4_shield_pass(source: &TagSource, technique: usize) -> Result<H3Pass, String> {
-    let globals = load_referenced_tag_from_source(
-        source,
-        "globals\\rasterizer_globals",
+pub(crate) fn h4_shield_pass(reader: &TagReader, technique: usize) -> Result<H3Pass, String> {
+    let globals = reader.load("globals\\rasterizer_globals",
         "rasterizer_globals",
         b"rasg",
     )
@@ -130,7 +127,7 @@ pub(crate) fn h4_shield_pass(source: &TagSource, technique: usize) -> Result<H3P
         .read_tag_ref_path("explicit pixel shader")
         .filter(|path| !path.is_empty())
         .ok_or("no pixel shader")?;
-    let program = super::shaders::H4ShaderSource::read(source, &path)?
+    let program = super::shaders::H4ShaderSource::read(reader, &path)?
         .program(&super::shaders::H4_DEFINES)?;
     let vertex =
         super::shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
@@ -143,6 +140,8 @@ pub(crate) fn h4_shield_pass(source: &TagSource, technique: usize) -> Result<H3P
 
 #[cfg(test)]
 mod tests {
+    use crate::core::source::TagSource;
+    use crate::app::export::load_referenced_tag_from_source;
     use super::*;
 
     fn kit() -> Option<TagSource> {
@@ -187,7 +186,7 @@ mod tests {
         );
         let grunt = model(&source, "objects\\characters\\storm_grunt\\storm_grunt");
         assert_eq!(shield_impact_path(&grunt), None);
-        let shield = read_h4_shield(&source, &chief).expect("the Chief's shield");
+        let shield = read_h4_shield(&crate::app::model_preview::load::TagReader::new(&source), &chief).expect("the Chief's shield");
         assert!(!shield.settings.showing(0.0));
         assert!(shield.settings.showing(0.5));
         assert_eq!(shield.textures.len(), 4);

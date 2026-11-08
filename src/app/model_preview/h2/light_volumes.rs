@@ -18,7 +18,6 @@ use super::super::effects::marker_name;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::dot;
 use crate::app::model_preview::common::attached::attached;
 
@@ -94,7 +93,7 @@ fn function_of(holder: TagStruct<'_>, name: &str) -> Option<TagFunction> {
     tag_function_at(&holder.descend(name)?, "function")
 }
 
-fn read_volume(source: &TagSource, volume: TagStruct<'_>, glow: Option<&Arc<H2Image>>) -> Option<H2Volume> {
+fn read_volume(reader: &TagReader, volume: TagStruct<'_>, glow: Option<&Arc<H2Image>>) -> Option<H2Volume> {
     let flagged = |wanted: &str| has_flag(volume, "flags", wanted);
     let aspect = elements(volume, "aspect").first().and_then(|aspect| {
         Some(VolumeAspect {
@@ -107,7 +106,7 @@ fn read_volume(source: &TagSource, volume: TagStruct<'_>, glow: Option<&Arc<H2Im
     });
     let own = volume.read_tag_ref_path("bitmap").filter(|path| !path.is_empty());
     let bitmap = match own {
-        Some(path) => decode_h2_image(source, &path, SamplerKind::Texture2D, 0).map(Arc::new),
+        Some(path) => decode_h2_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new),
         None => glow.cloned(),
     };
     let count = volume.read_int_any("sprite count")?.clamp(4, MOST_SPRITES as i128) as usize;
@@ -152,15 +151,15 @@ fn read_volume(source: &TagSource, volume: TagStruct<'_>, glow: Option<&Arc<H2Im
 }
 
 /// `globals`' `rasterizer data`, whose `glow` stands in for a volume's bitmap.
-pub(in crate::app::model_preview) fn read_glow(source: &TagSource) -> Option<Arc<H2Image>> {
-    let globals = load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
+pub(in crate::app::model_preview) fn read_glow(reader: &TagReader) -> Option<Arc<H2Image>> {
+    let globals = reader.load("globals\\globals", "globals", b"matg").ok()?;
     let data = elements(globals.root(), "rasterizer data");
     let path = data.first()?.read_tag_ref_path("glow").filter(|path| !path.is_empty())?;
-    decode_h2_image(source, &path, SamplerKind::Texture2D, 0).map(Arc::new)
+    decode_h2_image(reader, &path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
-pub(in crate::app::model_preview) fn read_h2_bitmap(source: &TagSource, path: &str) -> Option<Arc<H2Image>> {
-    decode_h2_image(source, path, SamplerKind::Texture2D, 0).map(Arc::new)
+pub(in crate::app::model_preview) fn read_h2_bitmap(reader: &TagReader, path: &str) -> Option<Arc<H2Image>> {
+    decode_h2_image(reader, path, SamplerKind::Texture2D, 0).map(Arc::new)
 }
 
 /// `render_submit_object_attachments`: one at every marker of the name. Then
@@ -171,7 +170,7 @@ pub(in crate::app::model_preview) fn read_h2_bitmap(source: &TagSource, path: &s
 /// location while their event runs: scale 1, white faded over the event, as
 /// bright as the part's A and B scales.
 pub(in crate::app::model_preview) fn read_h2_light_volumes(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -188,7 +187,7 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
         let (path, attached) = if kind == volume_group {
             (path, true)
         } else if kind == light_group {
-            let Ok(light) = load_referenced_tag_from_source(source, &path, "light", b"ligh") else {
+            let Ok(light) = reader.load(&path, "light", b"ligh") else {
                 continue;
             };
             let named = light.root().read_tag_ref_path("light volume").filter(|path| !path.is_empty());
@@ -199,15 +198,15 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
         } else {
             continue;
         };
-        let Ok(tag) = load_referenced_tag_from_source(source, &path, "light_volume", b"MGS2") else {
+        let Ok(tag) = reader.load(&path, "light_volume", b"MGS2") else {
             continue;
         };
-        let glow = glow.get_or_insert_with(|| read_glow(source));
+        let glow = glow.get_or_insert_with(|| read_glow(reader));
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let volumes = elements(root, "volumes");
         let volumes: Vec<H2Volume> =
-            volumes.iter().filter_map(|volume| read_volume(source, *volume, glow.as_ref())).collect();
+            volumes.iter().filter_map(|volume| read_volume(reader, *volume, glow.as_ref())).collect();
         let scaled_by_marker = volumes.first().is_some_and(|volume| volume.scaled_by_marker);
         let volumes = Arc::new(volumes);
         let name = marker_name(attachment, "marker");
@@ -231,19 +230,19 @@ pub(in crate::app::model_preview) fn read_h2_light_volumes(
             });
         }
     }
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         if part.group != volume_group {
             return;
         }
-        let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "light_volume", b"MGS2") else {
+        let Ok(tag) = reader.load(&part.path, "light_volume", b"MGS2") else {
             return;
         };
-        let glow = glow.get_or_insert_with(|| read_glow(source));
+        let glow = glow.get_or_insert_with(|| read_glow(reader));
         let root = tag.root();
         let real = |name: &str| root.read_real(name).unwrap_or(0.0);
         let volumes = elements(root, "volumes");
         let volumes: Vec<H2Volume> =
-            volumes.iter().filter_map(|volume| read_volume(source, *volume, glow.as_ref())).collect();
+            volumes.iter().filter_map(|volume| read_volume(reader, *volume, glow.as_ref())).collect();
         let volumes = Arc::new(volumes);
         for marker in part_markers(markers, &part.marker, part.effect.once) {
             let (place, node) = frame(&marker);
@@ -632,7 +631,7 @@ mod tests {
             let name = relative.to_string_lossy().replace('/', "\\");
             let tag = load_referenced_tag_from_source(&source, &name, "light_volume", b"MGS2").unwrap();
             for volume in elements(tag.root(), "volumes") {
-                let Some(read) = read_volume(&source, volume, None) else {
+                let Some(read) = read_volume(&crate::app::model_preview::load::TagReader::new(&source), volume, None) else {
                     continue;
                 };
                 match &read.spacing {

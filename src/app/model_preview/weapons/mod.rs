@@ -478,33 +478,33 @@ fn descendants(preview: &RenderModelPreview, node: usize) -> Vec<usize> {
 }
 
 /// A unit's graph, by way of its `.model`.
-fn unit_graph(source: &TagSource, unit: &TagFile) -> Option<TagFile> {
+fn unit_graph(reader: &TagReader, unit: &TagFile) -> Option<Arc<TagFile>> {
     let model = holder_of(unit.root(), "model")?.read_tag_ref_path("model")?;
-    let model = load_referenced_tag_from_source(source, &model, "model", b"hlmt").ok()?;
+    let model = reader.load(&model, "model", b"hlmt").ok()?;
     let graph = model.root().read_tag_ref_path("animation").filter(|path| !path.is_empty())?;
-    load_referenced_tag_from_source(source, &graph, "model_animation_graph", b"jmad").ok()
+    reader.load(&graph, "model_animation_graph", b"jmad").ok()
 }
 
 /// What a unit can hold, from a loose folder's weapons.
 pub(in crate::app::model_preview) fn unit_weapons(
-    source: &TagSource,
+    reader: &TagReader,
     unit: &TagFile,
     known: Option<&[Equippable]>,
 ) -> UnitWeapons {
-    let Some(tag) = unit_graph(source, unit) else {
+    let Some(tag) = unit_graph(reader, unit) else {
         return UnitWeapons::default();
     };
     let graph = graph_entries(&tag);
     let equippable = known.map_or_else(
         || {
-            let TagSource::LooseFolder { root, .. } = source else {
+            let TagSource::LooseFolder { root, .. } = &reader.source else {
                 return Vec::new();
             };
             let mut found: Vec<_> = loose_weapon_paths(root)
                 .into_iter()
                 .filter_map(|path| {
                     let weapon =
-                        load_referenced_tag_from_source(source, &path, "weapon", b"weap").ok()?;
+                        reader.load(&path, "weapon", b"weap").ok()?;
                     let class = string_id_in(&weapon, "weapon class");
                     let kind = string_id_in(&weapon, "weapon name");
                     accepts(&graph, &class, &kind).then(|| {
@@ -545,8 +545,8 @@ pub(in crate::app::model_preview) fn unit_weapons(
 /// `weapon specific markers` entry for the weapon's class and name gives the
 /// hand's marker before `right_hand_node` / `left_hand_node` do. No kit unit
 /// fills the block.
-fn h4_weapon_specific_marker(source: &TagSource, unit: &TagFile, weapon: &TagFile, left_hand: bool) -> Option<String> {
-    if source.game() != Some(GameId::Halo4) {
+fn h4_weapon_specific_marker(reader: &TagReader, unit: &TagFile, weapon: &TagFile, left_hand: bool) -> Option<String> {
+    if reader.source.game() != Some(GameId::Halo4) {
         return None;
     }
     let holder = holder_of(unit.root(), "weapon specific markers")?;
@@ -561,7 +561,7 @@ fn h4_weapon_specific_marker(source: &TagSource, unit: &TagFile, weapon: &TagFil
 /// `sub_88D990`, attaching a readied weapon: the unit's hand, to the unit's
 /// preferred gun marker if the weapon has one, or else its handle node.
 pub(in crate::app::model_preview) fn attach_weapon(
-    source: &TagSource,
+    reader: &TagReader,
     unit: &TagFile,
     path: &str,
     left_hand: bool,
@@ -569,13 +569,13 @@ pub(in crate::app::model_preview) fn attach_weapon(
     ik: Option<&UnitWeapons>,
     preview: &mut RenderModelPreview,
 ) -> Option<AttachedObject> {
-    let weapon = load_referenced_tag_from_source(source, path, "weapon", b"weap").ok()?;
+    let weapon = reader.load(path, "weapon", b"weap").ok()?;
     let model = holder_of(weapon.root(), "model")?.read_tag_ref_path("model")?;
-    let model = load_referenced_tag_from_source(source, &model, "model", b"hlmt").ok()?;
+    let model = reader.load(&model, "model", b"hlmt").ok()?;
     let render = model.root().read_tag_ref_path("render model")?;
-    let render = load_referenced_tag_from_source(source, &render, "render_model", b"mode").ok()?;
+    let render = reader.load(&render, "render_model", b"mode").ok()?;
     let attached = build_render_preview(&render).ok()?;
-    let hand = h4_weapon_specific_marker(source, unit, &weapon, left_hand)
+    let hand = h4_weapon_specific_marker(reader, unit, &weapon, left_hand)
         .unwrap_or_else(|| string_id_in(unit, if left_hand { "left_hand_node" } else { "right_hand_node" }));
     let preferred = string_id_in(unit, "preferred_gun_node");
     let has_preferred = attached.markers.iter().any(|marker| marker.name == preferred);
@@ -588,7 +588,7 @@ pub(in crate::app::model_preview) fn attach_weapon(
     let child = MarkerFrame::find(&attached, &grip);
     // Reach's IK chains, and Halo 4's IK sets, reach for the held weapon's
     // markers where they ride.
-    if matches!(source.game(), Some(GameId::HaloReach | GameId::Halo4)) {
+    if matches!(reader.source.game(), Some(GameId::HaloReach | GameId::Halo4)) {
         let place = |frame: &MarkerFrame| {
             (frame.axes.map(|axis| attach_vector(&parent, &child, axis)), attach_point(&parent, &child, frame.position))
         };
@@ -616,7 +616,7 @@ pub(in crate::app::model_preview) fn attach_weapon(
         }
     }
     let variant = object_variant(&weapon, &model, "").map(|variant| variant.name).unwrap_or_default();
-    fold_attached(source, &weapon, &model, &variant, attached, parent, child, owner, tag_path::name(path), preview)
+    fold_attached(reader, &weapon, &model, &variant, attached, parent, child, owner, tag_path::name(path), preview)
 }
 
 #[cfg(test)]
@@ -911,7 +911,7 @@ mod tests {
         let rifle = entries.iter().find(|entry| (entry.mode.as_str(), entry.class.as_str(), entry.kind.as_str()) == ("combat", "rifle", ANY));
         assert!(rifle.is_some_and(|entry| entry.has_idle), "the rifle class idles under any");
         let unit = load_referenced_tag_from_source(&source, spartan, "biped", b"bipd").unwrap();
-        let weapons = unit_weapons(&source, &unit, None);
+        let weapons = unit_weapons(&crate::app::model_preview::load::TagReader::new(&source), &unit, None);
         let paths: Vec<_> = weapons.equippable.iter().map(|weapon| weapon.option.name.as_str()).collect();
         assert!(paths.contains(&"assault_rifle") && paths.contains(&"sniper_rifle"), "{paths:?}");
         assert_eq!(clips_without_ik(&graph).len(), 2, "two clips turn weapon IK off by their user flags");

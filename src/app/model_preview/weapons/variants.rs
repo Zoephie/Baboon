@@ -6,7 +6,6 @@ use super::super::attachment::MarkerFrame;
 use super::super::common::fields::elements;
 use super::super::load::build_render_preview;
 use super::super::*;
-use crate::core::source::TagSource;
 use super::attached::{AttachedObject, fold_attached};
 use super::holder_of;
 
@@ -45,11 +44,11 @@ fn variant_objects(model: &TagFile) -> Vec<Vec<VariantObject>> {
 }
 
 /// A child object's `.model`, and its variant by name, else its own default.
-fn child_model(source: &TagSource, entry: &VariantObject) -> Option<(TagFile, TagFile, Option<ModelVariantPreview>)> {
+fn child_model(reader: &TagReader, entry: &VariantObject) -> Option<(Arc<TagFile>, Arc<TagFile>, Option<ModelVariantPreview>)> {
     let extension = blam_tags::paths::group_tag_to_extension(entry.group)?;
-    let object = load_referenced_tag_from_source(source, &entry.path, extension, &entry.group.to_be_bytes()).ok()?;
+    let object = reader.load(&entry.path, extension, &entry.group.to_be_bytes()).ok()?;
     let model = holder_of(object.root(), "model")?.read_tag_ref_path("model")?;
-    let model = load_referenced_tag_from_source(source, &model, "model", b"hlmt").ok()?;
+    let model = reader.load(&model, "model", b"hlmt").ok()?;
     let chosen = object_variant(&object, &model, &entry.child_variant);
     Some((object, model, chosen))
 }
@@ -70,7 +69,7 @@ pub(in crate::app::model_preview) fn object_variant(object: &TagFile, model: &Ta
 /// What a `.model`'s variants attach, such as the warthog's turret: every one
 /// goes in once, drawn only under the variants that name it.
 pub(in crate::app::model_preview) fn attach_variant_objects(
-    source: &TagSource,
+    reader: &TagReader,
     model: &TagFile,
     variants: &mut [ModelVariantPreview],
     preview: &mut RenderModelPreview,
@@ -88,11 +87,11 @@ pub(in crate::app::model_preview) fn attach_variant_objects(
         let Ok(owner) = u8::try_from(index + usize::from(FIRST_CHILD_OWNER)) else {
             break;
         };
-        let Some((object, child_tag, chosen)) = child_model(source, entry) else {
+        let Some((object, child_tag, chosen)) = child_model(reader, entry) else {
             continue;
         };
         let render = child_tag.root().read_tag_ref_path("render model");
-        let render = render.and_then(|path| load_referenced_tag_from_source(source, &path, "render_model", b"mode").ok());
+        let render = render.and_then(|path| reader.load(&path, "render_model", b"mode").ok());
         let Some(attached) = render.and_then(|render| build_render_preview(&render).ok()) else {
             continue;
         };
@@ -115,7 +114,7 @@ pub(in crate::app::model_preview) fn attach_variant_objects(
             .collect();
         let variant = chosen.as_ref().map_or("", |variant| variant.name.as_str());
         let folded =
-            fold_attached(source, &object, &child_tag, variant, attached, parent, child, owner, &name, preview);
+            fold_attached(reader, &object, &child_tag, variant, attached, parent, child, owner, &name, preview);
         attached_objects.extend(folded);
         for (region, permutation) in choices {
             // With no variant chosen, no child shows.

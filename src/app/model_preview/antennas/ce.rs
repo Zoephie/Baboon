@@ -15,7 +15,6 @@ use super::super::materials::decode_h2_image;
 use super::super::*;
 use super::{ANTENNA_TRIM, AntennaQuad, AntennaSprite, antenna_sprite};
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 
 /// One segment of an antenna: a bitmap sprite stretched along it.
 #[derive(Debug, Clone)]
@@ -91,13 +90,13 @@ impl CeAntenna {
     }
 }
 
-fn read_antenna(source: &TagSource, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeAntenna> {
-    let tag = load_referenced_tag_from_source(source, path, "antenna", b"ant!").ok()?;
+fn read_antenna(reader: &TagReader, path: &str, owner: u8, markers: &[RenderModelPreviewMarker]) -> Option<CeAntenna> {
+    let tag = reader.load(path, "antenna", b"ant!").ok()?;
     let root = tag.root();
     let name = root.read_string("attachment marker name").unwrap_or_default();
     let (node, position, forward) = marker_or_origin(markers, &name, owner)?;
     let bitmap_path = root.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty())?;
-    let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
+    let bitmap = reader.load(&bitmap_path, "bitmap", b"bitm").ok()?;
     let mut image_index = None;
     let mut segments = Vec::new();
     for vertex in elements(root, "vertices") {
@@ -113,7 +112,7 @@ fn read_antenna(source: &TagSource, path: &str, owner: u8, markers: &[RenderMode
             scale: length / covered,
         });
     }
-    let image = decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, image_index?)?;
+    let image = decode_h2_image(reader, &bitmap_path, SamplerKind::Texture2D, image_index?)?;
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let (falloff, cutoff) = (real("falloff pixels"), real("cutoff pixels"));
     let fade = (ANTENNA_FADE_PIXELS - cutoff) / (falloff - cutoff);
@@ -130,7 +129,7 @@ fn read_antenna(source: &TagSource, path: &str, owner: u8, markers: &[RenderMode
 
 /// The antennas among `object`'s widgets.
 pub(in crate::app::model_preview) fn read_ce_antennas(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -143,7 +142,7 @@ pub(in crate::app::model_preview) fn read_ce_antennas(
         .iter()
         .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
         .filter(|(group, _)| *group == antenna_group)
-        .filter_map(|(_, path)| read_antenna(source, &path, owner, markers))
+        .filter_map(|(_, path)| read_antenna(reader, &path, owner, markers))
         .collect()
 }
 

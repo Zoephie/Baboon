@@ -26,7 +26,6 @@ use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_m
 use super::super::renderer::{H3_EXPOSURE, reach_alt_exposure};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{clamped_unit, cross, length};
 use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
 use crate::app::model_preview::common::attached::attached;
@@ -490,20 +489,20 @@ pub(crate) struct H3LightVolumeAt {
     pub(crate) definition: Arc<H3VolumeDefinition>,
 }
 
-fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3VolumeDefinition> {
-    if source.game() == Some(GameId::Halo4) {
-        return read_h4_definition(source, element);
+fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<H3VolumeDefinition> {
+    if reader.source.game() == Some(GameId::Halo4) {
+        return read_h4_definition(reader, element);
     }
-    let reach = source.game() == Some(GameId::HaloReach);
+    let reach = reader.source.game() == Some(GameId::HaloReach);
     let shader = element.descend("actual shader?")?;
     let definition = shader.read_tag_ref_path("definition").filter(|path| !path.is_empty())?;
-    let definition = read_h3_definition(source, &definition)?;
+    let definition = read_h3_definition(reader, &definition)?;
     let options: Vec<usize> = elements(shader, "options")
         .iter()
         .map(|option| option.read_int_any("short").unwrap_or(0).max(0) as usize)
         .collect();
     let chosen = |category: &str| definition.chosen(category, &options).unwrap_or_default().to_owned();
-    let resolved = resolve_embedded_method(source, shader);
+    let resolved = resolve_embedded_method(reader, shader);
     let resolved_real = |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
     // `lights__light_volume.hlsl` l.288–296; `albedo_circular.render_method_option`'s defaults.
     let circular = (reach && chosen("albedo") == "circular")
@@ -518,10 +517,10 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
         let map = base.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
         let baked = resolved
             .as_ref()
-            .and_then(|resolved| super::super::gen3::materials::read_resolved_map(source, resolved, "base_map"));
+            .and_then(|resolved| super::super::gen3::materials::read_resolved_map(reader, resolved, "base_map"));
         match baked {
             Some((bitmap, sampler)) => (Some(bitmap), Some(sampler)),
-            None => (Some(read_h3_bitmap(source, &map, 0, SamplerKind::Texture2D)?), None),
+            None => (Some(read_h3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?), None),
         }
     };
     let blend = definition.blend(&options);
@@ -559,9 +558,9 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3Volum
 /// 0x1403ABF50): Reach's, through the `actual material`, and never
 /// precompiled, which MCC clears every time and could not draw ("not
 /// implemented for D3D11").
-fn read_h4_definition(source: &TagSource, element: TagStruct<'_>) -> Option<H3VolumeDefinition> {
+fn read_h4_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<H3VolumeDefinition> {
     let material = blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
-    let resolved = resolve_h4_effect_material(source, &material, "light_volume")
+    let resolved = resolve_h4_effect_material(reader, &material, "light_volume")
         .map_err(|error| eprintln!("h4 light volume material: {error}"))
         .ok()?;
     let flagged = |wanted: &str| has_flag(element, "flags", wanted);
@@ -666,7 +665,7 @@ impl VolumeProperties {
 /// The volumes an object's attached effects run, one at each marker of a
 /// location.
 pub(in crate::app::model_preview) fn read_h3_light_volumes(
-    source: &TagSource,
+    reader: &TagReader,
     object: &blam_tags::TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -674,16 +673,16 @@ pub(in crate::app::model_preview) fn read_h3_light_volumes(
 ) -> Vec<H3LightVolumeAt> {
     let mut volumes = Vec::new();
     let volume_group = u32::from_be_bytes(*b"ltvl");
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         if part.group != volume_group {
             return;
         }
-        let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "light_volume_system", b"ltvl") else {
+        let Ok(tag) = reader.load(&part.path, "light_volume_system", b"ltvl") else {
             return;
         };
         let (offset, yaw, pitch) = read_part_placement(part.part);
         for element in elements(tag.root(), "light_volumes") {
-            let Some(definition) = read_definition(source, element).map(Arc::new) else {
+            let Some(definition) = read_definition(reader, element).map(Arc::new) else {
                 continue;
             };
             for marker in &part.effect.locations(markers, &part.marker, &frame) {
@@ -1271,7 +1270,7 @@ mod tests {
         let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
         let first = |path: &str| {
             let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
-            read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path)
+            read_definition(&crate::app::model_preview::load::TagReader::new(&source), elements(tag.root(), "light_volumes")[0]).expect(path)
         };
         let headlights = first("objects\\vehicles\\human\\civilian\\cargo_truck\\fx\\headlights");
         assert!(headlights.reach);
@@ -1294,7 +1293,7 @@ mod tests {
         let source = super::super::super::particles::loose_kit(&root, GameId::Halo3);
         let path = "objects\\characters\\masterchief\\fx\\flashlight";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
-        let volume = read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path);
+        let volume = read_definition(&crate::app::model_preview::load::TagReader::new(&source), elements(tag.root(), "light_volumes")[0]).expect(path);
         assert!(!volume.reach && volume.bitmap.is_some());
         assert!(volume.circular.is_none() && volume.depth_fade.is_none() && volume.lod.is_none());
         assert!(volume.precompiled.is_none());
@@ -1372,7 +1371,7 @@ mod tests {
         let source = super::super::super::particles::loose_kit(&root, GameId::Halo4);
         let path = "objects\\vehicles\\covenant\\turrets\\plasma_turret\\fx\\tripod_light_volume";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
-        let volume = read_definition(&source, elements(tag.root(), "light_volumes")[0]).expect(path);
+        let volume = read_definition(&crate::app::model_preview::load::TagReader::new(&source), elements(tag.root(), "light_volumes")[0]).expect(path);
         let (material, _) = volume.h4.as_ref().expect("a material");
         assert!(material.pass.vertex.contains("vs_light_volume_state_buffer"));
         assert!(material.pass.vertex.contains("vs_lightVolumeOverallState"));
@@ -1397,7 +1396,7 @@ mod tests {
                 let relative = relative.to_string_lossy().replace('/', "\\");
                 let tag = load_referenced_tag_from_source(&source, &relative, "light_volume_system", b"ltvl").unwrap();
                 for element in elements(tag.root(), "light_volumes") {
-                    match read_definition(&source, element) {
+                    match read_definition(&crate::app::model_preview::load::TagReader::new(&source), element) {
                         Some(volume) if volume.h4.is_some() => read += 1,
                         _ => failures.push(relative.clone()),
                     }

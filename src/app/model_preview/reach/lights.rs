@@ -16,7 +16,6 @@ use super::super::functions::FunctionValues;
 use super::super::common::named_function::{NamedFunction, tag_function_at};
 use super::super::effects::part_markers;
 use super::super::*;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::cross;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
@@ -77,8 +76,8 @@ struct ReachLightTag {
     intensity_scale: f32,
 }
 
-fn read_light_tag(source: &TagSource, path: &str) -> Option<ReachLightTag> {
-    let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
+fn read_light_tag(reader: &TagReader, path: &str) -> Option<ReachLightTag> {
+    let tag = reader.load(path, "light", b"ligh").ok()?;
     let root = tag.root();
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let version = root.read_int_any("version").unwrap_or(4);
@@ -387,7 +386,7 @@ impl ReachLitLight {
 /// name (`light_new_attached`), first-person-only lights left out of a third
 /// person view.
 pub(crate) fn read_reach_lights(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -399,7 +398,7 @@ pub(crate) fn read_reach_lights(
     for attachment in object_attachments(object, &[light_group, cheap_group]) {
         let ObjectAttachment { group, path, marker: name, scale_by, secondary_by, change_color, force_on } = attachment;
         if group == light_group {
-            let Some(tag) = read_light_tag(source, &path).filter(|tag| !tag.first_person_only).map(Arc::new) else {
+            let Some(tag) = read_light_tag(reader, &path).filter(|tag| !tag.first_person_only).map(Arc::new) else {
                 continue;
             };
             for marker in part_markers(markers, &name, false) {
@@ -417,7 +416,7 @@ pub(crate) fn read_reach_lights(
                     tag: Arc::clone(&tag),
                 });
             }
-        } else if let Some(read) = read_cheap_light(source, &path) {
+        } else if let Some(read) = read_cheap_light(reader, &path) {
             for marker in part_markers(markers, &name, false) {
                 let (place, node) = frame(&marker);
                 cheap.push(ReachCheapLight {
@@ -436,8 +435,8 @@ pub(crate) fn read_reach_lights(
     (lights, cheap)
 }
 
-fn read_cheap_light(source: &TagSource, path: &str) -> Option<ReachCheapLight> {
-    let tag = load_referenced_tag_from_source(source, path, "cheap_light", b"gldf").ok()?;
+fn read_cheap_light(reader: &TagReader, path: &str) -> Option<ReachCheapLight> {
+    let tag = reader.load(path, "cheap_light", b"gldf").ok()?;
     let root = tag.root();
     let function = |name: &str| root.descend(name).and_then(|holder| tag_function_at(&holder, "Mapping")).map(Arc::new);
     Some(ReachCheapLight {

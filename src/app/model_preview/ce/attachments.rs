@@ -346,14 +346,14 @@ pub(in crate::app::model_preview) fn loose_weapon_paths(root: &std::path::Path) 
 
 /// The weapons `unit_can_use_weapon` lets this unit hold in its resting seat:
 /// the biped has no say, only its animations do.
-fn equippable_of(source: &TagSource, graph: &TagFile) -> Vec<CeEquippable> {
-    let TagSource::LooseFolder { root, .. } = source else {
+fn equippable_of(reader: &TagReader, graph: &TagFile) -> Vec<CeEquippable> {
+    let TagSource::LooseFolder { root, .. } = &reader.source else {
         return Vec::new();
     };
     let mut equippable: Vec<_> = loose_weapon_paths(root)
         .into_iter()
         .filter_map(|path| {
-            let weapon = load_referenced_tag_from_source(source, &path, "weapon", b"weap").ok()?;
+            let weapon = reader.load(&path, "weapon", b"weap").ok()?;
             let label = weapon.root().read_string("label")?;
             let class = weapon_hold(graph, &label)?.class;
             Some(CeEquippable { name: tag_path::name(&path).to_owned(), path, class, label })
@@ -366,17 +366,17 @@ fn equippable_of(source: &TagSource, graph: &TagFile) -> Vec<CeEquippable> {
 /// A biped's weapon choices, with `chosen` held. `known` spares the scan when
 /// only the choice changed.
 pub(in crate::app::model_preview) fn biped_weapons(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     chosen: Option<&str>,
     known: Option<&[CeEquippable]>,
 ) -> CeBipedWeapons {
     let Some(graph) = object_reference(object, "animation graph").and_then(|graph| {
-        load_referenced_tag_from_source(source, &graph, "model_animations", b"antr").ok()
+        reader.load(&graph, "model_animations", b"antr").ok()
     }) else {
         return CeBipedWeapons::default();
     };
-    let equippable = known.map_or_else(|| equippable_of(source, &graph), <[_]>::to_vec);
+    let equippable = known.map_or_else(|| equippable_of(reader, &graph), <[_]>::to_vec);
     let held = chosen.and_then(|path| equippable.iter().find(|weapon| weapon.path == path));
     // With nothing held every clip stays.
     let hidden_clips =
@@ -460,14 +460,14 @@ pub(in crate::app::model_preview) fn weapon_ik(
 
 /// Hang the unit's ready weapon on it, returning the object that adds.
 pub(in crate::app::model_preview) fn attach_ce_weapon(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     path: &str,
     preview: &mut RenderModelPreview,
 ) -> Option<CeAttachedObject> {
-    let weapon = load_referenced_tag_from_source(source, path, "weapon", b"weap").ok()?;
+    let weapon = reader.load(path, "weapon", b"weap").ok()?;
     let model = object_reference(&weapon, "model")?;
-    let render = load_referenced_tag_from_source(source, &model, "gbxmodel", b"mod2").ok()?;
+    let render = reader.load(&model, "gbxmodel", b"mod2").ok()?;
     let mut attached = build_render_preview(&render).ok()?;
     let forced = read_ce_forced_permutation(&weapon);
     if forced != 0 {
@@ -476,7 +476,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
     let label = weapon.root().read_string("label").unwrap_or_default();
     let hold = object_reference(object, "animation graph")
         .and_then(|graph| {
-            load_referenced_tag_from_source(source, &graph, "model_animations", b"antr").ok()
+            reader.load(&graph, "model_animations", b"antr").ok()
         })
         .and_then(|graph| weapon_hold(&graph, &label))
         .unwrap_or_default();
@@ -486,7 +486,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
     for (marker, attach_to) in &hold.ik_points {
         preview.weapon_ik.extend(weapon_ik(preview, &attached, &hold.class, parent, child, marker, attach_to));
     }
-    let lights = super::lights::read_attached_lights(source, &weapon, 1, &attached, parent, child);
+    let lights = super::lights::read_attached_lights(reader, &weapon, 1, &attached, parent, child);
     preview.ce.lights.extend(lights);
     let markers = attached
         .markers
@@ -496,7 +496,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
             RenderModelPreviewMarker {
                 position: held.position,
                 axes: held.axes,
-                node_index: held.node as i16,
+                node_index: held.node,
                 ..marker.clone()
             }
         })
@@ -752,7 +752,7 @@ mod tests {
                 class: String::new(),
                 label: label.to_owned(),
             }];
-            let hidden = biped_weapons(&source, &cyborg, Some(path), Some(&equippable)).hidden_clips;
+            let hidden = biped_weapons(&crate::app::model_preview::load::TagReader::new(&source), &cyborg, Some(path), Some(&equippable)).hidden_clips;
             let tag = graph("characters\\cyborg\\cyborg");
             let clips: Vec<_> = elements(tag.root(), "animations")
                 .iter()
@@ -772,7 +772,7 @@ mod tests {
         let pistol = held("hp", "pistol");
         assert!(!pistol("stand pistol idle"));
         assert!(pistol("stand rifle idle"));
-        let unarmed = biped_weapons(&source, &cyborg, None, Some(&[])).hidden_clips;
+        let unarmed = biped_weapons(&crate::app::model_preview::load::TagReader::new(&source), &cyborg, None, Some(&[])).hidden_clips;
         assert!(unarmed.is_empty(), "nothing held, nothing hidden: {} clips", unarmed.len());
         // `alert` has no rocket launcher, so it falls back on its last weapon.
         let tag = graph("characters\\cyborg\\cyborg");

@@ -33,7 +33,7 @@ pub(in crate::app::model_preview) struct H2TemplateDefaults {
 /// `gray_50_percent` for `base_map`, `default_detail` at scale 16 for
 /// `detail_map`, as the game does.
 pub(in crate::app::model_preview) fn resolve_h2_shader(
-    source: &TagSource,
+    reader: &TagReader,
     shader: &TagFile,
     caches: &mut ResolveCaches,
 ) -> MaterialTextures {
@@ -41,7 +41,7 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
     let template = root
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
-        .and_then(|path| cached_h2_template(source, &path, &mut caches.h2_templates));
+        .and_then(|path| cached_h2_template(reader, &path, &mut caches.h2_templates));
     let parameters = h2_shader_parameters(root);
 
     let mut textures = MaterialTextures {
@@ -72,7 +72,7 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
             repeat_y: true,
             scale,
         };
-        textures.slots[slot as usize] = cached_bitmap(source, &binding, caches);
+        textures.slots[slot as usize] = cached_bitmap(reader, &binding, caches);
     }
     // Inferred from the templates rather than read from their passes: the
     // `*alpha_test*` templates that declare no `alpha_test_map`
@@ -97,7 +97,7 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
             .iter()
             .any(|layer| !textures.h2_layers[*layer as usize].is_empty());
         textures.h2_layers[layer as usize] = prepare_h2_passes(
-            source,
+            reader,
             shader,
             &parameters,
             template.as_deref(),
@@ -118,7 +118,7 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
                 Some(defaults.default_bitmap.clone()).filter(|path| !path.is_empty())
             });
         textures.h2_layers[H2Layer::ActiveCamo as usize] =
-            prepare_h2_camo_passes(source, bump, caches);
+            prepare_h2_camo_passes(reader, bump, caches);
     }
     // Passes draw it with Game Shaders on: an emblem's overlay does, and is only
     // off for want of a player. Without them, and with no slots, it is bare.
@@ -155,7 +155,7 @@ fn h2_shader_parameters<'a>(root: TagStruct<'a>) -> HashMap<String, TagStruct<'a
 /// `rasterizer_visible_section_build_rendered_geometry`): `globals.globals`'
 /// `global shader`, which reads the bump of the shader it replaced.
 fn prepare_h2_camo_passes(
-    source: &TagSource,
+    reader: &TagReader,
     bump: Option<String>,
     caches: &mut ResolveCaches,
 ) -> Vec<H2DrawPass> {
@@ -163,10 +163,10 @@ fn prepare_h2_camo_passes(
         .h2_camo_shader
         .get_or_insert_with(|| {
             let globals =
-                load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
+                reader.load("globals\\globals", "globals", b"matg").ok()?;
             let root = globals.root();
             let path = root.descend("rasterizer data[0]")?.read_tag_ref_path("global shader")?;
-            load_referenced_tag_from_source(source, &path, "shader", b"shad").ok().map(Arc::new)
+            reader.load(&path, "shader", b"shad").ok()
         })
         .clone();
     let Some(shader) = shader else {
@@ -176,9 +176,9 @@ fn prepare_h2_camo_passes(
     let template = root
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
-        .and_then(|path| cached_h2_template(source, &path, &mut caches.h2_templates));
+        .and_then(|path| cached_h2_template(reader, &path, &mut caches.h2_templates));
     prepare_h2_passes(
-        source,
+        reader,
         &shader,
         &h2_shader_parameters(root),
         template.as_deref(),
@@ -206,7 +206,7 @@ fn h2_bitmap_scale(
 /// prepared drops them all, and the material keeps its slot drawing rather
 /// than losing a layer: this needs a loose kit's `.psh` files.
 fn prepare_h2_passes(
-    source: &TagSource,
+    reader: &TagReader,
     shader: &TagFile,
     parameters: &HashMap<String, TagStruct<'_>>,
     template: Option<&H2TemplateDefaults>,
@@ -215,11 +215,11 @@ fn prepare_h2_passes(
     has_texaccum: bool,
     camo_bump: Option<String>,
 ) -> Vec<H2DrawPass> {
-    let TagSource::LooseFolder { root, .. } = source else {
+    let TagSource::LooseFolder { root, .. } = &reader.source else {
         return Vec::new();
     };
     let load = |path: &str, extension: &str, group: &[u8; 4]| {
-        load_referenced_tag_from_source(source, path, extension, group).ok()
+        reader.load(path, extension, group).ok()
     };
     let mut passes = match resolve_h2_layer_passes(shader, load, layer.tag_name(), layer.implementation()) {
         Ok(passes) => passes,
@@ -270,7 +270,7 @@ fn prepare_h2_passes(
                 if let Some(cached) = caches.h2_images.get(&key) {
                     return cached.clone();
                 }
-                let decoded = decode_h2_image(source, path, kind, 0).map(Arc::new);
+                let decoded = decode_h2_image(reader, path, kind, 0).map(Arc::new);
                 caches.h2_images.insert(key, decoded.clone());
                 decoded
             },
@@ -316,14 +316,14 @@ fn h2_scale_animation(parameter: &TagStruct<'_>) -> Option<[Option<f32>; 2]> {
 }
 
 fn cached_h2_template(
-    source: &TagSource,
+    reader: &TagReader,
     path: &str,
     cache: &mut HashMap<String, Option<Arc<H2TemplateDefaults>>>,
 ) -> Option<Arc<H2TemplateDefaults>> {
     if let Some(cached) = cache.get(path) {
         return cached.clone();
     }
-    let loaded = load_referenced_tag_from_source(source, path, "shader_template", b"stem")
+    let loaded = reader.load(path, "shader_template", b"stem")
         .ok()
         .map(|template| {
             let mut parameters = HashMap::new();

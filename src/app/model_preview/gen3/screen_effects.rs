@@ -15,7 +15,6 @@ use super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
 use super::super::*;
 use super::super::renderer::REACH_SCREEN_NOISE_BITMAP;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 
 /// `build_saturation_matrix`'s weights.
 const LUMINANCE: [f32; 3] = [0.212_656, 0.715_158, 0.072_185_6];
@@ -396,18 +395,18 @@ fn shows_to_no_unit(flagged: impl Fn(&[&str]) -> bool) -> bool {
     !(flagged(&UNATTACHED) || flagged(&FIRST_PERSON) || flagged(&THIRD_PERSON)) || flagged(&UNATTACHED)
 }
 
-fn read_screen_shader(source: &TagSource, element: TagStruct<'_>) -> Option<(String, ScreenLayer, i32)> {
+fn read_screen_shader(reader: &TagReader, element: TagStruct<'_>) -> Option<(String, ScreenLayer, i32)> {
     let path = element.read_tag_ref_path("shader effect").filter(|path| !path.is_empty())?;
-    let tag = load_referenced_tag_from_source(source, &path, "shader_screen", b"rmss").ok()?;
+    let tag = reader.load(&path, "shader_screen", b"rmss").ok()?;
     let root = tag.root();
     let layer = ScreenLayer::read(root);
     let order = root.read_int_any("sort order").unwrap_or(0) as i32;
     Some((path, layer, order))
 }
 
-fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinition> {
+fn read_definition(reader: &TagReader, element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinition> {
     let flagged = |labels: &[&str]| has_flag_labelled(element, "flags", labels);
-    let reach = source.game() == Some(GameId::HaloReach);
+    let reach = reader.source.game() == Some(GameId::HaloReach);
     // The preview's camera is a third person's, on nothing.
     let shows = if reach { shows_to_no_unit(flagged) } else { shows_in_third_person(flagged) };
     if has_flag(element, "flags", "debug disable") || !shows {
@@ -459,13 +458,13 @@ fn read_definition(source: &TagSource, element: TagStruct<'_>, delay: f32) -> Op
         angle_falloff: falloff("angle falloff"),
         object_falloff,
         predates_object_falloff: element.descend("object falloff").is_none(),
-        shader: read_screen_shader(source, element),
+        shader: read_screen_shader(reader, element),
     })
 }
 
 /// `s_area_screen_effect_definition::postprocess`: played in turn, each starts
 /// as the last ends, whatever its own `delay` says.
-fn read_definitions(source: &TagSource, root: TagStruct<'_>) -> Vec<H3ScreenDefinition> {
+fn read_definitions(reader: &TagReader, root: TagStruct<'_>) -> Vec<H3ScreenDefinition> {
     let in_turn = has_flag(root, "global flags", "play sequentially - ignore delay settings");
     let mut start = 0.0;
     let mut definitions = Vec::new();
@@ -473,7 +472,7 @@ fn read_definitions(source: &TagSource, root: TagStruct<'_>) -> Vec<H3ScreenDefi
         let lifetime = element.read_real("lifetime").unwrap_or(0.0);
         let delay = if in_turn { start } else { element.read_real("delay").unwrap_or(0.0) };
         start += lifetime;
-        definitions.extend(read_definition(source, element, delay));
+        definitions.extend(read_definition(reader, element, delay));
     }
     definitions
 }
@@ -524,7 +523,7 @@ impl H3ScreenEffectAt {
 }
 
 pub(in crate::app::model_preview) fn read_h3_screen_effects(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -532,15 +531,15 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
 ) -> Vec<H3ScreenEffectAt> {
     let mut effects = Vec::new();
     let group = u32::from_be_bytes(*b"sefc");
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         if part.group != group {
             return;
         }
-        let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "area_screen_effect", b"sefc") else {
+        let Ok(tag) = reader.load(&part.path, "area_screen_effect", b"sefc") else {
             return;
         };
-        let odst = source.game() == Some(GameId::Halo3Odst);
-        let mut definitions = read_definitions(source, tag.root());
+        let odst = reader.source.game() == Some(GameId::Halo3Odst);
+        let mut definitions = read_definitions(reader, tag.root());
         definitions.retain(|definition| {
             shows_on_object(odst, definition.predates_object_falloff, part.unattached)
         });
@@ -566,13 +565,13 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
 
 /// `rasterizer_globals`' default bitmap that Reach's final composite reads
 /// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
-pub(in crate::app::model_preview) fn read_reach_screen_noise(source: &TagSource) -> Option<super::super::gen3::materials::H3Bitmap> {
+pub(in crate::app::model_preview) fn read_reach_screen_noise(reader: &TagReader) -> Option<super::super::gen3::materials::H3Bitmap> {
     let globals =
-        load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+        reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let defaults = elements(globals.root(), "default bitmaps");
     let noise = defaults.get(REACH_SCREEN_NOISE_BITMAP)?;
     let path = noise.read_tag_ref_path("default bitmaps").filter(|path| !path.is_empty())?;
-    super::super::gen3::materials::read_h3_bitmap(source, &path, 0, SamplerKind::Texture2D)
+    super::super::gen3::materials::read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
 }
 
 /// Every `shader_screen` these can draw, as materials of no batch, which gives
@@ -837,8 +836,8 @@ mod tests {
         let path = "objects\\characters\\spartans\\fx\\damage_feedback\\body_damage_screen_distortion";
         let tag = load_referenced_tag_from_source(&source, path, "area_screen_effect", b"sefc").expect(path);
         assert!(!elements(tag.root(), "screen effects").is_empty());
-        assert!(read_definitions(&source, tag.root()).is_empty());
-        let (image, ..) = read_reach_screen_noise(&source).expect("monochrome_random");
+        assert!(read_definitions(&crate::app::model_preview::load::TagReader::new(&source), tag.root()).is_empty());
+        let (image, ..) = read_reach_screen_noise(&crate::app::model_preview::load::TagReader::new(&source)).expect("monochrome_random");
         assert!(image.whole());
     }
 

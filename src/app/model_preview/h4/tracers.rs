@@ -25,8 +25,6 @@ use super::super::particles::{read_ends, slerped};
 use super::particles::{pack_argb8, pack_half2, pack_ushort2n};
 use super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::*;
-use crate::app::export::geometry::load_referenced_tag_from_source;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::length;
 use crate::app::model_preview::common::random::{high16_over_65535, high24_over_2_24, lcg_step};
 use crate::app::model_preview::common::attached::attached;
@@ -336,13 +334,13 @@ fn shape_named(name: &str) -> u32 {
     }
 }
 
-fn read_tracer(source: &TagSource, element: TagStruct<'_>) -> Option<H4TracerDefinition> {
+fn read_tracer(reader: &TagReader, element: TagStruct<'_>) -> Option<H4TracerDefinition> {
     if has_flag(element, "flags", "disabled for debugging") {
         return None;
     }
     let material =
         blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
-    let resolved = resolve_h4_effect_material(source, &material, "tracer")
+    let resolved = resolve_h4_effect_material(reader, &material, "tracer")
         .map_err(|error| eprintln!("h4 tracer material: {error}"))
         .ok()?;
     let mut properties = Vec::with_capacity(PROPERTY_NAMES.len());
@@ -523,7 +521,7 @@ fn seeds_of(index: usize) -> [f32; 2] {
 /// `point-to-point` agrees with its having a secondary location
 /// (`UpdateLocations` X 0x8296EB50).
 pub(in crate::app::model_preview) fn read_h4_tracers(
-    source: &TagSource,
+    reader: &TagReader,
     object: &blam_tags::TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -531,11 +529,11 @@ pub(in crate::app::model_preview) fn read_h4_tracers(
 ) -> Vec<H4TracerAt> {
     let mut tracers = Vec::new();
     let tracer_group = u32::from_be_bytes(*b"trac");
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         if part.group != tracer_group {
             return;
         }
-        let Ok(tag) = load_referenced_tag_from_source(source, &part.path, "tracer_system", b"trac")
+        let Ok(tag) = reader.load(&part.path, "tracer_system", b"trac")
         else {
             return;
         };
@@ -548,7 +546,7 @@ pub(in crate::app::model_preview) fn read_h4_tracers(
         let lod = TracerLod::read(root);
         let definitions: Vec<Arc<H4TracerDefinition>> = elements(root, "tracers")
             .into_iter()
-            .filter_map(|element| read_tracer(source, element))
+            .filter_map(|element| read_tracer(reader, element))
             .map(Arc::new)
             .collect();
         let (offset, yaw, pitch) = read_part_placement(part.part);
@@ -1612,7 +1610,7 @@ mod tests {
         let tag =
             load_referenced_tag_from_source(&source, path, "tracer_system", b"trac").expect(path);
         let element = elements(tag.root(), "tracers")[0];
-        let tracer = read_tracer(&source, element).expect("its tracer");
+        let tracer = read_tracer(&crate::app::model_preview::load::TagReader::new(&source), element).expect("its tracer");
         assert!(
             tracer
                 .material
@@ -1685,7 +1683,7 @@ mod tests {
                         disabled += 1;
                         continue;
                     }
-                    match read_tracer(&source, element) {
+                    match read_tracer(&crate::app::model_preview::load::TagReader::new(&source), element) {
                         Some(_) => read += 1,
                         None => failures.push(relative.clone()),
                     }

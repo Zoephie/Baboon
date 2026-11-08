@@ -8,15 +8,14 @@
 //! `skinned_blendshaped`) naming its vertex shader. `DX_VERSION=11` is the
 //! only define the compile needs; `pc` follows from it in `core.fxh`.
 
+use crate::app::model_preview::load::TagReader;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::super::common::fields::elements;
-use crate::app::export::geometry::load_referenced_tag_from_source;
 use crate::core::hlsl::emit::{Stage, Translated, translate_with};
 use crate::core::hlsl::parse::{Program, parse};
 use crate::core::hlsl::pre::{Preprocessor, Token};
-use crate::core::source::TagSource;
 
 /// Where an `#include` falls back to when the including file's own folder
 /// doesn't hold it.
@@ -48,8 +47,8 @@ pub(crate) struct H4ShaderSource {
 }
 
 impl H4ShaderSource {
-    pub(crate) fn read(source: &TagSource, path: &str) -> Result<Self, String> {
-        let tag = load_referenced_tag_from_source(source, path, "material_shader", b"mats")
+    pub(crate) fn read(reader: &TagReader, path: &str) -> Result<Self, String> {
+        let tag = reader.load(path, "material_shader", b"mats")
             .map_err(|error| format!("{path}: {error}"))?;
         let mut files = HashMap::new();
         let mut main = None;
@@ -156,6 +155,7 @@ pub(crate) fn translate_technique(program: &Program, index: usize, pass: &str, s
 
 #[cfg(test)]
 mod tests {
+    use crate::core::source::TagSource;
     use super::*;
     use crate::core::game::GameId;
 
@@ -196,7 +196,7 @@ mod tests {
             if tag.contains("\\water\\") {
                 continue;
             }
-            let program = match H4ShaderSource::read(&source, tag).and_then(|shader| shader.program(&H4_DEFINES)) {
+            let program = match H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), tag).and_then(|shader| shader.program(&H4_DEFINES)) {
                 Ok(program) => program,
                 Err(error) => {
                     failures.push(format!("{tag}: {error}"));
@@ -238,7 +238,7 @@ mod tests {
         };
         for path in ["gobo_specular", "pointphysicallycorrect"] {
             let path = format!("shaders\\material_shaders\\explicit_shaders\\lighting\\{path}");
-            let program = H4ShaderSource::read(&source, &path).unwrap().program(&H4_DEFINES).unwrap();
+            let program = H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), &path).unwrap().program(&H4_DEFINES).unwrap();
             assert_eq!(program.techniques.len(), 16, "{path}");
             for index in 0..16 {
                 let pixel = translate_technique(&program, index, "tiny_position", Stage::Pixel)
@@ -277,7 +277,7 @@ mod tests {
             let name = entry.file_name().to_string_lossy().into_owned();
             let Some(stem) = name.strip_suffix(".material_shader") else { continue };
             let path = format!("shaders\\material_shaders\\fx\\{stem}");
-            let program = match H4ShaderSource::read(&source, &path).and_then(|shader| shader.program(&H4_DEFINES)) {
+            let program = match H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), &path).and_then(|shader| shader.program(&H4_DEFINES)) {
                 Ok(program) => program,
                 Err(error) => {
                     failures.push(format!("{stem}: {error}"));

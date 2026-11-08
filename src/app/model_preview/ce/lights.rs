@@ -359,8 +359,8 @@ impl CeReflection {
     }
 }
 
-fn read_flare(source: &TagSource, path: &str) -> Option<CeFlare> {
-    let tag = load_referenced_tag_from_source(source, path, "lens_flare", b"lens").ok()?;
+fn read_flare(reader: &TagReader, path: &str) -> Option<CeFlare> {
+    let tag = reader.load(path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
     let bitmap = root.read_tag_ref_path("bitmap").filter(|bitmap| !bitmap.is_empty())?;
     let mut images = Vec::new();
@@ -369,7 +369,7 @@ fn read_flare(source: &TagSource, path: &str) -> Option<CeFlare> {
     for reflection in elements(root, "reflections") {
         let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
         let image = indices.iter().position(|known| *known == index).or_else(|| {
-            let image = decode_h2_image(source, &bitmap, SamplerKind::Texture2D, index)?;
+            let image = decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
             images.push(Arc::new(image));
             indices.push(index);
             Some(images.len() - 1)
@@ -491,11 +491,11 @@ fn baked_colors(mut lower: [f32; 4], mut upper: [f32; 4]) -> ([f32; 4], [f32; 4]
 }
 
 /// A `light` tag as tool's postprocess leaves it, placed nowhere yet.
-fn read_light_tag(source: &TagSource, path: &str) -> Option<CeLight> {
-    let light = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
+fn read_light_tag(reader: &TagReader, path: &str) -> Option<CeLight> {
+    let light = reader.load(path, "light", b"ligh").ok()?;
     let root = light.root();
     let flare_path = root.read_tag_ref_path("lens flare").filter(|flare| !flare.is_empty());
-    let flare = flare_path.and_then(|flare| read_flare(source, &flare)).map(Arc::new);
+    let flare = flare_path.and_then(|flare| read_flare(reader, &flare)).map(Arc::new);
     // Tags on disk lack what tool's postprocess gives them for the game.
     let modifier = root.read_real_bounds("radius modifier");
     let radius_bounds = if modifier.lower < UNSET && modifier.upper < UNSET {
@@ -539,9 +539,9 @@ pub(crate) struct CeEffectLightDef {
     falloff: i32,
 }
 
-pub(in crate::app::model_preview) fn read_effect_light(source: &TagSource, path: &str) -> Option<CeEffectLightDef> {
-    let mut light = read_light_tag(source, path)?;
-    let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
+pub(in crate::app::model_preview) fn read_effect_light(reader: &TagReader, path: &str) -> Option<CeEffectLightDef> {
+    let mut light = read_light_tag(reader, path)?;
+    let tag = reader.load(path, "light", b"ligh").ok()?;
     let root = tag.root();
     // Its flags are made 3 whatever the tag's: it is always dynamic.
     light.dynamic = true;
@@ -604,7 +604,7 @@ impl CeEffectLightDef {
 /// The lights among `object`'s attachments, one per marker of the name.
 /// `frame` turns a marker to where the preview holds it, and its node.
 pub(in crate::app::model_preview) fn read_ce_lights(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -622,7 +622,7 @@ pub(in crate::app::model_preview) fn read_ce_lights(
         if group != light_group || path.is_empty() {
             continue;
         }
-        let Some(template) = read_light_tag(source, &path) else {
+        let Some(template) = read_light_tag(reader, &path) else {
             continue;
         };
         // `light_new`: it needs one or the other to exist.
@@ -648,14 +648,14 @@ pub(in crate::app::model_preview) fn read_ce_lights(
 
 /// The same, for a weapon held on `parent`.
 pub(in crate::app::model_preview) fn read_attached_lights(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     weapon: &RenderModelPreview,
     parent: MarkerFrame,
     child: MarkerFrame,
 ) -> Vec<CeLight> {
-    read_ce_lights(source, object, owner, &weapon.markers, |marker| {
+    read_ce_lights(reader, object, owner, &weapon.markers, |marker| {
         (attached_marker_frame(marker, &parent, &child), parent.node.max(0) as usize)
     })
 }

@@ -251,6 +251,8 @@ pub(crate) fn resolve_model_textures(
     source: &TagSource,
     materials: &[RenderModelPreviewMaterial],
 ) -> Vec<MaterialTextures> {
+    // The materials' own reads, once each for this resolve.
+    let reader = &TagReader::new(source);
     let mut caches = ResolveCaches {
         kit_names: match source {
             TagSource::LooseFolder {
@@ -270,7 +272,7 @@ pub(crate) fn resolve_model_textures(
             // here kills the worker before it sends its message — leaving the
             // viewport on "Loading shaders…" forever.
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                resolve_one_material(source, material, &mut caches)
+                resolve_one_material(reader, material, &mut caches)
             }))
             .unwrap_or_else(|_| {
                 MaterialTextures::failed(
@@ -337,7 +339,7 @@ fn share_with_object(
 }
 
 fn resolve_one_material(
-    source: &TagSource,
+    reader: &TagReader,
     material: &RenderModelPreviewMaterial,
     caches: &mut ResolveCaches,
 ) -> MaterialTextures {
@@ -358,19 +360,19 @@ fn resolve_one_material(
     };
     let group = material.shader_group.to_be_bytes();
     let shader =
-        match load_referenced_tag_from_source(source, &material.shader_path, &extension, &group) {
+        match reader.load(&material.shader_path, &extension, &group) {
             Ok(tag) => tag,
             Err(error) => return MaterialTextures::failed(error.to_string()),
         };
     if group == *b"mat " {
-        return super::h4::materials::resolve_h4_material(source, &shader, caches);
+        return super::h4::materials::resolve_h4_material(reader, &shader, caches);
     }
     match blam_tags::game::Game::of(&shader) {
         blam_tags::game::Game::Halo1 => {
-            return resolve_ce_shader(source, &shader, group, material.permutation, caches);
+            return resolve_ce_shader(reader, &shader, group, material.permutation, caches);
         },
         blam_tags::game::Game::Halo2 if group == *b"shad" => {
-            return resolve_h2_shader(source, &shader, caches);
+            return resolve_h2_shader(reader, &shader, caches);
         }
         _ => {}
     }
@@ -386,19 +388,19 @@ fn resolve_one_material(
     // the detail maps' tiling is exactly such a value. It is not required
     // though: a definition that will not parse still leaves every explicitly
     // authored bitmap working, which is nearly all of them.
-    let definition = cached_render_method_definition(source, &render_method.definition_path, &mut caches.definitions);
+    let definition = cached_render_method_definition(&reader.source, &render_method.definition_path, &mut caches.definitions);
     if let Some(definition) = &definition
-        && source.game() == Some(GameId::HaloReach)
+        && reader.source.game() == Some(GameId::HaloReach)
     {
         reach_version_update(&mut render_method, definition);
-        let reference = reach_reference(source, &render_method, &material.shader_path, definition, &mut caches.references);
+        let reference = reach_reference(reader, &render_method, &material.shader_path, definition, &mut caches.references);
         render_method.apply_reference_shader(definition, reference.as_deref());
     }
     let resolved = definition.map(|definition| {
         ResolvedRenderMethod::resolve(&render_method, &definition, |option_path| {
             // The engine's resolver takes owned options; this runs once per
             // texture resolve on a worker, not per frame.
-            cached_render_method_option(source, option_path, &mut caches.options)
+            cached_render_method_option(&reader.source, option_path, &mut caches.options)
                 .map(|option| (*option).clone())
         })
     });
@@ -420,7 +422,7 @@ fn resolve_one_material(
         let Some(binding) = slot_binding(&values, parameter) else {
             continue;
         };
-        textures.slots[slot as usize] = cached_bitmap(source, &binding, caches);
+        textures.slots[slot as usize] = cached_bitmap(reader, &binding, caches);
     }
     // Foliage is the one family whose base alpha IS coverage: leaves are
     // authored as cutouts in the base map and the shader often names no
@@ -435,7 +437,7 @@ fn resolve_one_material(
     }
     // `Game::of` calls every tag after Halo 2 `Halo3`, Reach's included.
     if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 {
-        match prepare_h3_material(source, &values, caches) {
+        match prepare_h3_material(reader, &values, caches) {
             Ok(material) => textures.h3 = Some(Arc::new(material)),
             // The general shader still draws it, so this is only worth saying
             // when there is nothing else to show.
@@ -449,8 +451,8 @@ fn resolve_one_material(
 }
 
 /// Decode a map in the shape its sampler asks for.
-pub(super) fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind, index: usize) -> Option<H2Image> {
-    let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok()?;
+pub(super) fn decode_h2_image(reader: &TagReader, path: &str, kind: SamplerKind, index: usize) -> Option<H2Image> {
+    let tag = reader.load(path, "bitmap", b"bitm").ok()?;
     if kind == SamplerKind::Texture2D {
         let image = decode_thumbnail(&tag, index, MAX_TEXTURE_EDGE).ok()?;
         return Some(H2Image::Flat(TextureImage {
@@ -579,7 +581,7 @@ pub(in crate::app::model_preview) fn parameter_named<'a>(
 }
 
 pub(in crate::app::model_preview) fn cached_bitmap(
-    source: &TagSource,
+    reader: &TagReader,
     binding: &SlotBitmap,
     caches: &mut ResolveCaches,
 ) -> Option<TextureImage> {
@@ -594,13 +596,13 @@ pub(in crate::app::model_preview) fn cached_bitmap(
             image
         });
     }
-    let decoded = decode_bound_bitmap(source, binding);
+    let decoded = decode_bound_bitmap(reader, binding);
     caches.bitmaps.insert(key, decoded.clone());
     decoded
 }
 
-fn decode_bound_bitmap(source: &TagSource, binding: &SlotBitmap) -> Option<TextureImage> {
-    let tag = load_referenced_tag_from_source(source, &binding.path, "bitmap", b"bitm").ok()?;
+fn decode_bound_bitmap(reader: &TagReader, binding: &SlotBitmap) -> Option<TextureImage> {
+    let tag = reader.load(&binding.path, "bitmap", b"bitm").ok()?;
     let image =
         decode_thumbnail(&tag, binding.image_index.max(0) as usize, MAX_TEXTURE_EDGE).ok()?;
     Some(TextureImage {
@@ -1188,7 +1190,7 @@ mod tests {
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
         let path = "objects\\bitmaps\\reflection_maps\\vehicle_glass";
-        let Some(H2Image::Cube { size, faces }) = decode_h2_image(&source, path, SamplerKind::Cube, 0)
+        let Some(H2Image::Cube { size, faces }) = decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Cube, 0)
         else {
             panic!("{path} should decode as a cube");
         };
@@ -1259,7 +1261,7 @@ mod tests {
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
         let Some(H2Image::Volume { width, height, depth, rgba }) =
-            decode_h2_image(&source, "rasterizer\\plasma_shield_noise", SamplerKind::Volume, 0)
+            decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), "rasterizer\\plasma_shield_noise", SamplerKind::Volume, 0)
         else {
             panic!("the plasma noise should decode as a volume");
         };
@@ -1284,7 +1286,7 @@ mod tests {
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
         let path = "globals\\global_render_texture";
-        let Some(H2Image::Volume { width, height, depth, rgba }) = decode_h2_image(&source, path, SamplerKind::Volume, 0)
+        let Some(H2Image::Volume { width, height, depth, rgba }) = decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Volume, 0)
         else {
             panic!("the render texture should decode as layers");
         };

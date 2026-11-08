@@ -8,7 +8,6 @@ use super::super::common::named_function::tag_function_at;
 use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 
 /// `global_z_near` and `global_z_far`, which the outline's depth is measured by.
 pub(crate) const GAME_NEAR: f32 = 0.0078125;
@@ -96,11 +95,11 @@ fn color_of(tag: TagStruct<'_>, name: &str) -> Option<[f32; 3]> {
 }
 
 /// `rasterizer_globals`' `vision_mode`, for an object of `model_tag`.
-pub(in crate::app::model_preview) fn read_h3_vision(source: &TagSource, object: &TagFile) -> Option<H3Vision> {
+pub(in crate::app::model_preview) fn read_h3_vision(reader: &TagReader, object: &TagFile) -> Option<H3Vision> {
     let globals =
-        load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+        reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let path = globals.root().read_tag_ref_path("Vision Mode Settings").filter(|path| !path.is_empty())?;
-    let tag = load_referenced_tag_from_source(source, &path, "vision_mode", b"vmdx").ok()?;
+    let tag = reader.load(&path, "vision_mode", b"vmdx").ok()?;
     let root = tag.root();
     let class = vision_class(object);
     let real = |name: String| root.read_real(&name).unwrap_or(0.0);
@@ -116,7 +115,7 @@ pub(in crate::app::model_preview) fn read_h3_vision(source: &TagSource, object: 
         intensity: real(format!("intensity {class}")),
         ping_intensity: real(format!("ping intensity {class}")),
         dimming: real(format!("overlapping dimming factor {class}")),
-        mask: read_h3_bitmap(source, &mask, 0, SamplerKind::Texture2D),
+        mask: read_h3_bitmap(reader, &mask, 0, SamplerKind::Texture2D),
     })
 }
 
@@ -138,9 +137,9 @@ impl H3MotionBlur {
     }
 }
 
-pub(in crate::app::model_preview) fn read_h3_motion_blur(source: &TagSource) -> Option<H3MotionBlur> {
+pub(in crate::app::model_preview) fn read_h3_motion_blur(reader: &TagReader) -> Option<H3MotionBlur> {
     let globals =
-        load_referenced_tag_from_source(source, "globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
+        reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let root = globals.root();
     let real = |name: &str| root.read_real(name);
     Some(H3MotionBlur::new(

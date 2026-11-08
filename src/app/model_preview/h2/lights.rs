@@ -21,7 +21,6 @@ use super::super::common::named_function::tag_function_at;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::core::source::TagSource;
 use crate::app::model_preview::common::math::{cross, dot, lerp};
 use crate::app::model_preview::common::random::lcg_step;
 use crate::app::model_preview::common::attached::attached;
@@ -353,8 +352,8 @@ fn scale_function(entry: TagStruct<'_>, block: &str) -> Option<Arc<TagFunction>>
     tag_function_at(&element, "function").map(Arc::new)
 }
 
-fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
-    let tag = load_referenced_tag_from_source(source, path, "lens_flare", b"lens").ok()?;
+fn read_h2_flare(reader: &TagReader, path: &str) -> Option<H2Flare> {
+    let tag = reader.load(path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
     let bitmap = root.read_tag_ref_path("bitmap").filter(|bitmap| !bitmap.is_empty())?;
     let mut images = Vec::new();
@@ -363,7 +362,7 @@ fn read_h2_flare(source: &TagSource, path: &str) -> Option<H2Flare> {
     for reflection in elements(root, "reflections") {
         let index = reflection.read_int_any("bitmap index").unwrap_or(0).max(0) as usize;
         let image = indices.iter().position(|known| *known == index).or_else(|| {
-            let image = decode_h2_image(source, &bitmap, SamplerKind::Texture2D, index)?;
+            let image = decode_h2_image(reader, &bitmap, SamplerKind::Texture2D, index)?;
             images.push(Arc::new(image));
             indices.push(index);
             Some(images.len() - 1)
@@ -438,17 +437,17 @@ pub(in crate::app::model_preview) fn light_can_shine(root: TagStruct<'_>) -> boo
 /// light, whether it lights the model on the sphere path, and its flare. `None`
 /// for a light the game makes nothing of in a third person view.
 fn read_h2_light(
-    source: &TagSource,
+    reader: &TagReader,
     path: &str,
 ) -> Option<(H2Light, bool, Option<H2Frustum>, Option<Arc<H2Flare>>)> {
-    let tag = load_referenced_tag_from_source(source, path, "light", b"ligh").ok()?;
+    let tag = reader.load(path, "light", b"ligh").ok()?;
     let root = tag.root();
     let flag = |option: &str| has_flag(root, "flags", option);
     if !light_can_shine(root) {
         return None;
     }
     let flare = root.read_tag_ref_path("lens flare").filter(|path| !path.is_empty());
-    let flare = flare.and_then(|path| read_h2_flare(source, &path)).map(Arc::new);
+    let flare = flare.and_then(|path| read_h2_flare(reader, &path)).map(Arc::new);
     let rgb = |name: &str| {
         let color = root.read_rgb(name);
         [color.red, color.green, color.blue]
@@ -502,14 +501,14 @@ fn read_h2_light(
     // A sphere is the only type that takes the sphere path.
     let kind = |option: &str| root.field("type").is_some_and(|field| field.enum_is(option));
     let lights_model = kind("sphere") && lit;
-    let frustum = lit.then(|| read_h2_frustum(source, root)).flatten();
+    let frustum = lit.then(|| read_h2_frustum(reader, root)).flatten();
     Some((light, lights_model, frustum, flare))
 }
 
 /// The shape `sub_8EB100` and `sub_8E84F0` read from a frustum `light`, with
 /// tool's postprocess applied. A shadow's pass needs a map of the level from
 /// the light, which a preview has none of, so it lights without one.
-fn read_h2_frustum(source: &TagSource, root: TagStruct<'_>) -> Option<H2Frustum> {
+fn read_h2_frustum(reader: &TagReader, root: TagStruct<'_>) -> Option<H2Frustum> {
     let is = |field: &str, option: &str| root.field(field).is_some_and(|field| field.enum_is(option));
     // Orthogonal lights assert in `sub_946960`, so these are the frustums;
     // tool's postprocess makes `directional` of a frustum's default falloff.
@@ -520,7 +519,7 @@ fn read_h2_frustum(source: &TagSource, root: TagStruct<'_>) -> Option<H2Frustum>
     }
     let gel = root.read_tag_ref_path("gel map").filter(|gel| !gel.is_empty());
     let gel = gel
-        .and_then(|gel| decode_h2_image(source, &gel, SamplerKind::Texture2D, 0))
+        .and_then(|gel| decode_h2_image(reader, &gel, SamplerKind::Texture2D, 0))
         .map(Arc::new);
     let aspect = gel.as_deref().map_or(1.0, |image| match image {
         H2Image::Flat(image) => image.height as f32 / image.width as f32,
@@ -553,13 +552,13 @@ struct H2LightPlace {
 /// What a light puts on the object: a sphere's light, a frustum's gel pass,
 /// and the flare `light_submit_lens_flares` submits for it.
 fn place_h2_light(
-    source: &TagSource,
+    reader: &TagReader,
     path: &str,
     owner: u8,
     at: H2LightPlace,
     found: &mut (Vec<H2FlareAt>, Vec<H2PointLight>, Vec<H2GelLight>),
 ) {
-    let Some((light, lights_model, frustum, flare)) = read_h2_light(source, path) else {
+    let Some((light, lights_model, frustum, flare)) = read_h2_light(reader, path) else {
         return;
     };
     let (place, node) = (at.place, at.node);
@@ -614,7 +613,7 @@ fn place_h2_light(
 /// of their location: scale 1, tinted by the effect's color (its object's
 /// change color, or white).
 pub(in crate::app::model_preview) fn read_h2_flares(
-    source: &TagSource,
+    reader: &TagReader,
     object: &TagFile,
     owner: u8,
     markers: &[RenderModelPreviewMarker],
@@ -649,13 +648,13 @@ pub(in crate::app::model_preview) fn read_h2_flares(
                 change_color,
                 effect: None,
             };
-            place_h2_light(source, &path, owner, at, &mut found);
+            place_h2_light(reader, &path, owner, at, &mut found);
             continue;
         }
         if group != lens_group {
             continue;
         }
-        let Some(flare) = read_h2_flare(source, &path).map(Arc::new) else {
+        let Some(flare) = read_h2_flare(reader, &path).map(Arc::new) else {
             continue;
         };
         if flare.flags.only_first_person {
@@ -678,10 +677,10 @@ pub(in crate::app::model_preview) fn read_h2_flares(
             });
         }
     }
-    for_each_attached_part(source, object, |part| {
+    for_each_attached_part(reader, object, |part| {
         if part.group == lens_group {
             let third_person = |flare: &H2Flare| !flare.flags.only_first_person;
-            let Some(flare) = read_h2_flare(source, &part.path).filter(third_person) else {
+            let Some(flare) = read_h2_flare(reader, &part.path).filter(third_person) else {
                 return;
             };
             let flare = Arc::new(flare);
@@ -723,7 +722,7 @@ pub(in crate::app::model_preview) fn read_h2_flares(
             change_color: None,
             effect: Some(H2EffectLight::new(Arc::clone(&part.times), part.event, part.scaled)),
         };
-        place_h2_light(source, &part.path, owner, at, &mut found);
+        place_h2_light(reader, &part.path, owner, at, &mut found);
     });
     found
 }
