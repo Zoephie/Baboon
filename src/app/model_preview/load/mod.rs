@@ -353,11 +353,11 @@ pub(super) mod kit_object_tests {
         let Some(root) = kit_root(GameId::Halo3) else { return };
         let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\warthog\\warthog", "vehicle", b"vehi");
         let name = "warthog_chaingun_illumination";
-        assert!(!super::super::renderer::h2_shader_inputs(&data, 0).iter().any(|read| read == name));
-        let values = super::super::renderer::attached_values(&data, 0.0);
+        assert!(!super::super::frame::h2_shader_inputs(&data, 0).iter().any(|read| read == name));
+        let values = super::super::frame::attached_values(&data, 0.0);
         for attached in &data.attached {
             let (_, own) = values.iter().find(|(owner, _)| *owner == attached.owner).unwrap();
-            for read in super::super::renderer::h2_shader_inputs(&data, attached.owner) {
+            for read in super::super::frame::h2_shader_inputs(&data, attached.owner) {
                 assert!(own.contains_key(&read), "owner {} lacks {read}", attached.owner);
             }
         }
@@ -420,7 +420,7 @@ pub(super) mod kit_object_tests {
         let path = "objects\\levels\\solo\\030_outskirts\\hog_light\\hog_light";
         let data = kit_preview(&root, GameId::Halo3, path, "scenery", b"scen");
         assert_eq!(data.preview.h3.lights.len(), 1);
-        assert!(super::super::renderer::has_effects(&data.preview));
+        assert!(super::super::frame::has_effects(&data.preview));
     }
 
     /// A Halo CE part sorts from its centroid on the node tool's postprocess

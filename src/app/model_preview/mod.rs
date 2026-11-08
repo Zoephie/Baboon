@@ -40,6 +40,7 @@ mod common;
 mod gl;
 mod renderer;
 mod viewport;
+mod frame;
 #[cfg(test)]
 mod gates;
 #[cfg(test)]
@@ -69,6 +70,7 @@ pub(in crate::app) use campaign_evolved::prewarm_ce_mesh_sync_index;
 pub(in crate::app) use renderer::material_color;
 use renderer::*;
 use viewport::*;
+use frame::*;
 use common::camera::*;
 use common::clock::*;
 use dx9::passes::{H2ChangeColors, read_h2_change_colors};
@@ -993,7 +995,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
         let held = usize::from(object).checked_sub(1)?;
         data.ce_attached.get(held).map(|held| held.name.clone())
     };
-    let time = renderer::preview_clock(ui);
+    let time = frame::preview_clock(ui);
     let controls = ce::functions::CeEffectControls {
         effects: &data.preview.ce.effects,
         firing: &data.preview.ce.firing,
@@ -1007,14 +1009,14 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
     draw_h2_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.object_functions {
         let time = ui.input(|input| input.time) as f32;
-        let values = renderer::h2_function_values(data, &state.function_inputs, time);
+        let values = frame::h2_function_values(data, &state.function_inputs, time);
         functions::draw_function_controls(
             ui,
             functions,
             data.geometry_id,
             &mut state.function_inputs,
             &values,
-            &renderer::h2_shader_inputs(data, 0),
+            &frame::h2_shader_inputs(data, 0),
         );
     }
     let read = |object: u8| {

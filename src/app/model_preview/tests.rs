@@ -267,13 +267,13 @@ fn overlay_permutations_follow_the_selection_or_fall_back() {
     select(&mut state, "__unnamed", "monitor");
     select(&mut state, "hull", "base");
     assert_eq!(
-        renderer::visible_batch_indices(&preview, &state),
+        frame::visible_batch_indices(&preview, &state),
         [0, 2, 4, 5]
     );
 
     // A matching collision permutation wins over the fallback.
     select(&mut state, "hull", "broken");
-    assert_eq!(renderer::visible_batch_indices(&preview, &state), [0, 2, 6]);
+    assert_eq!(frame::visible_batch_indices(&preview, &state), [0, 2, 6]);
 
     // A disabled region hides its overlay too.
     state
@@ -281,12 +281,12 @@ fn overlay_permutations_follow_the_selection_or_fall_back() {
         .get_mut("__unnamed")
         .unwrap()
         .enabled = false;
-    assert_eq!(renderer::visible_batch_indices(&preview, &state), [6]);
+    assert_eq!(frame::visible_batch_indices(&preview, &state), [6]);
 
     // A standalone tag's batches are the primary preview: exact match only.
     state.overlays_loaded = false;
     select(&mut state, "__unnamed", "monitor");
-    assert_eq!(renderer::visible_batch_indices(&preview, &state), [0, 6]);
+    assert_eq!(frame::visible_batch_indices(&preview, &state), [0, 6]);
 }
 
 /// The monitor biped against `BLAM_TEST_HCEEK` (the kit's `tags`): its
@@ -329,7 +329,7 @@ fn halo_ce_monitor_collision_overlay_is_drawn() {
     };
     reset_model_preview_selection(&mut state, &data, None);
 
-    let visible = renderer::visible_batch_indices(&data.preview, &state);
+    let visible = frame::visible_batch_indices(&data.preview, &state);
     let layers = |layer| {
         visible
             .iter()

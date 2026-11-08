@@ -16,6 +16,7 @@ use eframe::glow::{self, HasContext};
 use std::sync::Arc;
 use super::render::H4Game;
 use super::super::renderer::*;
+use super::super::frame::ModelGpuFrame;
 
 impl H4Game {
     /// Halo 4's `c_render_shield::render_object_internal`: every part that

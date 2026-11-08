@@ -4,7 +4,7 @@
 //! curve: the frame is encoded by a square root.
 
 use super::super::gen3::shaders::H3Value;
-use super::super::renderer::*;
+use super::super::frame::ModelGpuFrame;
 use super::super::common::camera::*;
 
 /// `c_geometry_sampler::m_default_lightprobe_sample` (MCC 0x14201E920, the

@@ -4,7 +4,8 @@
 use eframe::glow::{self, HasContext as _};
 
 use super::super::common::slots::GameSlot;
-use super::super::renderer::{ModelGpuFrame, sprite_maps};
+use super::super::frame::ModelGpuFrame;
+use super::super::renderer::sprite_maps;
 
 /// Halo 3's and ODST's state for one of the renderer's slots.
 #[derive(Default)]

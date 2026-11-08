@@ -4,7 +4,7 @@
 use eframe::glow;
 
 use super::super::common::slots::GameSlot;
-use super::super::renderer::ModelGpuFrame;
+use super::super::frame::ModelGpuFrame;
 
 /// Halo 4's state for one of the renderer's slots.
 #[derive(Default)]

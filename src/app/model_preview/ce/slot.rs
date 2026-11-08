@@ -8,7 +8,7 @@ use eframe::glow::{self, HasContext as _};
 
 use super::super::common::slots::GameSlot;
 use super::super::common::image::H2Image;
-use super::super::renderer::ModelGpuFrame;
+use super::super::frame::ModelGpuFrame;
 use crate::app::model_preview::gl::texture::upload_h2_image;
 
 /// A map per image, per sheet, per particle system.

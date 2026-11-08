@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::super::ModelRegionSelection;
 use super::super::RenderModelPreview;
-use super::super::renderer::marker_active;
+use super::super::frame::marker_active;
 
 /// One of the things a preview carries.
 pub(in crate::app::model_preview) trait Feature {
@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn every_feature_with_slider_inputs_is_a_slider_source_once() {
-        use crate::app::model_preview::renderer::{SLIDER_SOURCES, SliderSource};
+        use crate::app::model_preview::frame::{SLIDER_SOURCES, SliderSource};
         let listed: Vec<&str> = SLIDER_SOURCES
             .iter()
             .filter_map(|source| match source {

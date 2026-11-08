@@ -359,7 +359,7 @@ pub(super) fn render(
         state.function_inputs.insert((data.geometry_id, name.clone()), *value);
     }
     let background = preview_background(&if options.light_theme { egui::Visuals::light() } else { egui::Visuals::dark() });
-    let mut frame = super::super::renderer::build_frame(&data, &state, rect, options.time, background, &options.forced);
+    let mut frame = super::super::frame::build_frame(&data, &state, rect, options.time, background, &options.forced);
     let preview = Arc::clone(&frame.preview);
     frame.visible_batches.retain(|&batch| {
         let material = preview.batches[batch].material_index as usize;

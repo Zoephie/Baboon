@@ -8,7 +8,7 @@ use super::effect_gl::H4EffectCx;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::gen3::screen_effects::H3ScreenSettings;
-use super::super::renderer::ModelGpuFrame;
+use super::super::frame::ModelGpuFrame;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::h3_set_cull;
 use crate::app::model_preview::common::sprites::h3_layered_distance;
