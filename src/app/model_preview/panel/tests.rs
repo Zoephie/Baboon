@@ -944,7 +944,7 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
 
 #[test]
 fn the_weapon_picker_filters_only_a_list_that_scrolls() {
-    let weapon = |class: &str, name: &str| weapons::WeaponOption {
+    let weapon = |class: &str, name: &str| super::super::weapons::WeaponOption {
         path: name.to_owned(),
         name: name.to_owned(),
         class: class.to_owned(),
