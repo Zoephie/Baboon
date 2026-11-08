@@ -13,7 +13,7 @@
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use super::load::kit_object_tests::kit_preview;
+use super::harness::kit::kit_preview;
 use super::data::ModelPreviewData;
 use crate::core::game::GameId;
 

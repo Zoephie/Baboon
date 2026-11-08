@@ -45,6 +45,8 @@ mod frame;
 mod gates;
 #[cfg(test)]
 mod harness;
+#[cfg(test)]
+mod tests;
 mod selection;
 mod panel;
 pub(in crate::app) mod effects;
