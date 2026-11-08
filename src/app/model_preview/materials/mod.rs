@@ -10,7 +10,7 @@ use blam_tags::render_method::{
     RenderMethodDefinition, RenderMethodOption, RenderMethodParameter, ResolvedRenderMethod,
     ResolvedValue,
 };
-use super::ce::passes::{
+use super::ce::shaders::{
     CeCamoSettings, CeModelCommon,
 };
 use super::gen3::shaders::{
@@ -25,7 +25,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use std::sync::Arc;
 use std::collections::HashMap;
 
-use super::ce::materials::*;
+use super::ce::shaders::resolve::*;
 use super::gen3::materials::{H3Bitmap, h3_xform, prepare_h3_material, reach_reference, reach_version_update};
 use super::h2::materials::*;
 

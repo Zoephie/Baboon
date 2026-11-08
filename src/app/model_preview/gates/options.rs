@@ -151,7 +151,7 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(HCE.0, HCE.1, "glow", "trailing particle distribution", Old::Value(0), "emit vertically"),
     row(HCE.0, HCE.1, "glow", "trailing particle distribution", Old::Value(1), "emit normal (up)"),
     row(HCE.0, HCE.1, "glow", "trailing particle distribution", Old::Value(2), "emit randomly"),
-    // ce::passes
+    // ce::shaders
     row(HCE.0, HCE.1, "shader_transparent_chicago", "flags", Old::Bit(0x1), "alpha-tested"),
     row(HCE.0, HCE.1, "shader_transparent_chicago", "flags", Old::Bit(0x2), "decal"),
     row(HCE.0, HCE.1, "shader_transparent_chicago", "flags", Old::Bit(0x4), "two-sided"),

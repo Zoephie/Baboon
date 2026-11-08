@@ -6,7 +6,7 @@ use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
 use super::super::common::flares::{FlareSprite, OcclusionOffset};
-use super::passes::periodic_evaluate;
+use super::shaders::periodic_evaluate;
 use crate::app::model_preview::common::fields::argb;
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::image::H2Image;

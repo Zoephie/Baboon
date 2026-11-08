@@ -1,17 +1,17 @@
 //! Halo CE's shaders resolved to the textures and passes the preview draws.
 
-use super::super::*;
-use super::super::ce::passes::{
+use super::super::super::*;
+use super::super::super::ce::shaders::{
     CeNumeric, ce_camo_pass, ce_model_passes, ce_transparent_passes,
     read_ce_camo_settings,
 };
-use super::super::dx9::passes::{
+use super::super::super::dx9::passes::{
     H2DrawPass, H2Layer,
 };
 use crate::core::h2_pixel_shader::SamplerKind;
 use std::sync::Arc;
 use std::collections::HashMap;
-use super::super::materials::*;
+use super::super::super::materials::*;
 
 /// Halo CE model shading, as `ShaderModel()` in the kit's `fx/model_common.h`
 /// does it and `rasterizer_model_draw_{model,environment}_shader_pp` (CE
@@ -40,7 +40,7 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
     caches: &mut ResolveCaches,
 ) -> MaterialTextures {
     let root = shader.root();
-    let flags = super::super::ce::passes::ShaderFlags::of(root);
+    let flags = super::super::super::ce::shaders::ShaderFlags::of(root);
     let has = |flag: &str| flags.has(flag);
     // Both scale fields store 0 for "unset"; a 0 at runtime would collapse
     // every texel to one (the cyborg ships `detail map v-scale` 0), so it can

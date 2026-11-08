@@ -1,0 +1,45 @@
+//! Halo CE's model shaders as draw passes.
+//!
+//! `shader_model` and a `shader_environment` on a model both draw through
+//! `ShaderModel()` in the kit's `fx/model_common.h`. What feeds it follows
+//! `rasterizer_model_draw_model_shader_pp` and
+//! `rasterizer_model_draw_environment_shader_pp`; the lighting is
+//! `default_object_lighting`, what the game falls back on with no level.
+
+use crate::app::model_preview::load::TagReader;
+use std::sync::{Arc, LazyLock};
+
+use blam_tags::{TagBlock, TagFieldData, TagStruct};
+
+use super::super::dx9::passes::{
+    H2Blend, H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2Depth, H2DrawPass, H2DrawTexture,
+    H2_GLSL_VERSION,
+};
+use super::super::common::image::H2Image;
+use super::super::common::fields::{argb, has_flag, has_flag_in_any};
+use super::super::dx9::stage::{H2_TEXTURE_ROWS, H2VertexStage};
+use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
+use crate::core::h2_pixel_shader::SamplerKind;
+use crate::core::source::TagSource;
+use crate::app::model_preview::common::random::{high16_times_inverse_65535, lcg_step};
+use crate::app::model_preview::ce::blend::{FADE_MODES, FramebufferBlend};
+
+pub(in crate::app::model_preview) mod resolve;
+mod base;
+pub(in crate::app::model_preview) use base::*;
+mod periodic;
+pub(in crate::app::model_preview) use periodic::*;
+mod animation;
+pub(in crate::app::model_preview) use animation::*;
+mod model;
+pub(in crate::app::model_preview) use model::*;
+mod transparent;
+pub(in crate::app::model_preview) use transparent::*;
+mod glass;
+use glass::*;
+mod special;
+use special::*;
+mod camo;
+pub(in crate::app::model_preview) use camo::*;
+#[cfg(test)]
+mod tests;

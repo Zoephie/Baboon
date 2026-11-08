@@ -4,7 +4,7 @@ use std::sync::Arc;
 use blam_tags::TagStruct;
 use super::super::common::fields::elements;
 use super::super::common::view::ViewFrame;
-use super::passes::{CeMapAnimation, read_effect_map_animation};
+use super::shaders::{CeMapAnimation, read_effect_map_animation};
 use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;

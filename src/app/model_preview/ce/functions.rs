@@ -10,7 +10,7 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 
 use super::super::common::fields::has_flag;
 use super::super::common::time::TICKS_PER_SECOND;
-use super::passes::{option_index, periodic_evaluate};
+use super::shaders::{option_index, periodic_evaluate};
 
 const INPUTS: [&str; 4] = ["A in", "B in", "C in", "D in"];
 /// `scale function by` and its like: nothing, four inputs, then four outputs.
@@ -99,9 +99,9 @@ impl CeFunction {
             turn_off_with: usize::try_from(block.read_int_any("turn off with").unwrap_or(-1)).ok(),
             rate: Some(real("period")).filter(|period| *period > 0.0).map_or(1.0, |period| 1.0 / period),
             scale_period_by: source("scale period by"),
-            function: option_index(block, "function", &super::passes::PERIODIC_FUNCTIONS) as usize,
+            function: option_index(block, "function", &super::shaders::PERIODIC_FUNCTIONS) as usize,
             scale_function_by: source("scale function by"),
-            wobble_function: option_index(block, "wobble function", &super::passes::PERIODIC_FUNCTIONS)
+            wobble_function: option_index(block, "wobble function", &super::shaders::PERIODIC_FUNCTIONS)
                 as usize,
             // Tool's postprocess (`sub_4A09A0`) leaves it be, and the game
             // multiplies the time by it.
