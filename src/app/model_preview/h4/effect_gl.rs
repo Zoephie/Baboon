@@ -293,7 +293,7 @@ pub(in crate::app::model_preview) fn material_functions(
     material: &H4EffectMaterial,
     object: u8,
 ) -> H3Values {
-    let drawn = super::submit::DrawnObject {
+    let drawn = super::materials::submit::DrawnObject {
         values: frame.function_values_of_object(object),
         time: frame.time,
         owner: object,
@@ -305,7 +305,7 @@ pub(in crate::app::model_preview) fn material_functions(
     ];
     material
         .submit
-        .draw_values(super::submit::H4Draw::Lit, &drawn, identity)
+        .draw_values(super::materials::submit::H4Draw::Lit, &drawn, identity)
 }
 
 /// What every effect's constant `name` is, before the material's own.

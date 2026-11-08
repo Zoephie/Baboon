@@ -301,7 +301,7 @@ impl Gen3State {
         let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
         // Halo 4: the sampler's frame-index function, on the object's values.
         if let Some(submit) = material.h4().filter(|_| count > 0) {
-            let drawn = super::super::super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
+            let drawn = super::super::super::h4::materials::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
             if let Some(index) = submit.frame(uniform, &drawn) {
                 return frame_key(uniform, index);
             }

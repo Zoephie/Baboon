@@ -684,8 +684,8 @@ pub(crate) fn h4_light_program(
         .get(index)?
         .read_tag_ref_path("explicit pixel shader")
         .filter(|path| !path.is_empty())?;
-    let shader = super::shaders::H4ShaderSource::read(reader, &path).ok()?;
-    shader.program(&super::shaders::H4_DEFINES).ok()
+    let shader = super::materials::shaders::H4ShaderSource::read(reader, &path).ok()?;
+    shader.program(&super::materials::shaders::H4_DEFINES).ok()
 }
 
 /// A technique's `tiny_position` pixel shader over a full-screen triangle.
@@ -694,7 +694,7 @@ pub(crate) fn h4_light_pass(
     technique: usize,
 ) -> Result<H3Pass, String> {
     let pixel =
-        super::shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
+        super::materials::shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
     Ok(H3Pass {
         fullscreen: true,
         vertex: super::super::h4::materials::h4_screen_vertex().to_owned(),

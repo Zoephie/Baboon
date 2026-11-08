@@ -57,5 +57,5 @@ pub(in crate::app::model_preview) struct Gen3State {
     pub(in crate::app::model_preview) camo_scene: Option<glow::NativeTexture>,
     /// Which draw of a Halo 4 material is under way, when not its albedo or
     /// own pass (a hologram's or `opaque_alpha_blend`'s fringe).
-    pub(in crate::app::model_preview) submit_draw: Option<super::super::h4::submit::H4Draw>,
+    pub(in crate::app::model_preview) submit_draw: Option<super::super::h4::materials::submit::H4Draw>,
 }

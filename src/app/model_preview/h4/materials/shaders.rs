@@ -12,7 +12,7 @@ use crate::app::model_preview::load::TagReader;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::super::common::fields::elements;
+use super::super::super::common::fields::elements;
 use crate::core::hlsl::emit::{Stage, Translated, translate_with};
 use crate::core::hlsl::parse::{Program, parse};
 use crate::core::hlsl::pre::{Preprocessor, Token};

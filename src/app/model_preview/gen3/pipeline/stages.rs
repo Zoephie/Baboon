@@ -85,20 +85,20 @@ impl Gen3State {
                     let object = batch.material_index as usize;
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                     let drawn =
-                        super::super::super::h4::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
+                        super::super::super::h4::materials::submit::DrawnObject { values: frame.function_values_of(object), time: frame.time, owner };
                     let albedo = material.albedo.as_ref().is_some_and(|albedo| Arc::ptr_eq(albedo, pass));
                     let fringe = material.fringe.as_ref().is_some_and(|fringe| Arc::ptr_eq(fringe, pass));
                     let draw = match state.submit_draw {
                         Some(draw) => draw,
-                        None if albedo => super::super::super::h4::submit::H4Draw::Albedo,
-                        None if fringe => super::super::super::h4::submit::H4Draw::Fringe,
-                        None => super::super::super::h4::submit::H4Draw::Lit,
+                        None if albedo => super::super::super::h4::materials::submit::H4Draw::Albedo,
+                        None if fringe => super::super::super::h4::materials::submit::H4Draw::Fringe,
+                        None => super::super::super::h4::materials::submit::H4Draw::Lit,
                     };
                     let mut values = submit.draw_values(draw, &drawn, h4_hologram_node(frame));
                     // Only the opened object's count is read; attached Halo 4
                     // objects bring geometry alone.
                     let count = if owner == 0 { frame.preview.h4.change_color_count } else { 0 };
-                    let colors = super::super::super::h4::submit::object_parameters(frame.change_colors_of(object), count);
+                    let colors = super::super::super::h4::materials::submit::object_parameters(frame.change_colors_of(object), count);
                     values.insert("ps_material_object_parameters".to_owned(), H3Value::FloatArray(colors));
                     values
                 });

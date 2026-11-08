@@ -116,7 +116,7 @@ impl H4Game {
                         // Its blend state is additive (1).
                         let value = if name == "ps_material_blend_constant" {
                             Some(H3Value::Floats(
-                                super::submit::blend_constant(1),
+                                super::materials::submit::blend_constant(1),
                             ))
                         } else {
                             frame_value(frame, H3Dialect::Halo4, name, size, 0.0)

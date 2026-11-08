@@ -133,7 +133,7 @@ fn h4_flare_pass_links() {
 /// pixel shader; `BLAM_TEST_H4EK` to the tags folder.
 #[test]
 fn h4_effect_passes_link() {
-    use super::super::h4::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+    use super::super::h4::materials::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
     use crate::core::hlsl::emit::Stage;
     let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
         return;

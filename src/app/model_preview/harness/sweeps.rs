@@ -154,7 +154,7 @@ fn h3_sweep() {
 /// `H4_FOLDER` narrows to a folder under `shaders\material_shaders`.
 #[test]
 fn h4_sweep() {
-    use super::super::h4::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+    use super::super::h4::materials::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
     use crate::core::hlsl::emit::Stage;
     let Ok(limit) = std::env::var("H4_SWEEP") else {
         return;
@@ -297,7 +297,7 @@ fn h4_sweep() {
 /// and `BLAM_TEST_H4EK`. `H4_PASS_SOURCE` prints the GLSL too.
 #[test]
 fn h4_pass_inputs() {
-    use super::super::h4::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
+    use super::super::h4::materials::shaders::{H4_DEFINES, H4ShaderSource, translate_pass};
     use crate::core::hlsl::emit::Stage;
     let Ok(spec) = std::env::var("H4_PASS") else {
         return;

@@ -67,7 +67,7 @@ pub(crate) struct H3Material {
 pub(crate) enum H3MaterialDialect {
     Halo3,
     Reach,
-    Halo4(Arc<super::super::super::h4::submit::H4Submit>),
+    Halo4(Arc<super::super::super::h4::materials::submit::H4Submit>),
 }
 
 impl From<RenderMethodDialect> for H3MaterialDialect {
@@ -90,14 +90,14 @@ impl H3Material {
     }
 
     /// Halo 4's per-draw functions and hologram rig.
-    pub(crate) fn h4(&self) -> Option<&Arc<super::super::super::h4::submit::H4Submit>> {
+    pub(crate) fn h4(&self) -> Option<&Arc<super::super::super::h4::materials::submit::H4Submit>> {
         match &self.dialect {
             H3MaterialDialect::Halo4(submit) => Some(submit),
             H3MaterialDialect::Halo3 | H3MaterialDialect::Reach => None,
         }
     }
 
-    pub(crate) fn h4_mut(&mut self) -> Option<&mut Arc<super::super::super::h4::submit::H4Submit>> {
+    pub(crate) fn h4_mut(&mut self) -> Option<&mut Arc<super::super::super::h4::materials::submit::H4Submit>> {
         match &mut self.dialect {
             H3MaterialDialect::Halo4(submit) => Some(submit),
             H3MaterialDialect::Halo3 | H3MaterialDialect::Reach => None,

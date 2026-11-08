@@ -127,12 +127,12 @@ pub(crate) fn h4_shield_pass(reader: &TagReader, technique: usize) -> Result<H3P
         .read_tag_ref_path("explicit pixel shader")
         .filter(|path| !path.is_empty())
         .ok_or("no pixel shader")?;
-    let program = super::shaders::H4ShaderSource::read(reader, &path)?
-        .program(&super::shaders::H4_DEFINES)?;
+    let program = super::materials::shaders::H4ShaderSource::read(reader, &path)?
+        .program(&super::materials::shaders::H4_DEFINES)?;
     let vertex =
-        super::shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
+        super::materials::shaders::translate_technique(&program, technique, "skinned", Stage::Vertex)?;
     let pixel =
-        super::shaders::translate_technique(&program, technique, "_default", Stage::Pixel)?;
+        super::materials::shaders::translate_technique(&program, technique, "_default", Stage::Pixel)?;
     let mut pass = super::super::gen3::shaders::pass_of(vertex, pixel);
     rewire_depth_fade(&mut pass)?;
     Ok(pass)

@@ -22,16 +22,16 @@ pub(crate) fn h4_flare_pass(reader: &TagReader) -> Result<super::super::super::g
             .ok_or(format!("no {field}"))
     };
     let program = |path: &str| -> Result<_, String> {
-        super::super::shaders::H4ShaderSource::read(reader, path)?
-            .program(&super::super::shaders::H4_DEFINES)
+        super::super::materials::shaders::H4ShaderSource::read(reader, path)?
+            .program(&super::super::materials::shaders::H4_DEFINES)
     };
-    let vertex = super::super::shaders::translate_technique(
+    let vertex = super::super::materials::shaders::translate_technique(
         &program(&path("explicit vertex shader")?)?,
         0,
         "screen",
         Stage::Vertex,
     )?;
-    let pixel = super::super::shaders::translate_technique(
+    let pixel = super::super::materials::shaders::translate_technique(
         &program(&path("explicit pixel shader")?)?,
         0,
         "screen",

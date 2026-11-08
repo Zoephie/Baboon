@@ -209,7 +209,7 @@ pub(in crate::app::model_preview) struct ResolveCaches {
     /// Halo 4's bitmaps by path: whether each exists, and is a cube.
     pub(in crate::app::model_preview) h4_bitmap_kinds: HashMap<String, Option<bool>>,
     /// `rasterizer_globals`' two hologram screen materials, read once.
-    pub(in crate::app::model_preview) h4_hologram_post: Option<Option<Arc<crate::app::model_preview::h4::submit::H4HologramPost>>>,
+    pub(in crate::app::model_preview) h4_hologram_post: Option<Option<Arc<crate::app::model_preview::h4::materials::submit::H4HologramPost>>>,
     /// `globals`' `camo distortion texture`, read once.
     pub(in crate::app::model_preview) h4_camo_texture: Option<Option<String>>,
     pub(in crate::app::model_preview) h3_shield: Option<Option<Arc<H3Shield>>>,
