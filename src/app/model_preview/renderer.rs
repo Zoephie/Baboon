@@ -6480,17 +6480,22 @@ fn append_instances_to_preview(
         };
         let direction = |vector: [f32; 3]| turned(vector).map(|value| value * scale.signum());
         let origin = point3_to_array(placement.position);
-        let Some(vertex_base) = common::geometry::VertexBase::of(preview.vertices.len(), 0, common::geometry::Overflow::Wraps) else {
+        // A triangle naming a vertex the mesh lacks is dropped whole, so the
+        // triangles after it keep their corners.
+        let triangles: Vec<&[u32]> = source
+            .chunks_exact(3)
+            .filter(|corners| corners.iter().all(|&index| (index as usize) < mesh.vertices.len()))
+            .collect();
+        // Each vertex the triangles name is added once.
+        let adding = triangles.iter().copied().flatten().collect::<std::collections::HashSet<_>>().len();
+        let Some(vertex_base) =
+            common::geometry::VertexBase::of(preview.vertices.len(), adding, common::geometry::Overflow::RefusesAppend)
+        else {
             continue;
         };
         let mut remapped = HashMap::new();
         let mut indices = Vec::with_capacity(source.len());
-        // A triangle naming a vertex the mesh lacks is dropped whole, so the
-        // triangles after it keep their corners.
-        let triangles = source.chunks_exact(3).filter(|corners| {
-            corners.iter().all(|&index| (index as usize) < mesh.vertices.len())
-        });
-        for &index in triangles.flatten() {
+        for &index in triangles.into_iter().flatten() {
             let next = vertex_base.offset(remapped.len() as u32);
             let at = *remapped.entry(index).or_insert(next);
             if at == next {

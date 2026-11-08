@@ -229,7 +229,7 @@ fn append_collision_jms(
         if vertices.is_empty() {
             continue;
         }
-        let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::Wraps) else {
+        let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::RefusesAppend) else {
             continue;
         };
         let index_start = preview.indices.len() as u32;
@@ -521,7 +521,7 @@ fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderMode
     if vertices.is_empty() {
         return;
     }
-    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::Wraps) else {
+    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::RefusesAppend) else {
         return;
     };
     let index_start = preview.indices.len() as u32;

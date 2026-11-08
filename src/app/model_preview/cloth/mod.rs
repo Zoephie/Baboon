@@ -765,7 +765,7 @@ pub(super) fn read_cloth<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize
         };
         cloth.first_vertex = preview.vertices.len();
         let sheet = sheet_vertices(&uvs, game);
-        let Some(base) = VertexBase::of(cloth.first_vertex, sheet.len(), Overflow::Wraps) else {
+        let Some(base) = VertexBase::of(cloth.first_vertex, sheet.len(), Overflow::RefusesAppend) else {
             continue;
         };
         let count = cloth.places.len() as u32;

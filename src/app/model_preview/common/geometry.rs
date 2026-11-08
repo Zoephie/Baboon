@@ -5,10 +5,6 @@
 /// `u32` index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::app::model_preview) enum Overflow {
-    /// The base is the vertex count cut to 32 bits, and each index is a plain
-    /// `u32` sum from it: past `u32::MAX` a release build wraps (a debug build
-    /// stops). Attaching, cloth, derived sheets and instance meshes append so.
-    Wraps,
     /// Nothing is appended once the vertex count, or the count with the
     /// append's own, no longer fits a `u32` index. Indices are plain sums from
     /// the base, which cannot pass it.
@@ -29,7 +25,6 @@ impl VertexBase {
     /// when `rule` refuses the append.
     pub(in crate::app::model_preview) fn of(existing: usize, adding: usize, rule: Overflow) -> Option<Self> {
         match rule {
-            Overflow::Wraps => Some(Self { first: existing as u32 }),
             Overflow::RefusesAppend | Overflow::DropsTriangle => {
                 let first = u32::try_from(existing).ok()?;
                 if adding.checked_add(existing).is_none_or(|count| count > u32::MAX as usize) {
@@ -40,8 +35,8 @@ impl VertexBase {
         }
     }
 
-    /// The append's `index`th vertex: a plain sum, for `Wraps` and
-    /// `RefusesAppend`.
+    /// The append's `index`th vertex: a plain sum, for `RefusesAppend`, whose
+    /// base and count fit.
     pub(in crate::app::model_preview) fn offset(self, index: u32) -> u32 {
         self.first + index
     }
@@ -60,10 +55,8 @@ mod tests {
     const MOST: usize = u32::MAX as usize;
 
     #[test]
-    fn a_wrapping_append_cuts_its_base_to_32_bits_and_never_refuses() {
-        assert_eq!(VertexBase::of(MOST + 3, 10, Overflow::Wraps).map(|base| base.offset(0)), Some(2));
-        assert_eq!(VertexBase::of(MOST, usize::MAX, Overflow::Wraps).map(|base| base.offset(0)), Some(u32::MAX));
-        assert_eq!(VertexBase::of(5, 1, Overflow::Wraps).map(|base| base.offset(4)), Some(9));
+    fn an_append_that_fits_counts_from_the_vertices_before_it() {
+        assert_eq!(VertexBase::of(5, 1, Overflow::RefusesAppend).map(|base| base.offset(4)), Some(9));
     }
 
     #[test]

@@ -184,7 +184,7 @@ pub(super) fn merge_attached(
     owner: u8,
     name: &str,
 ) {
-    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), other.vertices.len(), Overflow::Wraps) else {
+    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), other.vertices.len(), Overflow::RefusesAppend) else {
         return;
     };
     let index_base = preview.indices.len() as u32;
