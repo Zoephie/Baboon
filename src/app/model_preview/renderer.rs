@@ -6370,7 +6370,7 @@ pub(in crate::app::model_preview) fn ce_sorts_transparents(frame: &ModelGpuFrame
 fn ce_flare_quad(
     camera: &ModelGpuCamera,
     view: &common::view::ViewFrame,
-    sprite: &ce::lights::FlareSprite,
+    sprite: &crate::app::model_preview::common::flares::FlareSprite,
 ) -> [[f32; 6]; 4] {
     let (sine, cosine) = sprite.rotation.sin_cos();
     let center = sprite.center;
@@ -6396,7 +6396,7 @@ pub(in crate::app::model_preview) unsafe fn ce_flare_occlusion(
     flares: &SpriteGl,
     camera: &ModelGpuCamera,
     view: &common::view::ViewFrame,
-    patch: &ce::lights::FlareSprite,
+    patch: &crate::app::model_preview::common::flares::FlareSprite,
 ) -> Option<f32> {
     unsafe {
         let vertices = ce_flare_quad(camera, view, patch);
@@ -6432,7 +6432,7 @@ pub(in crate::app::model_preview) unsafe fn draw_flare_sprites(
     flares: &SpriteGl,
     camera: &ModelGpuCamera,
     view: &common::view::ViewFrame,
-    sprites: &[ce::lights::FlareSprite],
+    sprites: &[crate::app::model_preview::common::flares::FlareSprite],
     textures: &[Option<glow::NativeTexture>],
 ) {
     unsafe {

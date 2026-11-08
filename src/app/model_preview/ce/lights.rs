@@ -5,6 +5,7 @@ use super::super::common::view::{ViewFrame, posed_on};
 use crate::app::model_preview::common::marker::MarkerFrame;
 use super::attachments::attached_marker_frame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
+use super::super::common::flares::{FlareSprite, OcclusionOffset};
 use super::passes::{argb, periodic_evaluate};
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::image::H2Image;
@@ -62,25 +63,6 @@ pub(crate) struct CeReflection {
     animation_phase: f32,
 }
 
-/// A flare's `occlusion offset direction`: where it tests from, beside its
-/// marker. A number with no name tests from the marker, as `none` does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum OcclusionOffset {
-    TowardViewer,
-    MarkerForward,
-    None,
-}
-
-impl OcclusionOffset {
-    pub(in crate::app::model_preview) fn read(root: TagStruct<'_>) -> Self {
-        match root.read_enum_option("occlusion offset direction").as_deref() {
-            Some("toward viewer") => Self::TowardViewer,
-            Some("marker forward") => Self::MarkerForward,
-            _ => Self::None,
-        }
-    }
-}
-
 /// A `lens_flare` tag.
 #[derive(Debug, Clone)]
 pub(crate) struct CeFlare {
@@ -125,25 +107,6 @@ pub(crate) struct CeLight {
     /// A light an effect made: the value its age gives it, in place of a
     /// function's, and a color of the bounds alone.
     fixed: Option<f32>,
-}
-
-/// One quad, ready to place.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct FlareSprite {
-    pub(crate) center: [f32; 3],
-    /// Half its width and height, in world units.
-    pub(crate) extent: [f32; 2],
-    /// Radians, about the view axis.
-    pub(crate) rotation: f32,
-    pub(crate) color: [f32; 3],
-    pub(crate) alpha: f32,
-    pub(crate) image: usize,
-    /// Halo 2: how strongly the map's brightest parts run to white.
-    pub(crate) highlight: Option<f32>,
-    /// Halo 3: how the map's own color adds, and the power that takes it to.
-    pub(crate) tint: Option<[f32; 2]>,
-    /// Halo 2: whether the world's depth hides it.
-    pub(crate) depth_tested: bool,
 }
 
 fn rgb_of(color: [f32; 4]) -> [f32; 3] {

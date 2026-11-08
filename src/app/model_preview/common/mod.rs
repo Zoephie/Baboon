@@ -9,6 +9,7 @@ pub(in crate::app::model_preview) mod camera;
 pub(in crate::app::model_preview) mod clock;
 pub(in crate::app::model_preview) mod features;
 pub(in crate::app::model_preview) mod fields;
+pub(in crate::app::model_preview) mod flares;
 pub(in crate::app::model_preview) mod geometry;
 pub(in crate::app::model_preview) mod image;
 pub(in crate::app::model_preview) mod marker;

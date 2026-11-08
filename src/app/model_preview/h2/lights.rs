@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
-use super::super::ce::lights::FlareSprite;
+use crate::app::model_preview::common::flares::FlareSprite;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::effects::{EffectTimes, for_each_attached_part, part_markers};
@@ -24,7 +24,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, lerp};
 use crate::app::model_preview::common::random::lcg_step;
 use crate::app::model_preview::common::attached::attached;
-use crate::app::model_preview::ce::lights::OcclusionOffset;
+use crate::app::model_preview::common::flares::OcclusionOffset;
 use crate::app::model_preview::dx9::passes::ce_color_interpolation;
 
 /// A `lens_flare`'s `flags`, by name.

@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
-use super::super::ce::lights::FlareSprite;
+use crate::app::model_preview::common::flares::FlareSprite;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::effects::{
     EffectTimes, for_each_attached_part, marker_name, part_markers,
