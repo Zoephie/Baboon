@@ -10,7 +10,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::super::common::view::{ViewFrame, posed_on};
-use super::particles::CePointPhysics;
+use crate::app::model_preview::common::point_physics::CePointPhysics;
 use super::passes::{FramebufferBlend, argb};
 use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;

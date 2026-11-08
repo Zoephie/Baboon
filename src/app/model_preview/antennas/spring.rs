@@ -4,7 +4,7 @@
 //! marker itself; [`super::Antenna`] draws the curve between.
 
 use super::super::common::view::posed_on;
-use super::super::ce::particles::CePointPhysics;
+use crate::app::model_preview::common::point_physics::CePointPhysics;
 use super::Antenna;
 use super::super::cloth::REACH_TICK_RATE;
 use crate::app::model_preview::common::math::{minus, plus, scaled};

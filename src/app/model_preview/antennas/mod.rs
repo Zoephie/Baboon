@@ -449,7 +449,7 @@ fn read_reach_antenna<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
         .read_tag_ref_path("physics")
         .filter(|path| !path.is_empty())
         .and_then(|path| reader.load(&path, "point_physics", b"pphy").ok())
-        .map(|tag| super::ce::particles::CePointPhysics::read(&tag));
+        .map(|tag| crate::app::model_preview::common::point_physics::CePointPhysics::read(&tag));
     let reach = ReachAntennaSpring {
         strength: root.read_real("spring strength coefficient").unwrap_or(0.0),
         length: total_length,

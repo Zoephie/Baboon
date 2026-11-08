@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, object_block};
 use super::super::common::view::posed_on;
-use super::particles::CePointPhysics;
+use crate::app::model_preview::common::point_physics::CePointPhysics;
 use super::super::*;
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 
