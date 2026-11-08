@@ -6,6 +6,7 @@
 use eframe::glow::{self, HasContext as _};
 
 use super::super::renderer::*;
+use super::super::particles::{H3ParticleGl, h3_particle_gl, particle_floats};
 
 use super::super::gl::buffer::*;
 

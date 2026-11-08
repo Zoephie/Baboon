@@ -8,7 +8,7 @@ use super::super::common::slots::GameSlots;
 use super::super::gen3::pipeline::h3_lighting_constants;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
-use super::super::renderer::particle_floats;
+use super::super::particles::particle_floats;
 use super::slot::H3Slot;
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;

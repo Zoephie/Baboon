@@ -10,6 +10,7 @@ use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system, draw_sprite_quad,
 };
 use super::super::renderer::*;
+use super::super::particles::{CHEAP_FLOATS, H3ParticleGl, ReachCheapGl, particle_floats, reach_cheap_gl};
 use super::super::common::sprite_gl::*;
 use super::super::common::camera::*;
 use super::super::common::view::ce_flare_view;

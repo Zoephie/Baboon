@@ -201,3 +201,18 @@ pub(in crate::app::model_preview) unsafe fn link_sprite_gl(gl: &glow::Context, m
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::model_preview::gl::glslang::assert_compiles_under_glslang;
+
+    /// The flare program, which Reach's light volumes' disc and depth fade
+    /// share, and Reach's composite with its gamma and noise, as the
+    /// particle program is checked.
+    #[test]
+    fn the_flare_and_reach_composite_programs_compile_under_glslang() {
+        assert_compiles_under_glslang("flare", &[("vert", CE_FLARE_VERTEX), ("frag", CE_FLARE_FRAGMENT)]);
+        assert_compiles_under_glslang("reach_composite", &[("frag", super::reach::lighting::REACH_COMPOSITE_FRAGMENT)]);
+    }
+}

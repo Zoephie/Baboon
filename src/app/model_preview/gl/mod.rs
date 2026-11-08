@@ -4,6 +4,8 @@
 pub(in crate::app::model_preview) mod buffer;
 pub(in crate::app::model_preview) mod chain;
 pub(in crate::app::model_preview) mod glsl;
+#[cfg(test)]
+pub(in crate::app::model_preview) mod glslang;
 pub(in crate::app::model_preview) mod link;
 pub(in crate::app::model_preview) mod pass_state;
 pub(in crate::app::model_preview) mod program;

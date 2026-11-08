@@ -5,6 +5,10 @@
 
 /// Reach's cheap particles, which Halo 4 runs too.
 pub(super) mod cheap;
+mod gl;
+pub(in crate::app::model_preview) use gl::*;
+mod cheap_gl;
+pub(in crate::app::model_preview) use cheap_gl::*;
 
 use std::sync::Arc;
 
