@@ -58,7 +58,7 @@ pub(in crate::app::model_preview) unsafe fn h4_flare_images(
                 .images
                 .iter()
                 .map(|(image, texels, mips)| unsafe {
-                    super::super::gen3::pipeline::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
+                    crate::app::model_preview::gl::texture::upload_h2_image_linear(gl, image, *texels, mips, Some(sampler))
                 })
                 .collect()
         })

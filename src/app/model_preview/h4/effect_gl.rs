@@ -127,7 +127,7 @@ impl H4EffectGl {
                 };
                 upload_array(gl, &layers, texture.texels, texture.sampler)
             } else {
-                super::super::gen3::pipeline::upload_h2_image_linear(
+                crate::app::model_preview::gl::texture::upload_h2_image_linear(
                     gl,
                     &texture.image,
                     texture.texels,
@@ -412,7 +412,7 @@ unsafe fn upload_array(
             glow::LINEAR as i32,
         );
         if let Some(sampler) = sampler {
-            super::super::gen3::pipeline::h3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
+            crate::app::model_preview::gl::texture::h3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
         }
         gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
         Some(texture)

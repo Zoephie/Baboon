@@ -9,22 +9,20 @@ use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::prt::{H3PrtKind, second_order_rotation};
-use std::borrow::Cow;
 
-use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Shield, H3Value};
 
-use crate::app::model_preview::common::image::{H3Sampler, H3Texels};
+use crate::app::model_preview::common::image::H3Texels;
 use super::super::reach::lighting::reach_frame_value;
 use super::super::reach::lights::{ReachLitLight, inline_rows};
 use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
 use super::super::renderer::*;
+use super::super::gl::texture::*;
 use super::super::common::camera::*;
 use super::super::common::view::ce_flare_view;
 use super::super::dx9::passes::{H2Layer};
-use super::super::common::image::H2Image;
 use super::super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
@@ -2013,39 +2011,6 @@ pub(in crate::app::model_preview) unsafe fn h3_set_blend(gl: &glow::Context, ble
     }
 }
 
-/// `d3d11_sampler_state_cache::get`: the border is transparent black, and
-/// anisotropic filters are trilinear with a limit.
-pub(in crate::app::model_preview) unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: H3Sampler) {
-    const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
-    let address = |mode| match mode {
-        BitmapAddressMode::Clamp => glow::CLAMP_TO_EDGE,
-        BitmapAddressMode::Mirror => glow::MIRRORED_REPEAT,
-        BitmapAddressMode::BlackBorder => glow::CLAMP_TO_BORDER,
-        _ => glow::REPEAT,
-    } as i32;
-    let (minify, magnify, anisotropy) = match sampler.filter {
-        BitmapFilterMode::Point => (glow::NEAREST_MIPMAP_NEAREST, glow::NEAREST, 1.0),
-        BitmapFilterMode::Bilinear | BitmapFilterMode::LightprobeTextureArray => {
-            (glow::LINEAR_MIPMAP_NEAREST, glow::LINEAR, 1.0)
-        }
-        BitmapFilterMode::Anisotropic2Expensive => (glow::LINEAR_MIPMAP_LINEAR, glow::LINEAR, 2.0),
-        BitmapFilterMode::Anisotropic3Expensive => (glow::LINEAR_MIPMAP_LINEAR, glow::LINEAR, 3.0),
-        BitmapFilterMode::Anisotropic4Expensive => (glow::LINEAR_MIPMAP_LINEAR, glow::LINEAR, 4.0),
-        _ => (glow::LINEAR_MIPMAP_LINEAR, glow::LINEAR, 1.0),
-    };
-    unsafe {
-        gl.tex_parameter_i32(target, glow::TEXTURE_MIN_FILTER, minify as i32);
-        gl.tex_parameter_i32(target, glow::TEXTURE_MAG_FILTER, magnify as i32);
-        gl.tex_parameter_f32(target, TEXTURE_MAX_ANISOTROPY, anisotropy);
-        if target != glow::TEXTURE_CUBE_MAP {
-            gl.tex_parameter_i32(target, glow::TEXTURE_WRAP_S, address(sampler.address[0]));
-            gl.tex_parameter_i32(target, glow::TEXTURE_WRAP_T, address(sampler.address[1]));
-            gl.tex_parameter_i32(target, glow::TEXTURE_WRAP_R, address(sampler.address[0]));
-            gl.tex_parameter_f32_slice(target, glow::TEXTURE_BORDER_COLOR, &[0.0; 4]);
-        }
-    }
-}
-
 /// What `render_mesh_part_default` lights a part with.
 fn h3_lit_pass<'a>(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch, material: &'a H3Material) -> &'a Arc<H3Pass> {
     let vertex = frame.preview.indices.get(batch.index_start as usize).copied().unwrap_or(0);
@@ -2058,135 +2023,6 @@ fn h3_lit_pass<'a>(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch, mater
         H3PrtKind::None => None,
     };
     slot.and_then(|slot| material.prt[slot].as_ref()).unwrap_or(&material.lit)
-}
-
-/// The engine decodes signed texels biased by 128; the card wants them back.
-fn signed_bytes(rgba: &[u8], texels: H3Texels) -> Cow<'_, [u8]> {
-    match texels {
-        H3Texels::Signed => rgba.iter().map(|byte| byte.wrapping_sub(128)).collect(),
-        _ => Cow::Borrowed(rgba),
-    }
-}
-
-/// `upload_h2_image` with an sRGB format, for the curve the card decodes.
-pub(in crate::app::model_preview) unsafe fn upload_h2_image_linear(
-    gl: &glow::Context,
-    image: &H2Image,
-    texels: H3Texels,
-    mips: &[H2Image],
-    sampler: Option<H3Sampler>,
-) -> Option<glow::NativeTexture> {
-    // GL reads as much as the size says, whatever the slice holds.
-    if !image.whole() {
-        return None;
-    }
-    let mips = if mips.iter().all(H2Image::whole) { mips } else { &[] };
-    let (format, kind) = match texels {
-        H3Texels::Linear => (glow::RGBA8, glow::UNSIGNED_BYTE),
-        H3Texels::Srgb => (glow::SRGB8_ALPHA8, glow::UNSIGNED_BYTE),
-        H3Texels::Signed => (glow::RGBA8_SNORM, glow::BYTE),
-    };
-    let format = format as i32;
-    let finish = |target| unsafe {
-        gl.generate_mipmap(target);
-        gl.tex_parameter_i32(target, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
-        gl.tex_parameter_i32(target, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
-    };
-    unsafe {
-        let texture = gl.create_texture().ok()?;
-        match image {
-            H2Image::Flat(image) => {
-                if image.width == 0 || image.height == 0 {
-                    gl.delete_texture(texture);
-                    return None;
-                }
-                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                gl.tex_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    format,
-                    image.width as i32,
-                    image.height as i32,
-                    0,
-                    glow::RGBA,
-                    kind,
-                    glow::PixelUnpackData::Slice(Some(&signed_bytes(&image.rgba, texels))),
-                );
-                finish(glow::TEXTURE_2D);
-                for (level, mip) in mips.iter().enumerate() {
-                    if let H2Image::Flat(mip) = mip {
-                        let rgba = signed_bytes(&mip.rgba, texels);
-                        let (width, height) = (mip.width as i32, mip.height as i32);
-                        let pixels = glow::PixelUnpackData::Slice(Some(&rgba));
-                        gl.tex_image_2d(glow::TEXTURE_2D, level as i32 + 1, format, width, height, 0, glow::RGBA, kind, pixels);
-                    }
-                }
-                if !mips.is_empty() {
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, mips.len() as i32);
-                }
-                let wrap = |repeat: bool| if repeat { glow::REPEAT } else { glow::CLAMP_TO_EDGE } as i32;
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, wrap(image.repeat_x));
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, wrap(image.repeat_y));
-                if let Some(sampler) = sampler {
-                    h3_apply_sampler(gl, glow::TEXTURE_2D, sampler);
-                }
-            }
-            H2Image::Cube { size, faces } => {
-                gl.bind_texture(glow::TEXTURE_CUBE_MAP, Some(texture));
-                for (face, rgba) in faces.iter().enumerate() {
-                    gl.tex_image_2d(
-                        glow::TEXTURE_CUBE_MAP_POSITIVE_X + face as u32,
-                        0,
-                        format,
-                        *size as i32,
-                        *size as i32,
-                        0,
-                        glow::RGBA,
-                        kind,
-                        glow::PixelUnpackData::Slice(Some(&signed_bytes(rgba, texels))),
-                    );
-                }
-                finish(glow::TEXTURE_CUBE_MAP);
-                for (level, mip) in mips.iter().enumerate() {
-                    if let H2Image::Cube { size, faces } = mip {
-                        for (face, rgba) in faces.iter().enumerate() {
-                            let rgba = signed_bytes(rgba, texels);
-                            let target = glow::TEXTURE_CUBE_MAP_POSITIVE_X + face as u32;
-                            let side = *size as i32;
-                            let pixels = glow::PixelUnpackData::Slice(Some(&rgba));
-                            gl.tex_image_2d(target, level as i32 + 1, format, side, side, 0, glow::RGBA, kind, pixels);
-                        }
-                    }
-                }
-                if !mips.is_empty() {
-                    gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, glow::TEXTURE_MAX_LEVEL, mips.len() as i32);
-                }
-                if let Some(sampler) = sampler {
-                    h3_apply_sampler(gl, glow::TEXTURE_CUBE_MAP, sampler);
-                }
-            }
-            H2Image::Volume { width, height, depth, rgba } => {
-                gl.bind_texture(glow::TEXTURE_3D, Some(texture));
-                gl.tex_image_3d(
-                    glow::TEXTURE_3D,
-                    0,
-                    format,
-                    *width as i32,
-                    *height as i32,
-                    *depth as i32,
-                    0,
-                    glow::RGBA,
-                    kind,
-                    glow::PixelUnpackData::Slice(Some(&signed_bytes(rgba, texels))),
-                );
-                finish(glow::TEXTURE_3D);
-                if let Some(sampler) = sampler {
-                    h3_apply_sampler(gl, glow::TEXTURE_3D, sampler);
-                }
-            }
-        }
-        Some(texture)
-    }
 }
 
 #[cfg(test)]
