@@ -5,7 +5,7 @@
 
 use super::super::gen3::shaders::H3Value;
 use super::super::frame::ModelGpuFrame;
-use super::super::common::camera::*;
+use super::super::common::camera::h2_camera_light;
 
 /// `c_geometry_sampler::m_default_lightprobe_sample` (MCC 0x14201E920, the
 /// 360's 0x8527C000, the same floats): its dual vMF, as

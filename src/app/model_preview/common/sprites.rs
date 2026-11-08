@@ -5,17 +5,15 @@
 
 use eframe::glow::{self, HasContext as _};
 
-use super::super::renderer::*;
 use super::super::particles::{H3ParticleGl, h3_particle_gl, particle_floats};
 
-use super::super::gl::buffer::*;
+use super::super::gl::buffer::slice_bytes;
 
 use super::super::gl::target::copy_frame;
 
 
-use super::super::common::sprite_gl::*;
+use super::super::common::sprite_gl::{SpriteGl, link_sprite_gl};
 
-use super::super::common::camera::*;
 
 use super::super::*;
 use super::super::gl::pass_state::PassState;

@@ -1,6 +1,8 @@
 //! The GPU slots a preview's buffers and textures live in, least recently drawn first out.
 
 use super::*;
+use super::super::gl::buffer::slice_bytes;
+use super::super::gl::texture::{upload_h2_image, upload_texture};
 use super::super::particles::{sprite_maps, upload_cheap_render_texture};
 use super::super::dx9::passes::{H2DrawPass, H2_LAYER_COUNT};
 use crate::app::model_preview::common::image::H3Sampler;

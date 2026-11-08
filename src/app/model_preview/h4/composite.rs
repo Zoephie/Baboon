@@ -15,7 +15,7 @@ use crate::app::model_preview::gl::texture::upload_h2_image_linear;
 use eframe::glow::{self, HasContext};
 use std::sync::Arc;
 use super::render::H4Game;
-use super::super::renderer::*;
+use super::super::renderer::RenderCore;
 use super::super::frame::ModelGpuFrame;
 
 impl H4Game {

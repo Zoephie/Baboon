@@ -1,10 +1,6 @@
 //! Depth-tested Glow rendering, markers, and preview geometry conversion.
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
-use super::common::camera::*;
-use super::gl::texture::*;
-use super::gl::buffer::*;
-use super::common::sprite_gl::*;
 use super::gl::scope::PostScope;
 use super::*;
 use super::dx9::draw::*;

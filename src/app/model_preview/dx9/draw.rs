@@ -2,10 +2,8 @@
 //! uniforms, drawing each material's passes in order, the texaccum fill, the frame copy and bloom.
 
 use super::super::*;
-use super::super::renderer::*;
 use super::shadow::*;
-use super::super::common::camera::*;
-use super::super::gl::buffer::*;
+use super::super::gl::buffer::model_draw_range;
 use super::super::gl::target::H2Target;
 use super::super::gl::program::Linked;
 use super::super::gl::scope::PostScope;

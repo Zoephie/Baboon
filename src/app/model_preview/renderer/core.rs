@@ -1,6 +1,9 @@
 //! The GPU core every game draws through: the slots, the main program and the shared frame steps.
 
 use super::*;
+use super::super::common::sprite_gl::{SpriteGl, link_sprite_gl};
+use super::super::gl::buffer::model_draw_range;
+use super::super::gl::texture::{upload_black_cube, upload_black_flat, upload_placeholder_texture, upload_solid_volume};
 use super::super::gl::target::H2Target;
 use super::super::common::view::ce_flare_view;
 use super::super::gl::link::link;

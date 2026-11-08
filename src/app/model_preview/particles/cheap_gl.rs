@@ -1,7 +1,7 @@
 //! The cheap particle program Reach and Halo 4 draw their cheap particles with.
 
 use super::*;
-use super::super::gl::buffer::*;
+use super::super::gl::buffer::slice_bytes;
 use super::super::gen3::shaders::H3Blend;
 use eframe::glow::{self, HasContext as _};
 

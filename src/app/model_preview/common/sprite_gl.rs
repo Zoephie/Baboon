@@ -4,8 +4,7 @@
 use eframe::glow::{self, HasContext as _};
 
 use super::super::gl::glsl::glsl_view_depth;
-use super::super::renderer::*;
-use super::super::gl::buffer::*;
+use super::super::gl::buffer::slice_bytes;
 use super::super::*;
 use super::camera::*;
 

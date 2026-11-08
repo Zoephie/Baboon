@@ -13,11 +13,11 @@ use super::super::gen3::shaders::H3Value;
 
 use crate::app::model_preview::common::image::H3Sampler;
 use super::flares::{H4FlareDraw, H4FlareView};
-use super::super::renderer::*;
+use super::super::renderer::RenderCore;
 use super::super::frame::ModelGpuFrame;
-use super::super::gl::buffer::*;
-use super::super::common::sprite_gl::*;
-use super::super::common::camera::*;
+use super::super::gl::buffer::slice_bytes;
+use super::super::common::sprite_gl::link_sprite_gl;
+use super::super::common::camera::{ModelGpuCamera, ce_flare_clip};
 use super::super::common::view::ce_flare_view;
 
 /// The camera as the flares read it: a point's normalized device position,

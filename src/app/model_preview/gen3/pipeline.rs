@@ -19,10 +19,10 @@ use super::super::reach::lighting::reach_frame_value;
 use super::super::reach::lights::{ReachLitLight, inline_rows};
 use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
-use super::super::renderer::*;
-use super::super::gl::buffer::*;
-use super::super::gl::texture::*;
-use super::super::common::camera::*;
+use super::super::gl::buffer::model_draw_range;
+use super::super::gl::texture::upload_h2_image_linear;
+#[cfg(test)]
+use super::super::gl::texture::signed_bytes;
 use super::super::common::view::ce_flare_view;
 use super::super::dx9::passes::{H2Layer};
 use super::super::*;

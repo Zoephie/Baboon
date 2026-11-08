@@ -11,9 +11,9 @@ use super::super::effects::EffectOnsets;
 use crate::app::model_preview::common::sprites::h3_layered_distance;
 use super::super::common::view::ViewFrame;
 use super::super::gl::pass_state::PassState;
-use super::super::renderer::*;
+use super::super::renderer::RenderCore;
 use super::super::frame::ModelGpuFrame;
-use super::super::common::sprite_gl::*;
+use super::super::common::sprite_gl::SpriteGl;
 use super::super::common::view::ce_flare_view;
 use super::pipeline::Dx9Game;
 

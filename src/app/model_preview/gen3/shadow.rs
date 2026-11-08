@@ -4,7 +4,6 @@
 
 use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
-use super::super::renderer::*;
 use super::super::*;
 use super::shaders::{H3Material, H3Pass};
 

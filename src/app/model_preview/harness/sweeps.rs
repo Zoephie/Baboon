@@ -2,7 +2,6 @@
 //! sweeps of a family's or a kit's passes through translation and the driver.
 
 use super::super::*;
-use super::super::renderer::*;
 use eframe::glow::{self, HasContext as _};
 use std::sync::Arc;
 use super::gl::headless_gl;

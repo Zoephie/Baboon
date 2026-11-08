@@ -3,10 +3,9 @@
 use super::*;
 use super::super::super::renderer::CE_EVENTS_RUNNING;
 use super::super::super::dx9::draw::{gl_blend_equation, gl_blend_factor};
-use super::super::super::common::camera::*;
-use super::super::super::gl::texture::*;
-use super::super::super::gl::buffer::*;
-use super::super::super::common::sprite_gl::*;
+use super::super::super::gl::texture::upload_h2_image;
+use super::super::super::gl::buffer::slice_bytes;
+use super::super::super::common::sprite_gl::SpriteGl;
 use eframe::glow::{self, HasContext as _};
 use std::collections::HashMap;
 use std::sync::Arc;

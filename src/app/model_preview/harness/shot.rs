@@ -15,8 +15,6 @@
 //! `H2_SHOT_FIRE=<trigger>@<seconds>` fires the held weapon's trigger.
 
 use super::super::*;
-use super::super::renderer::*;
-use super::super::common::camera::*;
 use eframe::glow::{self, HasContext as _};
 use std::sync::Arc;
 use super::gl::{headless_gl, headless_gl_recording, take_gl_log};

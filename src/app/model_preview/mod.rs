@@ -73,8 +73,12 @@ pub(in crate::app) use common::palette::material_color;
 use renderer::*;
 use viewport::*;
 use frame::*;
-use common::camera::*;
-use common::clock::*;
+use common::camera::{
+    DEPTH_UNITS, MAX_PREVIEW_SCALE, ModelGpuCamera, PreviewCamera, ce_flare_clip, ce_flare_pixels,
+    h2_camera_light, h2_eye_position, min_preview_scale, preview_center_radius, rotate_view_vector,
+    scene_depth_terms, unrotate_view_vector,
+};
+use common::clock::{frame_steps, resume_point};
 use dx9::passes::{H2ChangeColors, read_h2_change_colors};
 use selection::*;
 #[cfg(test)]

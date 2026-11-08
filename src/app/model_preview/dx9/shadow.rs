@@ -2,7 +2,6 @@
 //! Halo 2 draws and Halo 3 and ODST borrow.
 
 use super::super::*;
-use super::super::renderer::*;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::dx9::passes::H2Layer;
