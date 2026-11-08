@@ -15,7 +15,7 @@ use crate::core::game::GameId;
 
 /// The objects each game loads: a biped, weapons and vehicles, chosen to reach
 /// as many of the preview's features as one load can.
-const LOAD_SET: &[(&str, GameId, &[(&str, &str, &[u8; 4])])] = &[
+pub(super) const LOAD_SET: &[(&str, GameId, &[(&str, &str, &[u8; 4])])] = &[
     (
         "BLAM_TEST_HCEEK",
         GameId::HaloCe,

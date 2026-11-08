@@ -486,7 +486,7 @@ pub(in crate::app::model_preview) fn is_shown(shown: &[bool], index: usize) -> b
     shown.get(index).copied().unwrap_or(true)
 }
 
-fn marker_active(only: &(String, String), selections: &HashMap<String, ModelRegionSelection>) -> bool {
+pub(in crate::app::model_preview) fn marker_active(only: &(String, String), selections: &HashMap<String, ModelRegionSelection>) -> bool {
     let selection = selections.get(&only.0);
     selection.is_some_and(|selection| selection.enabled && selection.permutation == only.1)
 }
