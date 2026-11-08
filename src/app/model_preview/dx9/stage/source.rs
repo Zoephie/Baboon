@@ -1,0 +1,351 @@
+//! A stage's GLSL: its outputs, its drawn position and its full source.
+
+use super::*;
+
+impl H2VertexStage {
+    fn outputs(self) -> &'static str {
+        match self {
+            Self::Default => {
+                "v_tc0.xy = vec2(row(0, uv), row(1, uv));
+    v_tc1.xy = vec2(row(2, uv), row(3, uv));
+    v_tc2.xy = vec2(row(4, uv), row(5, uv));
+    v_tc3.xy = vec2(row(6, uv), row(7, uv));"
+            }
+            Self::Reflection => {
+                "v_tc0.xyz = normal * dot(to_eye, normal) * u_reflection_scale - to_eye;
+    v_tc1.xy = vec2(row(2, uv), row(3, uv));
+    v_tc2.xy = vec2(row(4, uv), row(5, uv));
+    v_tc3.xy = vec2(row(6, uv), row(7, uv));"
+            }
+            Self::Offset => {
+                "v_tc0.xyz = vec3(row(0, position), row(1, position), row(2, position));
+    v_tc1.xyz = vec3(row(3, position), row(4, position), row(5, position));"
+            }
+            Self::Lightmap
+            | Self::LightmapEnv
+            | Self::LightmapMark
+            | Self::LightmapEnvStencil
+            | Self::LightmapMarkStencil
+            | Self::LightmapStencil
+            | Self::LightmapTarget
+            | Self::LightmapTargetEye
+            | Self::LightmapEye
+            | Self::LightmapEyeBlend
+            | Self::Texaccum => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    v_tc0.xy = base;
+    v_tc2.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc3.xyz = tangent_space(-u_light_direct, tangent, binormal, normal);
+    vec3 eye_vector = tangent_space(to_eye, tangent, binormal, normal);
+    v_color0 = vec4(normalize(eye_vector) * 0.5 + 0.5, 1.0);
+    vec3 indirect = tangent_space(-u_light_indirect, tangent, binormal, normal);
+    v_color1 = vec4(normalize(indirect) * 0.5 + 0.5, 1.0);"
+            }
+            Self::ActiveCamo => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    v_tc0.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_color0 = vec4(tangent_space(u_view_back, tangent, binormal, normal) * 0.5 + 0.5, 1.0);
+    vec3 view_normal = vec3(dot(u_view_right, normal), dot(u_view_up, normal), dot(u_view_back, normal));
+    v_tc3.xyz = view_normal;
+    float bend = log2(max(view_normal.z, 0.0));
+    vec4 refraction = vec4(
+        view_normal.xy * pow(2.0, bend * u_texture_rows[9].y) * u_texture_rows[8].y + u_texture_rows[8].zw,
+        vec2(pow(2.0, bend * u_texture_rows[9].x) * u_texture_rows[8].x));
+    refraction *= u_texture_rows[9].z / 320.0;
+    vec2 screen = gl_Position.xy / gl_Position.w * 0.5 + 0.5;
+    vec3 across = u_view_right * refraction.z;
+    vec3 down = u_view_up * refraction.w;
+    v_tc1 = vec4(dot(across, tangent), dot(across, binormal), screen.x + refraction.x, 1.0);
+    // The game's screen runs down, a framebuffer's up.
+    v_tc2 = vec4(dot(down, tangent), dot(down, binormal), screen.y - refraction.y, 1.0);
+    v_tc2.xy = -v_tc2.xy;
+    v_fog = dot(-to_eye, u_view_back) * u_texture_rows[5].x + u_texture_rows[5].y;"
+            }
+            Self::Water => {
+                "v_tc0.xy = position.xy * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc3.xy = vec2(0.5, normalize(to_eye).z * 0.5 + 0.5);"
+            }
+            Self::ShadowCaster => "gl_Position = u_shadow_matrix * vec4(position, 1.0);",
+            Self::ShadowMask => "v_tc0 = u_shadow_matrix * vec4(position, 1.0);",
+            Self::TextureCamera => {
+                "v_tc0.xy = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;"
+            }
+            Self::Hologram => {
+                "vec3 offset = position - u_eye;
+    vec2 across = vec2(dot(offset, u_view_right), dot(offset, u_view_up));
+    v_tc1.xy = across * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    v_tc2.xy = across * u_texture_rows[1].xy + u_texture_rows[1].zw;
+    v_tc3.xy = across * u_texture_rows[2].xy + u_texture_rows[2].zw;"
+            }
+            Self::Prt | Self::PrtDetail => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    v_tc1.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    vec3 eye_unit = normalize(to_eye);
+    float eye_facing = dot(normal, eye_unit);
+    v_tc2.xyz = normal * eye_facing * u_reflection_scale - eye_unit;
+    int cluster = int(a_prt_cluster + 0.5) * 4;
+    vec3 transfer = u_prt[cluster].xyz + vec3(
+        dot(a_prt_weights, u_prt[cluster + 1]),
+        dot(a_prt_weights, u_prt[cluster + 2]),
+        dot(a_prt_weights, u_prt[cluster + 3]));
+    v_color0 = vec4(transfer * u_texture_rows[3].x, dot(transfer, transfer));
+    v_tc3.xyz = tangent_space(u_prt_light, tangent, binormal, normal);
+    vec3 halfway = normalize(u_prt_light + eye_unit);
+    v_color1 = vec4(tangent_space(halfway, tangent, binormal, normal) * 0.5 + 0.5, eye_facing * eye_facing);"
+            }
+            Self::Emissive => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    v_tc0.xy = base * u_texture_rows[1].xy + u_texture_rows[1].zw;
+    v_tc1.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc2.xy = base * u_texture_rows[3].xy + u_texture_rows[3].zw;
+    v_tc3.xy = base * u_texture_rows[4].xy + u_texture_rows[4].zw;"
+            }
+            Self::Environment => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    v_tc0.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc1.xy = base * u_texture_rows[1].xy + u_texture_rows[1].zw;
+    v_tc2.xyz = tangent_space(to_eye, tangent, binormal, normal);
+    v_tc3.xyz = normal * dot(normal, to_eye) * u_reflection_scale - to_eye;"
+            }
+            Self::LightDiffuse | Self::LightDiffuseTarget | Self::LightDiffuseDetail => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    vec3 to_light = u_light_position - position;
+    v_tc0.xy = base;
+    v_tc1.xyz = tangent_space(to_light, tangent, binormal, normal);
+    v_tc2.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc3.xyz = to_light * -u_light_falloff + 0.5;"
+            }
+            Self::LightGel | Self::LightGelTarget | Self::LightGelDetail => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    vec3 to_light = u_light_position - position;
+    v_tc0.xy = base;
+    v_tc1.xyz = tangent_space(to_light, tangent, binormal, normal);
+    v_tc2.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc3 = vec4(dot(to_light, u_gel_rows[0].xyz) + u_gel_rows[0].w,
+        dot(to_light, u_gel_rows[1].xyz) + u_gel_rows[1].w,
+        0.0, dot(to_light, u_gel_rows[2].xyz));
+    v_tc3.z = v_tc3.w;
+    v_color0 = vec4(vec3(clamp(dot(to_light, u_gel_rows[2].xyz) + u_gel_rows[2].w, 0.0, 1.0)), 1.0);
+    v_color1 = vec4(vec3(clamp(dot(to_light, u_gel_rows[3].xyz) + u_gel_rows[3].w, 0.0, 1.0)), 1.0);"
+            }
+            Self::LightFrustum | Self::LightFrustumTarget | Self::LightFrustumDetail => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    vec3 to_light = u_light_position - position;
+    v_tc0.xy = base;
+    v_tc1.xyz = tangent_space(to_light, tangent, binormal, normal);
+    v_tc2.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc3.xyz = tangent_space(to_eye, tangent, binormal, normal);
+    v_color0 = vec4(vec3(dot(to_light, u_gel_rows[2].xyz) + u_gel_rows[2].w), 1.0);"
+            }
+            Self::LightSpecular => {
+                "vec2 base = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    v_tc1.xyz = tangent_space(u_light_position - position, tangent, binormal, normal);
+    v_tc2.xy = base * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc3.xyz = tangent_space(to_eye, tangent, binormal, normal);
+    v_color0 = u_tint_facing;
+    v_color1 = u_tint_glancing;"
+            }
+            Self::CeModel => {
+                "v_tc0.xy = vec2(row(0, uv), row(1, uv));
+    v_tc1.xy = v_tc0.xy * u_texture_rows[2].xy;
+    v_tc2.xy = v_tc0.xy;
+    vec3 surface = normal * u_texture_rows[3].y;
+    v_tc3.xyz = surface * dot(to_eye, surface) * 2.0 - to_eye;
+    float first = dot(surface, -u_light_direct);
+    first = max(first, -first * u_texture_rows[3].x);
+    float second = dot(surface, -u_texture_rows[6].xyz);
+    v_color0 = vec4(clamp(u_texture_rows[4].rgb + ce_point_light(position, surface)
+        + max(first, 0.0) * u_texture_rows[5].rgb
+        + max(second, 0.0) * u_texture_rows[7].rgb, 0.0, 1.0), 0.0);
+    float view = dot(normalize(to_eye), surface);
+    v_color1 = clamp(u_tint_facing * view + u_tint_glancing, 0.0, 1.0);
+    if (u_texture_rows[8].x != 0.0) {
+        float along = dot(u_view_back, position - u_eye) * -1.0;
+        v_color1.a *= clamp((along - u_texture_rows[8].x)
+            / (u_texture_rows[8].y - u_texture_rows[8].x), 0.0, 1.0);
+    }"
+            }
+            Self::CeGlassLit => {
+                "v_tc0.xy = uv.xy * u_texture_rows[2].xy;
+    v_tc1.xy = uv.xy * u_texture_rows[2].zw;
+    float first = max(dot(normal, -u_light_direct), 0.0);
+    float second = max(dot(normal, -u_texture_rows[6].xyz), 0.0);
+    v_color0 = vec4(clamp(u_texture_rows[4].rgb + ce_point_light(position, normal)
+        + first * u_texture_rows[5].rgb + second * u_texture_rows[7].rgb, 0.0, 1.0), 1.0);"
+            }
+            Self::CeGlassFlat => {
+                "v_tc0.xy = uv.xy * u_texture_rows[2].xy;
+    v_tc1.xyz = tangent_space(u_view_back, tangent, binormal, normal);
+    v_tc2.xyz = normal;
+    v_tc3.xyz = normal * dot(to_eye, normal) * 2.0 - to_eye;"
+            }
+            Self::CeMeter => "v_tc0.xy = uv.xy;",
+            Self::CeWaterOpacity => {
+                "v_tc0.xy = uv.xy;
+    v_tc1.xyz = tangent_space(to_eye, tangent, binormal, normal);"
+            }
+            Self::CeActiveCamo => {
+                "float depth = dot(to_eye, u_view_back);
+    float near = clamp(u_texture_rows[0].y / (depth * depth), 0.0, 1.0);
+    v_color0 = vec4(u_texture_rows[1].rgb, near);
+    v_tc0.xyz = vec3(dot(normal, u_view_right), dot(normal, u_view_up), -dot(normal, u_view_back));
+    v_tc1.xyz = vec3(near * u_texture_rows[0].x, 0.0, 1.0 / u_view_size.x);
+    // The game's screen runs down, a framebuffer's up.
+    v_tc2.xyz = vec3(0.0, -near * u_texture_rows[0].x, 1.0 / u_view_size.y);"
+            }
+            Self::CePlasma => {
+                "vec4 place = vec4(a_position, 1.0);
+    v_tc0.xyz = vec3(dot(place, u_texture_rows[0]), dot(place, u_texture_rows[1]),
+        dot(place, u_texture_rows[2]));
+    v_tc1.xyz = vec3(dot(place, u_texture_rows[3]), dot(place, u_texture_rows[4]),
+        dot(place, u_texture_rows[5]));
+    v_color0 = clamp(u_texture_rows[7] * dot(normalize(to_eye), normal) + u_texture_rows[6], 0.0, 1.0);"
+            }
+            Self::CeTransparent => CE_TRANSPARENT,
+            Self::CeTransparentReflection => "vec3 cube = normal * dot(to_eye, normal) * 2.0 - to_eye;",
+            Self::CeTransparentObject => "vec3 cube = normal;",
+            Self::CeTransparentViewer => "vec3 cube = to_eye;",
+            Self::CeTransparentScreen => CE_TRANSPARENT,
+            Self::Bumped => {
+                "v_tc0.xy = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
+    v_tc0.xy = v_tc0.xy * u_texture_rows[2].xy + u_texture_rows[2].zw;
+    v_tc1 = vec4(tangent.x, binormal.x, normal.x, to_eye.x);
+    v_tc2 = vec4(tangent.y, binormal.y, normal.y, to_eye.y);
+    v_tc3 = vec4(tangent.z, binormal.z, normal.z, to_eye.z);
+    v_color0 = u_tint_facing;
+    v_color1 = u_tint_glancing;"
+            }
+        }
+    }
+
+    /// The offset and Halo CE plasma variants move the drawn surface out along
+    /// the normal; the rest draw it where it is.
+    fn drawn_position(self) -> &'static str {
+        match self {
+            Self::Offset => "position + normal * u_texture_rows[8].w",
+            Self::CePlasma => "position + normal * u_texture_rows[0].z",
+            _ => "position",
+        }
+    }
+
+    pub(in crate::app) fn source(self, version_declaration: &str) -> String {
+        let prelude = model_vertex_prelude(version_declaration);
+        let (outputs, drawn) = (self.outputs(), self.drawn_position());
+        let variant = match self {
+            Self::LightDiffuseTarget | Self::LightGelTarget | Self::LightFrustumTarget => {
+                "v_tc0 = vec4((gl_Position.xy + gl_Position.w) * 0.5, gl_Position.ww);"
+            }
+            Self::CeTransparentReflection | Self::CeTransparentObject | Self::CeTransparentViewer => {
+                CE_TRANSPARENT_CUBE
+            }
+            Self::CeTransparentScreen => {
+                "v_tc0 = vec4(row(0, vec3(gl_Position.xy, 0.0)) + u_texture_rows[0].w * (gl_Position.w - 1.0), \
+                 row(1, vec3(gl_Position.xy, 0.0)) + u_texture_rows[1].w * (gl_Position.w - 1.0), 0.0, gl_Position.w);"
+            }
+            Self::LightDiffuseDetail | Self::LightGelDetail | Self::LightFrustumDetail => {
+                "v_tc4.xy = base * u_texture_rows[1].xy + u_texture_rows[1].zw;"
+            }
+            Self::Hologram | Self::Prt => {
+                "v_tc0 = vec4((gl_Position.xy + gl_Position.w) * 0.5, gl_Position.ww);"
+            }
+            Self::Water => concat!(
+                "v_tc1 = vec4((gl_Position.xy / gl_Position.w + 1.0) * 0.5, 0.0, 1.0);\n    ",
+                "v_tc2 = vec4((gl_Position.xy + gl_Position.w) * 0.5, gl_Position.ww);"
+            ),
+            Self::PrtDetail => concat!(
+                "v_tc0.xy = base;\n    ",
+                "v_tc4.xy = base * u_texture_rows[1].xy + u_texture_rows[1].zw;"
+            ),
+            _ if self.is_lightmap() => self.lightmap_outputs(),
+            _ => "",
+        };
+        let prt = if matches!(self, Self::Prt | Self::PrtDetail) {
+            format!(
+                "in float a_prt_cluster;\nin vec4 a_prt_weights;\n\
+                 uniform vec4 u_prt[{H2_PRT_REGISTERS}];\nuniform vec3 u_prt_light;\n"
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            "{prelude}{prt}\
+invariant gl_Position;
+out vec4 v_color0;
+out vec4 v_color1;
+out vec4 v_tc0;
+out vec4 v_tc1;
+out vec4 v_tc2;
+out vec4 v_tc3;
+out vec4 v_tc4;
+out vec4 v_tc5;
+out vec4 v_tc6;
+out vec4 v_tc7;
+out float v_fog;
+uniform vec3 u_eye;
+uniform vec2 u_view_size;
+uniform vec3 u_view_right;
+uniform vec3 u_view_up;
+uniform vec3 u_view_back;
+uniform mat4 u_shadow_matrix;
+uniform vec4 u_texture_rows[{H2_TEXTURE_ROWS}];
+uniform vec4 u_tint_facing;
+uniform vec4 u_tint_glancing;
+uniform float u_reflection_scale;
+uniform vec3 u_light_direct;
+uniform vec3 u_light_indirect;
+uniform vec3 u_light_position;
+uniform float u_light_falloff;
+uniform vec4 u_gel_rows[4];
+uniform vec4 u_ce_point[{CE_POINT_LIGHT_ROWS}];
+vec3 tangent_space(vec3 value, vec3 tangent, vec3 binormal, vec3 normal) {{
+    return vec3(dot(value, tangent), dot(value, binormal), dot(value, normal));
+}}
+float row(int index, vec3 point) {{
+    return dot(u_texture_rows[index].xyz, point) + u_texture_rows[index].w;
+}}
+vec3 ce_point_light(vec3 position, vec3 normal) {{
+    vec3 sum = vec3(0.0);
+    for (int light = 0; light < 2; light++) {{
+        vec4 place = u_ce_point[light * 3];
+        vec4 aim = u_ce_point[light * 3 + 1];
+        vec4 color = u_ce_point[light * 3 + 2];
+        vec3 to_light = place.xyz - position;
+        float squared = dot(to_light, to_light);
+        to_light /= sqrt(max(squared, 0.000001));
+        float near = max(1.0 - squared * place.w, 0.0);
+        float facing = clamp(dot(to_light, normal), 0.0, 1.0);
+        float spot = max(dot(to_light, -aim.xyz) * aim.w + color.w, 0.0);
+        // `model.vsh` caps only the second light's spot at 1.
+        sum += near * facing * (light == 1 ? min(spot, 1.0) : spot) * color.rgb;
+    }}
+    return sum;
+}}
+void main() {{
+    vec3 position;
+    vec3 normal_in;
+    vec3 tangent;
+    vec3 binormal;
+    skinned_pose(position, normal_in, tangent, binormal);
+    vec3 normal = length(normal_in) > 0.0001 ? normalize(normal_in) : vec3(0.0, 0.0, 1.0);
+    vec3 uv = vec3(a_texcoord, 0.0);
+    vec3 to_eye = u_eye - position;
+    float facing = max(dot(normal, normalize(to_eye)), 0.0);
+    gl_Position = clip_position({drawn});
+    v_color0 = u_tint_facing * facing + u_tint_glancing * (1.0 - facing);
+    v_color1 = vec4(1.0);
+    v_tc0 = vec4(0.0, 0.0, 0.0, 1.0);
+    v_tc1 = v_tc0;
+    v_tc2 = v_tc0;
+    v_tc3 = v_tc0;
+    v_tc4 = v_tc0;
+    v_tc5 = v_tc0;
+    v_tc6 = v_tc0;
+    v_tc7 = vec4(0.0, 0.0, 0.0, 1.0);
+    v_fog = 1.0;
+    {outputs}
+    {variant}
+}}
+"
+        )
+    }
+}
