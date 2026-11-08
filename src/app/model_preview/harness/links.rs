@@ -11,7 +11,7 @@ use crate::core::source::TagSource;
 #[test]
 fn reach_shadow_apply_links() {
     let gl = headless_gl();
-    let program = unsafe { super::super::gen3::pipeline::screen_program(&gl, super::super::reach::shadow_pass::APPLY_FRAGMENT) }
+    let program = unsafe { crate::app::model_preview::gl::screen::screen_program(&gl, super::super::reach::shadow_pass::APPLY_FRAGMENT) }
         .expect("the apply compiles and links");
     for name in ["scene_depth", "normals", "shadow_map", "screen_to_world", "shadow_view_projection", "hull_planes"] {
         assert!(unsafe { gl.get_uniform_location(program, name) }.is_some(), "{name} is read");

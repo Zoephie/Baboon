@@ -4,6 +4,7 @@
 
 use super::render::{Gen3Batch, Gen3Cx, Gen3Game};
 use super::sprites::SpriteStage;
+use super::super::gl::screen::screen_program;
 use super::super::common::sprites::h3_layered_distance;
 use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
@@ -19,6 +20,7 @@ use super::super::reach::lights::{ReachLitLight, inline_rows};
 use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
 use super::super::renderer::*;
+use super::super::gl::buffer::*;
 use super::super::gl::texture::*;
 use super::super::common::camera::*;
 use super::super::common::view::ce_flare_view;
@@ -64,13 +66,6 @@ const ATTRIBUTES: [(&str, &str); 7] = [
 /// Where `static_prt_*`'s coefficients arrive, past the preview's own.
 pub(in crate::app::model_preview) const PRT_ATTRIBUTES: [u32; 3] = [11, 12, 13];
 const PRT_NAMES: [&str; 3] = ["a_BLENDWEIGHT1", "a_BLENDWEIGHT2", "a_BLENDWEIGHT3"];
-
-const COMPOSITE_VERTEX: &str = "#version 410 core
-void main() {
-    vec2 corner = vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4.0 - 1.0;
-    gl_Position = vec4(corner, 0.0, 1.0);
-}
-";
 
 const DISTORTION_FRAGMENT: &str = "#version 410 core
 uniform sampler2D scene;
@@ -229,30 +224,6 @@ pub(in crate::app::model_preview) struct H3Targets {
     pub(in crate::app::model_preview) distortion_framebuffer: glow::NativeFramebuffer,
     pub(in crate::app::model_preview) scene_copy: glow::NativeTexture,
     pub(in crate::app::model_preview) scene_copy_framebuffer: glow::NativeFramebuffer,
-}
-
-/// A full-screen program for `fragment`, or none if it fails to compile or
-/// link. A failure is logged once and remembered, so callers that ask again
-/// each frame neither rebuild nor log it again.
-pub(in crate::app::model_preview) unsafe fn screen_program(gl: &glow::Context, fragment: &str) -> Option<glow::NativeProgram> {
-    thread_local! {
-        static FAILED: std::cell::RefCell<std::collections::HashSet<String>> = Default::default();
-    }
-    if FAILED.with(|failed| failed.borrow().contains(fragment)) {
-        return None;
-    }
-    let fail = |log: String| {
-        eprintln!("model preview: screen shader: {log}");
-        FAILED.with(|failed| failed.borrow_mut().insert(fragment.to_owned()));
-        None
-    };
-    unsafe {
-        let stages = [(glow::VERTEX_SHADER, COMPOSITE_VERTEX), (glow::FRAGMENT_SHADER, fragment)];
-        match super::super::gl::link::link(gl, &stages, &[]) {
-            Ok(program) => Some(program),
-            Err(log) => fail(log),
-        }
-    }
 }
 
 impl H3Targets {

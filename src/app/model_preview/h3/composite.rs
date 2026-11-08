@@ -5,7 +5,8 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::pipeline::{HALF_LENS, screen_program};
+use super::super::gen3::pipeline::HALF_LENS;
+use crate::app::model_preview::gl::screen::screen_program;
 use super::render::H3Game;
 
 /// `final_composite`'s `tone_curve_constants` at a white point of one: the

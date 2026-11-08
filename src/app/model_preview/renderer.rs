@@ -3,6 +3,8 @@
 
 use super::common::camera::*;
 use super::gl::texture::*;
+use super::gl::buffer::*;
+use super::gl::target::H2Target;
 use super::common::sprite_gl::*;
 use super::gl::glsl::glsl_view_depth;
 use super::common::view::ce_flare_view;
@@ -2183,45 +2185,6 @@ impl ModelGpuSlot {
     }
 }
 
-/// A color and depth target at a pane's size. One holds the whole scene while
-/// game shaders are on, because the environment layer blends by destination
-/// alpha, which the window's framebuffer need not keep. The other is texaccum,
-/// for lightmap passes to read back at each pixel's screen position.
-pub(in crate::app::model_preview) struct H2Target {
-    pub(in crate::app::model_preview) framebuffer: glow::NativeFramebuffer,
-    color: glow::NativeTexture,
-    pub(in crate::app::model_preview) depth: glow::NativeRenderbuffer,
-    pub(in crate::app::model_preview) size: [i32; 2],
-}
-
-impl H2Target {
-    unsafe fn new(gl: &glow::Context, width: i32, height: i32) -> Option<Self> {
-        let size = [width, height];
-        let mut made = Made::new(gl);
-        unsafe {
-            let color = made.texture(size, Texels::RGBA8, Sampling::NEAREST_CLAMPED)?;
-            let depth = made.renderbuffer(size, glow::DEPTH24_STENCIL8)?;
-            let framebuffer = made.framebuffer(&[(glow::COLOR_ATTACHMENT0, color)])?;
-            gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
-            let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
-            if status != glow::FRAMEBUFFER_COMPLETE {
-                eprintln!("model preview: render target incomplete: {status:#x}");
-                return None;
-            }
-            made.keep();
-            Some(Self { framebuffer, color, depth, size })
-        }
-    }
-
-    unsafe fn delete(&self, gl: &glow::Context) {
-        unsafe {
-            gl.delete_framebuffer(self.framebuffer);
-            gl.delete_texture(self.color);
-            gl.delete_renderbuffer(self.depth);
-        }
-    }
-}
-
 /// The clear color of the preview, shared with the scene target.
 /// The theme's panel color, so a preview sits in the UI around it.
 pub(super) fn preview_background(visuals: &egui::Visuals) -> [f32; 3] {
@@ -3239,34 +3202,6 @@ impl H3ParticleGl {
             gl.depth_mask(false);
             gl.color_mask(true, true, true, false);
         }
-    }
-}
-
-/// The viewport of the framebuffer being drawn, copied into a texture of its
-/// size. A blit, as what is drawn to may be multisampled.
-pub(in crate::app::model_preview) unsafe fn copy_frame(gl: &glow::Context, copy: &mut Option<ColorTarget>) -> Option<glow::NativeTexture> {
-    unsafe {
-        let mut viewport = [0; 4];
-        gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
-        let [x, y, width, height] = viewport;
-        if width <= 0 || height <= 0 {
-            return None;
-        }
-        if copy.as_ref().is_some_and(|copy| copy.size != [width, height])
-            && let Some(old) = copy.take()
-        {
-            old.delete(gl);
-        }
-        let drawn_to = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
-        if copy.is_none() {
-            *copy = Some(ColorTarget::new(gl, [width, height], Texels::RGBA8, Sampling::LINEAR_CLAMPED)?);
-        }
-        let made = copy.as_ref()?;
-        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, drawn_to);
-        gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(made.framebuffer));
-        gl.blit_framebuffer(x, y, x + width, y + height, 0, 0, width, height, glow::COLOR_BUFFER_BIT, glow::NEAREST);
-        gl.bind_framebuffer(glow::FRAMEBUFFER, drawn_to);
-        Some(made.texture)
     }
 }
 
@@ -4859,26 +4794,6 @@ impl RenderCore {
             }
         }
     }
-}
-
-pub(in crate::app::model_preview) fn model_draw_range(
-    index_start: u32,
-    index_count: u32,
-    total_indices: usize,
-) -> Option<(i32, i32)> {
-    let start = index_start as usize;
-    let available = total_indices.checked_sub(start)?;
-    let count = (index_count as usize).min(available);
-    let count = count - count % 3;
-    if count == 0 || count > i32::MAX as usize {
-        return None;
-    }
-    let byte_offset = start.checked_mul(std::mem::size_of::<u32>())?;
-    Some((i32::try_from(byte_offset).ok()?, count as i32))
-}
-
-pub(super) fn slice_bytes<T>(slice: &[T]) -> &[u8] {
-    unsafe { std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), std::mem::size_of_val(slice)) }
 }
 
 #[cfg(test)]

@@ -7,7 +7,8 @@ use eframe::glow::{self, HasContext};
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use crate::app::model_preview::common::image::H3Sampler;
 use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::pipeline::{HALF_LENS, screen_program};
+use super::super::gen3::pipeline::HALF_LENS;
+use crate::app::model_preview::gl::screen::screen_program;
 use crate::app::model_preview::gl::texture::upload_h2_image_linear;
 use super::lighting::{
     REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_composite_gamma, reach_noise_offset, reach_noise_params,

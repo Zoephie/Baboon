@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use super::super::gen3::shaders::{H3Pass, H3Value, H3Values};
 use super::super::h4::materials::H4EffectMaterial;
 use super::super::renderer::*;
+use super::super::gl::buffer::*;
 use super::super::*;
 use super::super::gl::program::Linked;
 use super::super::common::image::H2Image;

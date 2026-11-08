@@ -14,7 +14,7 @@ use super::super::gl::pass_state::PassState;
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::pipeline::screen_program;
+use crate::app::model_preview::gl::screen::screen_program;
 
 /// What a chain runs on: a camera fx's bloom fields.
 #[derive(Debug, Clone, Copy, PartialEq)]

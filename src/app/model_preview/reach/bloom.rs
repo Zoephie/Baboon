@@ -9,7 +9,7 @@ use super::super::gl::chain::ScreenChain;
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::pipeline::screen_program;
+use crate::app::model_preview::gl::screen::screen_program;
 
 /// `globals\defaults\default.camera_fx_settings`, which every bloom parameter
 /// falls through to with no level: `bloom_highlight`, `bloom_inherent`,

@@ -7,6 +7,10 @@ use eframe::glow::{self, HasContext as _};
 
 use super::super::renderer::*;
 
+use super::super::gl::buffer::*;
+
+use super::super::gl::target::copy_frame;
+
 
 use super::super::common::sprite_gl::*;
 

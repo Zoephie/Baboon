@@ -8,7 +8,7 @@ use eframe::glow::{self, HasContext};
 use super::super::gen3::render::Gen3Batch;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::super::gen3::shadow::shadow_casters;
-use super::super::gen3::pipeline::screen_program;
+use crate::app::model_preview::gl::screen::screen_program;
 use super::super::renderer::{ModelGpuFrame, RenderCore};
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
