@@ -9,7 +9,7 @@ use blam_tags::TagFunction;
 
 use super::super::common::named_function::tag_function_at;
 use super::super::gen3::shaders::H3Pass;
-use super::lighting::REACH_DARK_MULTIPLIER;
+use super::composite::REACH_DARK_MULTIPLIER;
 
 /// `active camo[0]`'s third person curves.
 #[derive(Debug)]

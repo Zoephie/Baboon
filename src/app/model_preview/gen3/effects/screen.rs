@@ -13,7 +13,7 @@ use super::super::super::functions::FunctionValues;
 use super::super::super::common::named_function::tag_function_at;
 use super::super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
 use super::super::super::*;
-use super::super::super::reach::lighting::REACH_SCREEN_NOISE_BITMAP;
+use super::super::super::reach::composite::REACH_SCREEN_NOISE_BITMAP;
 use crate::core::h2_pixel_shader::SamplerKind;
 
 /// `build_saturation_matrix`'s weights.

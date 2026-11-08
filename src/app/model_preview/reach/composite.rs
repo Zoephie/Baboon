@@ -10,9 +10,6 @@ use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
 use crate::app::model_preview::gl::screen::screen_program;
 use crate::app::model_preview::gl::texture::upload_h2_image_linear;
-use super::lighting::{
-    REACH_COMPOSITE_FRAGMENT, REACH_DARK_MULTIPLIER, reach_composite_gamma, reach_noise_offset, reach_noise_params,
-};
 use super::render::ReachGame;
 
 impl ReachGame {
@@ -80,5 +77,106 @@ impl ReachGame {
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.enable(glow::DEPTH_TEST);
         }
+    }
+}
+
+/// `final_composite_base`'s factor on the lit target and on the bloom.
+pub(crate) const REACH_DARK_MULTIPLIER: f32 = 8.0;
+
+/// `rasterizer_globals`' `default bitmaps` element the final composite's
+/// noise reads: `monochrome noise for screen effect` (its element label).
+pub(crate) const REACH_SCREEN_NOISE_BITMAP: usize = 15;
+
+/// `postprocess_player_view`'s `gamma` constant's `.z` (MCC
+/// `sub_1408428C0`): half the screen effects' gamma, which the composite
+/// raises the light to (`convert_to_gamma2_and_apply_color_adjustments`).
+pub(in crate::app::model_preview) fn reach_composite_gamma(gamma: f32) -> f32 {
+    gamma * 0.5
+}
+
+/// `noise_params` (MCC `sub_1408428C0` into `sub_140841DE0`): from the area
+/// screen effects' bright and dark noise, `(2·bright, dark, 1 − bright, 0)`.
+/// No noise leaves the picture as it was.
+pub(in crate::app::model_preview) fn reach_noise_params(bright: f32, dark: f32) -> [f32; 4] {
+    [bright + bright, dark, 1.0 - bright, 0.0]
+}
+
+/// The noise's offset for a frame (MCC `sub_1408428C0`): a half texel step
+/// that turns over every other frame, plus `real_random`'s two draws
+/// (`random`, each in [0, 1)), halved.
+pub(in crate::app::model_preview) fn reach_noise_offset(frame: u32, random: [f32; 2]) -> [f32; 2] {
+    let step = |frame: u32| (frame & 2) as f32 * 0.5;
+    [(step(frame) + random[0]) * 0.5, (step(frame.wrapping_add(1)) + random[1]) * 0.5]
+}
+
+/// `final_composite`, as MCC runs it: the lit target and bloom brought back
+/// up, `pow(x, gamma.z)` (0.5 at the default gamma, `convert_output_gamma2`),
+/// the colour matrix, then `apply_noise`. The tone curve's call is commented
+/// out in the source.
+pub(in crate::app::model_preview) const REACH_COMPOSITE_FRAGMENT: &str = "#version 410 core
+uniform sampler2D accumulation;
+uniform sampler2D bloom;
+uniform sampler2D scene_depth;
+uniform sampler2D noise;
+uniform mat4 hue_saturation;
+uniform float dark_multiplier;
+uniform float view_scale;
+uniform float gamma;
+uniform vec4 noise_params;
+uniform vec2 noise_offset;
+out vec4 color;
+void main() {
+    vec2 place = gl_FragCoord.xy / vec2(textureSize(accumulation, 0));
+    place = (place - 0.5) * view_scale + 0.5;
+    vec4 accumulated = texture(accumulation, place);
+    if (place.x < 0.0 || place.x > 1.0 || place.y < 0.0 || place.y > 1.0) {
+        accumulated = vec4(0.0);
+    }
+    vec3 combined = (accumulated.rgb + texture(bloom, place).rgb) * dark_multiplier;
+    combined = pow(max(combined, vec3(0.0)), vec3(gamma));
+    color.rgb = clamp((vec4(combined, 1.0) * hue_saturation).rgb, 0.0, 1.0);
+    // `apply_noise`: the map tiled a texel a pixel (its 256 square in the
+    // game's), point sampled, at this frame's offset.
+    float shade = texture(noise, gl_FragCoord.xy / vec2(textureSize(noise, 0)) + noise_offset).z;
+    vec2 noise = shade * noise_params.xy + noise_params.zw;
+    color.rgb = color.rgb * noise.x + noise.y;
+    // Reach's lit target keeps its anti-aliasing blur in alpha, not cover:
+    // what the object drew covers what lies behind it.
+    bool drawn = texture(scene_depth, place).r < 1.0;
+    color.a = drawn ? 1.0 : accumulated.a;
+}
+";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `gamma.z` is half the screen effects' gamma: 0.5, the square root, at rest.
+    #[test]
+    fn reachs_composite_raises_to_half_the_gamma() {
+        assert_eq!(reach_composite_gamma(1.0), 0.5);
+        assert_eq!(reach_composite_gamma(3.0), 1.5);
+    }
+
+    /// `apply_noise`'s `noise_params`: none leaves the colour alone; bright
+    /// scales about 1, dark only adds.
+    #[test]
+    fn reachs_noise_scales_by_bright_and_adds_dark() {
+        assert_eq!(reach_noise_params(0.0, 0.0), [0.0, 0.0, 1.0, 0.0]);
+        let [scale, add, base, _] = reach_noise_params(0.25, 0.1);
+        let apply = |noise: f32| (noise * scale + base, noise * add);
+        assert_eq!(apply(0.0), (0.75, 0.0));
+        assert_eq!(apply(1.0), (1.25, 0.1));
+    }
+
+    /// The offset steps half a texel every other frame, each axis a frame
+    /// apart, plus half of each random draw.
+    #[test]
+    fn reachs_noise_offset_steps_by_frame_and_random() {
+        assert_eq!(reach_noise_offset(0, [0.0, 0.0]), [0.0, 0.0]);
+        assert_eq!(reach_noise_offset(1, [0.0, 0.0]), [0.0, 0.5]);
+        assert_eq!(reach_noise_offset(2, [0.0, 0.0]), [0.5, 0.5]);
+        assert_eq!(reach_noise_offset(3, [0.0, 0.0]), [0.5, 0.0]);
+        assert_eq!(reach_noise_offset(0, [0.5, 0.25]), [0.25, 0.125]);
     }
 }

@@ -212,6 +212,6 @@ mod tests {
     #[test]
     fn the_flare_and_reach_composite_programs_compile_under_glslang() {
         assert_compiles_under_glslang("flare", &[("vert", CE_FLARE_VERTEX), ("frag", CE_FLARE_FRAGMENT)]);
-        assert_compiles_under_glslang("reach_composite", &[("frag", super::reach::lighting::REACH_COMPOSITE_FRAGMENT)]);
+        assert_compiles_under_glslang("reach_composite", &[("frag", super::reach::composite::REACH_COMPOSITE_FRAGMENT)]);
     }
 }
