@@ -18,26 +18,17 @@ impl H4Game {
     fn frame_lights_of(frame: &ModelGpuFrame) -> Vec<H4LitLight> {
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let eye = h2_eye_position(&frame.camera);
-        let before = frame.preview.reach.lights.len() + frame.preview.reach.cheap_lights.len();
-        let shown = |index: usize| {
-            frame
-                .reach_lights_shown
-                .get(before + index)
-                .copied()
-                .unwrap_or(true)
-        };
         let mut lit = Vec::new();
         for (index, light) in frame.preview.h4.lights.iter().enumerate() {
-            if !shown(index) {
+            if !frame.shown.is(super::super::common::features::paths::H4_LIGHTS, index) {
                 continue;
             }
             let values = frame.function_values_of_object(light.object);
             let colors = frame.change_colors_of_object(light.object);
             lit.extend(light.lit(values, &colors, bones, frame.time, eye));
         }
-        let lights = frame.preview.h4.lights.len();
         for (index, light) in frame.preview.h4.cheap_lights.iter().enumerate() {
-            if !shown(lights + index) {
+            if !frame.shown.is(super::super::common::features::paths::H4_CHEAP_LIGHTS, index) {
                 continue;
             }
             let values = frame.function_values_of_object(light.object);

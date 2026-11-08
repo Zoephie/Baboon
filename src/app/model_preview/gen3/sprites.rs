@@ -231,7 +231,7 @@ impl SpritePass<'_> {
         unsafe {
             match sprite {
                 SortedSprite::Tracer(index) => {
-                    if frame.h4_tracers_shown.get(index).copied().unwrap_or(true) {
+                    if frame.shown.is(super::super::common::features::paths::H4_TRACERS, index) {
                         game.draw_own_sprite(&mut self.sprites(uploaded), Gen3Sprite::Tracer(index));
                     }
                 }
@@ -250,7 +250,7 @@ impl SpritePass<'_> {
     unsafe fn draw_volume(&self, game: &mut dyn Gen3Game, uploaded: &mut ModelGpuSlot, index: usize) {
         let (gl, frame, flares, camera) = (self.gl, self.frame, self.flares, self.camera);
         let at = &frame.preview.gen3.light_volumes[index];
-        if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
+        if !frame.shown.is(super::super::common::features::paths::GEN3_LIGHT_VOLUMES, index) {
             return;
         }
         unsafe {
@@ -302,7 +302,7 @@ impl SpritePass<'_> {
         distortion_copy: &mut Option<super::super::gl::target::ColorTarget>,
         index: usize,
     ) {
-        if !self.frame.h3_systems_shown.get(index).copied().unwrap_or(true) {
+        if !self.frame.shown.is(super::super::common::features::paths::PARTICLES, index) {
             return;
         }
         unsafe {
@@ -321,7 +321,7 @@ impl SpritePass<'_> {
     unsafe fn draw_strip(&self, uploaded: &mut ModelGpuSlot, index: usize) {
         let (frame, camera, stops) = (self.frame, self.camera, self.stops);
         let strip = &frame.preview.gen3.strips[index];
-        if !frame.h3_strips_shown.get(index).copied().unwrap_or(true) {
+        if !frame.shown.is(super::super::common::features::paths::GEN3_STRIPS, index) {
             return;
         }
         let Some(particles) = self.particle_gl else {
@@ -387,7 +387,7 @@ impl SpritePass<'_> {
         let (gl, frame, flares, camera, bones, view) = (self.gl, self.frame, self.flares, self.camera, self.bones, &self.view);
         let pixels = |center: [f32; 3], half: [f32; 2]| ce_flare_pixels(camera, viewport, center, half);
         for (index, at) in frame.preview.gen3.flares.iter().enumerate() {
-            if !frame.h3_flares_shown.get(index).copied().unwrap_or(true) {
+            if !frame.shown.is(super::super::common::features::paths::GEN3_FLARES, index) {
                 continue;
             }
             let values = frame.function_values_of_object(at.object);

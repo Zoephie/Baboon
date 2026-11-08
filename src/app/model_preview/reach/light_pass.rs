@@ -54,10 +54,8 @@ impl ReachGame {
         let (frame, slot) = (cx.frame, cx.slot);
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let mut lit = Vec::new();
-        let lights = frame.preview.reach.lights.len();
-        let shown = |index: usize| frame.reach_lights_shown.get(index).copied().unwrap_or(true);
         for (index, light) in frame.preview.reach.cheap_lights.iter().enumerate() {
-            if !shown(lights + index) {
+            if !frame.shown.is(super::super::common::features::paths::REACH_CHEAP_LIGHTS, index) {
                 continue;
             }
             let values = frame.function_values_of_object(light.object);
@@ -65,7 +63,7 @@ impl ReachGame {
             lit.extend(light.lit(values, &colors, bones, frame.time));
         }
         for (index, light) in frame.preview.reach.lights.iter().enumerate() {
-            if !shown(index) {
+            if !frame.shown.is(super::super::common::features::paths::REACH_LIGHTS, index) {
                 continue;
             }
             let values = frame.function_values_of_object(light.object);

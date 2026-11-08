@@ -88,7 +88,7 @@ impl RenderCore {
                 .collect();
             sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
             for (_, index) in sorted {
-                if !frame.h3_systems_shown.get(index).copied().unwrap_or(true) {
+                if !frame.shown.is(super::super::common::features::paths::PARTICLES, index) {
                     continue;
                 }
                 let Some(particles) = particle_gl else {

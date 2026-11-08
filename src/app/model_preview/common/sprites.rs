@@ -130,7 +130,7 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
     }
     if !frame.preview.gen3.cheap_emitters.is_empty() {
         let values = |object: u8| frame.function_values_of_object(object).cloned();
-        let (emitters, shown) = (&frame.preview.gen3.cheap_emitters, &frame.reach_cheap_shown);
+        let (emitters, shown) = (&frame.preview.gen3.cheap_emitters, frame.shown.list(super::features::paths::GEN3_CHEAP_EMITTERS));
         simulations.reach_cheap.advance(emitters, shown, values, &mut simulations.effect_onsets, bones, view.eye, frame.time);
     }
     if !frame.preview.gen3.strips.is_empty() {

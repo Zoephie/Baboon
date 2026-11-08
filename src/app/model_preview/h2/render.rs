@@ -8,7 +8,8 @@ use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
 use super::super::gen3::pipeline::h3_set_blend;
 use super::super::gen3::shaders::H3Blend;
-use super::super::renderer::{FrameCx, ce_flare_occlusion, draw_flare_sprites, is_shown};
+use super::super::common::features::paths;
+use super::super::renderer::{FrameCx, ce_flare_occlusion, draw_flare_sprites};
 use super::slot::H2Slot;
 
 /// Halo 2's own part of the dx9 shading: its cloth, its gel lights' maps,
@@ -49,7 +50,7 @@ impl Dx9Game for H2Game {
         unsafe {
             let volumes = frame.preview.h2.light_volumes.iter().zip(&h2.textures.light_volumes);
             for (index, (at, textures)) in volumes.enumerate() {
-                if !is_shown(&frame.h2_shown.volumes, index) {
+                if !frame.shown.is(paths::H2_LIGHT_VOLUMES, index) {
                     continue;
                 }
                 let values = frame.function_values_of_object(at.object);
@@ -68,7 +69,7 @@ impl Dx9Game for H2Game {
             }
             let liquids = frame.preview.h2.liquids.iter().zip(&h2.textures.liquids);
             for (index, (at, textures)) in liquids.enumerate() {
-                if !is_shown(&frame.h2_shown.liquids, index) {
+                if !frame.shown.is(paths::H2_LIQUIDS, index) {
                     continue;
                 }
                 let values = frame.function_values_of_object(at.object);
@@ -85,7 +86,7 @@ impl Dx9Game for H2Game {
             }
             let contrails = frame.preview.h2.contrails.iter().zip(&h2.textures.contrails);
             for (index, (at, texture)) in contrails.enumerate() {
-                if !is_shown(&frame.h2_shown.contrails, index) {
+                if !frame.shown.is(paths::H2_CONTRAILS, index) {
                     continue;
                 }
                 let Some(texture) = texture else {
@@ -106,7 +107,7 @@ impl Dx9Game for H2Game {
         let h2 = self.slots.of(slot, uploads);
         unsafe {
             for (index, at) in frame.preview.h2.flares.iter().enumerate() {
-                if !frame.h2_flares_shown.get(index).copied().unwrap_or(true) {
+                if !frame.shown.is(paths::H2_FLARES, index) {
                     continue;
                 }
                 let occlusion = match at.occlusion_patches(bones, view) {

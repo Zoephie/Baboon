@@ -103,7 +103,7 @@ impl RenderCore {
                 // `render_lights`: real lights draw whichever rig stands behind them.
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 for (index, point) in frame.preview.h2.point_lights.iter().enumerate() {
-                    if !is_shown(&frame.h2_shown.points, index) {
+                    if !frame.shown.is(super::super::common::features::paths::H2_POINT_LIGHTS, index) {
                         continue;
                     }
                     let values = frame.function_values_of_object(point.object);
@@ -125,7 +125,7 @@ impl RenderCore {
                 let gels = game.gel_maps(&mut FrameCx { gl, frame, core: self, slot });
                 let mut masked = false;
                 for (index, gel) in frame.preview.h2.gel_lights.iter().enumerate() {
-                    if !is_shown(&frame.h2_shown.gels, index) {
+                    if !frame.shown.is(super::super::common::features::paths::H2_GEL_LIGHTS, index) {
                         continue;
                     }
                     let values = frame.function_values_of_object(gel.object);

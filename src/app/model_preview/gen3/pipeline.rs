@@ -1358,7 +1358,7 @@ impl Gen3State {
             gl.blend_func(glow::ONE, glow::ONE);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             for (index, light) in frame.preview.h3.lights.iter().enumerate() {
-                if !frame.h3_lights_shown.get(index).copied().unwrap_or(true) {
+                if !frame.shown.is(super::super::common::features::paths::H3_LIGHTS, index) {
                     continue;
                 }
                 let values = frame.function_values_of_object(light.object);

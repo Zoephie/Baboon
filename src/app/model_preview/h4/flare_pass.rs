@@ -104,13 +104,7 @@ impl H4Game {
                 project: &projector,
             };
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-            let shown = |index: usize| {
-                frame
-                    .h3_flares_shown
-                    .get(frame.preview.gen3.flares.len() + index)
-                    .copied()
-                    .unwrap_or(true)
-            };
+            let shown = |index: usize| frame.shown.is(super::super::common::features::paths::H4_FLARES, index);
             // The patches: depth tested, nothing written.
             gl.use_program(Some(flares.program));
             gl.bind_vertex_array(Some(flares.vertex_array));

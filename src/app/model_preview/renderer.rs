@@ -22,7 +22,6 @@ use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::app::model_preview::common::attached::Attached;
 
 const ARMATURE_COLOR: Color32 = Color32::from_rgb(255, 204, 0);
 const MARKER_TOOLTIP_COLOR: Color32 = Color32::from_rgb(120, 235, 255);
@@ -310,16 +309,7 @@ fn build_frame(
         function_values,
         attached_values: attached_values(data, time),
         attached_colors: attached_colors(data),
-        h3_flares_shown: h3_flares_shown(&data.preview, state),
-        h3_lights_shown: h3_lights_shown(&data.preview, state),
-        reach_lights_shown: reach_lights_shown(&data.preview, state),
-        h3_volumes_shown: h3_volumes_shown(&data.preview, state),
-        h4_tracers_shown: h4_tracers_shown(&data.preview, state),
-        h3_systems_shown: h3_systems_shown(&data.preview, state),
-        h3_strips_shown: h3_strips_shown(&data.preview, state),
-        reach_cheap_shown: reach_cheap_shown(&data.preview, state),
-        h2_flares_shown: h2_flares_shown(&data.preview, state),
-        h2_shown: H2Shown::of(&data.preview, state),
+        shown: common::features::FeatureShown::of(&data.preview, &state.region_selections),
         ce_points: Vec::new(),
         ce_plays: ce_event_plays(data, &state.ce_event_counts, state.ce_event_scales),
         change_colors: h2_change_colors_for(
@@ -394,96 +384,6 @@ fn visible_instances(preview: &RenderModelPreview, state: &ModelPreviewState) ->
         instances.masks.get(&(region.clone(), selection.permutation.clone()))
     });
     chosen.copied().unwrap_or(0) & allowed.fold(0, |mask, permutation| mask | permutation)
-}
-
-/// Which of the preview's Halo 3 flares have a marker under what is selected.
-fn h3_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    let h4 = preview.h4.flares.iter().map(|at| at.only_under().is_none_or(shown));
-    preview.gen3.flares.iter().map(|at| at.only_under().is_none_or(shown)).chain(h4).collect()
-}
-
-/// The same of Reach's lights and then its cheap lights, then Halo 4's.
-pub(super) fn reach_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    let lights = preview.reach.lights.iter().map(|light| light.only_under().is_none_or(shown));
-    let cheap = preview.reach.cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
-    let h4 = preview.h4.lights.iter().map(|light| light.only_under().is_none_or(shown));
-    let h4_cheap = preview.h4.cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
-    lights.chain(cheap).chain(h4).chain(h4_cheap).collect()
-}
-
-/// The same of Halo 3's lights.
-fn h3_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    preview.h3.lights.iter().map(|light| light.only_under().is_none_or(shown)).collect()
-}
-
-/// The same of Halo 3's light volumes.
-fn h3_volumes_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    preview.gen3.light_volumes.iter().map(|at| at.only_under().is_none_or(shown)).collect()
-}
-
-/// The same of Halo 4's tracers.
-fn h4_tracers_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    preview.h4.tracers.iter().map(|at| at.only_under().is_none_or(shown)).collect()
-}
-
-/// The same of Reach's cheap particle emitters.
-fn reach_cheap_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    preview.gen3.cheap_emitters.iter().map(|at| at.only_under().is_none_or(shown)).collect()
-}
-
-/// The same of Halo 3's beams and contrails.
-fn h3_strips_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    preview.gen3.strips.iter().map(|at| at.only_under().is_none_or(shown)).collect()
-}
-
-/// The same of Halo 3's particle systems.
-fn h3_systems_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    preview.particles.iter().map(|at| at.only_under().is_none_or(shown)).collect()
-}
-
-/// The same of Halo 2's.
-fn h2_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
-    let shown = |only| marker_active(only, &state.region_selections);
-    preview.h2.flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
-}
-
-/// Which of Halo 2's other lights and effects have a marker under what is
-/// selected: `object_get_markers_by_string_id` finds only those of the
-/// permutations the object shows, so what hangs on the others is not made.
-#[derive(Debug, Clone, Default)]
-pub(super) struct H2Shown {
-    pub(in crate::app::model_preview) points: Vec<bool>,
-    pub(in crate::app::model_preview) gels: Vec<bool>,
-    pub(in crate::app::model_preview) volumes: Vec<bool>,
-    pub(in crate::app::model_preview) contrails: Vec<bool>,
-    pub(in crate::app::model_preview) liquids: Vec<bool>,
-    antennas: Vec<bool>,
-}
-
-impl H2Shown {
-    pub(super) fn of(preview: &RenderModelPreview, state: &ModelPreviewState) -> Self {
-        let shown = |only: Option<&(String, String)>| only.is_none_or(|only| marker_active(only, &state.region_selections));
-        Self {
-            points: preview.h2.point_lights.iter().map(|at| shown(at.only_under())).collect(),
-            gels: preview.h2.gel_lights.iter().map(|at| shown(at.only_under())).collect(),
-            volumes: preview.h2.light_volumes.iter().map(|at| shown(at.only_under())).collect(),
-            contrails: preview.h2.contrails.iter().map(|at| shown(at.only_under())).collect(),
-            liquids: preview.h2.liquids.iter().map(|at| shown(at.only_under())).collect(),
-            antennas: preview.antennas.iter().map(|at| shown(at.only_under())).collect(),
-        }
-    }
-}
-
-pub(in crate::app::model_preview) fn is_shown(shown: &[bool], index: usize) -> bool {
-    shown.get(index).copied().unwrap_or(true)
 }
 
 pub(in crate::app::model_preview) fn marker_active(only: &(String, String), selections: &HashMap<String, ModelRegionSelection>) -> bool {
@@ -957,19 +857,8 @@ pub(super) struct ModelGpuFrame {
     pub(super) attached_values: Vec<(u8, functions::FunctionValues)>,
     /// Each attached Halo 2 or Halo 3 object's own change colors, by owner.
     pub(super) attached_colors: Vec<(u8, [[f32; 3]; 4])>,
-    pub(super) h3_flares_shown: Vec<bool>,
-    pub(super) h3_lights_shown: Vec<bool>,
-    /// Reach's lights and then its cheap lights, as `h3_lights_shown`.
-    pub(super) reach_lights_shown: Vec<bool>,
-    pub(super) h3_volumes_shown: Vec<bool>,
-    pub(super) h4_tracers_shown: Vec<bool>,
-    pub(super) h3_systems_shown: Vec<bool>,
-    pub(super) h3_strips_shown: Vec<bool>,
-    pub(super) reach_cheap_shown: Vec<bool>,
-    pub(super) h2_flares_shown: Vec<bool>,
-    /// The rest of Halo 2's lights and effects, by whether their marker is
-    /// under what is selected.
-    pub(super) h2_shown: H2Shown,
+    /// Which of each feature show under the chosen regions.
+    pub(super) shown: common::features::FeatureShown,
     /// Each object's point lights this frame, in step with `object_states`.
     pub(super) ce_points: Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>,
     /// The panel's plays of Halo CE's event effects.
@@ -5343,7 +5232,8 @@ mod tests {
             let mut state = ModelPreviewState::default();
             let selection = ModelRegionSelection { enabled: true, permutation: permutation.to_owned() };
             state.region_selections.insert("flair_backpack".to_owned(), selection);
-            H2Shown::of(&data.preview, &state).antennas
+            let shown = common::features::FeatureShown::of(&data.preview, &state.region_selections);
+            shown.list(common::features::paths::ANTENNAS).to_vec()
         };
         assert_eq!(shown("trooper_radio"), [true]);
         assert_eq!(shown("trooper"), [false]);
@@ -6723,7 +6613,7 @@ pub(in crate::app::model_preview) fn h2_antennas(
         .iter()
         .zip(textures)
         .enumerate()
-        .filter(|(index, _)| is_shown(&frame.h2_shown.antennas, *index))
+        .filter(|(index, _)| frame.shown.is(common::features::paths::ANTENNAS, *index))
         .filter_map(|(index, (antenna, texture))| {
             let tip = tips.get(index).copied().flatten();
             Some((antenna.quads(bones, view, tip), (*texture)?, antenna.is_reach()))

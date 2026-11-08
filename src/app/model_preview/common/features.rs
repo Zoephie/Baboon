@@ -133,6 +133,74 @@ impl<T: Feature> FeatureList for Option<T> {
     }
 }
 
+/// Which of each feature show under the chosen regions, for one frame, by the
+/// feature's path: `object_get_markers_by_string_id` finds only the markers of
+/// the permutations the object shows, so what hangs on the others is not made.
+#[derive(Debug, Clone, Default)]
+pub(in crate::app::model_preview) struct FeatureShown {
+    lists: Vec<(&'static str, Vec<bool>)>,
+}
+
+impl FeatureShown {
+    /// Each feature of `preview`, under `selections`.
+    pub(in crate::app::model_preview) fn of(
+        preview: &RenderModelPreview,
+        selections: &HashMap<String, ModelRegionSelection>,
+    ) -> Self {
+        let mut lists = Vec::new();
+        preview.each_feature(&mut |path, list| lists.push((path, list.shown(selections))));
+        Self { lists }
+    }
+
+    /// Whether each of the feature at `path` shows; empty for a path it
+    /// doesn't have.
+    pub(in crate::app::model_preview) fn list(&self, path: &str) -> &[bool] {
+        self.lists.iter().find(|(at, _)| *at == path).map_or(&[], |(_, list)| list.as_slice())
+    }
+
+    /// Whether the `index`th of the feature at `path` shows: true for one it
+    /// doesn't know, as nothing hides it.
+    pub(in crate::app::model_preview) fn is(&self, path: &str, index: usize) -> bool {
+        self.list(path).get(index).copied().unwrap_or(true)
+    }
+}
+
+/// The paths the drawing code asks [`FeatureShown`] about, one constant each,
+/// so no call names a path by hand.
+pub(in crate::app::model_preview) mod paths {
+    /// Each constant, and [`ALL`] of them, from one list.
+    macro_rules! paths {
+        ($($(#[$doc:meta])* $name:ident => $path:literal),* $(,)?) => {
+            $($(#[$doc])* pub(in crate::app::model_preview) const $name: &str = $path;)*
+            /// Every path above.
+            #[cfg(test)]
+            pub(in crate::app::model_preview) const ALL: &[&str] = &[$($name),*];
+        };
+    }
+
+    paths! {
+        PARTICLES => "particles",
+        ANTENNAS => "antennas",
+        H2_FLARES => "h2.flares",
+        H2_POINT_LIGHTS => "h2.point_lights",
+        H2_GEL_LIGHTS => "h2.gel_lights",
+        H2_LIGHT_VOLUMES => "h2.light_volumes",
+        H2_CONTRAILS => "h2.contrails",
+        H2_LIQUIDS => "h2.liquids",
+        GEN3_CHEAP_EMITTERS => "gen3.cheap_emitters",
+        GEN3_FLARES => "gen3.flares",
+        GEN3_LIGHT_VOLUMES => "gen3.light_volumes",
+        GEN3_STRIPS => "gen3.strips",
+        H3_LIGHTS => "h3.lights",
+        REACH_LIGHTS => "reach.lights",
+        REACH_CHEAP_LIGHTS => "reach.cheap_lights",
+        H4_LIGHTS => "h4.lights",
+        H4_CHEAP_LIGHTS => "h4.cheap_lights",
+        H4_FLARES => "h4.flares",
+        H4_TRACERS => "h4.tracers",
+    }
+}
+
 /// A group of a preview's features: each field that is one, by its path as
 /// the load gate names it after `preview.`.
 pub(in crate::app::model_preview) trait Features {
@@ -586,27 +654,217 @@ mod tests {
         }
     }
 
+    /// The region selections the shown lists are checked under: none chosen,
+    /// then each region turned off, then each region on each of its
+    /// permutations.
+    fn selections_of(preview: &RenderModelPreview) -> Vec<HashMap<String, ModelRegionSelection>> {
+        let mut all = vec![HashMap::new()];
+        for region in &preview.regions {
+            let off = ModelRegionSelection { enabled: false, permutation: String::new() };
+            all.push(HashMap::from([(region.name.clone(), off)]));
+            for permutation in &region.permutations {
+                let on = ModelRegionSelection { enabled: true, permutation: permutation.clone() };
+                all.push(HashMap::from([(region.name.clone(), on)]));
+            }
+        }
+        all
+    }
+
     #[test]
-    fn the_lists_show_under_the_regions_as_todays_shown_lists_do() {
-        use crate::app::model_preview::renderer::H2Shown;
+    fn the_shown_lists_answer_as_the_frame_lists_did() {
         use crate::app::model_preview::state::ModelPreviewState;
         let loaded = gate_objects();
         if loaded.is_empty() {
             eprintln!("skipping: no kit variables set");
             return;
         }
-        let state = ModelPreviewState::default();
+        let mut limited = 0;
         for (name, data) in &loaded {
             let preview = &data.preview;
-            let today = H2Shown::of(preview, &state);
-            let selections = &state.region_selections;
-            assert_eq!(preview.h2.point_lights.shown(selections), today.points, "{name}: points");
-            assert_eq!(preview.h2.gel_lights.shown(selections), today.gels, "{name}: gels");
-            assert_eq!(preview.h2.light_volumes.shown(selections), today.volumes, "{name}: volumes");
-            assert_eq!(preview.h2.contrails.shown(selections), today.contrails, "{name}: contrails");
-            assert_eq!(preview.h2.liquids.shown(selections), today.liquids, "{name}: liquids");
+            let mut visit = |only: Option<&(String, String)>| limited += usize::from(only.is_some());
+            preview.gen3.flares.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h4.flares.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.reach.lights.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.reach.cheap_lights.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h4.lights.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h4.cheap_lights.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h3.lights.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.gen3.light_volumes.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h4.tracers.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.particles.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.gen3.strips.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.gen3.cheap_emitters.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h2.flares.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h2.point_lights.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h2.gel_lights.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h2.light_volumes.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h2.contrails.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.h2.liquids.iter().for_each(|at| visit(Feature::only_under(at)));
+            preview.antennas.iter().for_each(|at| visit(Feature::only_under(at)));
+            for selections in selections_of(preview) {
+                let state = ModelPreviewState { region_selections: selections.clone(), ..Default::default() };
+                let shown = FeatureShown::of(preview, &selections);
+                let check = |path: &str, before: &[bool]| {
+                    assert_eq!(shown.list(path), before, "{name}: {path} under {:?}", selections.keys().collect::<Vec<_>>());
+                    for (index, was) in before.iter().enumerate() {
+                        assert_eq!(shown.is(path, index), *was, "{name}: {path} {index}");
+                    }
+                    assert!(shown.is(path, before.len()), "{name}: {path} past the end shows");
+                };
+                let flares = h3_flares_shown_as_it_was(preview, &state);
+                let gen3_flares = preview.gen3.flares.len();
+                check(paths::GEN3_FLARES, &flares[..gen3_flares]);
+                check(paths::H4_FLARES, &flares[gen3_flares..]);
+                let lights = reach_lights_shown_as_it_was(preview, &state);
+                let reach = preview.reach.lights.len();
+                let reach_cheap = reach + preview.reach.cheap_lights.len();
+                let h4 = reach_cheap + preview.h4.lights.len();
+                check(paths::REACH_LIGHTS, &lights[..reach]);
+                check(paths::REACH_CHEAP_LIGHTS, &lights[reach..reach_cheap]);
+                check(paths::H4_LIGHTS, &lights[reach_cheap..h4]);
+                check(paths::H4_CHEAP_LIGHTS, &lights[h4..]);
+                check(paths::H3_LIGHTS, &h3_lights_shown_as_it_was(preview, &state));
+                check(paths::GEN3_LIGHT_VOLUMES, &h3_volumes_shown_as_it_was(preview, &state));
+                check(paths::H4_TRACERS, &h4_tracers_shown_as_it_was(preview, &state));
+                check(paths::PARTICLES, &h3_systems_shown_as_it_was(preview, &state));
+                check(paths::GEN3_STRIPS, &h3_strips_shown_as_it_was(preview, &state));
+                check(paths::GEN3_CHEAP_EMITTERS, &reach_cheap_shown_as_it_was(preview, &state));
+                check(paths::H2_FLARES, &h2_flares_shown_as_it_was(preview, &state));
+                let h2 = H2ShownAsItWas::of(preview, &state);
+                check(paths::H2_POINT_LIGHTS, &h2.points);
+                check(paths::H2_GEL_LIGHTS, &h2.gels);
+                check(paths::H2_LIGHT_VOLUMES, &h2.volumes);
+                check(paths::H2_CONTRAILS, &h2.contrails);
+                check(paths::H2_LIQUIDS, &h2.liquids);
+                check(paths::ANTENNAS, &h2.antennas);
+            }
+        }
+        eprintln!("shown lists: {limited} items under a region, over {} objects", loaded.len());
+        assert!(limited > 0, "no item hangs under a region: the test would be vacuous");
+    }
+
+    #[test]
+    fn every_path_asked_about_is_a_feature_and_none_is_spelled_by_hand() {
+        let mut visited = Vec::new();
+        RenderModelPreview::default().each_feature(&mut |path, _| visited.push(path));
+        for path in paths::ALL {
+            assert!(visited.contains(path), "{path} is no feature");
+        }
+        // The drawing code reads the frame's `shown` only through the
+        // constants: no call of its `is` or `list` with a string literal.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/model_preview");
+        let mut stack = vec![root];
+        while let Some(folder) = stack.pop() {
+            for entry in std::fs::read_dir(&folder).expect("the source folder") {
+                let path = entry.expect("an entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    let text = std::fs::read_to_string(&path).expect("a source file");
+                    // Built in pieces, so this file's own text holds neither.
+                    for spelled in [concat!("shown", ".is(\""), concat!("shown", ".list(\"")] {
+                        assert!(!text.contains(spelled), "{}: a path spelled by hand", path.display());
+                    }
+                }
+            }
         }
     }
+
+    /// The frame's shown lists as they were before `FeatureShown`, kept as
+    /// the oracles it is checked against.
+    mod as_it_was {
+        use crate::app::model_preview::RenderModelPreview;
+        use crate::app::model_preview::common::attached::Attached;
+        use crate::app::model_preview::renderer::marker_active;
+        use crate::app::model_preview::state::ModelPreviewState;
+
+        /// Which of the preview's Halo 3 flares have a marker under what is selected.
+        pub(super) fn h3_flares_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            let h4 = preview.h4.flares.iter().map(|at| at.only_under().is_none_or(shown));
+            preview.gen3.flares.iter().map(|at| at.only_under().is_none_or(shown)).chain(h4).collect()
+        }
+
+        /// The same of Reach's lights and then its cheap lights, then Halo 4's.
+        pub(super) fn reach_lights_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            let lights = preview.reach.lights.iter().map(|light| light.only_under().is_none_or(shown));
+            let cheap = preview.reach.cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
+            let h4 = preview.h4.lights.iter().map(|light| light.only_under().is_none_or(shown));
+            let h4_cheap = preview.h4.cheap_lights.iter().map(|light| light.only_under().is_none_or(shown));
+            lights.chain(cheap).chain(h4).chain(h4_cheap).collect()
+        }
+
+        /// The same of Halo 3's lights.
+        pub(super) fn h3_lights_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            preview.h3.lights.iter().map(|light| light.only_under().is_none_or(shown)).collect()
+        }
+
+        /// The same of Halo 3's light volumes.
+        pub(super) fn h3_volumes_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            preview.gen3.light_volumes.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+        }
+
+        /// The same of Halo 4's tracers.
+        pub(super) fn h4_tracers_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            preview.h4.tracers.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+        }
+
+        /// The same of Reach's cheap particle emitters.
+        pub(super) fn reach_cheap_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            preview.gen3.cheap_emitters.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+        }
+
+        /// The same of Halo 3's beams and contrails.
+        pub(super) fn h3_strips_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            preview.gen3.strips.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+        }
+
+        /// The same of Halo 3's particle systems.
+        pub(super) fn h3_systems_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            preview.particles.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+        }
+
+        /// The same of Halo 2's.
+        pub(super) fn h2_flares_shown_as_it_was(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+            let shown = |only| marker_active(only, &state.region_selections);
+            preview.h2.flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+        }
+
+        /// Which of Halo 2's other lights and effects have a marker under what is
+        /// selected: `object_get_markers_by_string_id` finds only those of the
+        /// permutations the object shows, so what hangs on the others is not made.
+        pub(super) struct H2ShownAsItWas {
+            pub(super) points: Vec<bool>,
+            pub(super) gels: Vec<bool>,
+            pub(super) volumes: Vec<bool>,
+            pub(super) contrails: Vec<bool>,
+            pub(super) liquids: Vec<bool>,
+            pub(super) antennas: Vec<bool>,
+        }
+
+        impl H2ShownAsItWas {
+            pub(super) fn of(preview: &RenderModelPreview, state: &ModelPreviewState) -> Self {
+                let shown = |only: Option<&(String, String)>| only.is_none_or(|only| marker_active(only, &state.region_selections));
+                Self {
+                    points: preview.h2.point_lights.iter().map(|at| shown(at.only_under())).collect(),
+                    gels: preview.h2.gel_lights.iter().map(|at| shown(at.only_under())).collect(),
+                    volumes: preview.h2.light_volumes.iter().map(|at| shown(at.only_under())).collect(),
+                    contrails: preview.h2.contrails.iter().map(|at| shown(at.only_under())).collect(),
+                    liquids: preview.h2.liquids.iter().map(|at| shown(at.only_under())).collect(),
+                    antennas: preview.antennas.iter().map(|at| shown(at.only_under())).collect(),
+                }
+            }
+        }
+    }
+
+    use as_it_was::*;
 
     /// `has_effects` as it was before the feature lists, field by field, kept
     /// for one commit as the oracle the loop is checked against.
