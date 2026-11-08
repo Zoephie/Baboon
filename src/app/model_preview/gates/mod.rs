@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use super::load::kit_object_tests::kit_preview;
-use super::state::ModelPreviewData;
+use super::data::ModelPreviewData;
 use crate::core::game::GameId;
 
 mod field_lines;
