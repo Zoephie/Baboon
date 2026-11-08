@@ -1172,39 +1172,10 @@ pub(super) fn object_moves(
         })
 }
 
-/// Whether anything draws, lights or simulates outside the materials' passes.
+/// Whether anything draws, lights or simulates outside the materials' passes:
+/// any of the preview's features.
 pub(super) fn has_effects(preview: &RenderModelPreview) -> bool {
-    !(preview.ce.lights.is_empty()
-        && preview.ce.antennas.is_empty()
-        && preview.ce.effects.is_empty()
-        && preview.ce.contrails.is_empty()
-        && preview.ce.light_volumes.is_empty()
-        && preview.ce.lightning.is_empty()
-        && preview.ce.glows.is_empty()
-        && preview.ce.particle_systems.is_empty()
-        && preview.ce.flags.is_empty()
-        && preview.antennas.is_empty()
-        && preview.h2.flares.is_empty()
-        && preview.h2.point_lights.is_empty()
-        && preview.h2.gel_lights.is_empty()
-        && preview.h2.light_volumes.is_empty()
-        && preview.h2.contrails.is_empty()
-        && preview.h2.liquids.is_empty()
-        && preview.h3.lights.is_empty()
-        && preview.reach.lights.is_empty()
-        && preview.reach.cheap_lights.is_empty()
-        && preview.h4.lights.is_empty()
-        && preview.h4.cheap_lights.is_empty()
-        && preview.h4.flares.is_empty()
-        && preview.gen3.flares.is_empty()
-        && preview.gen3.light_volumes.is_empty()
-        && preview.h4.tracers.is_empty()
-        && preview.particles.is_empty()
-        && preview.gen3.cheap_emitters.is_empty()
-        && preview.gen3.strips.is_empty()
-        && preview.h3.leaves.is_empty()
-        && preview.cloth.is_empty()
-        && preview.gen3.screen_effects.is_empty())
+    preview.any_feature(|list| !list.is_empty())
 }
 
 fn h2_functions_move(

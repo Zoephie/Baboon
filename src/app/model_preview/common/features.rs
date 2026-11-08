@@ -342,7 +342,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::app::model_preview::renderer::{h2_shader_inputs, has_effects, object_moves};
+    use crate::app::model_preview::renderer::{h2_shader_inputs, object_moves};
     use crate::app::model_preview::{ModelPreviewData, functions::FunctionInputs};
 
     fn paths(group: &dyn Features) -> Vec<&'static str> {
@@ -426,7 +426,7 @@ mod tests {
         }
         for (name, data) in &loaded {
             let preview = &data.preview;
-            assert_eq!(preview.any_feature(|list| !list.is_empty()), has_effects(preview), "{name}: has_effects");
+            assert_eq!(preview.any_feature(|list| !list.is_empty()), has_effects_as_it_was(preview), "{name}: has_effects");
             let alone = features_only(data);
             let moves = object_moves(&alone, &FunctionInputs::default(), 0.0, None);
             assert_eq!(preview.any_feature(|list| list.moves()), moves, "{name}: object_moves");
@@ -459,5 +459,41 @@ mod tests {
             assert_eq!(preview.h2.contrails.shown(selections), today.contrails, "{name}: contrails");
             assert_eq!(preview.h2.liquids.shown(selections), today.liquids, "{name}: liquids");
         }
+    }
+
+    /// `has_effects` as it was before the feature lists, field by field, kept
+    /// for one commit as the oracle the loop is checked against.
+    fn has_effects_as_it_was(preview: &RenderModelPreview) -> bool {
+        !(preview.ce.lights.is_empty()
+            && preview.ce.antennas.is_empty()
+            && preview.ce.effects.is_empty()
+            && preview.ce.contrails.is_empty()
+            && preview.ce.light_volumes.is_empty()
+            && preview.ce.lightning.is_empty()
+            && preview.ce.glows.is_empty()
+            && preview.ce.particle_systems.is_empty()
+            && preview.ce.flags.is_empty()
+            && preview.antennas.is_empty()
+            && preview.h2.flares.is_empty()
+            && preview.h2.point_lights.is_empty()
+            && preview.h2.gel_lights.is_empty()
+            && preview.h2.light_volumes.is_empty()
+            && preview.h2.contrails.is_empty()
+            && preview.h2.liquids.is_empty()
+            && preview.h3.lights.is_empty()
+            && preview.reach.lights.is_empty()
+            && preview.reach.cheap_lights.is_empty()
+            && preview.h4.lights.is_empty()
+            && preview.h4.cheap_lights.is_empty()
+            && preview.h4.flares.is_empty()
+            && preview.gen3.flares.is_empty()
+            && preview.gen3.light_volumes.is_empty()
+            && preview.h4.tracers.is_empty()
+            && preview.particles.is_empty()
+            && preview.gen3.cheap_emitters.is_empty()
+            && preview.gen3.strips.is_empty()
+            && preview.h3.leaves.is_empty()
+            && preview.cloth.is_empty()
+            && preview.gen3.screen_effects.is_empty())
     }
 }
