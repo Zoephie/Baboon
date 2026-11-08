@@ -5,6 +5,7 @@ use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::cloth::ClothGame;
 use super::super::*;
 use super::super::load::LoadCx;
+use blam_tags::TagFile;
 use crate::app::model_preview::common::attached::named;
 
 /// What hangs on a Halo 2 object, its own or one attached to another: its
@@ -38,4 +39,14 @@ pub(in crate::app::model_preview) fn read_h2_features<F: Fn(&RenderModelPreviewM
     preview.h2.liquids.extend(named(liquids, name));
     super::super::cloth::read_cloth(cx, preview, ClothGame::Halo2, [0.0; 3]);
     super::super::weapons::attached::read_extension_weapons(cx, preview);
+}
+
+/// A Halo 2 object's own flares, lights, antennas, particles, light volumes,
+/// contrails, liquids, cloth and extension weapons.
+pub(in crate::app::model_preview) fn read_h2_object_features(reader: &TagReader, model_tag: &TagFile, preview: &mut RenderModelPreview) {
+    let markers = std::mem::take(&mut preview.markers);
+    let frame = crate::app::model_preview::common::marker::own_marker_frame;
+    let cx = super::super::load::LoadCx { reader, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
+    read_h2_features(&cx, preview);
+    preview.markers = markers;
 }

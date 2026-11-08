@@ -162,7 +162,7 @@ impl ObjectLoad<'_> {
             self.read_colors_and_functions(data, notes);
             let preview = std::sync::Arc::make_mut(&mut data.preview);
             feature_into(notes, "its lights and effects", preview, |preview| {
-                super::super::h2::object::read_h2_object_features(reader, model_tag, preview);
+                super::super::h2::attached::read_h2_object_features(reader, model_tag, preview);
             });
         }
     }
