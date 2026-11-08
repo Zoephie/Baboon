@@ -2,6 +2,7 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
+use super::common::fields::read_named_string_exact;
 
 #[cfg(test)]
 mod tests {
@@ -420,33 +421,6 @@ pub(super) fn default_variant_index(data: &ModelPreviewData) -> Option<usize> {
         .and_then(named)
         .or_else(|| named("default"))
         .or((!data.variants.is_empty()).then_some(0))
-}
-
-pub(super) fn read_named_string_exact(
-    tag_struct: &TagStruct<'_>,
-    expected: &str,
-) -> Option<String> {
-    for field in tag_struct.fields() {
-        let name = field.name();
-        if field_name_matches(name, expected) {
-            match field.value()? {
-                TagFieldData::StringId(id) | TagFieldData::OldStringId(id) if !id.string.is_empty() => {
-                    return Some(id.string);
-                }
-                TagFieldData::String(value) | TagFieldData::LongString(value) if !value.is_empty() => {
-                    return Some(value);
-                }
-                _ => {}
-            }
-        }
-    }
-    None
-}
-
-pub(super) fn field_name_matches(actual: &str, expected: &str) -> bool {
-    actual.eq_ignore_ascii_case(expected)
-        || clean_field_name(actual).eq_ignore_ascii_case(expected)
-        || clean_field_name_basic(actual).eq_ignore_ascii_case(expected)
 }
 
 pub(super) fn reset_model_preview_selection(

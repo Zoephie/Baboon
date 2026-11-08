@@ -10,6 +10,7 @@ use blam_tags::{TagFieldData, TagFile, TagStruct};
 use eframe::egui::{self, Ui};
 
 use super::super::common::fields::has_flag;
+use super::super::common::time::TICKS_PER_SECOND;
 use super::passes::{option_index, periodic_evaluate};
 
 const INPUTS: [&str; 4] = ["A in", "B in", "C in", "D in"];
@@ -19,7 +20,6 @@ const SOURCES: [&str; 9] =
 const MAP_TO: [&str; 6] = ["linear", "early", "very early", "late", "very late", "cosine"];
 const BOUNDS_MODES: [&str; 3] = ["clip", "clip and normalize", "scale to fit"];
 const ACTIVATING_ABOVE: f32 = 0.0001;
-pub(in crate::app::model_preview) const TICKS_PER_SECOND: f32 = 30.0;
 const OUTPUTS: [&str; 4] = ["A out", "B out", "C out", "D out"];
 
 /// An input's value on an object at rest, as the `*_export_function_values`

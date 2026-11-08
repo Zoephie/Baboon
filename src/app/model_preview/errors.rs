@@ -1,6 +1,7 @@
 //! Import-tool error report extraction for model preview overlays.
 
 use super::*;
+use super::common::fields::field_name_matches;
 
 /// Attach every drawable error-report primitive in `tag` to `preview`.
 ///

@@ -7,7 +7,7 @@ use super::super::common::fields::elements;
 use super::super::load::build_render_preview;
 use super::super::*;
 use super::attached::{AttachedObject, fold_attached};
-use super::holder_of;
+use super::super::common::fields::holder_of;
 
 /// The first owner a variant's child object takes, after the two hands.
 const FIRST_CHILD_OWNER: u8 = 3;

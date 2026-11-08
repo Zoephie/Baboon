@@ -1,8 +1,10 @@
 //! Reading a tag's fields as the preview does for every game: a block's
-//! elements, an object's inherited block, and flag and function-slot options
-//! by name.
+//! elements, an object's inherited block, the struct holding a field, colors,
+//! fields matched by name, and flag and function-slot options by name.
 
-use blam_tags::{TagFile, TagStruct};
+use blam_tags::{TagFieldData, TagFile, TagStruct};
+
+use crate::app::editor::{clean_field_name, clean_field_name_basic};
 
 /// Every element of `holder`'s block `name`, none where it has no such block.
 pub(in crate::app::model_preview) fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'a>> {
@@ -82,4 +84,48 @@ pub(in crate::app::model_preview) fn object_block<'a>(object: &'a TagFile, block
         }
         holder = holder.fields_all().find_map(|field| field.as_struct())?;
     }
+}
+
+/// A `real_argb_color` field as red, green, blue and alpha; the tag stores
+/// alpha first.
+pub(in crate::app::model_preview) fn argb(root: TagStruct<'_>, name: &str) -> [f32; 4] {
+    match root.field(name).and_then(|field| field.value()) {
+        Some(TagFieldData::RealArgbColor(color)) => [color.red, color.green, color.blue, color.alpha],
+        _ => [0.0; 4],
+    }
+}
+
+/// The struct holding a field, wherever in the tag it sits.
+pub(in crate::app::model_preview) fn holder_of<'a>(from: TagStruct<'a>, field: &str) -> Option<TagStruct<'a>> {
+    if from.field(field).is_some() {
+        return Some(from);
+    }
+    from.fields_all().filter_map(|field| field.as_struct()).find_map(|inner| holder_of(inner, field))
+}
+
+pub(in crate::app::model_preview) fn read_named_string_exact(
+    tag_struct: &TagStruct<'_>,
+    expected: &str,
+) -> Option<String> {
+    for field in tag_struct.fields() {
+        let name = field.name();
+        if field_name_matches(name, expected) {
+            match field.value()? {
+                TagFieldData::StringId(id) | TagFieldData::OldStringId(id) if !id.string.is_empty() => {
+                    return Some(id.string);
+                }
+                TagFieldData::String(value) | TagFieldData::LongString(value) if !value.is_empty() => {
+                    return Some(value);
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+pub(in crate::app::model_preview) fn field_name_matches(actual: &str, expected: &str) -> bool {
+    actual.eq_ignore_ascii_case(expected)
+        || clean_field_name(actual).eq_ignore_ascii_case(expected)
+        || clean_field_name_basic(actual).eq_ignore_ascii_case(expected)
 }

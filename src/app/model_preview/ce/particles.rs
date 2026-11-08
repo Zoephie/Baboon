@@ -24,7 +24,8 @@ use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,
     unattached_quads, update_unattached,
 };
-use super::passes::{CeMapAnimation, FramebufferBlend, argb, read_effect_map_animation};
+use super::passes::{CeMapAnimation, FramebufferBlend, read_effect_map_animation};
+use crate::app::model_preview::common::fields::argb;
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;

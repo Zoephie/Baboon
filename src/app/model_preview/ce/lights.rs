@@ -6,13 +6,14 @@ use crate::app::model_preview::common::marker::MarkerFrame;
 use super::attachments::attached_marker_frame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
 use super::super::common::flares::{FlareSprite, OcclusionOffset};
-use super::passes::{argb, periodic_evaluate};
+use super::passes::periodic_evaluate;
+use crate::app::model_preview::common::fields::argb;
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::app::model_preview::common::math::{cross, dot, lerp};
+use crate::app::model_preview::common::math::{UNSET, cross, dot, lerp};
 
 /// `object_get_marker_by_name` as a widget reads it: the marker, or, when the
 /// object has none by that name (or the name is empty), the object's origin,
@@ -32,10 +33,6 @@ pub(in crate::app::model_preview) fn marker_or_origin(
 
 /// Colors of a reflection that all read zero take the light's instead.
 const NO_COLOR: [f32; 4] = [0.0; 4];
-
-
-/// Below this tool's light postprocess takes a value for unset.
-const UNSET: f32 = 0.0001;
 
 
 /// One sprite of a flare, set along the axis through the screen's center.

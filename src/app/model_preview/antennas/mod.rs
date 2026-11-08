@@ -8,13 +8,13 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::ce::passes::argb;
+use crate::app::model_preview::common::fields::argb;
 use super::common::fields::{elements, object_block};
 use super::common::math::{cross, dot};
 use super::common::view::{ViewFrame, posed_on};
 use super::common::image::H2Image;
 use super::gen3::materials::{H3Bitmap, read_h3_bitmap};
-use super::h2::lights::UNSET;
+use crate::app::model_preview::common::math::UNSET;
 use super::materials::decode_h2_image;
 use super::*;
 use crate::app::model_preview::common::attached::{Attached, attached};

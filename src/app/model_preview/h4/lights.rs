@@ -5,6 +5,7 @@
 //! 204 `pointphysicallycorrect`, added into the light. See
 //! `docs/h4-preview-research/lights.md`.
 
+use super::super::common::time::TICKS_PER_SECOND;
 use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::sync::Arc;
@@ -26,8 +27,6 @@ use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 
 const SMALLEST: f32 = 1e-4;
-/// Halo 4's simulation rate.
-const TICKS_PER_SECOND: f32 = 30.0;
 /// An attached light's datum `+20`, which `light_new_attached` (X360
 /// 0x84AC4B50) leaves at -1 and nothing on its path writes: its age and its
 /// functions' input count from there, not from when it came on.

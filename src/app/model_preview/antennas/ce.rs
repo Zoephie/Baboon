@@ -6,7 +6,7 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use super::super::ce::lights::marker_or_origin;
-use super::super::ce::passes::argb;
+use crate::app::model_preview::common::fields::argb;
 use super::super::common::fields::{elements, object_block};
 use super::super::common::math::dot;
 use super::super::common::view::{ViewFrame, posed_on};

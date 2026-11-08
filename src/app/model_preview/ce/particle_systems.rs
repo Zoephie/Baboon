@@ -214,7 +214,7 @@ fn bounds_of(holder: TagStruct<'_>, name: &str) -> [f32; 2] {
 }
 
 fn argb_of(holder: TagStruct<'_>, name: &str) -> [f32; 4] {
-    let [red, green, blue, alpha] = super::passes::argb(holder, name);
+    let [red, green, blue, alpha] = crate::app::model_preview::common::fields::argb(holder, name);
     [alpha, red, green, blue]
 }
 
@@ -243,7 +243,7 @@ pub(in crate::app::model_preview) fn read_pctl_def(reader: &TagReader, path: &st
                 let real = |name: &str| state.read_real(name).unwrap_or(0.0);
                 // Tool's `sub_49BFC0`.
                 let radius = Some(real("radius multiplier")).filter(|radius| *radius > 0.0).unwrap_or(1.0);
-                let [red, green, blue, alpha] = super::passes::argb(*state, "color multiplier");
+                let [red, green, blue, alpha] = crate::app::model_preview::common::fields::argb(*state, "color multiplier");
                 TypeState {
                     duration: bounds_of(*state, "duration bounds"),
                     transition: bounds_of(*state, "transition time bounds"),

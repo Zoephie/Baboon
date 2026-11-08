@@ -13,7 +13,7 @@ use super::attachment::WeaponOption;
 
 use crate::app::model_preview::common::marker::MarkerFrame;
 use super::ce::attachments::{loose_weapon_paths, weapon_ik};
-use super::common::fields::{elements, has_flag};
+use super::common::fields::{elements, has_flag, holder_of};
 use crate::app::model_preview::common::marker::{attach_point, attach_vector};
 use super::load::build_render_preview;
 use super::ce::attachments::CeWeaponIk;
@@ -327,14 +327,6 @@ impl UnitWeapons {
         }
         hidden
     }
-}
-
-/// The struct holding a field, wherever in the tag it sits.
-pub(in crate::app::model_preview) fn holder_of<'a>(from: TagStruct<'a>, field: &str) -> Option<TagStruct<'a>> {
-    if from.field(field).is_some() {
-        return Some(from);
-    }
-    from.fields_all().filter_map(|field| field.as_struct()).find_map(|inner| holder_of(inner, field))
 }
 
 /// A weapon type's actions and overlays. Reach puts them a level down, in

@@ -21,7 +21,7 @@ use super::super::common::named_function::tag_function_at;
 use super::super::materials::decode_h2_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use crate::app::model_preview::common::math::{cross, dot, lerp};
+use crate::app::model_preview::common::math::{UNSET, cross, dot, lerp};
 use crate::app::model_preview::common::random::lcg_step;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::flares::OcclusionOffset;
@@ -53,9 +53,6 @@ const NEAR_EDGE_BIAS: f32 = 0.0078125;
 const FIELD_OF_VIEW: [f32; 2] = [1.0, 120.0];
 /// What the brightness of `sub_8ED2A0` comes to, at most.
 const BRIGHTEST: f32 = 4.0;
-/// Tool's postprocess takes bounds all under this as unset.
-pub(in crate::app::model_preview) const UNSET: f32 = 0.0001;
-
 /// `occlusion inner radius scale`.
 const INNER_SCALES: [f32; 7] = [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625];
 

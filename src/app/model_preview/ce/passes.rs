@@ -16,7 +16,7 @@ use super::super::dx9::passes::{
     H2_GLSL_VERSION,
 };
 use super::super::common::image::H2Image;
-use super::super::common::fields::{has_flag, has_flag_in_any};
+use super::super::common::fields::{argb, has_flag, has_flag_in_any};
 use super::super::dx9::stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -979,15 +979,6 @@ fn enum_values(stage: TagStruct<'_>, after: &str) -> Vec<i32> {
             keep.then_some(value)
         })
         .collect()
-}
-
-/// A `real_argb_color` field as red, green, blue and alpha; the tag stores
-/// alpha first.
-pub(in crate::app::model_preview) fn argb(root: TagStruct<'_>, name: &str) -> [f32; 4] {
-    match root.field(name).and_then(|field| field.value()) {
-        Some(TagFieldData::RealArgbColor(color)) => [color.red, color.green, color.blue, color.alpha],
-        _ => [0.0; 4],
-    }
 }
 
 /// Which vertex stage draws the first map.
