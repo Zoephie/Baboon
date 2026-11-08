@@ -92,22 +92,22 @@ impl H4Game {
     pub(super) unsafe fn grading_texture(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) -> Option<super::bloom::H4BloomGrading> {
         unsafe {
             let grading = frame.preview.h4.color_grading.as_ref();
-            let key = grading.map(|(image, ..)| Arc::as_ptr(image) as usize);
-            if self.grading.map(|(known, _)| Some(known)) != Some(key) {
+            let image = grading.map(|(image, ..)| image);
+            if !grading_is_current(self.grading.as_ref().map(|(known, _)| known), image) {
                 if let Some((_, texture)) = self.grading.take() {
                     gl.delete_texture(texture);
                 }
                 // Sampler 8: bilinear, clamped.
                 let sampler = H3Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
-                let uploaded = grading.and_then(|(image, _, _)| upload_h2_image_linear(gl, image, H3Texels::Linear, &[], Some(sampler)));
-                self.grading = key.zip(uploaded);
+                let uploaded = image.and_then(|image| upload_h2_image_linear(gl, image, H3Texels::Linear, &[], Some(sampler)));
+                self.grading = image.cloned().zip(uploaded);
             }
             let size = match grading.map(|(image, ..)| &**image) {
                 Some(H2Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
                 _ => return None,
             };
             let (scale, offset) = super::lighting::h4_grading_scale_offset(size);
-            self.grading.map(|(_, texture)| super::bloom::H4BloomGrading { texture, scale, offset })
+            self.grading.as_ref().map(|(_, texture)| super::bloom::H4BloomGrading { texture: *texture, scale, offset })
         }
     }
 
@@ -237,5 +237,35 @@ impl H4Game {
             gl.depth_mask(true);
         }
         state.pass_values = None;
+    }
+}
+
+/// Whether the uploaded grading lookup is `now`'s: the same image, not one
+/// equal to it, since another load's image can differ after an edit.
+fn grading_is_current(held: Option<&Arc<H2Image>>, now: Option<&Arc<H2Image>>) -> bool {
+    match (held, now) {
+        (Some(held), Some(now)) => Arc::ptr_eq(held, now),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image() -> Arc<H2Image> {
+        Arc::new(H2Image::Volume { width: 1, height: 1, depth: 1, rgba: vec![0; 4] })
+    }
+
+    #[test]
+    fn the_grading_lookup_uploads_again_for_a_new_load_but_not_for_the_same_image() {
+        let held = image();
+        assert!(grading_is_current(Some(&held), Some(&held.clone())));
+        assert!(grading_is_current(None, None));
+        // A later load reads an equal image into a new allocation.
+        assert!(!grading_is_current(Some(&held), Some(&image())));
+        assert!(!grading_is_current(None, Some(&held)));
+        assert!(!grading_is_current(Some(&held), None));
     }
 }

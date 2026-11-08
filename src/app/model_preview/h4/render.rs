@@ -26,9 +26,10 @@ pub(in crate::app::model_preview) struct H4Game {
     pub(super) surfaces: Option<super::holograms::H4Holograms>,
     /// The bloom chain, the view's and the holograms'.
     pub(super) bloom: Option<super::bloom::H4Bloom>,
-    /// The colour grading lookup, uploaded for the preview whose image it is
-    /// (by that image's address).
-    pub(super) grading: Option<(usize, glow::NativeTexture)>,
+    /// The colour grading lookup and the image it was uploaded from. Holding
+    /// the image keeps its address from going to a later preview's, so a new
+    /// load always uploads its own.
+    pub(super) grading: Option<(std::sync::Arc<super::super::common::image::H2Image>, glow::NativeTexture)>,
     /// The final composite's program.
     pub(super) composite_program: Option<glow::NativeProgram>,
     /// The corners the flare reflections draw from.
