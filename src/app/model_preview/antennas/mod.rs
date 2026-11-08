@@ -8,6 +8,7 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use crate::app::model_preview::common::marker::MarkerFrame;
+use crate::app::model_preview::common::sprites::AntennaQuad;
 use crate::app::model_preview::common::fields::argb;
 use super::common::fields::{elements, object_block};
 use super::common::math::{cross, dot};
@@ -23,14 +24,6 @@ use spring::{ReachAntennaSpring, posed_marker};
 
 pub(in crate::app::model_preview) mod ce;
 pub(super) mod spring;
-
-/// One antenna sprite's corners, in strip order, with texture coordinates.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct AntennaQuad {
-    pub(crate) corners: [[f32; 5]; 4],
-    pub(crate) color: [f32; 4],
-}
-
 
 /// The first sprite of an antenna vertex's sequence, as `antenna_new` and
 /// `get_vertex_scale_by_distance` size it.

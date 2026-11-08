@@ -9,7 +9,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, has_flag, object_block};
-use super::super::antennas::AntennaQuad;
+use crate::app::model_preview::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::light_volumes::{read_glow, read_h2_bitmap};

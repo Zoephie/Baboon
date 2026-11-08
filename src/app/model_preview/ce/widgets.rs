@@ -8,7 +8,7 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, function_slot, function_slot_of, has_flag, object_block};
-use super::super::antennas::AntennaQuad;
+use crate::app::model_preview::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::passes::FramebufferBlend;
 use crate::app::model_preview::common::fields::argb;

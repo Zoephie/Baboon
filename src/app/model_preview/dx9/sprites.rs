@@ -8,7 +8,7 @@ use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system,
 };
 use super::super::effects::EffectOnsets;
-use super::super::gen3::pipeline::h3_layered_distance;
+use crate::app::model_preview::common::sprites::h3_layered_distance;
 use super::super::common::view::ViewFrame;
 use super::super::gl::pass_state::PassState;
 use super::super::renderer::*;

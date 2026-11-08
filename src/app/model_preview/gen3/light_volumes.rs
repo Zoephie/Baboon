@@ -10,7 +10,7 @@ use blam_tags::{TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::antennas::AntennaQuad;
+use crate::app::model_preview::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::tag_function_at;

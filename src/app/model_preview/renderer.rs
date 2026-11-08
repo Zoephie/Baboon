@@ -2489,7 +2489,7 @@ enum CeGroupDraw {
     Sprites(Vec<CeSprite>),
     /// Through the flares' plain color-times-map program: an antenna, or with
     /// `additive` a light volume, which `rasterizer_widget_begin(5, 1)` adds.
-    Plain { quads: Vec<antennas::AntennaQuad>, texture: glow::NativeTexture, additive: bool },
+    Plain { quads: Vec<crate::app::model_preview::common::sprites::AntennaQuad>, texture: glow::NativeTexture, additive: bool },
 }
 
 /// One of Halo CE's transparent groups, which `rasterizer_transparent_geometry_draw`
@@ -6332,7 +6332,7 @@ pub(in crate::app::model_preview) fn h2_antennas(
     bones: Option<&[[f32; 4]]>,
     view: &common::view::ViewFrame,
     tips: &[Option<[f32; 3]>],
-) -> Vec<(Vec<antennas::AntennaQuad>, glow::NativeTexture, bool)> {
+) -> Vec<(Vec<crate::app::model_preview::common::sprites::AntennaQuad>, glow::NativeTexture, bool)> {
     let preview = &frame.preview;
     preview
         .antennas

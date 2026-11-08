@@ -10,7 +10,8 @@ use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::gen3::screen_effects::H3ScreenSettings;
 use super::super::renderer::ModelGpuFrame;
 use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::pipeline::{h3_layered_distance, h3_set_cull};
+use super::super::gen3::pipeline::h3_set_cull;
+use crate::app::model_preview::common::sprites::h3_layered_distance;
 use super::holograms::{HologramPicture, draws_as_hologram};
 use super::camo::H4CamoDraw;
 

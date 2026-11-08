@@ -299,3 +299,31 @@ pub(in crate::app::model_preview) unsafe fn begin_flares(
 ) {
     unsafe { flares_state(flares, placeholder).apply(gl) }
 }
+
+/// One antenna sprite's corners, in strip order, with texture coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AntennaQuad {
+    pub(crate) corners: [[f32; 5]; 4],
+    pub(crate) color: [f32; 4],
+}
+
+/// A distance to sort by, far first, that puts `sort layer` before it.
+pub(in crate::app::model_preview) fn h3_layered_distance(layer: i32, distance: f32) -> f32 {
+    distance - layer as f32 * SORT_LAYER_SPAN
+}
+
+/// More than any preview is deep.
+const SORT_LAYER_SPAN: f32 = 1e6;
+
+#[cfg(test)]
+mod layer_tests {
+    use super::h3_layered_distance;
+
+    #[test]
+    fn a_later_layer_draws_after_however_far_it_lies() {
+        let far_post = h3_layered_distance(3, 500.0);
+        let near_normal = h3_layered_distance(2, 1.0);
+        assert!(far_post < near_normal);
+        assert!(h3_layered_distance(2, 5.0) > h3_layered_distance(2, 1.0));
+    }
+}

@@ -13,7 +13,8 @@ use super::super::common::view::{ViewFrame, posed_on};
 use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
 use super::super::*;
-use super::{ANTENNA_TRIM, AntennaQuad, AntennaSprite, antenna_sprite};
+use super::{ANTENNA_TRIM, AntennaSprite, antenna_sprite};
+use super::super::common::sprites::AntennaQuad;
 use crate::core::h2_pixel_shader::SamplerKind;
 
 /// One segment of an antenna: a bitmap sprite stretched along it.

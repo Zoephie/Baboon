@@ -4,6 +4,7 @@
 
 use super::render::{Gen3Batch, Gen3Cx, Gen3Game};
 use super::sprites::SpriteStage;
+use super::super::common::sprites::h3_layered_distance;
 use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
 use super::super::gl::target::{Made, Sampling, Texels};
@@ -1898,27 +1899,6 @@ impl Gen3State {
         }
     }
 }
-
-#[cfg(test)]
-mod layer_tests {
-    use super::h3_layered_distance;
-
-    #[test]
-    fn a_later_layer_draws_after_however_far_it_lies() {
-        let far_post = h3_layered_distance(3, 500.0);
-        let near_normal = h3_layered_distance(2, 1.0);
-        assert!(far_post < near_normal);
-        assert!(h3_layered_distance(2, 5.0) > h3_layered_distance(2, 1.0));
-    }
-}
-
-/// A distance to sort by, far first, that puts `sort layer` before it.
-pub(in crate::app::model_preview) fn h3_layered_distance(layer: i32, distance: f32) -> f32 {
-    distance - layer as f32 * SORT_LAYER_SPAN
-}
-
-/// More than any preview is deep.
-const SORT_LAYER_SPAN: f32 = 1e6;
 
 /// How far along the view a batch's middle lies, as sprites measure theirs.
 fn batch_distance(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch) -> f32 {

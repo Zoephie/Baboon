@@ -17,7 +17,8 @@ use super::super::common::view::ViewFrame;
 use super::super::super::effects::EffectOnsets;
 use super::super::particles::H3ParticleField;
 use super::super::gl::pass_state::PassState;
-use super::pipeline::{h3_layered_distance, h3_lighting_constants, h3_set_blend};
+use super::pipeline::{h3_lighting_constants, h3_set_blend};
+use crate::app::model_preview::common::sprites::h3_layered_distance;
 use super::super::reach::lighting::reach_exposure;
 use super::render::Gen3Game;
 
