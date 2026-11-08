@@ -4,21 +4,21 @@
 //! reflections added through explicit shader 46. See
 //! `docs/h4-preview-research/lights.md` §4.
 
-use super::super::gen3::state::Gen3State;
+use super::super::super::gen3::state::Gen3State;
 use eframe::glow::{self, HasContext};
-use super::render::H4Game;
+use super::super::render::H4Game;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::super::gen3::shaders::H3Value;
+use super::super::super::gen3::shaders::H3Value;
 
 use crate::app::model_preview::common::image::H3Sampler;
-use super::flares::{H4FlareDraw, H4FlareView};
-use super::super::renderer::RenderCore;
-use super::super::frame::ModelGpuFrame;
-use super::super::gl::buffer::slice_bytes;
-use super::super::common::sprite_gl::link_sprite_gl;
-use super::super::common::camera::{ModelGpuCamera, ce_flare_clip};
-use super::super::common::view::ce_flare_view;
+use super::super::flares::{H4FlareDraw, H4FlareView};
+use super::super::super::renderer::RenderCore;
+use super::super::super::frame::ModelGpuFrame;
+use super::super::super::gl::buffer::slice_bytes;
+use super::super::super::common::sprite_gl::link_sprite_gl;
+use super::super::super::common::camera::{ModelGpuCamera, ce_flare_clip};
+use super::super::super::common::view::ce_flare_view;
 
 /// The camera as the flares read it: a point's normalized device position,
 /// and the projection's scale there that `LensFlareProjectBillboard` hands
@@ -111,7 +111,7 @@ impl H4Game {
                 project: &projector,
             };
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-            let shown = |index: usize| frame.shown.is(super::super::common::features::paths::H4_FLARES, index);
+            let shown = |index: usize| frame.shown.is(super::super::super::common::features::paths::H4_FLARES, index);
             // The patches: depth tested, nothing written.
             gl.use_program(Some(flares.program));
             gl.bind_vertex_array(Some(flares.vertex_array));
@@ -245,16 +245,16 @@ impl H4Game {
                                 "tintColor" => floats(draw.tint),
                                 // `c_surface::get_alpha_multiplier`: 1 here.
                                 "ps_scale" => floats([1.0; 4]),
-                                other => super::super::gen3::pipeline::frame_value(
+                                other => super::super::super::gen3::pipeline::frame_value(
                                     frame,
-                                    super::super::gen3::shaders::H3Dialect::Halo4,
+                                    super::super::super::gen3::shaders::H3Dialect::Halo4,
                                     other,
                                     size,
                                     0.0,
                                 ),
                             };
                             if let Some(value) = value {
-                                super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value);
+                                super::super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value);
                             }
                         }
                         for (unit, (name, _)) in pass.textures.iter().enumerate() {

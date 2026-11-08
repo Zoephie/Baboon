@@ -9,7 +9,6 @@ pub(in crate::app::model_preview) mod bloom;
 pub(super) mod camo;
 pub(in crate::app::model_preview) mod composite;
 pub(in crate::app::model_preview) mod effect_gl;
-pub(in crate::app::model_preview) mod flare_pass;
 pub(super) mod flares;
 pub(in crate::app::model_preview) mod holograms;
 pub(super) mod lighting;
