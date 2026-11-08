@@ -11,6 +11,7 @@ use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::extract_sbsp_render_geometry_meshes;
 use blam_tags::{AssFile, AssObjectPayload, AssTriangle, JmsFile};
 use std::collections::HashMap;
+use super::common::geometry::{Overflow, VertexBase};
 
 /// JMS and ASS positions are world units × 100 (centimetres); render_model
 /// previews are world units, and an overlay merged into one must agree.
@@ -68,14 +69,9 @@ fn push_derived_batch(
     if triples.is_empty() {
         return;
     }
-    let Ok(vertex_base) = u32::try_from(preview.vertices.len()) else {
+    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), triples.len(), Overflow::RefusesAppend) else {
         return;
     };
-    if triples.len().checked_add(preview.vertices.len()).is_none()
-        || triples.len() + preview.vertices.len() > u32::MAX as usize
-    {
-        return;
-    }
     for (position, normal) in triples {
         expand_preview_bounds_local(&mut preview.bounds_min, &mut preview.bounds_max, *position);
         preview.vertices.push(RenderModelPreviewVertex {
@@ -87,7 +83,7 @@ fn push_derived_batch(
     let index_start = preview.indices.len() as u32;
     preview
         .indices
-        .extend((0..triples.len() as u32).map(|offset| vertex_base + offset));
+        .extend((0..triples.len() as u32).map(|offset| vertex_base.offset(offset)));
     let material_index = preview.materials.len().min(u16::MAX as usize) as u16;
     preview
         .materials
@@ -233,11 +229,13 @@ fn append_collision_jms(
         if vertices.is_empty() {
             continue;
         }
-        let vertex_base = preview.vertices.len() as u32;
+        let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::Wraps) else {
+            continue;
+        };
         let index_start = preview.indices.len() as u32;
         preview
             .indices
-            .extend((0..vertices.len() as u32).map(|offset| vertex_base + offset));
+            .extend((0..vertices.len() as u32).map(|offset| vertex_base.offset(offset)));
         preview.vertices.extend(vertices);
         let material_index = preview.materials.len().min(u16::MAX as usize) as u16;
         preview
@@ -523,7 +521,9 @@ fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderMode
     if vertices.is_empty() {
         return;
     }
-    let vertex_base = preview.vertices.len() as u32;
+    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::Wraps) else {
+        return;
+    };
     let index_start = preview.indices.len() as u32;
     for vertex in &vertices {
         expand_preview_bounds_local(
@@ -534,7 +534,7 @@ fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderMode
     }
     preview
         .indices
-        .extend((0..vertices.len() as u32).map(|offset| vertex_base + offset));
+        .extend((0..vertices.len() as u32).map(|offset| vertex_base.offset(offset)));
     preview.vertices.extend(vertices);
     let material_index = preview.materials.len().min(u16::MAX as usize) as u16;
     preview
@@ -865,12 +865,9 @@ fn ass_to_preview(ass: &AssFile, render_only: bool) -> RenderModelPreview {
         }
         let color = layer_color(region);
 
-        let Ok(vertex_base) = u32::try_from(preview.vertices.len()) else {
+        let Some(vertex_base) = VertexBase::of(preview.vertices.len(), vertices.len(), Overflow::RefusesAppend) else {
             break;
         };
-        if vertices.len() + preview.vertices.len() > u32::MAX as usize {
-            break;
-        }
         for vertex in vertices {
             let p = point(&vertex.position);
             let scaled = [
@@ -911,7 +908,7 @@ fn ass_to_preview(ass: &AssFile, render_only: bool) -> RenderModelPreview {
                     by_material.len() - 1
                 });
             let slot = &mut by_material[position].1;
-            slot.extend(triangle.v.iter().map(|&v| vertex_base + v));
+            slot.extend(triangle.v.iter().map(|&v| vertex_base.offset(v)));
         }
         for (material, indices) in by_material {
             if indices.is_empty() {
@@ -1217,12 +1214,9 @@ fn append_sbsp_mesh(
     placement: &InstancePlacement,
     flip: bool,
 ) {
-    let Ok(vertex_base) = u32::try_from(preview.vertices.len()) else {
+    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), mesh.vertices.len(), Overflow::RefusesAppend) else {
         return;
     };
-    if mesh.vertices.len() + preview.vertices.len() > u32::MAX as usize {
-        return;
-    }
     preview.vertices.reserve(mesh.vertices.len());
     for vertex in &mesh.vertices {
         let position = placement.apply(point(&vertex.position));
@@ -1254,9 +1248,9 @@ fn append_sbsp_mesh(
                 continue;
             }
             let (b, c) = if flip { (2, 1) } else { (1, 2) };
-            indices.push(vertex_base + triangle[0]);
-            indices.push(vertex_base + triangle[b]);
-            indices.push(vertex_base + triangle[c]);
+            indices.push(vertex_base.offset(triangle[0]));
+            indices.push(vertex_base.offset(triangle[b]));
+            indices.push(vertex_base.offset(triangle[c]));
         }
     }
 }
@@ -1413,12 +1407,9 @@ pub(super) fn scenario_bsp_paths(scenario: &TagFile) -> Vec<Option<String>> {
 /// material references. Regions with a name `dst` already lists are merged
 /// into the existing entry.
 pub(super) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderModelPreview) {
-    let Ok(vertex_base) = u32::try_from(dst.vertices.len()) else {
+    let Some(vertex_base) = VertexBase::of(dst.vertices.len(), src.vertices.len(), Overflow::RefusesAppend) else {
         return;
     };
-    if src.vertices.len() + dst.vertices.len() > u32::MAX as usize {
-        return;
-    }
     let material_base = dst.materials.len();
     dst.materials.extend(src.materials.iter().cloned());
     dst.errors.extend(src.errors.iter().cloned());
@@ -1445,7 +1436,7 @@ pub(super) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderMod
         dst.indices.extend(
             src.indices[start..end]
                 .iter()
-                .map(|index| index + vertex_base),
+                .map(|&index| vertex_base.offset(index)),
         );
         dst.batches.push(RenderModelPreviewBatch {
             region_name: batch.region_name.clone(),

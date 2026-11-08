@@ -5,6 +5,7 @@ use blam_tags::math::Matrix4;
 
 use super::*;
 use crate::app::model_preview::common::math::{cross, dot, scaled, unit_by_reciprocal};
+use super::common::geometry::{Overflow, VertexBase};
 
 /// One row of a weapon dropdown.
 #[derive(Debug, Clone, PartialEq)]
@@ -183,7 +184,9 @@ pub(super) fn merge_attached(
     owner: u8,
     name: &str,
 ) {
-    let vertex_base = preview.vertices.len() as u32;
+    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), other.vertices.len(), Overflow::Wraps) else {
+        return;
+    };
     let index_base = preview.indices.len() as u32;
     let material_base = preview.materials.len() as u16;
     let bound = [f32::from(parent.node), 0.0, 0.0, 0.0];
@@ -200,7 +203,7 @@ pub(super) fn merge_attached(
         }
     }
     preview.vertices.append(&mut other.vertices);
-    preview.indices.extend(other.indices.iter().map(|index| index + vertex_base));
+    preview.indices.extend(other.indices.iter().map(|&index| vertex_base.offset(index)));
     for material in &mut other.materials {
         material.object = owner;
     }

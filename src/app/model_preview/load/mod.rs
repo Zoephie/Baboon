@@ -5,6 +5,7 @@ use super::*;
 use super::dx9::passes::{H2Layer, h2_prt_lights};
 use super::h2::prt::read_h2_prt;
 use std::sync::Arc;
+use super::common::geometry::{Overflow, VertexBase};
 
 
 /// The load-affecting slice of [`ModelPreviewState`], snapshotted before the
@@ -917,17 +918,11 @@ pub(super) fn build_particle_model_preview(
     };
 
     for mesh in &meshes {
-        let Ok(vertex_base) = u32::try_from(preview.vertices.len()) else {
+        let Some(vertex_base) =
+            VertexBase::of(preview.vertices.len(), mesh.vertices.len(), Overflow::RefusesAppend)
+        else {
             continue;
         };
-        if mesh
-            .vertices
-            .len()
-            .checked_add(preview.vertices.len())
-            .is_none_or(|count| count > u32::MAX as usize)
-        {
-            continue;
-        }
 
         preview.vertices.reserve(mesh.vertices.len());
         for vertex in &mesh.vertices {
@@ -947,7 +942,7 @@ pub(super) fn build_particle_model_preview(
         };
         preview
             .indices
-            .extend(mesh.indices.iter().map(|index| vertex_base + index));
+            .extend(mesh.indices.iter().map(|&index| vertex_base.offset(index)));
         let Ok(index_end) = u32::try_from(preview.indices.len()) else {
             continue;
         };

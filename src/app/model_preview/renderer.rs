@@ -6480,7 +6480,9 @@ fn append_instances_to_preview(
         };
         let direction = |vector: [f32; 3]| turned(vector).map(|value| value * scale.signum());
         let origin = point3_to_array(placement.position);
-        let vertex_base = preview.vertices.len() as u32;
+        let Some(vertex_base) = common::geometry::VertexBase::of(preview.vertices.len(), 0, common::geometry::Overflow::Wraps) else {
+            continue;
+        };
         let mut remapped = HashMap::new();
         let mut indices = Vec::with_capacity(source.len());
         // A triangle naming a vertex the mesh lacks is dropped whole, so the
@@ -6489,7 +6491,7 @@ fn append_instances_to_preview(
             corners.iter().all(|&index| (index as usize) < mesh.vertices.len())
         });
         for &index in triangles.flatten() {
-            let next = vertex_base + remapped.len() as u32;
+            let next = vertex_base.offset(remapped.len() as u32);
             let at = *remapped.entry(index).or_insert(next);
             if at == next {
                 let vertex = &mesh.vertices[index as usize];
@@ -6548,17 +6550,11 @@ fn append_render_mesh_to_preview(
     region_name: &str,
     permutation_name: &str,
 ) {
-    let Ok(vertex_base) = u32::try_from(preview.vertices.len()) else {
+    let Some(vertex_base) =
+        common::geometry::VertexBase::of(preview.vertices.len(), mesh.vertices.len(), common::geometry::Overflow::DropsTriangle)
+    else {
         return;
     };
-    if mesh
-        .vertices
-        .len()
-        .checked_add(preview.vertices.len())
-        .is_none_or(|count| count > u32::MAX as usize)
-    {
-        return;
-    }
 
     preview.vertices.reserve(mesh.vertices.len());
     for vertex in &mesh.vertices {
@@ -6595,7 +6591,7 @@ fn append_render_mesh_to_preview(
         for triangle in source_indices.chunks_exact(3) {
             let convert = |index: u32| {
                 ((index as usize) < mesh.vertices.len())
-                    .then(|| vertex_base.checked_add(index))
+                    .then(|| vertex_base.checked_offset(index))
                     .flatten()
             };
             if let (Some(a), Some(b), Some(c)) = (

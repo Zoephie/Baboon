@@ -11,6 +11,7 @@ use super::effects::marker_name;
 use super::*;
 use crate::app::model_preview::common::math::{cross, dot, minus, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high_bits, lcg_step};
+use super::common::geometry::{Overflow, VertexBase};
 
 /// `k_maximum_vertices_per_cloth`.
 const MOST_VERTICES: usize = 121;
@@ -763,14 +764,17 @@ pub(super) fn read_cloth<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize
             continue;
         };
         cloth.first_vertex = preview.vertices.len();
-        let base = cloth.first_vertex as u32;
+        let sheet = sheet_vertices(&uvs, game);
+        let Some(base) = VertexBase::of(cloth.first_vertex, sheet.len(), Overflow::Wraps) else {
+            continue;
+        };
         let count = cloth.places.len() as u32;
         let index_start = preview.indices.len() as u32;
-        preview.vertices.extend(sheet_vertices(&uvs, game));
+        preview.vertices.extend(sheet);
         // The sides face apart, as `cloth_render_opaque`'s cull modes have it.
-        preview.indices.extend(cloth.indices.iter().map(|index| *index as u32 + base));
+        preview.indices.extend(cloth.indices.iter().map(|index| base.offset(*index as u32)));
         preview.indices.extend(cloth.indices.chunks_exact(3).rev().flat_map(|triangle| {
-            [triangle[2], triangle[1], triangle[0]].map(|index| index as u32 + base + count)
+            [triangle[2], triangle[1], triangle[0]].map(|index| base.offset(index as u32) + count)
         }));
         let name = cloth_region_name(&path, game);
         preview.materials.push(RenderModelPreviewMaterial {

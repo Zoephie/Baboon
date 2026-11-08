@@ -6,6 +6,7 @@
 
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod fields;
+pub(in crate::app::model_preview) mod geometry;
 pub(in crate::app::model_preview) mod image;
 pub(in crate::app::model_preview) mod math;
 pub(in crate::app::model_preview) mod named_function;
