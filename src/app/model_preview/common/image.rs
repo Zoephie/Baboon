@@ -26,26 +26,6 @@ impl H2Image {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// An image short of its size is not whole: a cube is square, so a face
-    /// as wide as the image but shorter would be read past its end.
-    #[test]
-    fn an_image_short_of_its_size_is_not_whole() {
-        let face = |side: usize| vec![0u8; side * side * 4];
-        let cube = |last: Vec<u8>| H2Image::Cube { size: 4, faces: [face(4), face(4), face(4), face(4), face(4), last] };
-        assert!(cube(face(4)).whole());
-        assert!(!cube(vec![0; 4 * 2 * 4]).whole());
-        let volume = |bytes: usize| H2Image::Volume { width: 2, height: 2, depth: 3, rgba: vec![0; bytes] };
-        assert!(volume(48).whole());
-        assert!(!volume(47).whole());
-        let huge = H2Image::Volume { width: usize::MAX, height: 2, depth: 1, rgba: Vec::new() };
-        assert!(!huge.whole(), "a size past the address space is never whole");
-    }
-}
-
 /// A texture's address and filter modes, from the bake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct H3Sampler {
@@ -117,5 +97,25 @@ impl H3Texels {
                 | BitmapFormat::DxnSnorm
                 | BitmapFormat::Ctx1
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An image short of its size is not whole: a cube is square, so a face
+    /// as wide as the image but shorter would be read past its end.
+    #[test]
+    fn an_image_short_of_its_size_is_not_whole() {
+        let face = |side: usize| vec![0u8; side * side * 4];
+        let cube = |last: Vec<u8>| H2Image::Cube { size: 4, faces: [face(4), face(4), face(4), face(4), face(4), last] };
+        assert!(cube(face(4)).whole());
+        assert!(!cube(vec![0; 4 * 2 * 4]).whole());
+        let volume = |bytes: usize| H2Image::Volume { width: 2, height: 2, depth: 3, rgba: vec![0; bytes] };
+        assert!(volume(48).whole());
+        assert!(!volume(47).whole());
+        let huge = H2Image::Volume { width: usize::MAX, height: 2, depth: 1, rgba: Vec::new() };
+        assert!(!huge.whole(), "a size past the address space is never whole");
     }
 }

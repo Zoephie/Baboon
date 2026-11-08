@@ -237,47 +237,6 @@ pub(in crate::app::model_preview) struct DepthTarget {
     pub(in crate::app::model_preview) texture: glow::NativeTexture,
 }
 
-#[cfg(all(test, target_os = "macos"))]
-mod gl_tests {
-    use crate::app::model_preview::harness::gl::headless_gl;
-    use eframe::glow::{self, HasContext as _};
-
-    /// What [`Made`](crate::app::model_preview::gl::target::Made) builds goes when it is
-    /// dropped half done, and stays once kept.
-    #[test]
-    fn made_targets_are_deleted_unless_kept() {
-        use crate::app::model_preview::gl::target::{Made, Sampling, Texels};
-        let gl = headless_gl();
-        // Each kind numbers its own names from 1.
-        let held = |gl: &glow::Context| -> usize {
-            (1..=32u32)
-                .map(|name| unsafe {
-                    let name = std::num::NonZeroU32::new(name).unwrap();
-                    usize::from(gl.is_texture(glow::NativeTexture(name)))
-                        + usize::from(gl.is_framebuffer(glow::NativeFramebuffer(name)))
-                        + usize::from(gl.is_renderbuffer(glow::NativeRenderbuffer(name)))
-                })
-                .sum()
-        };
-        unsafe {
-            let mut made = Made::new(&gl);
-            made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED).unwrap();
-            made.depth([4, 4], Texels::DEPTH24, Sampling::NEAREST, glow::DEPTH_ATTACHMENT).unwrap();
-            made.renderbuffer([4, 4], glow::DEPTH24_STENCIL8).unwrap();
-            assert_eq!(held(&gl), 5);
-            drop(made);
-            assert_eq!(held(&gl), 0, "a set never kept is gone");
-            let mut made = Made::new(&gl);
-            let target = made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED).unwrap();
-            assert!(made.complete(&[target.framebuffer]));
-            made.keep();
-            assert_eq!(held(&gl), 2, "a kept set stays");
-            target.delete(&gl);
-            assert_eq!(held(&gl), 0);
-        }
-    }
-}
-
 /// A color and depth target at a pane's size. One holds the whole scene while
 /// game shaders are on, because the environment layer blends by destination
 /// alpha, which the window's framebuffer need not keep. The other is texaccum,
@@ -342,5 +301,46 @@ pub(in crate::app::model_preview) unsafe fn copy_frame(gl: &glow::Context, copy:
         gl.blit_framebuffer(x, y, x + width, y + height, 0, 0, width, height, glow::COLOR_BUFFER_BIT, glow::NEAREST);
         gl.bind_framebuffer(glow::FRAMEBUFFER, drawn_to);
         Some(made.texture)
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod gl_tests {
+    use crate::app::model_preview::harness::gl::headless_gl;
+    use eframe::glow::{self, HasContext as _};
+
+    /// What [`Made`](crate::app::model_preview::gl::target::Made) builds goes when it is
+    /// dropped half done, and stays once kept.
+    #[test]
+    fn made_targets_are_deleted_unless_kept() {
+        use crate::app::model_preview::gl::target::{Made, Sampling, Texels};
+        let gl = headless_gl();
+        // Each kind numbers its own names from 1.
+        let held = |gl: &glow::Context| -> usize {
+            (1..=32u32)
+                .map(|name| unsafe {
+                    let name = std::num::NonZeroU32::new(name).unwrap();
+                    usize::from(gl.is_texture(glow::NativeTexture(name)))
+                        + usize::from(gl.is_framebuffer(glow::NativeFramebuffer(name)))
+                        + usize::from(gl.is_renderbuffer(glow::NativeRenderbuffer(name)))
+                })
+                .sum()
+        };
+        unsafe {
+            let mut made = Made::new(&gl);
+            made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED).unwrap();
+            made.depth([4, 4], Texels::DEPTH24, Sampling::NEAREST, glow::DEPTH_ATTACHMENT).unwrap();
+            made.renderbuffer([4, 4], glow::DEPTH24_STENCIL8).unwrap();
+            assert_eq!(held(&gl), 5);
+            drop(made);
+            assert_eq!(held(&gl), 0, "a set never kept is gone");
+            let mut made = Made::new(&gl);
+            let target = made.color([4, 4], Texels::RGBA8, Sampling::LINEAR_CLAMPED).unwrap();
+            assert!(made.complete(&[target.framebuffer]));
+            made.keep();
+            assert_eq!(held(&gl), 2, "a kept set stays");
+            target.delete(&gl);
+            assert_eq!(held(&gl), 0);
+        }
     }
 }

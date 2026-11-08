@@ -78,6 +78,60 @@ pub(in crate::app::model_preview) fn unit_or_up(a: [f32; 3]) -> [f32; 3] {
     if length > 0.0001 { a.map(|axis| axis / length) } else { [0.0, 0.0, 1.0] }
 }
 
+pub(in crate::app::model_preview) const IDENTITY: Matrix4 = Matrix4 {
+    m: [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ],
+};
+
+/// `perpendicular3d`: a vector square to `a`, from its two largest parts.
+pub(in crate::app::model_preview) fn perpendicular(a: [f32; 3]) -> [f32; 3] {
+    let [x, y, z] = a.map(f32::abs);
+    if x > y || x > z {
+        if y > z { [a[1], -a[0], 0.0] } else { [-a[2], 0.0, a[0]] }
+    } else {
+        [0.0, a[2], -a[1]]
+    }
+}
+
+pub(in crate::app::model_preview) fn axis_of(matrix: &Matrix4, axis: usize) -> [f32; 3] {
+    std::array::from_fn(|row| matrix.m[row][axis])
+}
+
+pub(in crate::app::model_preview) fn place_of(matrix: &Matrix4) -> [f32; 3] {
+    axis_of(matrix, 3)
+}
+
+pub(in crate::app::model_preview) fn matrix_of(axes: [[f32; 3]; 3], position: [f32; 3]) -> Matrix4 {
+    let mut matrix = IDENTITY;
+    for row in 0..3 {
+        for axis in 0..3 {
+            matrix.m[row][axis] = axes[axis][row];
+        }
+        matrix.m[row][3] = position[row];
+    }
+    matrix
+}
+
+pub(in crate::app::model_preview) fn rigid_inverse(matrix: &Matrix4) -> Matrix4 {
+    let axes = [axis_of(matrix, 0), axis_of(matrix, 1), axis_of(matrix, 2)];
+    let place = place_of(matrix);
+    let mut inverse = IDENTITY;
+    for row in 0..3 {
+        inverse.m[row][0] = axes[row][0];
+        inverse.m[row][1] = axes[row][1];
+        inverse.m[row][2] = axes[row][2];
+        inverse.m[row][3] = -dot(axes[row], place);
+    }
+    inverse
+}
+
+/// Tool's postprocess takes bounds all under this as unset.
+pub(in crate::app::model_preview) const UNSET: f32 = 0.0001;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,57 +196,3 @@ mod tests {
         assert_ne!(bits(unit_or_unchanged(skew)), bits(unit_by_reciprocal(skew)));
     }
 }
-
-pub(in crate::app::model_preview) const IDENTITY: Matrix4 = Matrix4 {
-    m: [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ],
-};
-
-/// `perpendicular3d`: a vector square to `a`, from its two largest parts.
-pub(in crate::app::model_preview) fn perpendicular(a: [f32; 3]) -> [f32; 3] {
-    let [x, y, z] = a.map(f32::abs);
-    if x > y || x > z {
-        if y > z { [a[1], -a[0], 0.0] } else { [-a[2], 0.0, a[0]] }
-    } else {
-        [0.0, a[2], -a[1]]
-    }
-}
-
-pub(in crate::app::model_preview) fn axis_of(matrix: &Matrix4, axis: usize) -> [f32; 3] {
-    std::array::from_fn(|row| matrix.m[row][axis])
-}
-
-pub(in crate::app::model_preview) fn place_of(matrix: &Matrix4) -> [f32; 3] {
-    axis_of(matrix, 3)
-}
-
-pub(in crate::app::model_preview) fn matrix_of(axes: [[f32; 3]; 3], position: [f32; 3]) -> Matrix4 {
-    let mut matrix = IDENTITY;
-    for row in 0..3 {
-        for axis in 0..3 {
-            matrix.m[row][axis] = axes[axis][row];
-        }
-        matrix.m[row][3] = position[row];
-    }
-    matrix
-}
-
-pub(in crate::app::model_preview) fn rigid_inverse(matrix: &Matrix4) -> Matrix4 {
-    let axes = [axis_of(matrix, 0), axis_of(matrix, 1), axis_of(matrix, 2)];
-    let place = place_of(matrix);
-    let mut inverse = IDENTITY;
-    for row in 0..3 {
-        inverse.m[row][0] = axes[row][0];
-        inverse.m[row][1] = axes[row][1];
-        inverse.m[row][2] = axes[row][2];
-        inverse.m[row][3] = -dot(axes[row], place);
-    }
-    inverse
-}
-
-/// Tool's postprocess takes bounds all under this as unset.
-pub(in crate::app::model_preview) const UNSET: f32 = 0.0001;
