@@ -98,6 +98,12 @@ impl PassState {
         self.with(StateCall::BindTexture(target, texture))
     }
 
+    /// `texture` bound to `target` on `unit`, then unit 0 active again: how
+    /// a pass binds a map beside the one on unit 0.
+    pub(in crate::app::model_preview) fn texture_on(self, unit: u32, target: u32, texture: Option<glow::NativeTexture>) -> Self {
+        self.active_texture(unit).bind_texture(target, texture).active_texture(glow::TEXTURE0)
+    }
+
     /// Faces culled as the model shows them, the back face named: off with
     /// back faces shown, else on, culling the back. The gen3 passes' rule.
     pub(in crate::app::model_preview) fn cull_back_unless(self, show_backfaces: bool) -> Self {
@@ -169,5 +175,17 @@ mod tests {
             ]
         );
         assert_eq!(PassState::new().culling_unless(false).calls(), [StateCall::Enable(glow::CULL_FACE)], "no face named");
+    }
+
+    #[test]
+    fn a_texture_on_another_unit_leaves_unit_0_active() {
+        assert_eq!(
+            PassState::new().texture_on(glow::TEXTURE2, glow::TEXTURE_3D, None).calls(),
+            [
+                StateCall::ActiveTexture(glow::TEXTURE2),
+                StateCall::BindTexture(glow::TEXTURE_3D, None),
+                StateCall::ActiveTexture(glow::TEXTURE0),
+            ]
+        );
     }
 }

@@ -11,6 +11,7 @@
 
 use eframe::glow::{self, HasContext};
 
+use super::super::gl::pass_state::PassState;
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 
 /// The blur amount `rasterizer_postprocess_scene` passes, in downsampled texels.
@@ -112,14 +113,7 @@ impl H2Bloom {
             let Some(([first, second], _)) = &self.surfaces else {
                 return;
             };
-            gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(self.vertex_array));
-            gl.disable(glow::DEPTH_TEST);
-            gl.disable(glow::CULL_FACE);
-            gl.disable(glow::BLEND);
-            gl.depth_mask(false);
-            gl.color_mask(true, true, true, true);
-            gl.active_texture(glow::TEXTURE0);
+            bloom_state(self.program, self.vertex_array).apply(gl);
             let uniform = |name: &str| gl.get_uniform_location(self.program, name);
             gl.uniform_1_i32(uniform("u_source").as_ref(), 0);
             let draw = |target: glow::NativeFramebuffer, source, mode: i32| {
@@ -144,24 +138,45 @@ impl H2Bloom {
             }
 
             gl.viewport(0, 0, size[0], size[1]);
-            gl.enable(glow::BLEND);
-            gl.blend_equation(glow::FUNC_ADD);
-            // `sub_9206D0(19, 10)`, `(20, 2)`: inverse destination color, one.
-            gl.blend_func(glow::ONE_MINUS_DST_COLOR, glow::ONE);
-            gl.color_mask(true, true, true, false);
+            add_state().apply(gl);
             draw(scene_framebuffer, first.texture, 2);
-            gl.disable(glow::BLEND);
-            gl.color_mask(true, true, true, true);
-            gl.depth_mask(true);
-            // What it switched off for the full-screen passes, back for
-            // whatever draws the model after.
-            gl.enable(glow::DEPTH_TEST);
-            if show_backfaces {
-                gl.disable(glow::CULL_FACE);
-            } else {
-                gl.enable(glow::CULL_FACE);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
+            after_bloom_state(show_backfaces).apply(gl);
         }
     }
+}
+
+/// What the mask and blurs draw under: the bloom program and its triangle, no
+/// depth test, culling or blend, every channel written, unit 0 active.
+fn bloom_state(program: glow::NativeProgram, vertex_array: glow::NativeVertexArray) -> PassState {
+    PassState::new()
+        .use_program(program)
+        .bind_vertex_array(vertex_array)
+        .disable(glow::DEPTH_TEST)
+        .disable(glow::CULL_FACE)
+        .disable(glow::BLEND)
+        .depth_mask(false)
+        .color_mask([true, true, true, true])
+        .active_texture(glow::TEXTURE0)
+}
+
+/// How the blurred mask goes onto the scene: `sub_9206D0(19, 10)`,
+/// `(20, 2)`, inverse destination colour and one, alpha kept.
+fn add_state() -> PassState {
+    PassState::new()
+        .enable(glow::BLEND)
+        .blend_equation(glow::FUNC_ADD)
+        .blend_func(glow::ONE_MINUS_DST_COLOR, glow::ONE)
+        .color_mask([true, true, true, false])
+}
+
+/// What the bloom switched off for its full-screen passes, back for whatever
+/// draws the model after.
+fn after_bloom_state(show_backfaces: bool) -> PassState {
+    PassState::new()
+        .disable(glow::BLEND)
+        .color_mask([true, true, true, true])
+        .depth_mask(true)
+        .enable(glow::DEPTH_TEST)
+        .culling_unless(show_backfaces)
+        .bind_texture(glow::TEXTURE_2D, None)
 }

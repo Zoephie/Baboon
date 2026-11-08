@@ -3,6 +3,7 @@
 
 use eframe::glow::{self, HasContext};
 
+use super::pass_state::PassState;
 use super::scope::PostScope;
 use super::target::ColorTarget;
 
@@ -37,12 +38,7 @@ impl ScreenChain {
     ) -> ChainRun {
         unsafe {
             let scope = PostScope::capture(gl);
-            gl.disable(glow::SCISSOR_TEST);
-            gl.disable(glow::DEPTH_TEST);
-            gl.disable(glow::BLEND);
-            gl.color_mask(true, true, true, true);
-            gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(vertex_array));
+            chain_state(self.program, vertex_array).apply(gl);
             gl.uniform_1_i32(self.uniform(gl, "source").as_ref(), 0);
             gl.uniform_1_i32(self.uniform(gl, "added").as_ref(), 1);
             gl.bind_texture(glow::TEXTURE_2D, Some(input));
@@ -79,10 +75,10 @@ impl ScreenChain {
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
             gl.viewport(0, 0, target.size[0], target.size[1]);
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, added.or(self.nothing));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(source));
+            PassState::new()
+                .texture_on(glow::TEXTURE1, glow::TEXTURE_2D, added.or(self.nothing))
+                .bind_texture(glow::TEXTURE_2D, Some(source))
+                .apply(gl);
             uniforms(&|name| self.uniform(gl, name));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
@@ -97,10 +93,10 @@ impl ScreenChain {
     /// The context must be current on this thread.
     pub(in crate::app::model_preview) unsafe fn end(&self, gl: &glow::Context, run: ChainRun, scene: glow::NativeFramebuffer) {
         unsafe {
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(run.input));
+            PassState::new()
+                .texture_on(glow::TEXTURE1, glow::TEXTURE_2D, None)
+                .bind_texture(glow::TEXTURE_2D, Some(run.input))
+                .apply(gl);
             for name in [glow::TEXTURE_MIN_FILTER, glow::TEXTURE_MAG_FILTER] {
                 gl.tex_parameter_i32(glow::TEXTURE_2D, name, glow::NEAREST as i32);
             }
@@ -109,4 +105,16 @@ impl ScreenChain {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
         }
     }
+}
+
+/// What a chain's passes draw under: no scissor, depth test or blend, every
+/// channel written, its program and the screen triangle's vertex array.
+fn chain_state(program: glow::NativeProgram, vertex_array: glow::NativeVertexArray) -> PassState {
+    PassState::new()
+        .disable(glow::SCISSOR_TEST)
+        .disable(glow::DEPTH_TEST)
+        .disable(glow::BLEND)
+        .color_mask([true, true, true, true])
+        .use_program(program)
+        .bind_vertex_array(vertex_array)
 }

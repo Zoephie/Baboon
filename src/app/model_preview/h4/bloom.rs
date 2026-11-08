@@ -10,6 +10,7 @@
 //! pass steps by, the source's.
 
 use super::super::gl::chain::ScreenChain;
+use super::super::gl::pass_state::PassState;
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
 
@@ -311,9 +312,9 @@ impl H4Bloom {
             let run = self.chain.begin(gl, vertex_array, accumulation);
             let uniform = |name: &str| self.chain.uniform(gl, name);
             gl.uniform_1_i32(uniform("grading").as_ref(), 2);
-            gl.active_texture(glow::TEXTURE2);
-            gl.bind_texture(glow::TEXTURE_3D, grading.map(|grading| grading.texture).or(self.no_volume));
-            gl.active_texture(glow::TEXTURE0);
+            PassState::new()
+                .texture_on(glow::TEXTURE2, glow::TEXTURE_3D, grading.map(|grading| grading.texture).or(self.no_volume))
+                .apply(gl);
             gl.uniform_1_i32(uniform("graded").as_ref(), i32::from(grading.is_some()));
             gl.uniform_1_i32(uniform("keeps_alpha").as_ref(), i32::from(settings.hologram));
             if let Some(grading) = grading {
@@ -340,9 +341,7 @@ impl H4Bloom {
             self.step(gl, small2, Pass::Add, (small.texture, small.size), Some(tiny2.texture), small_color);
             self.blur(gl, small2, small, ones);
 
-            gl.active_texture(glow::TEXTURE2);
-            gl.bind_texture(glow::TEXTURE_3D, None);
-            gl.active_texture(glow::TEXTURE0);
+            PassState::new().texture_on(glow::TEXTURE2, glow::TEXTURE_3D, None).apply(gl);
             self.chain.end(gl, run, scene);
             // `small` holds `blur_11_horizontal` of the result.
             Some(if settings.hologram { small.texture } else { small2.texture })
