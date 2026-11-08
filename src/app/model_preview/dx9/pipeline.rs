@@ -15,6 +15,7 @@ use super::super::renderer::*;
 use super::super::*;
 use super::passes::{H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT, H2DefaultLight, H2Layer};
 use super::sprites::Dx9Sprites;
+use super::draw::h2_draw_order;
 
 /// Where Halo CE's and Halo 2's shading differ.
 pub(in crate::app::model_preview) trait Dx9Game {

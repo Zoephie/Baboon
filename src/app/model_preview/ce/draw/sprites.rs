@@ -1,7 +1,8 @@
 //! Halo CE's effect sprites: advancing the effects, grouping their sprites by key and depth, and drawing each group.
 
 use super::*;
-use super::super::super::renderer::{CE_EVENTS_RUNNING, gl_blend_equation, gl_blend_factor};
+use super::super::super::renderer::CE_EVENTS_RUNNING;
+use super::super::super::dx9::draw::{gl_blend_equation, gl_blend_factor};
 use super::super::super::common::camera::*;
 use super::super::super::gl::texture::*;
 use super::super::super::gl::buffer::*;
