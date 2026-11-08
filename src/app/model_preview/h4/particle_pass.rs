@@ -126,7 +126,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
                     _ => None,
                 };
                 match value {
-                    Some(value) => super::super::gen3::pipeline::set_uniform_value(gl, location.as_ref(), ty, &value),
+                    Some(value) => super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value),
                     None => {
                         state.set_shared_uniform(gl, frame, material, &functions, name, ty, size);
                     }

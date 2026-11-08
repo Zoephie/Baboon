@@ -1340,11 +1340,7 @@ fn paint_model_gl(
     });
 }
 
-pub(super) use gen3::pipeline::EXPOSURE as H3_EXPOSURE;
-pub(super) use super::reach::lighting::{
-    REACH_DARK_MULTIPLIER, REACH_SCREEN_NOISE_BITMAP, reach_alt_exposure, reach_exposure, reach_lightmap_tint,
-    reach_particle_light,
-};
+use super::reach::lighting::reach_particle_light;
 
 /// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
 /// texture unit `i` to `SAMPLER_UNIFORMS[i]`.

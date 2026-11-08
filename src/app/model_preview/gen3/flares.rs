@@ -19,7 +19,7 @@ use blam_tags::tag_function::transition_function_evaluate;
 
 use super::super::common::image::H2Image;
 use super::super::common::named_function::tag_function_at;
-use super::super::renderer::H3_EXPOSURE as EXPOSURE;
+use super::pipeline::EXPOSURE;
 use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

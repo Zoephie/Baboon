@@ -16,6 +16,7 @@ use super::super::super::effects::EffectOnsets;
 use super::super::particles::H3ParticleField;
 use super::super::gl::pass_state::PassState;
 use super::pipeline::{h3_layered_distance, h3_lighting_constants, h3_set_blend};
+use super::super::reach::lighting::reach_exposure;
 use super::render::Gen3Game;
 
 /// Which part of the object's sprites a call draws.

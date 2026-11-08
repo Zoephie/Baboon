@@ -6,7 +6,7 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::shaders::{H3Dialect, H3Value};
 use super::super::gen3::screen_lights::screen_to_relative_world;
-use super::super::gen3::pipeline::{frame_value, h4_matrix, set_uniform_value, view_projection};
+use super::super::gen3::pipeline::{frame_value, h4_matrix, set_value, view_projection};
 use super::super::renderer::{ModelGpuFrame, h2_eye_position};
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
@@ -121,7 +121,7 @@ impl H4Game {
                             frame_value(frame, H3Dialect::Halo4, name, size, 0.0)
                         };
                         if let Some(value) = value {
-                            set_uniform_value(gl, location.as_ref(), ty, &value);
+                            set_value(gl, location.as_ref(), ty, &value);
                         }
                     }
                     let placeholder = this.placeholder;

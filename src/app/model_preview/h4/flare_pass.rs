@@ -247,7 +247,7 @@ impl H4Game {
                                 ),
                             };
                             if let Some(value) = value {
-                                super::super::gen3::pipeline::set_uniform_value(gl, location.as_ref(), ty, &value);
+                                super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value);
                             }
                         }
                         for (unit, (name, _)) in pass.textures.iter().enumerate() {

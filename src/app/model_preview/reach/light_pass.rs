@@ -6,7 +6,7 @@
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_lights::screen_to_relative_world;
-use super::super::gen3::pipeline::{set_uniform_value, view_projection};
+use super::super::gen3::pipeline::{set_value, view_projection};
 use super::super::renderer::h2_eye_position;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
@@ -140,7 +140,7 @@ impl ReachGame {
                             "material_coeff" => gl.uniform_4_f32(location.as_ref(), CHEAP_ALBEDO_BLEND, 0.0, 0.0, 0.0),
                             other => {
                                 if let Some(value) = reach_frame_value(frame, other, state.stops) {
-                                    set_uniform_value(gl, location.as_ref(), ty, &value);
+                                    set_value(gl, location.as_ref(), ty, &value);
                                 }
                             }
                         }

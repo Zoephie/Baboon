@@ -645,10 +645,6 @@ pub(in crate::app::model_preview) fn h4_matrix(frame: &ModelGpuFrame, name: &str
 }
 
 /// A translated uniform's value, by its type.
-pub(in crate::app::model_preview) unsafe fn set_uniform_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
-    unsafe { set_value(gl, location, ty, value) }
-}
-
 pub(in crate::app::model_preview) unsafe fn set_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
     unsafe {
         match (ty, value) {

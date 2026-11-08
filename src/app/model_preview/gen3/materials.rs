@@ -18,7 +18,6 @@ use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;
 use std::sync::Arc;
 use std::collections::HashMap;
-use super::super::materials::*;
 
 /// A bitmap for a pass, and whether `curve` has the card decode it.
 pub(in crate::app::model_preview) fn h3_image(

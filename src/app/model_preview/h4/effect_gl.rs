@@ -270,7 +270,7 @@ impl H4EffectGl {
                 (ty, &value),
                 (Type::Vector(Scalar::Uint, _), H3Value::Floats(_))
             ) {
-                super::super::gen3::pipeline::set_uniform_value(gl, location.as_ref(), ty, &value);
+                super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value);
             }
             true
         }

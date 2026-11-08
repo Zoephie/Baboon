@@ -1165,7 +1165,8 @@ mod tests {
     use crate::app::model_preview::harness::kit::{kit_root, kit_source};
     use crate::core::game::GameId;
     use super::super::shaders::H3Blend;
-    use super::super::super::renderer::{H3_EXPOSURE, reach_alt_exposure, reach_exposure};
+    use super::super::pipeline::EXPOSURE as H3_EXPOSURE;
+    use super::super::super::reach::lighting::{reach_alt_exposure, reach_exposure};
 
     #[test]
     fn a_beam_always_has_two_profiles_and_never_more_than_its_rows() {
