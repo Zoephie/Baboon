@@ -27,7 +27,7 @@ use std::collections::HashMap;
 
 use super::ce::shaders::resolve::*;
 use super::gen3::materials::{H3Bitmap, h3_xform, prepare_h3_material, reach_reference, reach_version_update};
-use super::h2::materials::*;
+use super::h2::shader::resolve::*;
 
 /// The texture roles the preview understands.
 ///

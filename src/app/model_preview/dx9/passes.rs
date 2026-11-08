@@ -2,7 +2,7 @@
 //! game's order, the default and shadow lights, a pass's blend, depth,
 //! textures and animated constants, the draw pass the renderer binds, and the
 //! objects' change colors. Halo 2's templates are read into it in
-//! `h2::passes`; Halo CE's shaders in `ce::shaders`.
+//! `h2::shader`; Halo CE's shaders in `ce::shaders`.
 
 use super::super::common::named_function::tag_function_at;
 use std::sync::Arc;

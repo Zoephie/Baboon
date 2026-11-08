@@ -1,13 +1,13 @@
 //! Halo 2's shaders resolved over their templates' defaults to the passes and
 //! textures the preview draws.
 
-use super::super::*;
-use super::super::common::fields::has_flag;
-use super::super::dx9::passes::{H2DrawPass, H2Layer, H2ParameterValue, animation_function};
-use super::passes::{h2_pass_needs_frame_texture, prepare_draw_pass, resolve_h2_layer_passes};
+use super::super::super::*;
+use super::super::super::common::fields::has_flag;
+use super::super::super::dx9::passes::{H2DrawPass, H2Layer, H2ParameterValue, animation_function};
+use super::super::shader::{h2_pass_needs_frame_texture, prepare_draw_pass, resolve_h2_layer_passes};
 use std::sync::Arc;
 use std::collections::HashMap;
-use super::super::materials::*;
+use super::super::super::materials::*;
 
 /// One Halo 2 template parameter's defaults: what a shader that does not
 /// override the parameter draws with.
