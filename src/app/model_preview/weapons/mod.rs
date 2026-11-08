@@ -9,14 +9,14 @@ use std::collections::BTreeSet;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachment::WeaponOption;
 
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::ce::attachments::{loose_weapon_paths, weapon_ik};
+use crate::app::model_preview::load::loose_weapon_paths;
+use crate::app::model_preview::animation::ik::weapon::weapon_ik;
 use super::common::fields::{elements, has_flag, holder_of};
 use crate::app::model_preview::common::marker::{attach_point, attach_vector};
 use super::load::build_render_preview;
-use super::ce::attachments::CeWeaponIk;
+use crate::app::model_preview::animation::ik::weapon::CeWeaponIk;
 use super::*;
 use crate::core::source::TagSource;
 
@@ -586,9 +586,9 @@ pub(in crate::app::model_preview) fn attach_weapon(
         let place = |frame: &MarkerFrame| {
             (frame.axes.map(|axis| attach_vector(&parent, &child, axis)), attach_point(&parent, &child, frame.position))
         };
-        let holder = super::animation::reach_ik::ReachIkHolder::Weapon(owner);
+        let holder = super::animation::ik::reach::ReachIkHolder::Weapon(owner);
         let node = Some(parent.node.max(0) as usize);
-        preview.gen3.ik_markers.extend(super::animation::reach_ik::reach_ik_markers(&attached, holder, place, node));
+        preview.gen3.ik_markers.extend(super::animation::ik::reach::reach_ik_markers(&attached, holder, place, node));
     }
     if let Some(weapons) = ik {
         let class = string_id_in(&weapon, "weapon class");
@@ -611,6 +611,15 @@ pub(in crate::app::model_preview) fn attach_weapon(
     }
     let variant = object_variant(&weapon, &model, "").map(|variant| variant.name).unwrap_or_default();
     fold_attached(reader, &weapon, &model, &variant, attached, parent, child, owner, tag_path::name(path), preview)
+}
+
+/// One row of a weapon dropdown.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WeaponOption {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    /// The class its row sits under.
+    pub(crate) class: String,
 }
 
 #[cfg(test)]

@@ -4,16 +4,15 @@
 //! the unit's animation graph names.
 
 use super::super::common::fields::{elements, object_block};
-use blam_tags::math::Matrix4;
 use blam_tags::{TagFile, TagStruct};
 
 use super::functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
 use super::super::dx9::passes::{H2ChangeColors, read_h2_change_colors};
 use super::super::load::build_render_preview;
 use super::super::*;
-use super::super::attachment::*;
-use super::super::common::marker::{MarkerFrame, attach_point, attach_vector};
-use super::super::common::math::{matrix_of, rigid_inverse};
+use super::super::load::merge_attached;
+use super::super::common::marker::MarkerFrame;
+use super::super::animation::ik::weapon::{attached_marker_frame, weapon_ik};
 use crate::core::source::TagSource;
 
 /// The stance a unit nobody is driving stands in.
@@ -29,70 +28,6 @@ pub(crate) struct CeAttachedObject {
     pub(crate) markers: Vec<RenderModelPreviewMarker>,
     pub(crate) functions: Option<CeObjectFunctions>,
     pub(crate) change_colors: H2ChangeColors,
-}
-
-/// Clips the game runs without weapon IK, by the last word of their names.
-/// `unit_animation_weapon_ik` turns it off for an action, a soft ping, and
-/// the states of `unit_animation_set_state` these play in.
-const NO_WEAPON_IK: &[&str] = &[
-    // Actions.
-    "disarm",
-    "drop",
-    "ready",
-    "put-away",
-    "reload",
-    "reload-1",
-    "reload-2",
-    "melee",
-    "throw-grenade",
-    "overheat",
-    // States.
-    "airborne-dead",
-    "landing-dead",
-    "enter",
-    "exit",
-    "melee-airborne",
-    "melee-continuous",
-    "resurrect-front",
-    "resurrect-back",
-    "leap-start",
-    "leap-airborne",
-    "leap-melee",
-    // Impulses, which `unit_start_animation_impulse` plays in one state.
-    "dive-front",
-    "dive-back",
-    "dive-left",
-    "dive-right",
-    "surprise-front",
-    "surprise-back",
-    "berserk",
-    "evade-left",
-    "evade-right",
-    "signal-move",
-    "signal-attack",
-    "warn",
-    "celebrate",
-    "panic",
-    // Pings, by the part of the body hit.
-    "head",
-    "chest",
-    "gut",
-    "l-arm",
-    "r-arm",
-    "l-hand",
-    "r-hand",
-    "l-leg",
-    "r-leg",
-    "l-thigh",
-    "r-thigh",
-    "l-foot",
-    "r-foot",
-];
-/// Whether the game keeps a held weapon's IK points on through a clip.
-pub(in crate::app::model_preview) fn clip_runs_weapon_ik(clip: &str) -> bool {
-    let last = clip.rsplit(' ').next().unwrap_or(clip);
-    // `%1` numbers a clip's permutations.
-    !NO_WEAPON_IK.contains(&last.split('%').next().unwrap_or(last))
 }
 
 /// `weapon_class_animation_block` slots of the aiming screens.
@@ -155,59 +90,6 @@ pub(in crate::app::model_preview) fn resting_aim(graph: &TagFile, clip: &str) ->
     let aim = weapon.and_then(|weapon| Some((clip_at(*weapon, screen)?, resting_screen_frame(*weapon))));
     let look = clip_at(*seat, LOOK).map(|look| (look, resting_screen_frame(*seat)));
     aim.into_iter().chain(look).collect()
-}
-
-/// A hand held to a marker of the weapon: an IK point of the animations.
-#[derive(Debug, Clone)]
-pub(crate) struct CeWeaponIk {
-    /// Which clips hold it: a Halo CE weapon class, the second word of their
-    /// names, or a Halo 2 mode, the first.
-    pub(in crate::app::model_preview) scope: String,
-    hand: usize,
-    elbow: usize,
-    shoulder: usize,
-    /// From the marker on the hand to its node.
-    hand_from_marker: Matrix4,
-    /// The node the weapon rides on.
-    weapon_node: usize,
-    /// The marker on the weapon, in bind space.
-    grip: Matrix4,
-    /// The nodes below the hand, which move with it.
-    pub(in crate::app::model_preview) carried: Vec<usize>,
-}
-
-impl CeWeaponIk {
-    pub(in crate::app::model_preview) fn hand(&self) -> usize {
-        self.hand
-    }
-
-    /// Whether a clip is one of the held weapon's, played with IK on.
-    pub(in crate::app::model_preview) fn runs_through(&self, clip: &str) -> bool {
-        clip.split(' ').any(|word| word.eq_ignore_ascii_case(&self.scope)) && clip_runs_weapon_ik(clip)
-    }
-
-    /// Pose the arm. `worlds` holds each node's posed transform, and
-    /// `inverse_binds` what `skin` undoes of it.
-    pub(in crate::app::model_preview) fn apply(&self, worlds: &mut [Matrix4], inverse_binds: &[Matrix4]) {
-        let (Some(weapon), Some(inverse)) =
-            (worlds.get(self.weapon_node).copied(), inverse_binds.get(self.weapon_node).copied())
-        else {
-            return;
-        };
-        let desired = weapon * inverse * self.grip * self.hand_from_marker;
-        let mut arm = [self.shoulder, self.elbow, self.hand].map(|node| worlds.get(node).copied());
-        let [Some(shoulder), Some(elbow), Some(hand)] = &mut arm else {
-            return;
-        };
-        let was = *hand;
-        reach_with_arm(desired, shoulder, elbow, hand);
-        (worlds[self.shoulder], worlds[self.elbow], worlds[self.hand]) = (*shoulder, *elbow, *hand);
-        // `render_model_adjust_hand`: what it did to the hand, from there down.
-        let moved = *hand * rigid_inverse(&was);
-        for node in &self.carried {
-            worlds[*node] = moved * worlds[*node];
-        }
-    }
 }
 
 /// What the animations say of a held weapon.
@@ -329,23 +211,6 @@ fn hidden_clips(graph: &TagFile, weapon_label: &str) -> std::collections::BTreeS
     other.difference(&held).copied().collect()
 }
 
-/// `.weapon` tags of a loose folder, by path without the extension.
-pub(in crate::app::model_preview) fn loose_weapon_paths(root: &std::path::Path) -> Vec<String> {
-    let mut found = Vec::new();
-    let mut folders = vec![root.to_path_buf()];
-    while let Some(folder) = folders.pop() {
-        for path in std::fs::read_dir(folder).into_iter().flatten().flatten().map(|entry| entry.path()) {
-            if path.is_dir() {
-                folders.push(path);
-            } else if path.extension().is_some_and(|extension| extension == "weapon") {
-                let inner = path.strip_prefix(root).unwrap_or(&path).with_extension("");
-                found.push(inner.to_string_lossy().replace('/', "\\"));
-            }
-        }
-    }
-    found
-}
-
 /// The weapons `unit_can_use_weapon` lets this unit hold in its resting seat:
 /// the biped has no say, only its animations do.
 fn equippable_of(reader: &TagReader, graph: &TagFile) -> Vec<CeEquippable> {
@@ -412,54 +277,6 @@ pub(in crate::app::model_preview) fn first_weapon(object: &TagFile) -> Option<St
         .find(|path| !path.is_empty())
 }
 
-/// A marker of a held object, where holding it puts it.
-pub(in crate::app::model_preview) fn attached_marker_frame(
-    marker: &RenderModelPreviewMarker,
-    parent: &MarkerFrame,
-    child: &MarkerFrame,
-) -> MarkerFrame {
-    MarkerFrame {
-        axes: marker.axes.map(|axis| attach_vector(parent, child, axis)),
-        position: attach_point(parent, child, marker.position),
-        node: parent.node,
-    }
-}
-
-/// An IK point of a weapon held on `parent`, if both markers and the arm exist.
-pub(in crate::app::model_preview) fn weapon_ik(
-    preview: &RenderModelPreview,
-    weapon: &RenderModelPreview,
-    scope: &str,
-    parent: MarkerFrame,
-    child: MarkerFrame,
-    marker: &str,
-    attach_to: &str,
-) -> Option<CeWeaponIk> {
-    let named = |model: &RenderModelPreview, name: &str| {
-        let found = model.markers.iter().any(|marker| marker.name.eq_ignore_ascii_case(name));
-        found.then(|| MarkerFrame::find(model, name))
-    };
-    let on_hand = named(preview, marker)?;
-    let on_weapon = named(weapon, attach_to)?;
-    let hand = on_hand.node.max(0) as usize;
-    let elbow = usize::try_from(preview.nodes.get(hand)?.parent).ok()?;
-    let shoulder = usize::try_from(preview.nodes.get(elbow)?.parent).ok()?;
-    let rows = preview.nodes.get(hand)?.inverse_bind;
-    let inverse_bind = Matrix4 { m: [rows[0], rows[1], rows[2], [0.0, 0.0, 0.0, 1.0]] };
-    let moved = on_weapon.axes.map(|axis| attach_vector(&parent, &child, axis));
-    let position = attach_point(&parent, &child, on_weapon.position);
-    Some(CeWeaponIk {
-        scope: scope.to_owned(),
-        hand,
-        elbow,
-        shoulder,
-        hand_from_marker: rigid_inverse(&(inverse_bind * matrix_of(on_hand.axes, on_hand.position))),
-        weapon_node: parent.node.max(0) as usize,
-        grip: matrix_of(moved, position),
-        carried: Vec::new(),
-    })
-}
-
 /// Hang the unit's ready weapon on it, returning the object that adds.
 pub(in crate::app::model_preview) fn attach_ce_weapon(
     reader: &TagReader,
@@ -516,6 +333,10 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blam_tags::math::Matrix4;
+    use super::super::super::animation::ik::weapon::{CeWeaponIk, LONGEST_REACH, clip_runs_weapon_ik, reach_with_arm};
+    use super::super::super::common::marker::{attach_point, attach_vector};
+    use super::super::super::common::math::{matrix_of, rigid_inverse};
     use super::super::super::common::math::{IDENTITY, axis_of, minus, place_of};
     use crate::app::model_preview::harness::kit::kit_source;
     use crate::core::game::GameId;

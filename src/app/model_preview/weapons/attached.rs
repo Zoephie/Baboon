@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 use blam_tags::TagFile;
-use super::super::attachment::merge_attached;
+use super::super::load::merge_attached;
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::super::ce::attachments::attached_marker_frame;
+use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::dx9::passes::{h2_change_colors_for, read_h2_change_colors};
 use super::super::*;

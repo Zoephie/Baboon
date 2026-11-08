@@ -23,7 +23,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
 mod errors;
-mod attachment;
 mod ce;
 pub(in crate::app) mod dx9;
 pub(in crate::app) mod h2;
@@ -116,7 +115,7 @@ pub(crate) struct RenderModelPreview {
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
     /// Halo CE: where a held weapon pulls the unit's hands.
-    pub weapon_ik: Vec<ce::attachments::CeWeaponIk>,
+    pub weapon_ik: Vec<crate::app::model_preview::animation::ik::weapon::CeWeaponIk>,
     pub particles: Vec<Arc<particles::H3ParticleSystem>>,
     pub cloth: Vec<cloth::H3ClothAt>,
     pub instances: RenderModelInstances,
@@ -1073,13 +1072,13 @@ const WEAPON_PICKER_HEIGHT: f32 = 300.0;
 
 /// Whether the weapon list overflows its popup: `None`, a heading per class,
 /// and a row per weapon.
-fn weapon_picker_scrolls(weapons: &[attachment::WeaponOption], row_height: f32) -> bool {
+fn weapon_picker_scrolls(weapons: &[weapons::WeaponOption], row_height: f32) -> bool {
     let classes = weapons.chunk_by(|a, b| a.class == b.class).count();
     (1 + classes + weapons.len()) as f32 * row_height > WEAPON_PICKER_HEIGHT
 }
 
 /// A weapon's row survives a search by its own name or its class's.
-fn weapon_matches(weapon: &attachment::WeaponOption, query: &str) -> bool {
+fn weapon_matches(weapon: &weapons::WeaponOption, query: &str) -> bool {
     weapon.name.to_lowercase().contains(query) || weapon.class.to_lowercase().contains(query)
 }
 
@@ -1088,8 +1087,8 @@ fn weapon_dropdown(
     ui: &mut Ui,
     label: &str,
     salt: (&str, &str),
-    weapons: &[attachment::WeaponOption],
-    held: Option<&attachment::WeaponOption>,
+    weapons: &[weapons::WeaponOption],
+    held: Option<&weapons::WeaponOption>,
 ) -> Option<Option<String>> {
     let mut chosen = None;
     ui.add_space(6.0);
@@ -1181,7 +1180,7 @@ fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
     let options: Vec<_> = weapons
         .equippable
         .iter()
-        .map(|weapon| attachment::WeaponOption {
+        .map(|weapon| weapons::WeaponOption {
             path: weapon.path.clone(),
             name: weapon.name.clone(),
             class: weapon.class.clone(),

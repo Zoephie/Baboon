@@ -3,7 +3,7 @@
 
 use super::super::common::view::{ViewFrame, posed_on};
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::attachments::attached_marker_frame;
+use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_in_any, object_block};
 use super::super::common::flares::{FlareSprite, OcclusionOffset};
 use super::passes::periodic_evaluate;

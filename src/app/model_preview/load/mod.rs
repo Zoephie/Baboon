@@ -6,7 +6,7 @@ use super::dx9::passes::{H2Layer, h2_prt_lights};
 use super::h2::prt::read_h2_prt;
 use std::sync::Arc;
 use super::common::geometry::{Overflow, VertexBase};
-use super::common::marker::own_marker_frame;
+use super::common::marker::{MarkerFrame, attach_point, attach_vector, own_marker_frame};
 
 pub(in crate::app::model_preview) mod reader;
 pub(in crate::app) use reader::TagReader;
@@ -568,7 +568,7 @@ impl ObjectLoad<'_> {
         preview.h4.shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
         // The unit's markers its IK sets and chains place.
         let own = |frame: &crate::app::model_preview::common::marker::MarkerFrame| (frame.axes, frame.position);
-        preview.gen3.ik_markers = super::animation::reach_ik::reach_ik_markers(preview, super::animation::reach_ik::ReachIkHolder::Unit, own, None);
+        preview.gen3.ik_markers = super::animation::ik::reach::reach_ik_markers(preview, super::animation::ik::reach::ReachIkHolder::Unit, own, None);
         let markers = preview.markers.clone();
         let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
         let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
@@ -1051,6 +1051,72 @@ pub(super) struct RawVariant {
     pub(super) name: String,
     pub(super) regions: Vec<(String, RawVariantRegion)>,
     pub(super) muted_nodes: Vec<String>,
+}
+
+/// `.weapon` tags of a loose folder, by path without the extension.
+pub(in crate::app::model_preview) fn loose_weapon_paths(root: &std::path::Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut folders = vec![root.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        for path in std::fs::read_dir(folder).into_iter().flatten().flatten().map(|entry| entry.path()) {
+            if path.is_dir() {
+                folders.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "weapon") {
+                let inner = path.strip_prefix(root).unwrap_or(&path).with_extension("");
+                found.push(inner.to_string_lossy().replace('/', "\\"));
+            }
+        }
+    }
+    found
+}
+
+/// Add `other` to `preview`, moved onto `parent` and owned by object `owner`.
+pub(in crate::app::model_preview) fn merge_attached(
+    preview: &mut RenderModelPreview,
+    mut other: RenderModelPreview,
+    parent: MarkerFrame,
+    child: MarkerFrame,
+    owner: u8,
+    name: &str,
+) {
+    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), other.vertices.len(), Overflow::RefusesAppend) else {
+        return;
+    };
+    let index_base = preview.indices.len() as u32;
+    let material_base = preview.materials.len() as u16;
+    let bound = [f32::from(parent.node), 0.0, 0.0, 0.0];
+    for vertex in &mut other.vertices {
+        vertex.position = attach_point(&parent, &child, vertex.position);
+        vertex.normal = attach_vector(&parent, &child, vertex.normal);
+        vertex.tangent = attach_vector(&parent, &child, vertex.tangent);
+        vertex.binormal = attach_vector(&parent, &child, vertex.binormal);
+        vertex.node_indices = bound;
+        vertex.node_weights = [1.0, 0.0, 0.0, 0.0];
+        for axis in 0..3 {
+            preview.bounds_min[axis] = preview.bounds_min[axis].min(vertex.position[axis]);
+            preview.bounds_max[axis] = preview.bounds_max[axis].max(vertex.position[axis]);
+        }
+    }
+    preview.vertices.append(&mut other.vertices);
+    preview.indices.extend(other.indices.iter().map(|&index| vertex_base.offset(index)));
+    for material in &mut other.materials {
+        material.object = owner;
+    }
+    preview.materials.append(&mut other.materials);
+    let label = |region: &str| format!("{name}: {region}");
+    let node = usize::try_from(parent.node).unwrap_or(0);
+    for mut batch in other.batches {
+        batch.index_start += index_base;
+        batch.material_index += material_base;
+        batch.region_name = label(&batch.region_name);
+        // Moved and bound as its vertices are.
+        batch.sort_position = batch.sort_position.map(|(point, _)| (attach_point(&parent, &child, point), node));
+        preview.batches.push(batch);
+    }
+    for mut region in other.regions {
+        region.name = label(&region.name);
+        preview.regions.push(region);
+    }
 }
 
 #[cfg(test)]
@@ -2856,4 +2922,3 @@ pub(super) mod kit_object_tests {
         assert!(made(MOST_SYSTEM_PARTICLES - left) <= left);
     }
 }
-

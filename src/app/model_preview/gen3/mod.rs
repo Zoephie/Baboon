@@ -27,7 +27,7 @@ pub(crate) struct Gen3Features {
     pub cheap_emitters: Vec<super::particles::cheap::ReachCheapEmitterAt>,
     /// The markers a Reach or Halo 4 unit's IK chains can reach for: its own
     /// and its held weapons', in bind space on the nodes they ride.
-    pub ik_markers: Vec<super::animation::reach_ik::ReachIkMarker>,
+    pub ik_markers: Vec<super::animation::ik::reach::ReachIkMarker>,
     pub flares: Vec<super::gen3::flares::H3FlareAt>,
     pub light_volumes: Vec<super::gen3::light_volumes::H3LightVolumeAt>,
     pub strips: Vec<std::sync::Arc<super::gen3::strips::H3StripAt>>,
