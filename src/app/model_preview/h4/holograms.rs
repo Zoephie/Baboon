@@ -186,7 +186,7 @@ fn scaled_sphere(
     root_skinning: Option<[[f32; 4]; 3]>,
     scaled_skinning: Option<[[f32; 4]; 3]>,
 ) -> ([f32; 3], f32) {
-    use super::super::attachment::{IDENTITY, place_of, rigid_inverse};
+    use crate::app::model_preview::common::math::{IDENTITY, place_of, rigid_inverse};
     use blam_tags::math::Matrix4;
     let rows = |rows: [[f32; 4]; 3]| Matrix4 { m: [rows[0], rows[1], rows[2], [0.0, 0.0, 0.0, 1.0]] };
     // Node 0's world matrix is its skinning matrix times its bind pose.

@@ -9,10 +9,12 @@ use std::collections::BTreeSet;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachment::{MarkerFrame, WeaponOption};
+use super::attachment::WeaponOption;
+
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::ce::attachments::{loose_weapon_paths, weapon_ik};
 use super::common::fields::{elements, has_flag};
-use super::attachment::{attach_point, attach_vector};
+use crate::app::model_preview::common::marker::{attach_point, attach_vector};
 use super::load::build_render_preview;
 use super::ce::attachments::CeWeaponIk;
 use super::*;

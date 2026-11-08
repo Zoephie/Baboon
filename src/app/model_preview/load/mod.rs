@@ -6,6 +6,7 @@ use super::dx9::passes::{H2Layer, h2_prt_lights};
 use super::h2::prt::read_h2_prt;
 use std::sync::Arc;
 use super::common::geometry::{Overflow, VertexBase};
+use super::common::marker::own_marker_frame;
 
 pub(in crate::app::model_preview) mod reader;
 pub(in crate::app) use reader::TagReader;
@@ -566,7 +567,7 @@ impl ObjectLoad<'_> {
         preview.h4.shield = super::h4::shield::read_h4_shield(reader, model);
         preview.h4.shadow_caster = super::h4::shadow::h4_shadow_caster(model_tag);
         // The unit's markers its IK sets and chains place.
-        let own = |frame: &super::attachment::MarkerFrame| (frame.axes, frame.position);
+        let own = |frame: &crate::app::model_preview::common::marker::MarkerFrame| (frame.axes, frame.position);
         preview.gen3.ik_markers = super::animation::reach_ik::reach_ik_markers(preview, super::animation::reach_ik::ReachIkHolder::Unit, own, None);
         let markers = preview.markers.clone();
         let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
@@ -870,12 +871,6 @@ impl<F> Clone for LoadCx<'_, F> {
 }
 
 impl<F> Copy for LoadCx<'_, F> {}
-
-/// Where a marker of the opened object puts what is attached to it.
-pub(in crate::app::model_preview) fn own_marker_frame(marker: &RenderModelPreviewMarker) -> (super::attachment::MarkerFrame, usize) {
-    let place = super::attachment::MarkerFrame { axes: marker.axes, position: marker.position, node: marker.node_index };
-    (place, marker.node_index.max(0) as usize)
-}
 
 /// The `.model` an object stands for. `None` for any other tag, which is its
 /// own model, and for a Halo CE object, which has no `.model` to name.

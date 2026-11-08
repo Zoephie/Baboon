@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagFunction};
 
-use super::super::attachment::MarkerFrame;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{has_flag, has_flag_labelled};
 use super::super::common::view::posed_on;
 use super::super::h3::lights::SHADOWS_AND_GELS;

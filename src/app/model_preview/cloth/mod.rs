@@ -4,7 +4,7 @@
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::attachment::MarkerFrame;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::common::fields::{elements, has_flag, object_block};
 use super::common::view::posed_on;
 use super::effects::marker_name;

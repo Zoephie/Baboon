@@ -2,7 +2,7 @@
 //! attached at their markers.
 
 use blam_tags::{TagFile, TagStruct};
-use super::super::attachment::MarkerFrame;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::elements;
 use super::super::load::build_render_preview;
 use super::super::*;

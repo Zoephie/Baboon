@@ -7,7 +7,9 @@ use blam_tags::animation::{decode_extended_block, AnimationGroup, ExtendedChanne
 use blam_tags::math::{Matrix4, RealPoint3d, RealQuaternion};
 use blam_tags::{Skeleton, TagFile};
 
-use super::super::attachment::{added, apart, axis_of, matrix_of, place_of, rigid_inverse};
+use super::super::common::math::{minus, plus};
+
+use crate::app::model_preview::common::math::{axis_of, matrix_of, place_of, rigid_inverse};
 use super::super::common::fields::elements;
 use super::super::RenderModelPreviewNode;
 use crate::app::model_preview::common::math::{cross, dot, scaled, unit_by_reciprocal};
@@ -214,7 +216,7 @@ pub(crate) struct ReachIkMarker {
 pub(crate) fn reach_ik_markers(
     model: &super::super::RenderModelPreview,
     holder: ReachIkHolder,
-    place: impl Fn(&super::super::attachment::MarkerFrame) -> ([[f32; 3]; 3], [f32; 3]),
+    place: impl Fn(&crate::app::model_preview::common::marker::MarkerFrame) -> ([[f32; 3]; 3], [f32; 3]),
     node: Option<usize>,
 ) -> Vec<ReachIkMarker> {
     let mut out: Vec<ReachIkMarker> = Vec::new();
@@ -222,7 +224,7 @@ pub(crate) fn reach_ik_markers(
         if out.iter().any(|known| known.name.eq_ignore_ascii_case(&marker.name)) {
             continue;
         }
-        let frame = super::super::attachment::MarkerFrame::find(model, &marker.name);
+        let frame = crate::app::model_preview::common::marker::MarkerFrame::find(model, &marker.name);
         let (axes, position) = place(&frame);
         out.push(ReachIkMarker {
             holder,
@@ -396,30 +398,30 @@ pub(crate) fn two_bone_ik(
     }
     let (mut a, mut j, mut e) = (a_old, j_old, e_old);
     let (a_at, j_at, e_at) = (place_of(&a), place_of(&j), place_of(&e));
-    let upper_bone = apart(j_at, a_at);
-    let lower_bone = apart(e_at, j_at);
-    let toward_pole = unit_by_reciprocal(pole.map_or(upper_bone, |pole| apart(pole, a_at)));
+    let upper_bone = minus(j_at, a_at);
+    let lower_bone = minus(e_at, j_at);
+    let toward_pole = unit_by_reciprocal(pole.map_or(upper_bone, |pole| minus(pole, a_at)));
     let align_a = ik_alignment(&a, upper_bone);
     a = a * align_a;
     let align_j = ik_alignment(&j, lower_bone);
     j = j * align_j;
     let (upper, lower) = (dot(upper_bone, upper_bone).sqrt(), dot(lower_bone, lower_bone).sqrt());
     if upper > 1e-4 && lower > 1e-4 {
-        let reach = unit_by_reciprocal(apart(e_at, a_at));
-        let to_goal = apart(place_of(&desired), a_at);
+        let reach = unit_by_reciprocal(minus(e_at, a_at));
+        let to_goal = minus(place_of(&desired), a_at);
         let length = dot(to_goal, to_goal).sqrt();
         let toward = if length > 0.0 { scaled(to_goal, 1.0 / length) } else { reach };
         let longest = 0.98 * (upper + lower);
         let shortest = longest.min(1.02 * (upper - lower).abs());
         let distance = length.clamp(shortest, longest);
-        let hand_at = added(a_at, scaled(toward, distance));
+        let hand_at = plus(a_at, scaled(toward, distance));
         let bend_up = up_of_forward_left(reach, toward_pole);
         let [forward, left, _] = frame_forward_up(toward, bend_up);
         let cosine = (lower * lower - distance * distance - upper * upper) / (-2.0 * distance * upper);
         let sine = (1.0 - cosine * cosine).max(1e-8).sqrt();
-        let elbow = added(a_at, scaled(added(scaled(forward, cosine), scaled(left, sine)), upper));
-        let joint_axes = frame_forward_up(apart(hand_at, elbow), axis_of(&j, 2));
-        let base_axes = frame_forward_up(apart(elbow, a_at), axis_of(&a, 2));
+        let elbow = plus(a_at, scaled(plus(scaled(forward, cosine), scaled(left, sine)), upper));
+        let joint_axes = frame_forward_up(minus(hand_at, elbow), axis_of(&j, 2));
+        let base_axes = frame_forward_up(minus(elbow, a_at), axis_of(&a, 2));
         a = matrix_of(base_axes, a_at);
         j = matrix_of(joint_axes, elbow);
         e = matrix_of([0, 1, 2].map(|axis| unit_by_reciprocal(axis_of(&desired, axis))), hand_at);
@@ -472,7 +474,7 @@ mod tests {
     }
 
     fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
-        let gap = apart(a, b);
+        let gap = minus(a, b);
         dot(gap, gap).sqrt()
     }
 

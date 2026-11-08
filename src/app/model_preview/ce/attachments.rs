@@ -12,6 +12,8 @@ use super::super::dx9::passes::{H2ChangeColors, read_h2_change_colors};
 use super::super::load::build_render_preview;
 use super::super::*;
 use super::super::attachment::*;
+use super::super::common::marker::{MarkerFrame, attach_point, attach_vector};
+use super::super::common::math::{matrix_of, rigid_inverse};
 use crate::core::source::TagSource;
 
 /// The stance a unit nobody is driving stands in.
@@ -514,6 +516,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::super::common::math::{IDENTITY, axis_of, minus, place_of};
     use crate::app::model_preview::harness::kit::kit_source;
     use crate::core::game::GameId;
     use crate::app::model_preview::common::math::{dot, unit_by_reciprocal};
@@ -553,7 +556,7 @@ mod tests {
     }
 
     fn distance(a: &Matrix4, b: &Matrix4) -> f32 {
-        let gap = apart(place_of(a), place_of(b));
+        let gap = minus(place_of(a), place_of(b));
         dot(gap, gap).sqrt()
     }
 
@@ -567,7 +570,7 @@ mod tests {
         // The elbow started below the line to the goal, and stays there.
         assert!(place_of(&elbow)[1] < place_of(&elbow)[0]);
         // Each bone's first axis still runs down it.
-        let down = unit_by_reciprocal(apart(place_of(&elbow), place_of(&shoulder)));
+        let down = unit_by_reciprocal(minus(place_of(&elbow), place_of(&shoulder)));
         assert!(dot(axis_of(&shoulder, 0), down) > 0.999);
     }
 

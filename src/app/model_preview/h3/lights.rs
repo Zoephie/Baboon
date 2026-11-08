@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFile, TagStruct};
 
-use super::super::attachment::MarkerFrame;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_labelled, object_block};
 use super::super::common::view::posed_on;
 use super::super::effects::{

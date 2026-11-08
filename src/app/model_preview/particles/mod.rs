@@ -11,7 +11,7 @@ use std::sync::Arc;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, ParameterSource, ResolvedRenderMethod, ResolvedValue};
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
-use super::attachment::MarkerFrame;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::common::view::ViewFrame;
 use super::functions::FunctionValues;

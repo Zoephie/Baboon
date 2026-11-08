@@ -1,7 +1,7 @@
 //! What hangs on a Halo 4 object attached to another.
 
 use std::sync::Arc;
-use super::super::attachment::MarkerFrame;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::cloth::ClothGame;
 use super::super::*;
 use super::super::load::LoadCx;

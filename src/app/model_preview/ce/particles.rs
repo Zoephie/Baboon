@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::super::attachment::perpendicular;
+use crate::app::model_preview::common::math::perpendicular;
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::lights::{CeEffectLightDef, CeLight, read_effect_light};
 use super::super::common::view::{ViewFrame, posed_on};

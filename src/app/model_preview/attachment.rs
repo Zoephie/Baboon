@@ -1,11 +1,12 @@
-//! What any game's held or carried object needs: rigid transforms, an arm that
+//! What any game's held or carried object needs: a weapon row, an arm that
 //! reaches for a marker, and folding a second model into a preview.
 
 use blam_tags::math::Matrix4;
 
 use super::*;
-use crate::app::model_preview::common::math::{cross, dot, scaled, unit_by_reciprocal};
+use crate::app::model_preview::common::math::{axis_of, cross, dot, matrix_of, minus, place_of, plus, scaled, unit_by_reciprocal};
 use super::common::geometry::{Overflow, VertexBase};
+use super::common::marker::{MarkerFrame, attach_point, attach_vector};
 
 /// One row of a weapon dropdown.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,83 +20,20 @@ pub(crate) struct WeaponOption {
 /// `inverse_kinematics_adjust_matrices` keeps the arm this much short of straight.
 pub(super) const LONGEST_REACH: f32 = 0.98;
 
-pub(super) const IDENTITY: Matrix4 = Matrix4 {
-    m: [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ],
-};
-
-
-
-/// `perpendicular3d`: a vector square to `a`, from its two largest parts.
-pub(super) fn perpendicular(a: [f32; 3]) -> [f32; 3] {
-    let [x, y, z] = a.map(f32::abs);
-    if x > y || x > z {
-        if y > z { [a[1], -a[0], 0.0] } else { [-a[2], 0.0, a[0]] }
-    } else {
-        [0.0, a[2], -a[1]]
-    }
-}
-
-
-pub(super) fn added(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|axis| a[axis] + b[axis])
-}
-
-pub(super) fn apart(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    std::array::from_fn(|axis| a[axis] - b[axis])
-}
-
-
-pub(super) fn axis_of(matrix: &Matrix4, axis: usize) -> [f32; 3] {
-    std::array::from_fn(|row| matrix.m[row][axis])
-}
-
-pub(super) fn place_of(matrix: &Matrix4) -> [f32; 3] {
-    axis_of(matrix, 3)
-}
-
-pub(super) fn matrix_of(axes: [[f32; 3]; 3], position: [f32; 3]) -> Matrix4 {
-    let mut matrix = IDENTITY;
-    for row in 0..3 {
-        for axis in 0..3 {
-            matrix.m[row][axis] = axes[axis][row];
-        }
-        matrix.m[row][3] = position[row];
-    }
-    matrix
-}
-
-pub(super) fn rigid_inverse(matrix: &Matrix4) -> Matrix4 {
-    let axes = [axis_of(matrix, 0), axis_of(matrix, 1), axis_of(matrix, 2)];
-    let place = place_of(matrix);
-    let mut inverse = IDENTITY;
-    for row in 0..3 {
-        inverse.m[row][0] = axes[row][0];
-        inverse.m[row][1] = axes[row][1];
-        inverse.m[row][2] = axes[row][2];
-        inverse.m[row][3] = -dot(axes[row], place);
-    }
-    inverse
-}
-
 /// `inverse_kinematics_adjust_matrices`: bend at the elbow, on the side it
 /// already bends, so the hand reaches `desired`.
 pub(super) fn reach_with_arm(desired: Matrix4, shoulder: &mut Matrix4, elbow: &mut Matrix4, hand: &mut Matrix4) {
     let start = place_of(shoulder);
     let joint = place_of(elbow);
-    let upper = dot(apart(joint, start), apart(joint, start)).sqrt();
-    let fore = dot(apart(place_of(hand), joint), apart(place_of(hand), joint)).sqrt();
-    let to_goal = apart(place_of(&desired), start);
+    let upper = dot(minus(joint, start), minus(joint, start)).sqrt();
+    let fore = dot(minus(place_of(hand), joint), minus(place_of(hand), joint)).sqrt();
+    let to_goal = minus(place_of(&desired), start);
     let mut reach = dot(to_goal, to_goal).sqrt();
     if reach < 0.0001 {
         return;
     }
     let toward = scaled(to_goal, 1.0 / reach);
-    let side = unit_by_reciprocal(cross(toward, apart(joint, start)));
+    let side = unit_by_reciprocal(cross(toward, minus(joint, start)));
     let bend = cross(side, toward);
     let mut goal = desired;
     let longest = (upper + fore) * LONGEST_REACH;
@@ -105,7 +43,7 @@ pub(super) fn reach_with_arm(desired: Matrix4, shoulder: &mut Matrix4, elbow: &m
     }
     if longest < reach {
         reach = longest;
-        let place = added(start, scaled(toward, reach));
+        let place = plus(start, scaled(toward, reach));
         (0..3).for_each(|row| goal.m[row][3] = place[row]);
     }
     let along = (reach * reach + upper * upper - fore * fore) / (reach * 2.0);
@@ -115,64 +53,12 @@ pub(super) fn reach_with_arm(desired: Matrix4, shoulder: &mut Matrix4, elbow: &m
         let z = unit_by_reciprocal(cross(x, up));
         matrix_of([x, cross(z, x), z], place)
     };
-    let upper_axis = unit_by_reciprocal(added(scaled(toward, along), scaled(bend, out)));
-    let fore_axis = unit_by_reciprocal(added(scaled(toward, reach - along), scaled(bend, -out)));
-    let bent = added(start, scaled(upper_axis, upper));
+    let upper_axis = unit_by_reciprocal(plus(scaled(toward, along), scaled(bend, out)));
+    let fore_axis = unit_by_reciprocal(plus(scaled(toward, reach - along), scaled(bend, -out)));
+    let bent = plus(start, scaled(upper_axis, upper));
     *elbow = aimed(fore_axis, axis_of(elbow, 1), bent);
     *shoulder = aimed(upper_axis, axis_of(shoulder, 1), start);
     *hand = goal;
-}
-
-/// A marker as a rigid transform: its three axes, then its position.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct MarkerFrame {
-    pub(super) axes: [[f32; 3]; 3],
-    pub(super) position: [f32; 3],
-    pub(super) node: i16,
-}
-
-impl MarkerFrame {
-    pub(super) const ORIGIN: Self = Self {
-        axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        position: [0.0; 3],
-        node: 0,
-    };
-
-    /// `object_get_marker_by_name`: no name, or none found, is the origin.
-    pub(super) fn find(preview: &RenderModelPreview, name: &str) -> Self {
-        preview
-            .markers
-            .iter()
-            .find(|marker| !name.is_empty() && marker.name.eq_ignore_ascii_case(name))
-            .map_or(Self::ORIGIN, |marker| Self {
-                axes: marker.axes,
-                position: marker.position,
-                node: marker.node_index.max(0),
-            })
-    }
-
-    /// A direction in this frame's axes, in the space the frame sits in.
-    fn rotate(&self, value: [f32; 3]) -> [f32; 3] {
-        std::array::from_fn(|axis| {
-            (0..3).map(|index| self.axes[index][axis] * value[index]).sum()
-        })
-    }
-
-    /// `rotate`'s inverse: axes are unit and square to each other.
-    fn unrotate(&self, value: [f32; 3]) -> [f32; 3] {
-        std::array::from_fn(|index| (0..3).map(|axis| self.axes[index][axis] * value[axis]).sum())
-    }
-}
-
-/// Where a point of the child goes when its `child` marker meets `parent`.
-pub(super) fn attach_point(parent: &MarkerFrame, child: &MarkerFrame, point: [f32; 3]) -> [f32; 3] {
-    let local = child.unrotate(std::array::from_fn(|axis| point[axis] - child.position[axis]));
-    let turned = parent.rotate(local);
-    std::array::from_fn(|axis| turned[axis] + parent.position[axis])
-}
-
-pub(super) fn attach_vector(parent: &MarkerFrame, child: &MarkerFrame, vector: [f32; 3]) -> [f32; 3] {
-    parent.rotate(child.unrotate(vector))
 }
 
 /// Add `other` to `preview`, moved onto `parent` and owned by object `owner`.

@@ -14,7 +14,7 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
     preview: &mut RenderModelPreview,
 ) {
     let own = super::super::ce::lights::read_ce_lights(reader, model_tag, 0, &preview.markers, |marker| {
-        let frame = super::super::attachment::MarkerFrame {
+        let frame = crate::app::model_preview::common::marker::MarkerFrame {
             axes: marker.axes,
             position: marker.position,
             node: marker.node_index.max(0),

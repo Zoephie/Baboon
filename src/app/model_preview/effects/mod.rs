@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::attachment::{MarkerFrame, perpendicular};
+use crate::app::model_preview::common::math::perpendicular;
+
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::functions::FunctionValues;
 use super::*;

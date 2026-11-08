@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-use super::attachment::MarkerFrame;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::ce::passes::argb;
 use super::common::fields::{elements, object_block};
 use super::common::math::{cross, dot};

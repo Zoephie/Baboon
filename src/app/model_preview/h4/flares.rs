@@ -10,7 +10,7 @@ use std::sync::Arc;
 use blam_tags::tag_function::transition_function_evaluate;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
-use super::super::attachment::MarkerFrame;
+use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
 use super::super::gen3::flares::{OcclusionOffset, rotation_function};
 use super::super::common::view::posed_on;

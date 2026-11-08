@@ -2,6 +2,7 @@
 
 use super::super::*;
 use blam_tags::TagFile;
+use super::super::common::marker::own_marker_frame;
 
 /// What a Reach object brings so far: its flares and lights. Its light
 /// volumes and effects read differently, and wait on their own readers.
@@ -9,7 +10,7 @@ pub(in crate::app::model_preview) fn read_reach_object_features(reader: &TagRead
     preview.reach.shield = super::super::reach::shield::read_reach_shield(reader, model);
     preview.reach.camo = super::super::reach::camo::ReachCamo::read(reader).map(std::sync::Arc::new);
     preview.reach.shadow_caster = super::super::reach::shadow::reach_shadow_caster(model_tag, model);
-    let own = |frame: &super::super::attachment::MarkerFrame| (frame.axes, frame.position);
+    let own = |frame: &crate::app::model_preview::common::marker::MarkerFrame| (frame.axes, frame.position);
     preview.gen3.ik_markers = super::super::animation::reach_ik::reach_ik_markers(preview, super::super::animation::reach_ik::ReachIkHolder::Unit, own, None);
     let markers = preview.markers.clone();
     let frame = |marker: &RenderModelPreviewMarker| own_marker_frame(marker);
