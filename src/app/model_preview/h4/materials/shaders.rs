@@ -16,6 +16,9 @@ use super::super::super::common::fields::elements;
 use crate::core::hlsl::emit::{Stage, Translated, translate_with};
 use crate::core::hlsl::parse::{Program, parse};
 use crate::core::hlsl::pre::{Preprocessor, Token};
+use super::super::super::gen3::shaders::H3Pass;
+use crate::core::hlsl::parse::{Scalar, Type};
+use crate::app::model_preview::h4::shield::{DEPTH_DECODE, WORLD_SCALE};
 
 /// Where an `#include` falls back to when the including file's own folder
 /// doesn't hold it.
@@ -323,3 +326,28 @@ mod tests {
     }
 }
 
+/// `ComputeDepthFade`'s decode of the game's reversed depth through
+/// `psDepthConstants`, made to read the preview's window depth back as world
+/// distance from the eye through [`DEPTH_DECODE`] and [`WORLD_SCALE`].
+pub(crate) fn rewire_depth_fade(pass: &mut H3Pass) -> Result<(), String> {
+    const DECODE: &str =
+        "float l_sceneDepth = (1.0 / ((psDepthConstants.x + psDepthConstants.y) - (psDepthConstants.y * l_depthValue.x)));";
+    if !pass.pixel.contains(DECODE) {
+        return Err("the depth fade's decode is not where it was".to_owned());
+    }
+    pass.pixel = pass.pixel.replace(
+        DECODE,
+        &format!(
+            "float l_window_ndc = l_depthValue.x * 2.0 - 1.0;
+float l_sceneDepth = ((l_window_ndc - {DEPTH_DECODE}.y) / ({DEPTH_DECODE}.x - l_window_ndc * {DEPTH_DECODE}.z) + {DEPTH_DECODE}.w) / {WORLD_SCALE};"
+        ),
+    );
+    pass.pixel = pass.pixel.replacen(
+        "uniform vec4 psDepthConstants;",
+        &format!("uniform vec4 psDepthConstants;\nuniform vec4 {DEPTH_DECODE};\nuniform float {WORLD_SCALE};"),
+        1,
+    );
+    pass.uniforms.push((DEPTH_DECODE.to_owned(), Type::Vector(Scalar::Float, 4)));
+    pass.uniforms.push((WORLD_SCALE.to_owned(), Type::Scalar(Scalar::Float)));
+    Ok(())
+}

@@ -13,20 +13,18 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::super::common::fields::{elements, has_flag};
+use super::super::common::fields::has_flag;
 use super::super::common::view::posed_on;
 use super::super::functions::FunctionValues;
 use super::super::common::named_function::{NamedFunction, tag_function_at};
 use super::super::effects::part_markers;
-use super::super::gen3::shaders::H3Pass;
 use super::super::reach::lights::object_value;
 use super::super::*;
-use crate::core::hlsl::emit::Stage;
 use crate::app::model_preview::common::math::{cross, unit_unless_under_micro};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 
-const SMALLEST: f32 = 1e-4;
+pub(super) const SMALLEST: f32 = 1e-4;
 /// An attached light's datum `+20`, which `light_new_attached` (X360
 /// 0x84AC4B50) leaves at -1 and nothing on its path writes: its age and its
 /// functions' input count from there, not from when it came on.
@@ -34,15 +32,14 @@ const ATTACHED_CREATION_TICK: f32 = -1.0;
 /// `RenderSSLightInternal`'s angle falloff power, `c[4].w`, for every light.
 const SPOT_POWER: f32 = 2.0;
 
-
 /// `RenderSSLightInternal`'s technique bits: the place among
 /// `MAKE_SS_LIGHT_TECHNIQUE`'s sixteen.
 pub(crate) const TECHNIQUE_SPOT: usize = 4;
 pub(crate) const TECHNIQUE_SPECULAR: usize = 8;
 
 /// `rasterizer_globals`' explicit shaders the lights draw with.
-const GOBO_SPECULAR: usize = 187;
-const POINT_PHYSICALLY_CORRECT: usize = 204;
+pub(super) const GOBO_SPECULAR: usize = 187;
+pub(super) const POINT_PHYSICALLY_CORRECT: usize = 204;
 
 /// A light's function: `light_function`, its `Mapping` beside the names of
 /// what drives it.
@@ -89,7 +86,7 @@ impl H4LightFunction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum H4LightKind {
+pub(super) enum H4LightKind {
     Point,
     Spot,
     /// Not attached to objects in the kit, and not drawn.
@@ -99,10 +96,10 @@ enum H4LightKind {
 /// A `light` tag, by field name: the kit's layouts differ from the
 /// definitions' (`lights.md` §0).
 #[derive(Debug, Clone)]
-struct H4LightTag {
-    kind: H4LightKind,
+pub(super) struct H4LightTag {
+    pub(super) kind: H4LightKind,
     /// `Lighting Mode` 0: shader 204.
-    physical: bool,
+    pub(super) physical: bool,
     color: [f32; 3],
     target_color: [f32; 3],
     intensity: H4LightFunction,
@@ -114,7 +111,7 @@ struct H4LightTag {
     interpolation: Option<H4LightFunction>,
     fade: [f32; 2],
     screenspace: bool,
-    specular: f32,
+    pub(super) specular: f32,
     diffuse: f32,
     first_person_only: bool,
     always_on_for_weapon: bool,
@@ -178,7 +175,7 @@ pub(crate) struct H4Light {
     /// A weapon on its own: `light_update_active_status` wants `always on
     /// for weapon`.
     lone_weapon: bool,
-    tag: Arc<H4LightTag>,
+    pub(super) tag: Arc<H4LightTag>,
 }
 
 /// A `cheap_light` at a marker (`render_object_attachments`' `gldf`).
@@ -216,8 +213,6 @@ pub(crate) struct H4LitLight {
     pub(crate) outer: f32,
     pub(crate) inner: f32,
 }
-
-
 
 /// `light_color_too_dark` (X360 0x829ECEE8).
 fn too_dark(color: [f32; 3]) -> bool {
@@ -622,85 +617,6 @@ fn read_cheap_light(reader: &TagReader, path: &str) -> Option<H4CheapLight> {
             .read_real("Falloff Begin Ratio")
             .unwrap_or(0.0)
             .clamp(0.0, 1.0),
-    })
-}
-
-/// The light passes a preview's lights can ask for, keyed by (physically
-/// correct, technique): explicit 187 or 204's `tiny_position` pixel shader
-/// over a full-screen triangle. A spot's cone may close to a point's, so a
-/// spot brings both.
-pub(crate) fn read_h4_light_passes(reader: &TagReader, preview: &mut RenderModelPreview) {
-    let mut wanted: Vec<(bool, usize)> = Vec::new();
-    for light in &preview.h4.lights {
-        let tag = &light.tag;
-        let specular = if tag.specular > SMALLEST {
-            TECHNIQUE_SPECULAR
-        } else {
-            0
-        };
-        wanted.push((tag.physical, specular));
-        if tag.kind == H4LightKind::Spot {
-            wanted.push((tag.physical, specular | TECHNIQUE_SPOT));
-        }
-    }
-    if !preview.h4.cheap_lights.is_empty() {
-        wanted.push((false, 0));
-    }
-    wanted.retain(|key| !preview.h4.light_passes.contains_key(key));
-    if wanted.is_empty() {
-        return;
-    }
-    let mut programs = HashMap::new();
-    for key in wanted {
-        let program = programs
-            .entry(key.0)
-            .or_insert_with(|| h4_light_program(reader, key.0));
-        let Some(program) = program.as_ref() else {
-            continue;
-        };
-        if let Ok(pass) = h4_light_pass(program, key.1) {
-            preview.h4.light_passes.insert(key, Arc::new(pass));
-        }
-    }
-}
-
-/// Explicit 204's effect when `physical`, else 187's, parsed.
-pub(crate) fn h4_light_program(
-    reader: &TagReader,
-    physical: bool,
-) -> Option<crate::core::hlsl::parse::Program> {
-    let globals = reader.load("globals\\rasterizer_globals",
-        "rasterizer_globals",
-        b"rasg",
-    )
-    .ok()?;
-    let index = if physical {
-        POINT_PHYSICALLY_CORRECT
-    } else {
-        GOBO_SPECULAR
-    };
-    let explicit = elements(globals.root(), "explicit shaders");
-    let path = explicit
-        .get(index)?
-        .read_tag_ref_path("explicit pixel shader")
-        .filter(|path| !path.is_empty())?;
-    let shader = super::materials::shaders::H4ShaderSource::read(reader, &path).ok()?;
-    shader.program(&super::materials::shaders::H4_DEFINES).ok()
-}
-
-/// A technique's `tiny_position` pixel shader over a full-screen triangle.
-pub(crate) fn h4_light_pass(
-    program: &crate::core::hlsl::parse::Program,
-    technique: usize,
-) -> Result<H3Pass, String> {
-    let pixel =
-        super::materials::shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
-    Ok(H3Pass {
-        fullscreen: true,
-        vertex: super::super::h4::materials::h4_screen_vertex().to_owned(),
-        pixel: pixel.source,
-        uniforms: pixel.uniforms,
-        textures: pixel.textures,
     })
 }
 

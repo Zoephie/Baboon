@@ -51,7 +51,7 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
     let mut pass = super::super::super::gen3::shaders::pass_of(vertex, pixel);
     // The depth fade reads the preview's depth, where the pixel shader has one.
     if pass.pixel.contains("psDepthConstants") {
-        super::super::super::h4::shield::rewire_depth_fade(&mut pass)?;
+        super::shaders::rewire_depth_fade(&mut pass)?;
     }
     let pass = Arc::new(pass);
     let baked = {

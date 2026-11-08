@@ -8,6 +8,7 @@ pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;
 pub(super) mod camo;
+pub(super) mod camo_pass;
 pub(in crate::app::model_preview) mod composite;
 pub(super) mod flares;
 pub(in crate::app::model_preview) mod holograms;

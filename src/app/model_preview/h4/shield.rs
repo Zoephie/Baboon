@@ -17,7 +17,7 @@ use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::{H3Pass, H3Texture};
 use super::super::gen3::shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 use crate::core::hlsl::emit::Stage;
-use crate::core::hlsl::parse::{Scalar, Type};
+use crate::app::model_preview::h4::materials::shaders::rewire_depth_fade;
 
 /// `rasterizer_globals`' explicit shader 61, `shield_impact`.
 const SHIELD_IMPACT: usize = 61;
@@ -84,32 +84,6 @@ pub(crate) fn read_h4_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<
         textures,
         pass,
     }))
-}
-
-/// `ComputeDepthFade`'s decode of the game's reversed depth through
-/// `psDepthConstants`, made to read the preview's window depth back as world
-/// distance from the eye through [`DEPTH_DECODE`] and [`WORLD_SCALE`].
-pub(crate) fn rewire_depth_fade(pass: &mut H3Pass) -> Result<(), String> {
-    const DECODE: &str =
-        "float l_sceneDepth = (1.0 / ((psDepthConstants.x + psDepthConstants.y) - (psDepthConstants.y * l_depthValue.x)));";
-    if !pass.pixel.contains(DECODE) {
-        return Err("the depth fade's decode is not where it was".to_owned());
-    }
-    pass.pixel = pass.pixel.replace(
-        DECODE,
-        &format!(
-            "float l_window_ndc = l_depthValue.x * 2.0 - 1.0;
-float l_sceneDepth = ((l_window_ndc - {DEPTH_DECODE}.y) / ({DEPTH_DECODE}.x - l_window_ndc * {DEPTH_DECODE}.z) + {DEPTH_DECODE}.w) / {WORLD_SCALE};"
-        ),
-    );
-    pass.pixel = pass.pixel.replacen(
-        "uniform vec4 psDepthConstants;",
-        &format!("uniform vec4 psDepthConstants;\nuniform vec4 {DEPTH_DECODE};\nuniform float {WORLD_SCALE};"),
-        1,
-    );
-    pass.uniforms.push((DEPTH_DECODE.to_owned(), Type::Vector(Scalar::Float, 4)));
-    pass.uniforms.push((WORLD_SCALE.to_owned(), Type::Scalar(Scalar::Float)));
-    Ok(())
 }
 
 /// Explicit 61's `technique` on the preview's skinned vertices, made to read

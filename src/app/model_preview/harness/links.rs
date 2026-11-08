@@ -94,9 +94,9 @@ fn h4_light_passes_link() {
     };
     let gl = headless_gl();
     for physical in [false, true] {
-        let program = super::super::h4::lights::h4_light_program(&crate::app::model_preview::load::TagReader::new(&source), physical).expect("the light shader");
+        let program = super::super::h4::light_pass::h4_light_program(&crate::app::model_preview::load::TagReader::new(&source), physical).expect("the light shader");
         for technique in 0..16 {
-            let pass = super::super::h4::lights::h4_light_pass(&program, technique).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));
+            let pass = super::super::h4::light_pass::h4_light_pass(&program, technique).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));
             unsafe {
                 let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
                 link(&gl, &stages, &[]).unwrap_or_else(|error| panic!("{physical} {technique}: {error}"));

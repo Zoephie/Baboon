@@ -13,6 +13,13 @@ use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use super::lights::{H4LightBlend, H4LitLight};
 use super::render::H4Game;
+use std::collections::HashMap;
+use std::sync::Arc;
+use super::super::common::fields::elements;
+use super::super::gen3::shaders::H3Pass;
+use super::super::*;
+use crate::core::hlsl::emit::Stage;
+use crate::app::model_preview::h4::lights::{GOBO_SPECULAR, H4LightKind, POINT_PHYSICALLY_CORRECT, SMALLEST, TECHNIQUE_SPECULAR, TECHNIQUE_SPOT};
 
 impl H4Game {
     /// Every Halo 4 light of the frame, on the preview's clock as game time.
@@ -141,4 +148,83 @@ impl H4Game {
             Gen3State::end_screen_lights(gl);
         }
     }
+}
+
+/// The light passes a preview's lights can ask for, keyed by (physically
+/// correct, technique): explicit 187 or 204's `tiny_position` pixel shader
+/// over a full-screen triangle. A spot's cone may close to a point's, so a
+/// spot brings both.
+pub(crate) fn read_h4_light_passes(reader: &TagReader, preview: &mut RenderModelPreview) {
+    let mut wanted: Vec<(bool, usize)> = Vec::new();
+    for light in &preview.h4.lights {
+        let tag = &light.tag;
+        let specular = if tag.specular > SMALLEST {
+            TECHNIQUE_SPECULAR
+        } else {
+            0
+        };
+        wanted.push((tag.physical, specular));
+        if tag.kind == H4LightKind::Spot {
+            wanted.push((tag.physical, specular | TECHNIQUE_SPOT));
+        }
+    }
+    if !preview.h4.cheap_lights.is_empty() {
+        wanted.push((false, 0));
+    }
+    wanted.retain(|key| !preview.h4.light_passes.contains_key(key));
+    if wanted.is_empty() {
+        return;
+    }
+    let mut programs = HashMap::new();
+    for key in wanted {
+        let program = programs
+            .entry(key.0)
+            .or_insert_with(|| h4_light_program(reader, key.0));
+        let Some(program) = program.as_ref() else {
+            continue;
+        };
+        if let Ok(pass) = h4_light_pass(program, key.1) {
+            preview.h4.light_passes.insert(key, Arc::new(pass));
+        }
+    }
+}
+
+/// Explicit 204's effect when `physical`, else 187's, parsed.
+pub(crate) fn h4_light_program(
+    reader: &TagReader,
+    physical: bool,
+) -> Option<crate::core::hlsl::parse::Program> {
+    let globals = reader.load("globals\\rasterizer_globals",
+        "rasterizer_globals",
+        b"rasg",
+    )
+    .ok()?;
+    let index = if physical {
+        POINT_PHYSICALLY_CORRECT
+    } else {
+        GOBO_SPECULAR
+    };
+    let explicit = elements(globals.root(), "explicit shaders");
+    let path = explicit
+        .get(index)?
+        .read_tag_ref_path("explicit pixel shader")
+        .filter(|path| !path.is_empty())?;
+    let shader = super::materials::shaders::H4ShaderSource::read(reader, &path).ok()?;
+    shader.program(&super::materials::shaders::H4_DEFINES).ok()
+}
+
+/// A technique's `tiny_position` pixel shader over a full-screen triangle.
+pub(crate) fn h4_light_pass(
+    program: &crate::core::hlsl::parse::Program,
+    technique: usize,
+) -> Result<H3Pass, String> {
+    let pixel =
+        super::materials::shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
+    Ok(H3Pass {
+        fullscreen: true,
+        vertex: super::super::h4::materials::h4_screen_vertex().to_owned(),
+        pixel: pixel.source,
+        uniforms: pixel.uniforms,
+        textures: pixel.textures,
+    })
 }

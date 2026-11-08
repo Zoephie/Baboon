@@ -6,9 +6,7 @@ use super::super::gen3::state::Gen3State;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use super::super::common::image::H2Image;
-use super::super::gen3::shaders::H3Material;
 use crate::app::model_preview::common::image::{H3Sampler, H3Texels};
-use super::super::RenderModelPreviewBatch;
 use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS, h3_set_cull};
 use crate::app::model_preview::gl::screen::screen_program;
 use crate::app::model_preview::gl::texture::upload_h2_image_linear;
@@ -110,12 +108,12 @@ impl H4Game {
                 Some(H2Image::Volume { width, height, depth, .. }) => [*width, *height, *depth],
                 _ => return None,
             };
-            let (scale, offset) = super::lighting::h4_grading_scale_offset(size);
+            let (scale, offset) = super::composite::h4_grading_scale_offset(size);
             self.grading.as_ref().map(|(_, texture)| super::bloom::H4BloomGrading { texture: *texture, scale, offset })
         }
     }
 
-    /// Halo 4's `final_composite`: see `h4::lighting::H4_COMPOSITE_FRAGMENT`.
+    /// Halo 4's `final_composite`: see `h4::composite::H4_COMPOSITE_FRAGMENT`.
     pub(super) unsafe fn draw_composite(
         &mut self,
         cx: &mut Gen3Cx<'_>,
@@ -124,7 +122,7 @@ impl H4Game {
         depth: Option<glow::NativeTexture>,
         screen: super::super::gen3::effects::screen::H3ScreenSettings,
     ) {
-        use super::lighting::{H4_COMPOSITE_FRAGMENT, H4_DARK_MULTIPLIER};
+        use super::lighting::H4_DARK_MULTIPLIER;
         let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);
         let state = &mut *cx.state;
         unsafe {
@@ -161,87 +159,6 @@ impl H4Game {
             gl.enable(glow::DEPTH_TEST);
         }
     }
-
-    /// `c_render_active_camo::render_object_callback` for a Halo 4 object,
-    /// over the finished picture: each part's `active_camo` entry point reads
-    /// a copy of the picture so far (`resolve_framebuffer_for_active_camo`),
-    /// `alpha_blend`. The game reads and writes its light ahead of the tone
-    /// curve; the preview's backdrop is the picture, and at full camo nothing
-    /// of the object is in it, so reading and writing the picture's bytes is
-    /// the same. Fully transparent, nothing of the object is under it,
-    /// and the nearest part alone shows, as its depth decides. Otherwise its
-    /// lit base wrote depth, which the camo meets nudged toward the eye by
-    /// `camo depth bias function`'s constant.
-    pub(super) unsafe fn draw_camo(
-        &mut self,
-        cx: &mut Gen3Cx<'_>,
-        batches: &[(RenderModelPreviewBatch, Arc<H3Material>)],
-        draw: super::camo::H4CamoDraw,
-        size: [i32; 2],
-    ) {
-        let (gl, frame, slot, core) = (cx.gl, cx.frame, cx.slot, &mut *cx.core);
-        let state = &mut *cx.state;
-        /// `camo depth bias function`: the kit's constant, in a 24-bit
-        /// buffer's units.
-        const DEPTH_BIAS: f32 = -2e-5 * 16_777_216.0;
-        let [width, height] = size.map(|side| side as f32);
-        state.pass_values = Some(
-            [
-                ("ps_activeCamoFactor", draw.factor),
-                ("ps_distortionTextureTransform", draw.transform),
-                ("distortionTextureEnabled", [f32::from(u8::from(draw.textured)); 4]),
-                ("ps_textureSize", [width, height, 1.0 / width, 1.0 / height]),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        unsafe {
-            if state.camo_scene.is_none() {
-                state.camo_scene = gl.create_texture().ok();
-            }
-            gl.bind_texture(glow::TEXTURE_2D, state.camo_scene);
-            gl.copy_tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8, 0, 0, size[0], size[1], 0);
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
-                (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
-            h3_set_cull(gl, frame);
-            gl.enable(glow::DEPTH_TEST);
-            gl.depth_func(glow::LEQUAL);
-            let mut camo = |this: &mut RenderCore| {
-                for (batch, material) in batches {
-                    if let Some(pass) = material.camo.as_ref() {
-                        state.draw_pass(this, gl, frame, slot, batch, material, pass, None);
-                    }
-                }
-            };
-            if draw.has_base {
-                gl.enable(glow::POLYGON_OFFSET_FILL);
-                gl.polygon_offset(0.0, DEPTH_BIAS);
-            } else {
-                gl.depth_mask(true);
-                gl.clear(glow::DEPTH_BUFFER_BIT);
-                gl.disable(glow::BLEND);
-                gl.color_mask(false, false, false, false);
-                camo(core);
-                gl.color_mask(true, true, true, true);
-            }
-            gl.depth_mask(false);
-            gl.enable(glow::BLEND);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-            camo(core);
-            gl.disable(glow::POLYGON_OFFSET_FILL);
-            gl.depth_mask(true);
-        }
-        state.pass_values = None;
-    }
 }
 
 /// Whether the uploaded grading lookup is `now`'s: the same image, not one
@@ -272,4 +189,52 @@ mod tests {
         assert!(!grading_is_current(None, Some(&held)));
         assert!(!grading_is_current(Some(&held), None));
     }
+}
+
+/// `final_composite` (`postprocess/final_composite_shared.fxh`), at the
+/// preview's camera fx: the HDR target brought back up (`× (8, 8, 8, 32)`)
+/// and the bloom added unscaled; hue, saturation and contrast are off (not
+/// on PC); the filmic curve ([`h4_filmic_params`]); then `sqrt` and
+/// `apply_color_grading` with one lookup, which is
+/// what reaches the screen. The lookup is uploaded as its bytes stand, so
+/// that its output is the displayed value [inferred: the back buffer's
+/// format, O7, decides whether the game's view decodes it, and either way
+/// the default lookup's output displays as sRGB(x²)]. Coverage is Reach's:
+/// what the object drew covers what lies behind it.
+pub(in crate::app::model_preview) const H4_COMPOSITE_FRAGMENT: &str = "#version 410 core
+uniform sampler2D accumulation;
+uniform sampler2D bloom;
+uniform sampler2D scene_depth;
+uniform sampler3D grading;
+uniform vec3 grading_scale;
+uniform vec3 grading_offset;
+uniform float dark_multiplier;
+uniform float view_scale;
+uniform float filmic[5];
+out vec4 color;
+void main() {
+    vec2 place = gl_FragCoord.xy / vec2(textureSize(accumulation, 0));
+    place = (place - 0.5) * view_scale + 0.5;
+    vec4 accumulated = texture(accumulation, place);
+    if (place.x < 0.0 || place.x > 1.0 || place.y < 0.0 || place.y > 1.0) {
+        accumulated = vec4(0.0);
+    }
+    vec3 combined = max(accumulated.rgb, vec3(0.0)) * dark_multiplier + texture(bloom, place).rgb;
+    combined = combined * (combined * filmic[0] + filmic[1]) / (combined * (combined * filmic[2] + filmic[3]) + filmic[4]);
+    vec3 encoded = sqrt(max(combined, vec3(0.0)));
+    // `apply_color_grading` reads level 0 (`sample3DLOD`). An implicit level
+    // follows the lookup coordinate's change across each 2×2 block, which
+    // jumps at a silhouette, and drew a grey rim from the lookup's small mips.
+    color.rgb = textureLod(grading, encoded * grading_scale + grading_offset, 0.0).rgb;
+    bool drawn = texture(scene_depth, place).r < 1.0;
+    color.a = drawn ? 1.0 : accumulated.a;
+}
+";
+
+/// `SetColorGradingParameters` (X360 0x829B78E0): a lookup of `size` texels
+/// a side is read at `x (size - 1) / size + 0.5 / size`, its texel centres.
+pub(in crate::app::model_preview) fn h4_grading_scale_offset(size: [usize; 3]) -> ([f32; 3], [f32; 3]) {
+    let scale = size.map(|side| (side.max(1) as f32 - 1.0) / side.max(1) as f32);
+    let offset = size.map(|side| 0.5 / side.max(1) as f32);
+    (scale, offset)
 }
