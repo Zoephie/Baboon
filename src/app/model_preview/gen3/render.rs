@@ -154,6 +154,9 @@ impl GameRender for Gen3Render {
     /// The scene's depth copy is the frame's own, made while its picture draws.
     unsafe fn prepare(&mut self, _cx: &mut FrameCx<'_>) {
         self.state.depth_copy = None;
+        // A frame that stopped before its last sprites leaves no queue for
+        // this one to draw from.
+        self.state.sprite_queue = None;
     }
 
     /// With no gen3 shading to draw (game shaders off, a mode without maps, a

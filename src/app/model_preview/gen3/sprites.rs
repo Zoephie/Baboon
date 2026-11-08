@@ -71,23 +71,25 @@ impl Gen3State {
             }
             gl.color_mask(true, true, true, false);
             pass.advance(game, uploaded, &mut core.sprites_advanced);
-            let sorted = pass.sorted(stage, uploaded);
-            let distorting = matches!(stage, SpriteStage::Distortions);
-            let mut distorted = 0;
-            let skip = if distorting { 0 } else { self.sprite_cursor };
-            for (distance, sprite) in sorted.into_iter().skip(skip) {
-                if distance < stage_limit(stage) {
-                    break;
-                }
-                if distorting {
+            // Sorted once a frame, the first time its sprites draw: the
+            // simulations have stepped by then, and drawing moves nothing a
+            // sort reads.
+            let queue = self.sprite_queue.get_or_insert_with(|| SpriteQueue {
+                sorted: pass.sorted(SpriteStage::Rest, uploaded),
+                next: 0,
+                distortions: pass.sorted(SpriteStage::Distortions, uploaded),
+            });
+            if matches!(stage, SpriteStage::Distortions) {
+                let mut distorted = 0;
+                for &(_, sprite) in &queue.distortions {
                     distorted += 1;
-                } else {
-                    self.sprite_cursor += 1;
+                    pass.draw_sorted(game, uploaded, &mut core.h2_distortion_copy, sprite);
                 }
-                pass.draw_sorted(game, uploaded, &mut core.h2_distortion_copy, sprite);
-            }
-            if distorting {
                 self.distorted = distorted > 0;
+            } else {
+                while let Some(sprite) = queue.next_farther_than(stage_limit(stage)) {
+                    pass.draw_sorted(game, uploaded, &mut core.h2_distortion_copy, sprite);
+                }
             }
             if matches!(stage, SpriteStage::Rest) {
                 pass.draw_cheap_particles(uploaded, &mut core.reach_cheap_gl, core.program);
@@ -101,14 +103,16 @@ impl Gen3State {
             begin_flares(gl, flares, core.placeholder);
             let viewport = core.scene.as_ref().map_or([1, 1], |scene| scene.size);
             pass.draw_flares(uploaded, viewport);
-            self.sprite_cursor = 0;
+            self.sprite_queue = None;
             core.end_sprites(gl, frame, slot);
         }
     }
 }
 
-/// How near the sorted sprites a stage draws come: `FartherThan`'s limit, all
-/// of them for the rest, and none of what does not bend for the distortions.
+/// How near the sorted sprites a stage draws come: `FartherThan`'s limit; for
+/// the rest, none (a finite distance is nearer than infinity: the last
+/// `FartherThan`, at minus infinity, has drawn them all); the distortions draw
+/// their own list whole.
 fn stage_limit(stage: SpriteStage) -> f32 {
     match stage {
         SpriteStage::FartherThan(limit) => limit,
@@ -117,8 +121,32 @@ fn stage_limit(stage: SpriteStage) -> f32 {
     }
 }
 
+/// One frame's sprites in `c_transparency_renderer`'s order, sorted once and
+/// drawn in runs as the blended sort reaches them.
+pub(in crate::app::model_preview) struct SpriteQueue {
+    /// What draws among the blended materials, far to near.
+    sorted: Vec<(f32, SortedSprite)>,
+    /// How many of `sorted` have drawn.
+    next: usize,
+    /// What bends the scene, far to near, drawn whole to its own target.
+    distortions: Vec<(f32, SortedSprite)>,
+}
+
+impl SpriteQueue {
+    /// The next sprite not yet drawn, if it is at least `limit` away.
+    fn next_farther_than(&mut self, limit: f32) -> Option<SortedSprite> {
+        let &(distance, sprite) = self.sorted.get(self.next)?;
+        if distance < limit {
+            return None;
+        }
+        self.next += 1;
+        Some(sprite)
+    }
+}
+
 /// One of the sorted sprites, by kind and index.
-enum SortedSprite {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(in crate::app::model_preview) enum SortedSprite {
     Volume(usize),
     Tracer(usize),
     System(usize),
@@ -453,4 +481,61 @@ pub(in crate::app::model_preview) struct Gen3Sprites<'a> {
     /// The frame's slot, and how many models it has taken.
     pub(in crate::app::model_preview) slot: usize,
     pub(in crate::app::model_preview) uploads: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Today's staged draw before the queue: each call sorted the whole list
+    /// again, skipped the `cursor` already drawn, and drew while not nearer
+    /// than the limit.
+    fn drawn_by_cursor(sorted: &[(f32, SortedSprite)], cursor: &mut usize, limit: f32) -> Vec<SortedSprite> {
+        let mut drawn = Vec::new();
+        for &(distance, sprite) in sorted.iter().skip(*cursor) {
+            if distance < limit {
+                break;
+            }
+            *cursor += 1;
+            drawn.push(sprite);
+        }
+        drawn
+    }
+
+    #[test]
+    fn the_queue_draws_each_stage_as_the_cursor_did() {
+        // Far to near, as `sorted` leaves them, with ties and a distance that
+        // is no number (it compares as not nearer, so it draws).
+        let sorted = vec![
+            (9.0, SortedSprite::Volume(0)),
+            (7.5, SortedSprite::System(2)),
+            (7.5, SortedSprite::Strip(1)),
+            (f32::NAN, SortedSprite::Tracer(0)),
+            (3.0, SortedSprite::Leaves(0)),
+            (3.0, SortedSprite::System(0)),
+            (-2.0, SortedSprite::Volume(1)),
+        ];
+        // A frame's stages: the blended batches' distances, minus infinity
+        // after the last, then the rest.
+        let stages = [
+            SpriteStage::FartherThan(10.0),
+            SpriteStage::FartherThan(7.5),
+            SpriteStage::FartherThan(7.5),
+            SpriteStage::FartherThan(4.0),
+            SpriteStage::FartherThan(3.0),
+            SpriteStage::FartherThan(f32::NEG_INFINITY),
+            SpriteStage::Rest,
+        ];
+        let mut queue = SpriteQueue { sorted: sorted.clone(), next: 0, distortions: Vec::new() };
+        let mut cursor = 0;
+        for stage in stages {
+            let before = drawn_by_cursor(&sorted, &mut cursor, stage_limit(stage));
+            let mut now = Vec::new();
+            while let Some(sprite) = queue.next_farther_than(stage_limit(stage)) {
+                now.push(sprite);
+            }
+            assert_eq!(now, before, "{stage:?}");
+        }
+        assert_eq!(queue.next, sorted.len(), "every sprite drew once");
+    }
 }
