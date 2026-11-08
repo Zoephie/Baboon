@@ -72,6 +72,9 @@ pub(in crate::app::model_preview) trait FeatureList {
 
     /// Whether each shows under the chosen regions.
     fn shown(&self, selections: &HashMap<String, ModelRegionSelection>) -> Vec<bool>;
+
+    /// Every one taken out.
+    fn clear(&mut self);
 }
 
 fn inputs_of<'a, T: Feature + 'a>(items: impl Iterator<Item = &'a T> + Clone, object: u8) -> Vec<&'a str> {
@@ -102,6 +105,10 @@ impl<T: Feature> FeatureList for Vec<T> {
     fn shown(&self, selections: &HashMap<String, ModelRegionSelection>) -> Vec<bool> {
         shown(self.iter(), selections)
     }
+
+    fn clear(&mut self) {
+        Vec::clear(self);
+    }
 }
 
 impl<T: Feature> FeatureList for Option<T> {
@@ -120,12 +127,19 @@ impl<T: Feature> FeatureList for Option<T> {
     fn shown(&self, selections: &HashMap<String, ModelRegionSelection>) -> Vec<bool> {
         shown(self.iter(), selections)
     }
+
+    fn clear(&mut self) {
+        *self = None;
+    }
 }
 
 /// A group of a preview's features: each field that is one, by its path as
 /// the load gate names it after `preview.`.
 pub(in crate::app::model_preview) trait Features {
     fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList));
+
+    /// [`each`](Features::each), lending each field to change.
+    fn each_mut(&mut self, visit: &mut dyn FnMut(&'static str, &mut dyn FeatureList));
 }
 
 impl RenderModelPreview {
@@ -154,6 +168,42 @@ impl RenderModelPreview {
         names
     }
 
+    /// [`each_feature`](Self::each_feature), lending each to change.
+    pub(in crate::app::model_preview) fn each_feature_mut(&mut self, visit: &mut dyn FnMut(&'static str, &mut dyn FeatureList)) {
+        visit("particles", &mut self.particles);
+        visit("antennas", &mut self.antennas);
+        visit("cloth", &mut self.cloth);
+        self.h2.each_mut(visit);
+        self.gen3.each_mut(visit);
+        self.h3.each_mut(visit);
+        self.reach.each_mut(visit);
+        self.h4.each_mut(visit);
+        self.ce.each_mut(visit);
+    }
+
+    /// The feature at `path` taken out; false when the preview has none there.
+    pub(in crate::app::model_preview) fn clear_feature(&mut self, path: &str) -> bool {
+        let mut found = false;
+        self.each_feature_mut(&mut |at, list| {
+            if at == path {
+                list.clear();
+                found = true;
+            }
+        });
+        found
+    }
+
+    /// Whether the feature at `path` holds none (true for a path it doesn't have).
+    pub(in crate::app::model_preview) fn feature_is_empty(&self, path: &str) -> bool {
+        let mut empty = true;
+        self.each_feature(&mut |at, list| {
+            if at == path {
+                empty = list.is_empty();
+            }
+        });
+        empty
+    }
+
     /// Whether any feature answers `test`.
     pub(in crate::app::model_preview) fn any_feature(&self, mut test: impl FnMut(&dyn FeatureList) -> bool) -> bool {
         let mut any = false;
@@ -162,83 +212,76 @@ impl RenderModelPreview {
     }
 }
 
-impl Features for super::super::ce::CeFeatures {
-    fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
-        let Self { lights, antennas, effects, firing: _, contrails, light_volumes, lightning, glows, flags, particle_systems } =
-            self;
-        visit("ce.lights", lights);
-        visit("ce.antennas", antennas);
-        visit("ce.effects", effects);
-        visit("ce.contrails", contrails);
-        visit("ce.light_volumes", light_volumes);
-        visit("ce.lightning", lightning);
-        visit("ce.glows", glows);
-        visit("ce.flags", flags);
-        visit("ce.particle_systems", particle_systems);
-    }
+/// `Features` for a group: `each` and `each_mut` from one list of its feature
+/// fields by path, the rest named as skipped, so the struct is taken apart
+/// whole and a new field must be listed or skipped.
+macro_rules! features {
+    ($group:path { $($field:ident => $path:literal),* $(,)? ; skip $($skipped:ident),* $(,)? }) => {
+        impl Features for $group {
+            fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
+                let Self { $($field,)* $($skipped: _,)* } = self;
+                $(visit($path, $field);)*
+            }
+
+            fn each_mut(&mut self, visit: &mut dyn FnMut(&'static str, &mut dyn FeatureList)) {
+                let Self { $($field,)* $($skipped: _,)* } = self;
+                $(visit($path, $field);)*
+            }
+        }
+    };
 }
 
-impl Features for super::super::h2::H2Features {
-    fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
-        let Self { prt: _, hologram_control: _, flares, point_lights, gel_lights, light_volumes, contrails, liquids } = self;
-        visit("h2.flares", flares);
-        visit("h2.point_lights", point_lights);
-        visit("h2.gel_lights", gel_lights);
-        visit("h2.light_volumes", light_volumes);
-        visit("h2.contrails", contrails);
-        visit("h2.liquids", liquids);
-    }
-}
+features!(super::super::ce::CeFeatures {
+    lights => "ce.lights",
+    antennas => "ce.antennas",
+    effects => "ce.effects",
+    contrails => "ce.contrails",
+    light_volumes => "ce.light_volumes",
+    lightning => "ce.lightning",
+    glows => "ce.glows",
+    flags => "ce.flags",
+    particle_systems => "ce.particle_systems";
+    skip firing
+});
 
-impl Features for super::super::gen3::Gen3Features {
-    fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
-        let Self { prt: _, cheap_emitters, ik_markers: _, flares, light_volumes, strips, screen_effects } = self;
-        visit("gen3.cheap_emitters", cheap_emitters);
-        visit("gen3.flares", flares);
-        visit("gen3.light_volumes", light_volumes);
-        visit("gen3.strips", strips);
-        visit("gen3.screen_effects", screen_effects);
-    }
-}
+features!(super::super::h2::H2Features {
+    flares => "h2.flares",
+    point_lights => "h2.point_lights",
+    gel_lights => "h2.gel_lights",
+    light_volumes => "h2.light_volumes",
+    contrails => "h2.contrails",
+    liquids => "h2.liquids";
+    skip prt, hologram_control
+});
 
-impl Features for super::super::h3::H3Features {
-    fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
-        let Self { shield: _, lights, leaves, vision: _, motion_blur: _ } = self;
-        visit("h3.lights", lights);
-        visit("h3.leaves", leaves);
-    }
-}
+features!(super::super::gen3::Gen3Features {
+    cheap_emitters => "gen3.cheap_emitters",
+    flares => "gen3.flares",
+    light_volumes => "gen3.light_volumes",
+    strips => "gen3.strips",
+    screen_effects => "gen3.screen_effects";
+    skip prt, ik_markers
+});
 
-impl Features for super::super::reach::ReachFeatures {
-    fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
-        let Self { lights, cheap_lights, light_passes: _, shield: _, camo: _, shadow_caster: _, screen_noise: _ } = self;
-        visit("reach.lights", lights);
-        visit("reach.cheap_lights", cheap_lights);
-    }
-}
+features!(super::super::h3::H3Features {
+    lights => "h3.lights",
+    leaves => "h3.leaves";
+    skip shield, vision, motion_blur
+});
 
-impl Features for super::super::h4::H4Features {
-    fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
-        let Self {
-            lights,
-            cheap_lights,
-            light_passes: _,
-            flares,
-            flare_pass: _,
-            camo: _,
-            shield: _,
-            shadow_caster: _,
-            tracers,
-            color_grading: _,
-            bounding_sphere: _,
-            change_color_count: _,
-        } = self;
-        visit("h4.lights", lights);
-        visit("h4.cheap_lights", cheap_lights);
-        visit("h4.flares", flares);
-        visit("h4.tracers", tracers);
-    }
-}
+features!(super::super::reach::ReachFeatures {
+    lights => "reach.lights",
+    cheap_lights => "reach.cheap_lights";
+    skip light_passes, shield, camo, shadow_caster, screen_noise
+});
+
+features!(super::super::h4::H4Features {
+    lights => "h4.lights",
+    cheap_lights => "h4.cheap_lights",
+    flares => "h4.flares",
+    tracers => "h4.tracers";
+    skip light_passes, flare_pass, camo, shield, shadow_caster, color_grading, bounding_sphere, change_color_count
+});
 
 /// [`Feature`] for kinds that hang under a region through [`Attached`]: `$moves`
 /// and `$inputs` are each kind's rule, `|at|` and `|at, object|`.
@@ -488,6 +531,32 @@ mod tests {
     fn a_list_offers_every_ones_inputs_before_any_ones_late_inputs() {
         let list = vec![Named("scale a", "object a"), Named("scale b", ""), Named("", "object c")];
         assert_eq!(list.inputs_of(0), ["scale a", "scale b", "object a", "object c"]);
+    }
+
+    #[test]
+    fn a_feature_is_cleared_by_its_path_and_both_walks_agree() {
+        let mut reading = Vec::new();
+        RenderModelPreview::default().each_feature(&mut |path, _| reading.push(path));
+        let mut changing = Vec::new();
+        let mut preview = RenderModelPreview::default();
+        preview.each_feature_mut(&mut |path, _| changing.push(path));
+        assert_eq!(reading, changing);
+        assert!(!preview.clear_feature("h2.prt"), "not a feature");
+        for (name, data) in &gate_objects() {
+            let mut filled = Vec::new();
+            data.preview.each_feature(&mut |path, list| {
+                if !list.is_empty() {
+                    filled.push(path);
+                }
+            });
+            for path in filled {
+                let mut preview = (*data.preview).clone();
+                assert!(preview.clear_feature(path), "{name}: {path}");
+                preview.each_feature(&mut |at, list| {
+                    assert_eq!(list.is_empty(), at == path || data.preview.feature_is_empty(at), "{name}: clearing {path} left {at}");
+                });
+            }
+        }
     }
 
     #[test]

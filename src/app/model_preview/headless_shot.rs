@@ -8,7 +8,8 @@
 //! function inputs `H2_SHOT_INPUTS` can set, posed at `H2_SHOT_CLIP`,
 //! holding `H2_SHOT_WEAPON` and `H2_SHOT_SECONDARY`, with named Halo 2
 //! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`, leaving out the
-//! features `H2_SHOT_DROP` names, and exports forced by `H2_SHOT_FORCE`.
+//! features `H2_SHOT_DROP` names by their paths (`h2.flares`, `particles`,
+//! `gen3.prt`, `reach.shield` …), and exports forced by `H2_SHOT_FORCE`.
 //! `H2_SHOT_PLAY=<text>@<seconds>` plays each Halo CE event effect whose
 //! name holds the text, that long before the shot, and
 //! `H2_SHOT_FIRE=<trigger>@<seconds>` fires the held weapon's trigger.
@@ -404,33 +405,16 @@ pub(super) fn render(
         let preview = Arc::make_mut(&mut data.preview);
         for feature in &options.dropped {
             match feature.as_str() {
-                "particles" => preview.particles.clear(),
-                "flares" => preview.h2.flares.clear(),
-                "lights" => preview.h2.point_lights.clear(),
-                "gels" => preview.h2.gel_lights.clear(),
-                "volumes" => preview.h2.light_volumes.clear(),
-                "h3_volumes" => preview.gen3.light_volumes.clear(),
-                "h4_tracers" => preview.h4.tracers.clear(),
-                "cheap_particles" => preview.gen3.cheap_emitters.clear(),
-                "contrails" => preview.h2.contrails.clear(),
-                "prt" => preview.gen3.prt = None,
-                "shield" => preview.reach.shield = None,
-                "antennas" => preview.antennas.clear(),
-                // The sheet's own batches go with it; its vertices stay, unused.
-                "cloth" => {
-                    preview.cloth.clear();
-                    preview.batches.retain(|batch| batch.permutation_name != "cloth");
+                // Not features: data the materials draw with.
+                "gen3.prt" => preview.gen3.prt = None,
+                "reach.shield" => preview.reach.shield = None,
+                path => {
+                    assert!(preview.clear_feature(path), "H2_SHOT_DROP: no feature {path}");
+                    // The sheet's own batches go with it; its vertices stay, unused.
+                    if path == "cloth" {
+                        preview.batches.retain(|batch| batch.permutation_name != "cloth");
+                    }
                 }
-                "reach_lights" => {
-                    preview.reach.lights.clear();
-                    preview.reach.cheap_lights.clear();
-                }
-                "h4_lights" => {
-                    preview.h4.lights.clear();
-                    preview.h4.cheap_lights.clear();
-                }
-                "h4_flares" => preview.h4.flares.clear(),
-                other => panic!("H2_SHOT_DROP: no feature {other}"),
             }
         }
     }
