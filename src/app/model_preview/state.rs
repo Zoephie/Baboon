@@ -485,6 +485,14 @@ mod tests {
             ModelRenderMode::Wireframe
         );
     }
+
+    #[test]
+    fn non_critical_errors_are_opt_in() {
+        let mut state = ModelPreviewState::default();
+        assert!(!state.show_non_critical_errors);
+        state.show_non_critical_errors = true;
+        assert!(state.show_non_critical_errors);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

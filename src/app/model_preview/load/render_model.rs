@@ -659,4 +659,24 @@ mod tests {
             (3, 3)
         );
     }
+
+    #[test]
+    fn a_permutation_of_mesh_none_draws_nothing_whatever_its_count() {
+        let permutation = |mesh_index, mesh_count| blam_tags::Permutation {
+            name: String::new(),
+            mesh_index,
+            mesh_count,
+            instance_mask: [0; 4],
+        };
+        let region = |permutations| blam_tags::Region { name: String::new(), permutations };
+        let model = RenderModel {
+            regions: vec![
+                region(vec![permutation(0, 1)]),
+                region(vec![permutation(-1, 1)]),
+                region(vec![permutation(1, 2)]),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(preview_mesh_order(&model, 3), [(0, 0, 0), (2, 0, 1), (2, 0, 2)]);
+    }
 }
