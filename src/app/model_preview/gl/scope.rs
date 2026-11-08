@@ -46,3 +46,42 @@ impl PostScope {
         }
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod gl_tests {
+    use crate::app::model_preview::harness::gl::headless_gl;
+    use eframe::glow::{self, HasContext as _};
+
+    /// [`PostScope`](crate::app::model_preview::gl::scope::PostScope) gives back the
+    /// framebuffer, viewport and scissor a pass found, whatever it left.
+    #[test]
+    fn a_post_scope_restores_what_it_found() {
+        use crate::app::model_preview::gl::scope::PostScope;
+        use crate::app::model_preview::gl::target::{ColorTarget, Sampling, Texels};
+        let gl = headless_gl();
+        unsafe {
+            let found = ColorTarget::new(&gl, [8, 8], Texels::RGBA8, Sampling::NEAREST).unwrap();
+            let other = ColorTarget::new(&gl, [8, 8], Texels::RGBA8, Sampling::NEAREST).unwrap();
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(found.framebuffer));
+            gl.viewport(1, 2, 3, 4);
+            gl.scissor(2, 3, 4, 5);
+            gl.enable(glow::SCISSOR_TEST);
+            let scope = PostScope::capture(&gl);
+            assert_eq!(scope.size(), [3, 4]);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(other.framebuffer));
+            gl.viewport(0, 0, 8, 8);
+            gl.scissor(0, 0, 1, 1);
+            gl.disable(glow::SCISSOR_TEST);
+            scope.restore(&gl);
+            let (mut viewport, mut scissor) = ([0; 4], [0; 4]);
+            gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+            gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut scissor);
+            assert_eq!(gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING), Some(found.framebuffer));
+            assert_eq!((viewport, scissor), ([1, 2, 3, 4], [2, 3, 4, 5]));
+            assert!(gl.is_enabled(glow::SCISSOR_TEST));
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            found.delete(&gl);
+            other.delete(&gl);
+        }
+    }
+}

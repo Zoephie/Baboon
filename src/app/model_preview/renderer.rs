@@ -254,7 +254,7 @@ pub(super) fn without_shield_parts(visible: &mut Vec<usize>, preview: &RenderMod
 /// The frame `state` shows of `data` in `rect` at `time` over `background`,
 /// with `forced` exports set over what the functions make. The app and the
 /// headless harness both build their frames here.
-fn build_frame(
+pub(super) fn build_frame(
     data: &ModelPreviewData,
     state: &ModelPreviewState,
     rect: egui::Rect,
@@ -1068,7 +1068,7 @@ fn object_functions(
         .chain(data.ce_attached.iter().filter_map(|object| object.functions.as_ref()))
 }
 
-fn object_states(
+pub(super) fn object_states(
     data: &ModelPreviewData,
     set: &ce::functions::CeFunctionInputs,
     shots: &ce::firing::CeShots,
@@ -1340,9 +1340,6 @@ fn paint_model_gl(
     });
 }
 
-#[cfg(all(test, target_os = "macos"))]
-#[path = "headless_shot.rs"]
-pub(super) mod headless_shot;
 pub(super) use gen3::pipeline::EXPOSURE as H3_EXPOSURE;
 pub(super) use super::reach::lighting::{
     REACH_DARK_MULTIPLIER, REACH_SCREEN_NOISE_BITMAP, reach_alt_exposure, reach_exposure, reach_lightmap_tint,
@@ -2279,7 +2276,7 @@ impl H2Target {
 
 /// The clear color of the preview, shared with the scene target.
 /// The theme's panel color, so a preview sits in the UI around it.
-fn preview_background(visuals: &egui::Visuals) -> [f32; 3] {
+pub(super) fn preview_background(visuals: &egui::Visuals) -> [f32; 3] {
     let [r, g, b, _] = visuals.panel_fill.to_array();
     [r, g, b].map(|channel| channel as f32 / 255.0)
 }
@@ -3581,7 +3578,7 @@ pub(in crate::app::model_preview) unsafe fn h3_particle_gl(gl: &glow::Context, m
 
 /// The preview's renderer: what every game draws with ([`RenderCore`]),
 /// and each game's own drawing ([`GameRender`]), which it hands the frame to.
-struct ModelGlRenderer {
+pub(super) struct ModelGlRenderer {
     core: RenderCore,
     games: GameRenders,
 }
@@ -3662,14 +3659,14 @@ impl Route {
 }
 
 impl ModelGlRenderer {
-    fn new(gl: &glow::Context) -> Result<Self, String> {
+    pub(super) fn new(gl: &glow::Context) -> Result<Self, String> {
         Ok(Self { core: RenderCore::new(gl)?, games: GameRenders::default() })
     }
 
     /// Draw `frame`: its slot, the game's preparation, the scene target, the
     /// shared program and grid, the game's shading, the wireframe, what the
     /// game draws over it, and the scene put back.
-    unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+    pub(super) unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
         // Set again if this frame steps the effects and something runs on.
         CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&frame.geometry_id));
         unsafe {
@@ -6001,7 +5998,7 @@ pub(in crate::app) fn min_preview_scale(preview: &RenderModelPreview) -> f32 {
     (radius * 1.1 / WIDEST_PREVIEW_VIEW).min(1.0)
 }
 
-fn preview_center_radius(preview: &RenderModelPreview) -> ([f32; 3], f32) {
+pub(super) fn preview_center_radius(preview: &RenderModelPreview) -> ([f32; 3], f32) {
     let (min, max) = (preview.bounds_min, preview.bounds_max);
     let center = [
         (min[0] + max[0]) * 0.5,

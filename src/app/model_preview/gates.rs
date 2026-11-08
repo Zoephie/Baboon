@@ -548,7 +548,7 @@ const PIXEL_SET: &[(&str, GameId, &[(&str, &str)])] = &[
 
 /// Each way G-px shoots an object, from a plain shot in the dark theme at rest.
 #[cfg(target_os = "macos")]
-type Look = fn(&mut super::renderer::headless_shot::ShotOptions);
+type Look = fn(&mut super::harness::shot::ShotOptions);
 
 #[cfg(target_os = "macos")]
 const LOOKS: &[(&str, Look)] = &[
@@ -598,7 +598,7 @@ const LOOKS: &[(&str, Look)] = &[
 /// Saves a shot as a PNG, upright.
 #[cfg(target_os = "macos")]
 fn save_png(path: &std::path::Path, pixels: &[u8]) {
-    use super::renderer::headless_shot::SHOT_SIZE;
+    use super::harness::shot::SHOT_SIZE;
     let row = SHOT_SIZE[0] as usize * 4;
     let upright: Vec<u8> = pixels.chunks_exact(row).rev().flatten().copied().collect();
     let image =
@@ -621,7 +621,7 @@ fn save_png(path: &std::path::Path, pixels: &[u8]) {
 #[cfg(target_os = "macos")]
 #[test]
 fn gate_pixels() {
-    use super::renderer::headless_shot::{Shot, ShotOptions, shoot};
+    use super::harness::shot::{Shot, ShotOptions, shoot};
     use crate::core::source::TagSource;
     let Some(dir) = gate_dir() else {
         eprintln!("skipping: BABOON_GATE_DIR is not set");
@@ -701,7 +701,7 @@ fn gate_pixels() {
         // G-calls: every GL state call, uniform and draw each shot made, in
         // order. A shot that differs keeps its whole log under `changed/`, to
         // set against the one blessing keeps beside the hashes.
-        let save_log = |folder: &std::path::Path, name: &str, shown: &super::renderer::headless_shot::Shown| {
+        let save_log = |folder: &std::path::Path, name: &str, shown: &super::harness::shot::Shown| {
             let path = folder.join(format!("{game:?}")).join(format!("{name}.log"));
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);

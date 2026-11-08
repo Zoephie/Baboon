@@ -196,3 +196,33 @@ impl GameRender for Gen3Render {
         }
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::app::model_preview::harness::shot::{Shot, ShotOptions, shoot};
+    use crate::core::game::GameId;
+
+    /// A gen3 tag from a source that names no game draws through Halo 3's
+    /// hooks on the legacy route, and so draws as a Halo 3 frame does: its
+    /// sprites once, from inside the gen3 pipeline, and not again after it.
+    #[test]
+    fn a_gen3_frame_with_no_game_draws_as_halo_3s_does() {
+        let Some(source) = kit_source(GameId::Halo3) else {
+            return;
+        };
+        let shot = Shot {
+            model: "objects\\vehicles\\warthog\\warthog".to_owned(),
+            shaders: true,
+            lights: true,
+            yaw: 0.6,
+            pitch: 0.25,
+            kind: Some("vehicle".to_owned()),
+        };
+        let options = ShotOptions { time: 3.0, ..ShotOptions::new(GameId::Halo3) };
+        let without = ShotOptions { no_game: true, ..options.clone() };
+        let shown = shoot(&source, &[(shot.clone(), options), (shot, without)]);
+        assert!(shown[0].pixels.iter().any(|byte| *byte != 0), "the warthog drew");
+        assert!(shown[0].pixels == shown[1].pixels, "the frame with no game drew differently");
+    }
+}
