@@ -10,7 +10,7 @@ use super::super::common::fields::{elements, function_slot_of, has_flag, object_
 use crate::app::model_preview::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::functions::FunctionValues;
-use super::lights::H2EffectPart;
+use super::effect_part::H2EffectPart;
 use super::super::effects::{for_each_attached_part, part_markers};
 use super::super::common::image::H2Image;
 use super::super::common::named_function::tag_function_at;
