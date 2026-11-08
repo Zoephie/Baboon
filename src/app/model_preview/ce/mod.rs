@@ -5,6 +5,7 @@ pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod object;
 pub(super) mod attachments;
 pub(super) mod contrails;
+pub(in crate::app::model_preview) mod draw;
 pub(super) mod firing;
 pub(super) mod flags;
 pub(super) mod functions;
