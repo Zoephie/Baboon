@@ -14,6 +14,15 @@ mod variants;
 pub(in crate::app::model_preview) use variants::*;
 mod errors;
 pub(in crate::app::model_preview) use errors::*;
+pub(in crate::app::model_preview) mod derived;
+pub(in crate::app::model_preview) use derived::*;
+mod merge;
+pub(in crate::app::model_preview) use merge::*;
+mod scenario;
+pub(in crate::app::model_preview) use scenario::*;
+mod overlays;
+pub(in crate::app::model_preview) use overlays::*;
+mod jobs;
 
 
 /// The load-affecting slice of [`ModelPreviewState`], snapshotted before the
