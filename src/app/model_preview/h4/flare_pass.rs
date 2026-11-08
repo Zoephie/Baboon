@@ -9,7 +9,9 @@ use eframe::glow::{self, HasContext};
 use super::render::H4Game;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::super::gen3::shaders::{H3Sampler, H3Value};
+use super::super::gen3::shaders::H3Value;
+
+use crate::app::model_preview::common::image::H3Sampler;
 use super::flares::{H4FlareDraw, H4FlareView};
 use super::super::renderer::*;
 

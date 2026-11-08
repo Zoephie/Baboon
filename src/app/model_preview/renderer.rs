@@ -15,7 +15,8 @@ use super::common::image::H2Image;
 use super::h2::bloom::H2Bloom;
 use super::dx9::passes::{H2Clock, h2_prt_lights};
 use super::dx9::stage::H2VertexStage;
-use super::gen3::shaders::{H3Blend, H3Sampler};
+use super::gen3::shaders::H3Blend;
+use crate::app::model_preview::common::image::H3Sampler;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
@@ -3373,7 +3374,7 @@ impl H3ParticleGl {
             gl.uniform_1_i32(self.alpha_test.as_ref(), i32::from(look.alpha_test));
             gl.depth_mask(look.alpha_test);
             gl.uniform_4_f32_slice(self.lighting.as_ref(), lighting.as_flattened());
-            let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| *texels != gen3::shaders::H3Texels::Signed);
+            let unsigned = look.base_map.as_ref().is_some_and(|(_, texels, _)| *texels != crate::app::model_preview::common::image::H3Texels::Signed);
             gl.uniform_1_i32(self.unsigned.as_ref(), i32::from(unsigned));
             if look.distortion.is_some() {
                 gl.blend_equation(glow::FUNC_ADD);

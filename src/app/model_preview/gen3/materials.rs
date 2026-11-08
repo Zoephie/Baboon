@@ -9,10 +9,8 @@ use blam_tags::render_method::{
     ResolvedValue,
 };
 use super::super::common::fields::{elements, has_flag};
-use super::super::gen3::shaders::{
-    H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources,
-    H3Sampler, H3Texels, H3Texture, H3Value, RenderMethodDialect,
-};
+use super::super::gen3::shaders::{H3Animated, H3Animation, H3Blend, H3Clock, H3Material, H3Pass, H3Shield, H3ShieldSettings, H3Sources, H3Texture, H3Value, RenderMethodDialect};
+use crate::app::model_preview::common::image::{H3Sampler, H3Texels};
 use super::super::common::image::H2Image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;

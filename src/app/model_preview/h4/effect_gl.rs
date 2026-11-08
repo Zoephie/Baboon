@@ -355,8 +355,8 @@ fn shared_value(
 unsafe fn upload_array(
     gl: &glow::Context,
     layers: &[&H2Image],
-    texels: gen3::shaders::H3Texels,
-    sampler: Option<gen3::shaders::H3Sampler>,
+    texels: crate::app::model_preview::common::image::H3Texels,
+    sampler: Option<crate::app::model_preview::common::image::H3Sampler>,
 ) -> Option<glow::NativeTexture> {
     let flats: Vec<&TextureImage> = layers
         .iter()
@@ -378,7 +378,7 @@ unsafe fn upload_array(
         return None;
     }
     let format = match texels {
-        gen3::shaders::H3Texels::Srgb => glow::SRGB8_ALPHA8,
+        crate::app::model_preview::common::image::H3Texels::Srgb => glow::SRGB8_ALPHA8,
         _ => glow::RGBA8,
     };
     let mut rgba = Vec::with_capacity(flats.len() * (width * height * 4));

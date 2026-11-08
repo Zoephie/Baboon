@@ -12,7 +12,9 @@ use std::borrow::Cow;
 
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Sampler, H3Shield, H3Texels, H3Value};
+use super::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Shield, H3Value};
+
+use crate::app::model_preview::common::image::{H3Sampler, H3Texels};
 use super::super::reach::lighting::reach_frame_value;
 use super::super::reach::lights::{ReachLitLight, inline_rows};
 use eframe::glow::{self, HasContext as _};

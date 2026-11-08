@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use blam_tags::bitmap::BitmapFormat;
-use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode, BLEND_MODES, REACH_BLEND_MODES};
+use blam_tags::render_method::{BLEND_MODES, REACH_BLEND_MODES};
+use super::super::common::image::{H3Sampler, H3Texels};
 
 use blam_tags::TagStruct;
 use blam_tags::tag_function::FunctionType;
@@ -758,80 +758,6 @@ pub(crate) struct H3Texture {
     pub(crate) frames: Vec<Arc<H2Image>>,
 }
 
-/// A texture's address and filter modes, from the bake.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct H3Sampler {
-    pub(crate) address: [BitmapAddressMode; 2],
-    pub(crate) filter: BitmapFilterMode,
-}
-
-/// What a texel means to the card, from the bitmap's format and curve as
-/// `bitmap_format_to_hardware_format_pc_unchecked` chooses its DXGI format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H3Texels {
-    Linear,
-    /// The card decodes the `sRGB` curve as it samples.
-    Srgb,
-    /// `_SNORM`: the shaders read -1..1 directly, and DirectX 11's
-    /// `BUMP_CONVERT` does nothing to them.
-    Signed,
-}
-
-impl H3Texels {
-    pub(crate) fn of(format: BitmapFormat, srgb_curve: bool) -> Self {
-        match format {
-            BitmapFormat::DxnSnorm
-            | BitmapFormat::V8u8
-            | BitmapFormat::Q8w8v8u8
-            | BitmapFormat::V16u16 => Self::Signed,
-            _ if srgb_curve => Self::Srgb,
-            _ => Self::Linear,
-        }
-    }
-
-    /// Halo 4's MCC upload (`halo4_tag_test` 0x1408D93B0, sRGB views
-    /// 0x1408D9510). Only the five formats with an sRGB twin can read
-    /// sRGB, when the curve is xRGB, sRGB or unknown; `dxn` is BC5_SNORM.
-    pub(crate) fn of_halo4(format: BitmapFormat, curve: i128) -> Self {
-        match format {
-            BitmapFormat::Dxn
-            | BitmapFormat::DxnSnorm
-            | BitmapFormat::V8u8
-            | BitmapFormat::Q8w8v8u8
-            | BitmapFormat::V16u16
-            | BitmapFormat::Signedr16g16b16a16 => Self::Signed,
-            BitmapFormat::X8r8g8b8
-            | BitmapFormat::A8r8g8b8
-            | BitmapFormat::Dxt1
-            | BitmapFormat::Dxt3
-            | BitmapFormat::Dxt5
-                if matches!(curve, 0 | 1 | 5) =>
-            {
-                Self::Srgb
-            }
-            _ => Self::Linear,
-        }
-    }
-
-    /// `bitmap_format_is_default_srgb`, for a bitmap whose curve is unknown.
-    pub(crate) fn default_srgb(format: BitmapFormat) -> bool {
-        !matches!(
-            format,
-            BitmapFormat::SoftwareRgbfp32
-                | BitmapFormat::V8u8
-                | BitmapFormat::Abgrfp32
-                | BitmapFormat::Abgrfp16
-                | BitmapFormat::Q8w8v8u8
-                | BitmapFormat::A2r10g10b10
-                | BitmapFormat::A16b16g16r16
-                | BitmapFormat::V16u16
-                | BitmapFormat::Dxn
-                | BitmapFormat::DxnSnorm
-                | BitmapFormat::Ctx1
-        )
-    }
-}
-
 /// A shader's passes and everything they read.
 #[derive(Debug)]
 pub(crate) struct H3Material {
@@ -1051,8 +977,26 @@ impl H3Animation {
 }
 
 #[cfg(test)]
+mod varying_tests {
+    use super::widen_varyings;
+
+    #[test]
+    fn a_vertex_stage_writes_as_much_as_the_pixel_stage_reads() {
+        let vertex = "out vec3 v_COLOR1;\nout vec2 v_TEXCOORD0;\nvoid main() {\n    v_COLOR1 = a.xyz;\n    v_TEXCOORD0 = b;\n}";
+        let pixel = "in vec4 v_COLOR1;\nin vec2 v_TEXCOORD0;";
+        let widened = widen_varyings(vertex, pixel);
+        assert!(widened.contains("out vec4 v_COLOR1;"), "{widened}");
+        assert!(widened.contains("v_COLOR1 = vec4(a.xyz, 0.0);"), "{widened}");
+        assert!(widened.contains("out vec2 v_TEXCOORD0;"));
+        assert!(widened.contains("v_TEXCOORD0 = b;"));
+        assert_eq!(widen_varyings(vertex, "in vec3 v_COLOR1;\nin vec2 v_TEXCOORD0;"), vertex);
+    }
+}
+
+#[cfg(test)]
 mod texel_tests {
     use super::*;
+    use blam_tags::bitmap::BitmapFormat;
 
     fn animation(input: &str, range: &str) -> H3Animation {
         H3Animation {
@@ -1148,23 +1092,6 @@ mod texel_tests {
         assert!(H3Texels::default_srgb(BitmapFormat::A8r8g8b8));
         assert!(!H3Texels::default_srgb(BitmapFormat::DxnSnorm));
         assert!(!H3Texels::default_srgb(BitmapFormat::Abgrfp16));
-    }
-}
-
-#[cfg(test)]
-mod varying_tests {
-    use super::widen_varyings;
-
-    #[test]
-    fn a_vertex_stage_writes_as_much_as_the_pixel_stage_reads() {
-        let vertex = "out vec3 v_COLOR1;\nout vec2 v_TEXCOORD0;\nvoid main() {\n    v_COLOR1 = a.xyz;\n    v_TEXCOORD0 = b;\n}";
-        let pixel = "in vec4 v_COLOR1;\nin vec2 v_TEXCOORD0;";
-        let widened = widen_varyings(vertex, pixel);
-        assert!(widened.contains("out vec4 v_COLOR1;"), "{widened}");
-        assert!(widened.contains("v_COLOR1 = vec4(a.xyz, 0.0);"), "{widened}");
-        assert!(widened.contains("out vec2 v_TEXCOORD0;"));
-        assert!(widened.contains("v_TEXCOORD0 = b;"));
-        assert_eq!(widen_varyings(vertex, "in vec3 v_COLOR1;\nin vec2 v_TEXCOORD0;"), vertex);
     }
 }
 

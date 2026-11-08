@@ -11,7 +11,8 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, has_flag};
 use super::super::functions::FunctionValues;
-use super::super::gen3::shaders::{H3Texels, H3Texture};
+use super::super::gen3::shaders::H3Texture;
+use crate::app::model_preview::common::image::H3Texels;
 use super::super::materials::decode_h2_image;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::named_function::NamedFunction;

@@ -5,7 +5,7 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_effects::H3ScreenSettings;
-use super::super::gen3::shaders::H3Sampler;
+use crate::app::model_preview::common::image::H3Sampler;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::{HALF_LENS, screen_program, upload_h2_image_linear};
 use super::lighting::{
