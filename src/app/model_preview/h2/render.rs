@@ -9,7 +9,8 @@ use super::super::dx9::sprites::Dx9Sprites;
 use super::super::gen3::pipeline::h3_set_blend;
 use super::super::gen3::shaders::H3Blend;
 use super::super::common::features::paths;
-use super::super::renderer::{FrameCx, ce_flare_occlusion, draw_flare_sprites};
+use super::super::renderer::FrameCx;
+use crate::app::model_preview::common::sprite_gl::{ce_flare_occlusion, draw_flare_sprites};
 use super::slot::H2Slot;
 
 /// Halo 2's own part of the dx9 shading: its cloth, its gel lights' maps,

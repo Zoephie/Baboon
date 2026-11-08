@@ -7,6 +7,8 @@ use eframe::glow::{self, HasContext as _};
 
 use super::super::renderer::*;
 
+use super::super::common::sprite_gl::*;
+
 use super::super::common::camera::*;
 
 use super::super::*;

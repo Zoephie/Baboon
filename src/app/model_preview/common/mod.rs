@@ -19,6 +19,7 @@ pub(in crate::app::model_preview) mod plain;
 pub(in crate::app::model_preview) mod point_physics;
 pub(in crate::app::model_preview) mod random;
 pub(in crate::app::model_preview) mod slots;
+pub(in crate::app::model_preview) mod sprite_gl;
 pub(in crate::app::model_preview) mod sprites;
 pub(in crate::app::model_preview) mod time;
 pub(in crate::app::model_preview) mod view;

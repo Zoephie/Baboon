@@ -14,6 +14,7 @@ use super::super::gen3::shaders::H3Value;
 use crate::app::model_preview::common::image::H3Sampler;
 use super::flares::{H4FlareDraw, H4FlareView};
 use super::super::renderer::*;
+use super::super::common::sprite_gl::*;
 use super::super::common::camera::*;
 use super::super::common::view::ce_flare_view;
 

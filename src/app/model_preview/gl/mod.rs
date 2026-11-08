@@ -2,6 +2,7 @@
 //! themselves when a later step fails.
 
 pub(in crate::app::model_preview) mod chain;
+pub(in crate::app::model_preview) mod glsl;
 pub(in crate::app::model_preview) mod link;
 pub(in crate::app::model_preview) mod pass_state;
 pub(in crate::app::model_preview) mod program;
