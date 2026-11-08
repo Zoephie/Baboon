@@ -518,12 +518,7 @@ pub(super) fn draw_model_preview_panel(
             return;
         }
 
-        let is_campaign_evolved = tag.header.group_tag.to_be_bytes() == *b"hlmt"
-            && tag
-                .root()
-                .read_tag_ref_with_group("skeleton model")
-                .map(|(_, reference)| !reference.trim().is_empty())
-                .unwrap_or(false);
+        let is_campaign_evolved = is_campaign_evolved_model(tag);
 
         let Some(data_result) = state.data.take() else {
             ui.label(RichText::new("No preview loaded").color(subtle_dark()));
@@ -538,402 +533,487 @@ pub(super) fn draw_model_preview_panel(
                 return;
             }
         };
+        let panel = PreviewPanel { tag, entry, source_game, supports_textures, is_campaign_evolved, data };
 
-        // A scenario's per-BSP toggle list. Region toggles cannot serve
-        // here: a region only exists once its BSP is loaded, and the point
-        // of this list is choosing what to load in the first place.
-        let draw_scenario_setup = |ui: &mut Ui, state: &mut ModelPreviewState| {
-            if !data.scenario_bsps.is_empty() {
-                ui.label(RichText::new("Structure BSPs").strong().color(text_dark()));
-                ui.horizontal_wrapped(|ui| {
-                    for (index, reference) in data.scenario_bsps.iter().enumerate() {
-                        let Some(reference) = reference else {
-                            continue;
-                        };
-                        let mut checked = state.scenario_bsp_selection.contains(&index);
-                        if ui
-                            .baboon_checkbox(&mut checked, bsp_display_name(reference))
-                            .on_hover_text(reference.as_str())
-                            .changed()
-                        {
-                            if checked {
-                                state.scenario_bsp_selection.insert(index);
-                            } else {
-                                state.scenario_bsp_selection.remove(&index);
-                            }
-                        }
-                    }
-                });
-                if state.scenario_bsp_selection.is_empty() {
-                    ui.label(
-                        RichText::new("Check a structure BSP to load its geometry.")
-                            .color(subtle_dark()),
-                    );
-                }
-                ui.separator();
-            }
-        };
-
-        // Deferred until after the viewport/setup row so the player can use
-        // the full page width, matching the layout in the design reference.
-        let draw_animation_player = |ui: &mut Ui, state: &mut ModelPreviewState| {
-            ui.add_space(8.0);
-            draw_model_preview_section(ui, "Animation Player", None, |ui, part| {
-                let animations = data.animations.as_deref().map_or(&[][..], Vec::as_slice);
-                let pose_frames = state
-                    .animation
-                    .pose
-                    .as_ref()
-                    .map(|pose| pose.frames.len())
-                    .unwrap_or(0);
-                let controls_enabled = state.animation.selected.is_some() && pose_frames > 0;
-                let duration = pose_frames as f32 / ANIMATION_FRAME_RATE;
-                let last_frame = pose_frames.saturating_sub(1) as f32;
-                if part == ModelPreviewSectionPart::Header {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing.x = 16.0;
-                        let loading = state.animation.selected.is_some()
-                            && state.animation.pose.is_none()
-                            && state.animation.error.is_none();
-                        let spinner_width = if loading { 20.0 } else { 0.0 };
-                        let combo_width = if ui.available_width() >= 600.0 {
-                            340.0
-                        } else {
-                            240.0_f32.min((ui.available_width() - spinner_width).max(1.0))
-                        };
-                        animation_header_group(ui, combo_width + spinner_width, |ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.add_enabled_ui(!animations.is_empty(), |ui| {
-                                let no_clips = std::collections::BTreeSet::new();
-                                let hidden = data
-                                    .ce_weapons
-                                    .as_ref()
-                                    .map(|weapons| &weapons.hidden_clips)
-                                    .or_else(|| data.weapons.as_ref().map(|weapons| &weapons.hidden_clips))
-                                    .unwrap_or(&no_clips);
-                                draw_animation_combo(
-                                    ui,
-                                    &entry.key,
-                                    animations,
-                                    hidden,
-                                    &mut state.animation,
-                                    combo_width,
-                                );
-                            });
-                            if loading {
-                                ui.spinner();
-                            }
-                        });
-                        animation_header_group(ui, 140.0, |ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            if selectable_icon_button(
-                                ui,
-                                ButtonIcon::Play,
-                                "Play",
-                                state.animation.playing,
-                                controls_enabled,
-                            )
-                            .clicked()
-                            {
-                                state.animation.playing = true;
-                                state.animation.stopped = false;
-                                // Play at the end of a non-looping clip restarts it.
-                                if !state.animation.looped
-                                    && state.animation.time * ANIMATION_FRAME_RATE >= last_frame
-                                {
-                                    state.animation.time = 0.0;
-                                }
-                            }
-                            if selectable_icon_button(
-                                ui,
-                                ButtonIcon::Pause,
-                                "Pause",
-                                !state.animation.playing && !state.animation.stopped,
-                                controls_enabled,
-                            )
-                            .clicked()
-                            {
-                                state.animation.playing = false;
-                                state.animation.stopped = false;
-                            }
-                            if selectable_icon_button(
-                                ui,
-                                ButtonIcon::Stop,
-                                "Stop and return to the default pose",
-                                state.animation.stopped,
-                                controls_enabled,
-                            )
-                            .clicked()
-                            {
-                                state.animation.playing = false;
-                                state.animation.stopped = true;
-                                state.animation.time = 0.0;
-                            }
-                            ui.spacing_mut().item_spacing.x = 8.0;
-                            if selectable_icon_button(
-                                ui,
-                                ButtonIcon::Loop,
-                                "Loop animation",
-                                state.animation.looped,
-                                controls_enabled,
-                            )
-                            .clicked()
-                            {
-                                state.animation.looped = !state.animation.looped;
-                            }
-                            if selectable_icon_button(
-                                ui,
-                                ButtonIcon::Function,
-                                "Interpolate between frames (off: step frame by frame)",
-                                state.animation.interpolate,
-                                controls_enabled,
-                            )
-                            .clicked()
-                            {
-                                state.animation.interpolate = !state.animation.interpolate;
-                            }
-                        });
-                        let speed_label_width = ui
-                            .painter()
-                            .layout_no_wrap(
-                                "Speed".to_owned(),
-                                FontId::proportional(12.0),
-                                subtle_dark(),
-                            )
-                            .size()
-                            .x;
-                        animation_header_group(ui, speed_label_width + 4.0 + 48.0, |ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.label(RichText::new("Speed").color(subtle_dark()));
-                            ui.add_enabled_ui(controls_enabled, |ui| {
-                                ui.add_sized(
-                                    Vec2::new(48.0, BUTTON_HEIGHT),
-                                    egui::DragValue::new(&mut state.animation.speed)
-                                        .range(0.05..=4.0)
-                                        .speed(0.02)
-                                        .max_decimals(2)
-                                        .suffix("×"),
-                                );
-                            });
-                        });
-                        let frame_position =
-                            animation_frame_position(&state.animation, pose_frames);
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(animation_frame_label(frame_position, pose_frames))
-                                    .color(subtle_dark()),
-                            )
-                            .wrap_mode(egui::TextWrapMode::Extend),
-                        );
-                    });
-                } else {
-                    ui.scope(|ui| {
-                        let mut scrub = animation_frame_position(&state.animation, pose_frames);
-                        ui.spacing_mut().slider_width = (ui.available_width() - 2.0).max(1.0);
-                        // Reserved before the slider so the ticks lie under its handle.
-                        let ticks = ui.painter().add(egui::Shape::Noop);
-                        let mut slider = egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0))
-                            .show_value(false);
-                        if !state.animation.interpolate {
-                            slider = slider.step_by(1.0);
-                        }
-                        let response = ui.add_enabled(controls_enabled, slider);
-                        let tick_xs = frame_tick_xs(
-                            response.rect,
-                            ui.style().visuals.handle_shape,
-                            last_frame.max(1.0),
-                            pose_frames,
-                        );
-                        let rail_y = response.rect.center().y;
-                        let stroke = egui::Stroke::new(1.0, subtle_dark());
-                        ui.painter().set(
-                            ticks,
-                            egui::Shape::Vec(
-                                tick_xs
-                                    .into_iter()
-                                    .map(|x| {
-                                        egui::Shape::line_segment(
-                                            [egui::pos2(x, rail_y - 5.0), egui::pos2(x, rail_y + 5.0)],
-                                            stroke,
-                                        )
-                                    })
-                                    .collect(),
-                            ),
-                        );
-                        if response.changed() {
-                            state.animation.time = scrub / ANIMATION_FRAME_RATE;
-                            state.animation.playing = false;
-                            state.animation.stopped = false;
-                        }
-                        if controls_enabled && state.animation.playing {
-                            let pass = ui.ctx().cumulative_pass_nr();
-                            let dt = ui.input(|input| input.stable_dt).min(0.1);
-                            advance_playback_clock(
-                                &mut state.animation,
-                                pass,
-                                dt,
-                                duration,
-                                last_frame,
-                            );
-                            ui.ctx().request_repaint();
-                        }
-                    });
-                    if let Some(error) = state.animation.error.clone() {
-                        ui.label(RichText::new(error).color(Color32::from_rgb(150, 56, 44)));
-                    }
-                }
-            });
-        };
-
-        let mut mutation_requested = false;
-        let mut reload_requested = false;
+        let mut requests = SetupRequests::default();
         let page_width = ui.available_width();
         let can_place_controls_beside = page_width >= 780.0;
         if can_place_controls_beside {
-            let gap = MODEL_PREVIEW_SECTION_GAP;
-            // At wide sizes the persisted preview scale controls the entire
-            // preview card. Reserve enough room for Model Setup, then let the
-            // card grow around its 470×300 viewport until it reaches that
-            // limit.
-            let preview_width = wide_model_preview_section_width(page_width, *model_preview_size);
-            let setup_width = (page_width - preview_width - gap).max(WIDE_MODEL_SETUP_MIN_WIDTH);
-            let preview_viewport_size = model_viewport_size(preview_width, *model_preview_size);
-            let shared_body_height = preview_viewport_size.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
-            // Setup's body has 8-point top/bottom margins; Preview's body is
-            // edge-to-edge. Match their *outer* card heights, not just content.
-            let setup_body_height =
-                (shared_body_height - model_setup_extra_header_height(setup_width) - 16.0).max(1.0);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                ui.allocate_ui(Vec2::new(preview_width, 0.0), |ui| {
-                    ui.set_min_width(preview_width);
-                    ui.set_max_width(preview_width);
-                    draw_model_preview_section(
-                        ui,
-                        "Model Preview",
-                        Some(shared_body_height),
-                        |ui, part| match part {
-                            ModelPreviewSectionPart::Header => draw_model_view_settings_menu(
-                                ui,
-                                tag,
-                                data,
-                                state,
-                                model_preview_size,
-                                supports_textures,
-                                is_campaign_evolved,
-                                source_game,
-                                !data.preview.nodes.is_empty(),
-                            ),
-                            ModelPreviewSectionPart::Body => {
-                                draw_model_viewport_with_stats(
-                                    ui,
-                                    data,
-                                    state,
-                                    preview_viewport_size,
-                                );
-                            }
-                        },
-                    );
-                });
-                ui.allocate_ui(Vec2::new(setup_width, 0.0), |ui| {
-                    ui.set_min_width(setup_width);
-                    ui.set_max_width(setup_width);
-                    draw_model_preview_section(
-                        ui,
-                        "Model Setup",
-                        Some(setup_body_height),
-                        |ui, part| {
-                            if part == ModelPreviewSectionPart::Header {
-                                draw_model_setup_header_controls(
-                                    ui,
-                                    setup_width,
-                                    data,
-                                    state,
-                                    |ui, state| {
-                                        // An object shows its `.model`'s variants but
-                                        // holds none, so there is nothing here to write.
-                                        if entry.group_tag == u32::from_be_bytes(*b"hlmt")
-                                            && draw_variant_header_actions(ui, data, state, edit)
-                                        {
-                                            mutation_requested = true;
-                                        }
-                                        if icon_text_button(
-                                            ui,
-                                            ButtonIcon::Refresh,
-                                            "Refresh Model",
-                                            true,
-                                        )
-                                        .clicked()
-                                        {
-                                            state.invalidate_load();
-                                            reload_requested = true;
-                                        }
-                                    },
-                                );
-                            } else {
-                                crate::app::ScrollArea::vertical()
-                                    .auto_shrink([false, false])
-                                    .max_height(setup_body_height)
-                                    .show(ui, |ui| {
-                                        draw_scenario_setup(ui, state);
-                                        draw_variant_controls(ui, data, state);
-                                        draw_object_functions(ui, data, state);
-                                    });
-                            }
-                        },
-                    );
-                });
-            });
+            draw_preview_beside_setup(ui, &panel, state, model_preview_size, edit, &mut requests);
         } else {
-            draw_model_preview_section(ui, "Model Preview", None, |ui, part| match part {
-                ModelPreviewSectionPart::Header => draw_model_view_settings_menu(
-                    ui,
-                    tag,
-                    data,
-                    state,
-                    model_preview_size,
-                    supports_textures,
-                    is_campaign_evolved,
-                    source_game,
-                    !data.preview.nodes.is_empty(),
-                ),
-                ModelPreviewSectionPart::Body => {
-                    let size = model_viewport_size(ui.available_width(), *model_preview_size);
-                    draw_model_viewport_with_stats(ui, data, state, size);
-                }
-            });
-            ui.add_space(8.0);
-            let setup_width = ui.available_width();
-            draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
-                if part == ModelPreviewSectionPart::Header {
-                    draw_model_setup_header_controls(ui, setup_width, data, state, |ui, state| {
-                        if entry.group_tag == u32::from_be_bytes(*b"hlmt")
-                            && draw_variant_header_actions(ui, data, state, edit)
-                        {
-                            mutation_requested = true;
-                        }
-                        if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
-                            .clicked()
-                        {
-                            state.invalidate_load();
-                            reload_requested = true;
-                        }
-                    });
-                } else {
-                    draw_scenario_setup(ui, state);
-                    draw_variant_controls(ui, data, state);
-                    draw_object_functions(ui, data, state);
-                }
-            });
+            draw_preview_above_setup(ui, &panel, state, model_preview_size, edit, &mut requests);
         }
-        draw_animation_player(ui, state);
-        if mutation_requested {
+        draw_animation_player(ui, &panel, state);
+        if requests.mutation {
             state.invalidate_load();
-        } else if !reload_requested {
+        } else if !requests.reload {
             state.data = restore_data.take();
         }
     });
     ui.add_space(8.0);
+}
+
+/// What every section of a loaded preview's panel draws from.
+struct PreviewPanel<'a> {
+    tag: &'a TagFile,
+    entry: &'a TagEntry,
+    source_game: Option<GameId>,
+    supports_textures: bool,
+    is_campaign_evolved: bool,
+    data: &'a ModelPreviewData,
+}
+
+/// What the Model Setup header's actions asked for this pass.
+#[derive(Default)]
+struct SetupRequests {
+    /// A variant was written, so the preview loads again.
+    mutation: bool,
+    /// Refresh Model was pressed.
+    reload: bool,
+}
+
+/// A Campaign Evolved `.model`: one that names a skeleton model.
+fn is_campaign_evolved_model(tag: &TagFile) -> bool {
+    tag.header.group_tag.to_be_bytes() == *b"hlmt"
+        && tag
+            .root()
+            .read_tag_ref_with_group("skeleton model")
+            .map(|(_, reference)| !reference.trim().is_empty())
+            .unwrap_or(false)
+}
+
+/// The wide layout: the Model Preview card and the Model Setup card side by
+/// side, their outer heights matched.
+fn draw_preview_beside_setup(
+    ui: &mut Ui,
+    panel: &PreviewPanel<'_>,
+    state: &mut ModelPreviewState,
+    model_preview_size: &mut f32,
+    edit: &mut FieldEditContext<'_>,
+    requests: &mut SetupRequests,
+) {
+    let page_width = ui.available_width();
+    let gap = MODEL_PREVIEW_SECTION_GAP;
+    // At wide sizes the persisted preview scale controls the entire
+    // preview card. Reserve enough room for Model Setup, then let the
+    // card grow around its 470×300 viewport until it reaches that
+    // limit.
+    let preview_width = wide_model_preview_section_width(page_width, *model_preview_size);
+    let setup_width = (page_width - preview_width - gap).max(WIDE_MODEL_SETUP_MIN_WIDTH);
+    let preview_viewport_size = model_viewport_size(preview_width, *model_preview_size);
+    let shared_body_height = preview_viewport_size.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
+    // Setup's body has 8-point top/bottom margins; Preview's body is
+    // edge-to-edge. Match their *outer* card heights, not just content.
+    let setup_body_height =
+        (shared_body_height - model_setup_extra_header_height(setup_width) - 16.0).max(1.0);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        ui.allocate_ui(Vec2::new(preview_width, 0.0), |ui| {
+            ui.set_min_width(preview_width);
+            ui.set_max_width(preview_width);
+            draw_model_preview_section(
+                ui,
+                "Model Preview",
+                Some(shared_body_height),
+                |ui, part| match part {
+                    ModelPreviewSectionPart::Header => {
+                        draw_preview_header(ui, panel, state, model_preview_size)
+                    }
+                    ModelPreviewSectionPart::Body => {
+                        draw_model_viewport_with_stats(
+                            ui,
+                            panel.data,
+                            state,
+                            preview_viewport_size,
+                        );
+                    }
+                },
+            );
+        });
+        ui.allocate_ui(Vec2::new(setup_width, 0.0), |ui| {
+            ui.set_min_width(setup_width);
+            ui.set_max_width(setup_width);
+            draw_model_preview_section(
+                ui,
+                "Model Setup",
+                Some(setup_body_height),
+                |ui, part| {
+                    if part == ModelPreviewSectionPart::Header {
+                        draw_model_setup_header_controls(
+                            ui,
+                            setup_width,
+                            panel.data,
+                            state,
+                            |ui, state| draw_setup_header_actions(ui, panel, state, edit, requests),
+                        );
+                    } else {
+                        crate::app::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .max_height(setup_body_height)
+                            .show(ui, |ui| {
+                                draw_setup_body(ui, panel.data, state);
+                            });
+                    }
+                },
+            );
+        });
+    });
+}
+
+/// The narrow layout: the Model Preview card, then the Model Setup card
+/// under it.
+fn draw_preview_above_setup(
+    ui: &mut Ui,
+    panel: &PreviewPanel<'_>,
+    state: &mut ModelPreviewState,
+    model_preview_size: &mut f32,
+    edit: &mut FieldEditContext<'_>,
+    requests: &mut SetupRequests,
+) {
+    draw_model_preview_section(ui, "Model Preview", None, |ui, part| match part {
+        ModelPreviewSectionPart::Header => draw_preview_header(ui, panel, state, model_preview_size),
+        ModelPreviewSectionPart::Body => {
+            let size = model_viewport_size(ui.available_width(), *model_preview_size);
+            draw_model_viewport_with_stats(ui, panel.data, state, size);
+        }
+    });
+    ui.add_space(8.0);
+    let setup_width = ui.available_width();
+    draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
+        if part == ModelPreviewSectionPart::Header {
+            draw_model_setup_header_controls(ui, setup_width, panel.data, state, |ui, state| {
+                draw_setup_header_actions(ui, panel, state, edit, requests)
+            });
+        } else {
+            draw_setup_body(ui, panel.data, state);
+        }
+    });
+}
+
+/// The Model Preview card's header: the view settings menu.
+fn draw_preview_header(
+    ui: &mut Ui,
+    panel: &PreviewPanel<'_>,
+    state: &mut ModelPreviewState,
+    model_preview_size: &mut f32,
+) {
+    draw_model_view_settings_menu(
+        ui,
+        panel.tag,
+        panel.data,
+        state,
+        model_preview_size,
+        panel.supports_textures,
+        panel.is_campaign_evolved,
+        panel.source_game,
+        !panel.data.preview.nodes.is_empty(),
+    )
+}
+
+/// The Model Setup card's header actions: the variant actions, then Refresh
+/// Model.
+fn draw_setup_header_actions(
+    ui: &mut Ui,
+    panel: &PreviewPanel<'_>,
+    state: &mut ModelPreviewState,
+    edit: &mut FieldEditContext<'_>,
+    requests: &mut SetupRequests,
+) {
+    // An object shows its `.model`'s variants but
+    // holds none, so there is nothing here to write.
+    if panel.entry.group_tag == u32::from_be_bytes(*b"hlmt")
+        && draw_variant_header_actions(ui, panel.data, state, edit)
+    {
+        requests.mutation = true;
+    }
+    if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true).clicked() {
+        state.invalidate_load();
+        requests.reload = true;
+    }
+}
+
+/// The Model Setup card's body: a scenario's BSPs, the variants and regions,
+/// and the object's functions.
+fn draw_setup_body(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+    draw_scenario_setup(ui, data, state);
+    draw_variant_controls(ui, data, state);
+    draw_object_functions(ui, data, state);
+}
+
+/// A scenario's per-BSP toggle list. Region toggles cannot serve here: a
+/// region only exists once its BSP is loaded, and the point of this list is
+/// choosing what to load in the first place.
+fn draw_scenario_setup(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+    if !data.scenario_bsps.is_empty() {
+        ui.label(RichText::new("Structure BSPs").strong().color(text_dark()));
+        ui.horizontal_wrapped(|ui| {
+            for (index, reference) in data.scenario_bsps.iter().enumerate() {
+                let Some(reference) = reference else {
+                    continue;
+                };
+                let mut checked = state.scenario_bsp_selection.contains(&index);
+                if ui
+                    .baboon_checkbox(&mut checked, bsp_display_name(reference))
+                    .on_hover_text(reference.as_str())
+                    .changed()
+                {
+                    if checked {
+                        state.scenario_bsp_selection.insert(index);
+                    } else {
+                        state.scenario_bsp_selection.remove(&index);
+                    }
+                }
+            }
+        });
+        if state.scenario_bsp_selection.is_empty() {
+            ui.label(
+                RichText::new("Check a structure BSP to load its geometry.")
+                    .color(subtle_dark()),
+            );
+        }
+        ui.separator();
+    }
+}
+
+/// How far the selected clip runs, for the player's controls.
+struct ClipFrames {
+    pose_frames: usize,
+    controls_enabled: bool,
+    duration: f32,
+    last_frame: f32,
+}
+
+/// The Animation Player card, under the viewport and setup row so the player
+/// can use the full page width, matching the layout in the design reference.
+fn draw_animation_player(ui: &mut Ui, panel: &PreviewPanel<'_>, state: &mut ModelPreviewState) {
+    ui.add_space(8.0);
+    draw_model_preview_section(ui, "Animation Player", None, |ui, part| {
+        let animations = panel.data.animations.as_deref().map_or(&[][..], Vec::as_slice);
+        let pose_frames = state
+            .animation
+            .pose
+            .as_ref()
+            .map(|pose| pose.frames.len())
+            .unwrap_or(0);
+        let controls_enabled = state.animation.selected.is_some() && pose_frames > 0;
+        let duration = pose_frames as f32 / ANIMATION_FRAME_RATE;
+        let last_frame = pose_frames.saturating_sub(1) as f32;
+        let frames = ClipFrames { pose_frames, controls_enabled, duration, last_frame };
+        if part == ModelPreviewSectionPart::Header {
+            draw_animation_header(ui, panel, animations, state, &frames);
+        } else {
+            draw_animation_scrubber(ui, state, &frames);
+        }
+    });
+}
+
+/// The Animation Player's header: the clip picker, the transport buttons,
+/// the speed and the frame position.
+fn draw_animation_header(
+    ui: &mut Ui,
+    panel: &PreviewPanel<'_>,
+    animations: &[PreviewAnimationEntry],
+    state: &mut ModelPreviewState,
+    frames: &ClipFrames,
+) {
+    let ClipFrames { pose_frames, controls_enabled, last_frame, .. } = *frames;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 16.0;
+        let loading = state.animation.selected.is_some()
+            && state.animation.pose.is_none()
+            && state.animation.error.is_none();
+        let spinner_width = if loading { 20.0 } else { 0.0 };
+        let combo_width = if ui.available_width() >= 600.0 {
+            340.0
+        } else {
+            240.0_f32.min((ui.available_width() - spinner_width).max(1.0))
+        };
+        animation_header_group(ui, combo_width + spinner_width, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.add_enabled_ui(!animations.is_empty(), |ui| {
+                let no_clips = std::collections::BTreeSet::new();
+                let hidden = panel
+                    .data
+                    .ce_weapons
+                    .as_ref()
+                    .map(|weapons| &weapons.hidden_clips)
+                    .or_else(|| panel.data.weapons.as_ref().map(|weapons| &weapons.hidden_clips))
+                    .unwrap_or(&no_clips);
+                draw_animation_combo(
+                    ui,
+                    &panel.entry.key,
+                    animations,
+                    hidden,
+                    &mut state.animation,
+                    combo_width,
+                );
+            });
+            if loading {
+                ui.spinner();
+            }
+        });
+        animation_header_group(ui, 140.0, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if selectable_icon_button(
+                ui,
+                ButtonIcon::Play,
+                "Play",
+                state.animation.playing,
+                controls_enabled,
+            )
+            .clicked()
+            {
+                state.animation.playing = true;
+                state.animation.stopped = false;
+                // Play at the end of a non-looping clip restarts it.
+                if !state.animation.looped
+                    && state.animation.time * ANIMATION_FRAME_RATE >= last_frame
+                {
+                    state.animation.time = 0.0;
+                }
+            }
+            if selectable_icon_button(
+                ui,
+                ButtonIcon::Pause,
+                "Pause",
+                !state.animation.playing && !state.animation.stopped,
+                controls_enabled,
+            )
+            .clicked()
+            {
+                state.animation.playing = false;
+                state.animation.stopped = false;
+            }
+            if selectable_icon_button(
+                ui,
+                ButtonIcon::Stop,
+                "Stop and return to the default pose",
+                state.animation.stopped,
+                controls_enabled,
+            )
+            .clicked()
+            {
+                state.animation.playing = false;
+                state.animation.stopped = true;
+                state.animation.time = 0.0;
+            }
+            ui.spacing_mut().item_spacing.x = 8.0;
+            if selectable_icon_button(
+                ui,
+                ButtonIcon::Loop,
+                "Loop animation",
+                state.animation.looped,
+                controls_enabled,
+            )
+            .clicked()
+            {
+                state.animation.looped = !state.animation.looped;
+            }
+            if selectable_icon_button(
+                ui,
+                ButtonIcon::Function,
+                "Interpolate between frames (off: step frame by frame)",
+                state.animation.interpolate,
+                controls_enabled,
+            )
+            .clicked()
+            {
+                state.animation.interpolate = !state.animation.interpolate;
+            }
+        });
+        let speed_label_width = ui
+            .painter()
+            .layout_no_wrap(
+                "Speed".to_owned(),
+                FontId::proportional(12.0),
+                subtle_dark(),
+            )
+            .size()
+            .x;
+        animation_header_group(ui, speed_label_width + 4.0 + 48.0, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(RichText::new("Speed").color(subtle_dark()));
+            ui.add_enabled_ui(controls_enabled, |ui| {
+                ui.add_sized(
+                    Vec2::new(48.0, BUTTON_HEIGHT),
+                    egui::DragValue::new(&mut state.animation.speed)
+                        .range(0.05..=4.0)
+                        .speed(0.02)
+                        .max_decimals(2)
+                        .suffix("×"),
+                );
+            });
+        });
+        let frame_position =
+            animation_frame_position(&state.animation, pose_frames);
+        ui.add(
+            egui::Label::new(
+                RichText::new(animation_frame_label(frame_position, pose_frames))
+                    .color(subtle_dark()),
+            )
+            .wrap_mode(egui::TextWrapMode::Extend),
+        );
+    });
+}
+
+/// The Animation Player's body: the frame scrubber with its ticks, the
+/// playback clock, and the clip's error.
+fn draw_animation_scrubber(ui: &mut Ui, state: &mut ModelPreviewState, frames: &ClipFrames) {
+    let ClipFrames { pose_frames, controls_enabled, duration, last_frame } = *frames;
+    ui.scope(|ui| {
+        let mut scrub = animation_frame_position(&state.animation, pose_frames);
+        ui.spacing_mut().slider_width = (ui.available_width() - 2.0).max(1.0);
+        // Reserved before the slider so the ticks lie under its handle.
+        let ticks = ui.painter().add(egui::Shape::Noop);
+        let mut slider = egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0))
+            .show_value(false);
+        if !state.animation.interpolate {
+            slider = slider.step_by(1.0);
+        }
+        let response = ui.add_enabled(controls_enabled, slider);
+        let tick_xs = frame_tick_xs(
+            response.rect,
+            ui.style().visuals.handle_shape,
+            last_frame.max(1.0),
+            pose_frames,
+        );
+        let rail_y = response.rect.center().y;
+        let stroke = egui::Stroke::new(1.0, subtle_dark());
+        ui.painter().set(
+            ticks,
+            egui::Shape::Vec(
+                tick_xs
+                    .into_iter()
+                    .map(|x| {
+                        egui::Shape::line_segment(
+                            [egui::pos2(x, rail_y - 5.0), egui::pos2(x, rail_y + 5.0)],
+                            stroke,
+                        )
+                    })
+                    .collect(),
+            ),
+        );
+        if response.changed() {
+            state.animation.time = scrub / ANIMATION_FRAME_RATE;
+            state.animation.playing = false;
+            state.animation.stopped = false;
+        }
+        if controls_enabled && state.animation.playing {
+            let pass = ui.ctx().cumulative_pass_nr();
+            let dt = ui.input(|input| input.stable_dt).min(0.1);
+            advance_playback_clock(
+                &mut state.animation,
+                pass,
+                dt,
+                duration,
+                last_frame,
+            );
+            ui.ctx().request_repaint();
+        }
+    });
+    if let Some(error) = state.animation.error.clone() {
+        ui.label(RichText::new(error).color(Color32::from_rgb(150, 56, 44)));
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
