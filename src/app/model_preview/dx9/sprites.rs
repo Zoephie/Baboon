@@ -10,6 +10,7 @@ use super::super::common::sprites::{
 use super::super::effects::EffectOnsets;
 use super::super::gen3::pipeline::h3_layered_distance;
 use super::super::common::view::ViewFrame;
+use super::super::gl::pass_state::PassState;
 use super::super::renderer::*;
 use super::pipeline::Dx9Game;
 
@@ -42,9 +43,7 @@ impl RenderCore {
             // with `sub_936910(0, 3, 2)`: depth tested, less or equal, not
             // written. Liquids draw through it too, and contrails through
             // a transparent pass, which tests the same way.
-            gl.enable(glow::DEPTH_TEST);
-            gl.depth_func(glow::LEQUAL);
-            gl.depth_mask(false);
+            widget_state().apply(gl);
             let uploads = uploaded.uploads();
             let mut sprites = Dx9Sprites {
                 gl,
@@ -104,6 +103,11 @@ impl RenderCore {
             }
         }
     }
+}
+
+/// The widgets' state: depth tested, less or equal, not written.
+fn widget_state() -> PassState {
+    PassState::new().enable(glow::DEPTH_TEST).depth_func(glow::LEQUAL).depth_mask(false)
 }
 
 /// What a game's own sprites draw with, inside the dx9 sprite pass: the

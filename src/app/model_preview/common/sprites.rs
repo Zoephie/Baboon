@@ -7,6 +7,7 @@ use eframe::glow::{self, HasContext as _};
 
 use super::super::renderer::*;
 use super::super::*;
+use super::super::gl::pass_state::PassState;
 use super::view::ViewFrame;
 
 impl RenderCore {
@@ -29,33 +30,9 @@ impl RenderCore {
                 self.particle_gl.get_or_insert_with(|| h3_particle_gl(gl, self.program));
             }
             self.slots[slot].sync_sprite_textures(gl, frame);
-            gl.use_program(Some(flares.program));
-            gl.bind_vertex_array(Some(flares.vertex_array));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
-            gl.active_texture(glow::TEXTURE0);
+            sprite_program_state(flares).apply(gl);
             gl.uniform_1_i32(flares.map.as_ref(), 0);
-            gl.enable(glow::BLEND);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.color_mask(true, true, true, false);
-            // Effects test against the model's depth, as the transparent passes
-            // do. Bloom leaves the test off, so it's switched on here.
-            gl.enable(glow::DEPTH_TEST);
-            gl.depth_mask(false);
-            gl.depth_func(glow::LEQUAL);
-            gl.disable(glow::CULL_FACE);
-            // `global_shader_effect_alpha_blended`, among the model's depth.
-            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-            // Halo 3's target is composited over the background by its alpha,
-            // so what covers it has to say so.
-            if h3 {
-                gl.color_mask(true, true, true, true);
-                gl.blend_func_separate(
-                    glow::SRC_ALPHA,
-                    glow::ONE_MINUS_SRC_ALPHA,
-                    glow::ONE,
-                    glow::ONE_MINUS_SRC_ALPHA,
-                );
-            }
+            sprite_blending_state(h3).apply(gl);
             // Plain color times map, not what the last flare left set.
             gl.uniform_1_f32(flares.highlight.as_ref(), -1.0);
             gl.uniform_2_f32(flares.tint.as_ref(), 0.0, 0.0);
@@ -68,23 +45,83 @@ impl RenderCore {
     pub(in crate::app::model_preview) unsafe fn end_sprites(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         unsafe {
             self.sprites_advanced = false;
-            gl.color_mask(true, true, true, true);
-            gl.depth_mask(true);
-            gl.depth_func(glow::LEQUAL);
-            gl.enable(glow::DEPTH_TEST);
-            // Sprites draw both sides; what comes after (bloom's masks)
-            // culls as the model does.
-            if frame.show_backfaces {
-                gl.disable(glow::CULL_FACE);
-            } else {
-                gl.enable(glow::CULL_FACE);
-            }
-            gl.disable(glow::BLEND);
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+            after_sprites_state(frame.show_backfaces, self.program, self.slots[slot].vertex_array).apply(gl);
         }
     }
+}
+
+/// The sprite program bound, its quad's buffer and the first map unit with it.
+fn sprite_program_state(flares: &SpriteGl) -> PassState {
+    PassState::new()
+        .use_program(flares.program)
+        .bind_vertex_array(flares.vertex_array)
+        .bind_buffer(glow::ARRAY_BUFFER, flares.buffer)
+        .active_texture(glow::TEXTURE0)
+}
+
+/// How sprites blend over the model: tested against its depth, not
+/// writing it, both sides drawn.
+fn sprite_blending_state(h3: bool) -> PassState {
+    let state = PassState::new()
+        .enable(glow::BLEND)
+        .blend_equation(glow::FUNC_ADD)
+        .color_mask([true, true, true, false])
+        // Effects test against the model's depth, as the transparent passes
+        // do. Bloom leaves the test off, so it's switched on here.
+        .enable(glow::DEPTH_TEST)
+        .depth_mask(false)
+        .depth_func(glow::LEQUAL)
+        .disable(glow::CULL_FACE)
+        // `global_shader_effect_alpha_blended`, among the model's depth.
+        .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+    if !h3 {
+        return state;
+    }
+    // Halo 3's target is composited over the background by its alpha, so
+    // what covers it has to say so.
+    state.color_mask([true, true, true, true]).blend_func_separate(
+        glow::SRC_ALPHA,
+        glow::ONE_MINUS_SRC_ALPHA,
+        glow::ONE,
+        glow::ONE_MINUS_SRC_ALPHA,
+    )
+}
+
+/// What the model's own drawing expects back after the sprites: depth
+/// written and tested, blending off, its program and vertices bound.
+fn after_sprites_state(
+    show_backfaces: bool,
+    program: glow::NativeProgram,
+    vertex_array: glow::NativeVertexArray,
+) -> PassState {
+    PassState::new()
+        .color_mask([true, true, true, true])
+        .depth_mask(true)
+        .depth_func(glow::LEQUAL)
+        .enable(glow::DEPTH_TEST)
+        // Sprites draw both sides; what comes after (bloom's masks) culls as
+        // the model does.
+        .culling_unless(show_backfaces)
+        .disable(glow::BLEND)
+        .bind_texture(glow::TEXTURE_2D, None)
+        .use_program(program)
+        .bind_vertex_array(vertex_array)
+}
+
+/// The lens flares' additive blend, through the sprite program, with a map
+/// bound before any flare binds its own.
+fn flares_state(flares: &SpriteGl, placeholder: Option<glow::NativeTexture>) -> PassState {
+    PassState::new()
+        .use_program(flares.program)
+        .bind_vertex_array(flares.vertex_array)
+        .bind_buffer(glow::ARRAY_BUFFER, flares.buffer)
+        .active_texture(glow::TEXTURE0)
+        // The occlusion tests draw with this program too, before any sprite
+        // binds a map; an unbound sampler makes drivers complain.
+        .bind_texture(glow::TEXTURE_2D, placeholder)
+        .color_mask([true, true, true, false])
+        .blend_equation(glow::FUNC_ADD)
+        .blend_func(glow::SRC_ALPHA, glow::ONE)
 }
 
 /// One quad through the sprite program: its corners, each a place and a map
@@ -257,16 +294,5 @@ pub(in crate::app::model_preview) unsafe fn begin_flares(
     flares: &SpriteGl,
     placeholder: Option<glow::NativeTexture>,
 ) {
-    unsafe {
-        gl.use_program(Some(flares.program));
-        gl.bind_vertex_array(Some(flares.vertex_array));
-        gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
-        gl.active_texture(glow::TEXTURE0);
-        // The occlusion tests draw with this program too, before any
-        // sprite binds a map; an unbound sampler makes drivers complain.
-        gl.bind_texture(glow::TEXTURE_2D, placeholder);
-        gl.color_mask(true, true, true, false);
-        gl.blend_equation(glow::FUNC_ADD);
-        gl.blend_func(glow::SRC_ALPHA, glow::ONE);
-    }
+    unsafe { flares_state(flares, placeholder).apply(gl) }
 }

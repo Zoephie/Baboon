@@ -4,6 +4,7 @@
 
 use super::render::{Gen3Batch, Gen3Cx, Gen3Game};
 use super::sprites::SpriteStage;
+use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
 use super::super::gl::target::{Made, Sampling, Texels};
 use super::prt::{H3PrtKind, second_order_rotation};
@@ -1442,12 +1443,7 @@ impl Gen3State {
                 if sprites {
                     self.draw_sprites(core, game, gl, frame, slot, SpriteStage::FartherThan(distance));
                 }
-                gl.enable(glow::BLEND);
-                gl.depth_mask(false);
-                gl.depth_func(glow::LEQUAL);
-                h3_set_cull(gl, frame);
-                gl.color_mask(true, true, true, true);
-                gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
+                blended_material_state(frame.show_backfaces, core.slots[slot].vertex_array).apply(gl);
                 h3_set_blend(gl, blend);
                 if material.decal {
                     gl.enable(glow::POLYGON_OFFSET_FILL);
@@ -1953,6 +1949,20 @@ fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Optio
         .flatten()
         .any(|known| Arc::ptr_eq(known, pass));
     material.dialect() == H3Dialect::Reach && foliage && own
+}
+
+/// What each blended material draws under, after any sprites farther
+/// than it: blended, depth tested and not written, culled as the model is,
+/// every channel written, the model's vertices bound. Its own blend and any
+/// decal offset follow per material.
+fn blended_material_state(show_backfaces: bool, vertex_array: glow::NativeVertexArray) -> PassState {
+    PassState::new()
+        .enable(glow::BLEND)
+        .depth_mask(false)
+        .depth_func(glow::LEQUAL)
+        .cull_back_unless(show_backfaces)
+        .color_mask([true, true, true, true])
+        .bind_vertex_array(vertex_array)
 }
 
 /// `c_object_renderer::render_albedo` and its like: `_cull_mode_cw` throughout.

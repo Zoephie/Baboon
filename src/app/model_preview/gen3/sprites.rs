@@ -14,6 +14,7 @@ use super::super::*;
 use super::super::common::view::ViewFrame;
 use super::super::super::effects::EffectOnsets;
 use super::super::particles::H3ParticleField;
+use super::super::gl::pass_state::PassState;
 use super::pipeline::{h3_layered_distance, h3_lighting_constants, h3_set_blend};
 use super::render::Gen3Game;
 
@@ -104,9 +105,7 @@ impl Gen3State {
                 pass.draw_cheap_particles(uploaded, &mut core.reach_cheap_gl, core.program);
             }
             if matches!(stage, SpriteStage::FartherThan(_) | SpriteStage::Distortions) {
-                gl.blend_equation(glow::FUNC_ADD);
-                gl.color_mask(true, true, true, true);
-                gl.use_program(Some(core.program));
+                back_to_materials_state(core.program).apply(gl);
                 return;
             }
             begin_flares(gl, flares, core.placeholder);
@@ -116,6 +115,12 @@ impl Gen3State {
             core.end_sprites(gl, frame, slot);
         }
     }
+}
+
+/// What a partial sprite run hands the blended materials back: the add
+/// equation, every channel written, the model's program bound.
+fn back_to_materials_state(program: glow::NativeProgram) -> PassState {
+    PassState::new().blend_equation(glow::FUNC_ADD).color_mask([true, true, true, true]).use_program(program)
 }
 
 /// How near the sorted sprites a stage draws come: `FartherThan`'s limit; for

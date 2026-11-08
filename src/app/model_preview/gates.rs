@@ -611,11 +611,14 @@ fn save_png(path: &std::path::Path, pixels: &[u8]) {
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 }
 
-/// G-px, G-sim and G-gl: each object of [`PIXEL_SET`], in each of [`LOOKS`],
-/// draws the same pixels as before, its slot keeps the same simulations (a
-/// line per field, under `sim/`), and the paint leaves GL as it did (under
-/// `gl/`). Blessing keeps every shot as a PNG beside the hashes; a shot that
-/// differs is saved under `changed/` to set against it.
+/// G-px, G-sim, G-gl and G-calls: each object of [`PIXEL_SET`], in each of
+/// [`LOOKS`], draws the same pixels as before, its slot keeps the same
+/// simulations (a line per field, under `sim/`), the paint leaves GL as it did
+/// (under `gl/`), and, with `BABOON_GATE_CALLS` set, it makes the same GL
+/// state calls, uniforms and draws in the same order (a count and hash per
+/// shot, under `glcalls/`). Blessing
+/// keeps every shot as a PNG, and every call log, beside the hashes; a shot
+/// that differs is saved under `changed/` to set against it.
 #[cfg(target_os = "macos")]
 #[test]
 fn gate_pixels() {
@@ -625,8 +628,9 @@ fn gate_pixels() {
         eprintln!("skipping: BABOON_GATE_DIR is not set");
         return;
     };
-    let (sim_dir, gl_dir, dir) = (dir.join("sim"), dir.join("gl"), dir.join("px"));
+    let (sim_dir, gl_dir, calls_dir, dir) = (dir.join("sim"), dir.join("gl"), dir.join("glcalls"), dir.join("px"));
     let bless = std::env::var_os("BABOON_GATE_BLESS").is_some();
+    let calls_gated = std::env::var_os("BABOON_GATE_CALLS").is_some();
     let mut failures = Vec::new();
     for (variable, game, objects) in PIXEL_SET {
         let Ok(root) = std::env::var(variable) else {
@@ -667,7 +671,13 @@ fn gate_pixels() {
         let mut snapshot = String::new();
         let mut simulations = String::new();
         let mut gl_states = String::new();
+        let mut calls = String::new();
         for (name, shown) in names.iter().zip(&images) {
+            let log = shown.gl_calls.join("\n");
+            let hash = log.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+            });
+            let _ = writeln!(calls, "{name} {} {hash:016x}", shown.gl_calls.len());
             for row in shown.simulation.lines() {
                 let _ = writeln!(simulations, "{name} {row}");
             }
@@ -690,6 +700,34 @@ fn gate_pixels() {
         failures.extend(simulated.err());
         let left = bless_or_compare(&gl_dir, &format!("{game:?}.txt"), &gl_states);
         failures.extend(left.err());
+        // G-calls, with `BABOON_GATE_CALLS` set: every GL state call, uniform
+        // and draw each shot made, in order. A shot that differs keeps its
+        // whole log under `changed/`, to set against the one blessing keeps
+        // beside the hashes. Opt-in: Halo 4's colour grading is cached by its
+        // image's address, so whether a shot re-uploads it (one
+        // `glBindTexture` of a 3D map) varies from run to run.
+        let save_log = |folder: &std::path::Path, name: &str, shown: &super::renderer::headless_shot::Shown| {
+            let path = folder.join(format!("{game:?}")).join(format!("{name}.log"));
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&path, shown.gl_calls.join("\n"));
+        };
+        if calls_gated {
+            if bless {
+                for (name, shown) in names.iter().zip(&images) {
+                    save_log(&calls_dir, name, shown);
+                }
+            }
+            if let Err(report) = bless_or_compare(&calls_dir, &format!("{game:?}.txt"), &calls) {
+                for (name, shown) in names.iter().zip(&images) {
+                    if report.contains(&format!("+ {name} ")) {
+                        save_log(&calls_dir.join("changed"), name, shown);
+                    }
+                }
+                failures.push(report);
+            }
+        }
         if let Err(report) = bless_or_compare(&dir, &format!("{game:?}.txt"), &snapshot) {
             for (name, shown) in names.iter().zip(&images) {
                 let pixels = &shown.pixels;
