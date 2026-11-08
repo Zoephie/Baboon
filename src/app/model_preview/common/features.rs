@@ -302,6 +302,7 @@ impl Feature for super::super::antennas::ce::CeAntenna {}
 impl Feature for super::super::ce::widgets::CeLightVolume {}
 
 impl Feature for super::super::ce::particles::CeEffectAt {
+    /// An event's effect runs only when played, and asks for frames then.
     fn moves(&self) -> bool {
         self.event.is_none()
     }
@@ -342,8 +343,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::app::model_preview::renderer::{h2_shader_inputs, object_moves};
-    use crate::app::model_preview::{ModelPreviewData, functions::FunctionInputs};
+    use crate::app::model_preview::renderer::h2_shader_inputs;
+    use crate::app::model_preview::ModelPreviewData;
 
     fn paths(group: &dyn Features) -> Vec<&'static str> {
         let mut found = Vec::new();
@@ -428,8 +429,7 @@ mod tests {
             let preview = &data.preview;
             assert_eq!(preview.any_feature(|list| !list.is_empty()), has_effects_as_it_was(preview), "{name}: has_effects");
             let alone = features_only(data);
-            let moves = object_moves(&alone, &FunctionInputs::default(), 0.0, None);
-            assert_eq!(preview.any_feature(|list| list.moves()), moves, "{name}: object_moves");
+            assert_eq!(preview.any_feature(|list| list.moves()), feature_moves_as_it_was(preview), "{name}: object_moves");
             for object in 0..=8 {
                 let today: BTreeSet<String> = h2_shader_inputs(&alone, object).into_iter().collect();
                 let mut listed = BTreeSet::new();
@@ -495,5 +495,37 @@ mod tests {
             && preview.h3.leaves.is_empty()
             && preview.cloth.is_empty()
             && preview.gen3.screen_effects.is_empty())
+    }
+
+    /// The feature part of `object_moves` as it was before the feature lists,
+    /// kept as the oracle the loop is checked against.
+    fn feature_moves_as_it_was(preview: &RenderModelPreview) -> bool {
+        preview.h2.flares.iter().any(|at| at.animates())
+            || preview.h2.point_lights.iter().any(|light| light.animates())
+            || preview.h2.gel_lights.iter().any(|light| light.animates())
+            || preview.h3.lights.iter().any(|light| light.animates())
+            || preview.reach.lights.iter().any(|light| light.animates())
+            || preview.reach.cheap_lights.iter().any(|light| light.animates())
+            || preview.h4.lights.iter().any(|light| light.animates())
+            || preview.h4.cheap_lights.iter().any(|light| light.animates())
+            || preview.h4.flares.iter().any(|at| at.animates())
+            || preview.gen3.flares.iter().any(|at| at.animates())
+            || preview.gen3.light_volumes.iter().any(|at| at.animates())
+            || !preview.h4.tracers.is_empty()
+            || !preview.particles.is_empty()
+            || !preview.gen3.cheap_emitters.is_empty()
+            || !preview.gen3.strips.is_empty()
+            || !preview.gen3.screen_effects.is_empty()
+            || !preview.cloth.is_empty()
+            || !preview.h2.liquids.is_empty()
+            || !preview.h2.contrails.is_empty()
+            // An event's effect runs only when played, and asks for frames then.
+            || preview.ce.effects.iter().any(|effect| effect.event.is_none())
+            || !preview.ce.contrails.is_empty()
+            || !preview.ce.lightning.is_empty()
+            || !preview.ce.glows.is_empty()
+            || !preview.ce.particle_systems.is_empty()
+            || !preview.ce.flags.is_empty()
+            || !preview.h3.leaves.is_empty()
     }
 }
