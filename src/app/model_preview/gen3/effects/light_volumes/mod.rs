@@ -21,7 +21,7 @@ use super::super::super::particles::inline_real;
 use super::super::shaders::{H3Blend, read_h3_definition};
 use crate::app::model_preview::common::image::H3Sampler;
 use super::super::effects::strips::EPSILON;
-use super::super::super::h4::particles::{f32_to_f16, pack_argb8};
+use super::super::super::h4::effects::particles::{f32_to_f16, pack_argb8};
 use super::super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::super::gen3::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
 use super::super::pipeline::EXPOSURE as H3_EXPOSURE;

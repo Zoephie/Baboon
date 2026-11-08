@@ -3,26 +3,22 @@
 //! are the renderer's.
 
 pub(in crate::app::model_preview) mod materials;
+pub(in crate::app::model_preview) mod effects;
 pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;
 pub(super) mod camo;
 pub(in crate::app::model_preview) mod composite;
-pub(in crate::app::model_preview) mod effect_gl;
 pub(super) mod flares;
 pub(in crate::app::model_preview) mod holograms;
 pub(super) mod lighting;
 pub(in crate::app::model_preview) mod light_pass;
 pub(super) mod lights;
-pub(in crate::app::model_preview) mod light_volume_pass;
-pub(in crate::app::model_preview) mod particle_pass;
-pub(super) mod particles;
 pub(in crate::app::model_preview) mod render;
 pub(super) mod shadow;
 pub(in crate::app::model_preview) mod shadow_pass;
 pub(super) mod shield;
 pub(in crate::app::model_preview) mod slot;
-pub(in crate::app::model_preview) mod tracer_pass;
 pub(super) mod tracers;
 
 /// What only a Halo 4 object brings to its preview: its lights and their

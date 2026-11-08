@@ -12,7 +12,7 @@ pub(in crate::app::model_preview) struct H4Slot {
     /// The trailing tracers between frames.
     pub(in crate::app::model_preview) trails: super::tracers::H4TracerField,
     /// The effects' programs, bitmaps and state buffer, of `effects_for`.
-    pub(in crate::app::model_preview) effects: super::effect_gl::H4EffectGl,
+    pub(in crate::app::model_preview) effects: super::effects::gl::H4EffectGl,
     effects_for: Option<u64>,
 }
 

@@ -6,10 +6,10 @@
 //! `docs/h4-preview-research/particles.md`.
 
 use eframe::glow::{self, HasContext};
-use super::super::particles::H4EmitterDraw;
-use super::super::gen3::shaders::{H3Pass, H3Value};
-use super::effect_gl::{H4EffectCx, H4EffectGl, material_functions};
-use super::particles::{H4ParticleRender, custom_vert_registers};
+use super::super::super::particles::H4EmitterDraw;
+use super::super::super::gen3::shaders::{H3Pass, H3Value};
+use super::super::effects::gl::{H4EffectCx, H4EffectGl, material_functions};
+use super::super::effects::particles::{H4ParticleRender, custom_vert_registers};
 use crate::core::hlsl::parse::Type;
 
 /// `effect_lightprobe_setup_lighting_constants` with the default probe
@@ -126,7 +126,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
                     _ => None,
                 };
                 match value {
-                    Some(value) => super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value),
+                    Some(value) => super::super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value),
                     None => {
                         state.set_shared_uniform(gl, frame, material, &functions, name, ty, size);
                     }

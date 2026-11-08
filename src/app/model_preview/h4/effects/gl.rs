@@ -8,12 +8,12 @@
 use eframe::glow::{self, HasContext};
 use std::collections::HashMap;
 
-use super::super::gen3::shaders::{H3Pass, H3Value, H3Values};
-use super::super::h4::materials::H4EffectMaterial;
-use super::super::gl::buffer::slice_bytes;
-use super::super::*;
-use super::super::gl::program::Linked;
-use super::super::common::image::H2Image;
+use super::super::super::gen3::shaders::{H3Pass, H3Value, H3Values};
+use super::super::super::h4::materials::H4EffectMaterial;
+use super::super::super::gl::buffer::slice_bytes;
+use super::super::super::*;
+use super::super::super::gl::program::Linked;
+use super::super::super::common::image::H2Image;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
 
@@ -61,7 +61,7 @@ impl H4EffectGl {
             return known.as_ref().map(|linked| linked.program);
         }
         let stages = [(glow::VERTEX_SHADER, pass.vertex.as_str()), (glow::FRAGMENT_SHADER, pass.pixel.as_str())];
-        let linked = unsafe { super::super::gl::link::link(gl, &stages, &[]) }
+        let linked = unsafe { super::super::super::gl::link::link(gl, &stages, &[]) }
             .map_err(|error| eprintln!("h4 effect program: {error}"))
             .ok();
         self.programs.insert(key, linked.map(Linked::new));
@@ -255,7 +255,7 @@ impl H4EffectGl {
         let pass = &*material.pass;
         unsafe {
             let location = self.location(gl, pass, name);
-            if let Some(matrix) = super::super::gen3::pipeline::h4_matrix(frame, name) {
+            if let Some(matrix) = super::super::super::gen3::pipeline::h4_matrix(frame, name) {
                 match matrix.len() {
                     9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
                     _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),
@@ -270,7 +270,7 @@ impl H4EffectGl {
                 (ty, &value),
                 (Type::Vector(Scalar::Uint, _), H3Value::Floats(_))
             ) {
-                super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value);
+                super::super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value);
             }
             true
         }
@@ -293,7 +293,7 @@ pub(in crate::app::model_preview) fn material_functions(
     material: &H4EffectMaterial,
     object: u8,
 ) -> H3Values {
-    let drawn = super::materials::submit::DrawnObject {
+    let drawn = super::super::materials::submit::DrawnObject {
         values: frame.function_values_of_object(object),
         time: frame.time,
         owner: object,
@@ -305,7 +305,7 @@ pub(in crate::app::model_preview) fn material_functions(
     ];
     material
         .submit
-        .draw_values(super::materials::submit::H4Draw::Lit, &drawn, identity)
+        .draw_values(super::super::materials::submit::H4Draw::Lit, &drawn, identity)
 }
 
 /// What every effect's constant `name` is, before the material's own.
@@ -330,22 +330,22 @@ fn shared_value(
         "s_atmosphere_fog_enable" | "s_atmosphere_fog_light_enable" => Some(H3Value::Integer(0)),
         name if name.starts_with("s_atmosphere_constant_") => floats([0.0; 4]),
         "vs_material_blend_constant" => floats(blend_constant(mode)),
-        "vs_bungie_exposure" => super::lighting::h4_frame_value("ps_view_exposure"),
+        "vs_bungie_exposure" => super::super::lighting::h4_frame_value("ps_view_exposure"),
         "vs_bungie_additive_scale_and_exposure" => {
-            super::lighting::h4_frame_value("ps_view_self_illum_exposure")
+            super::super::lighting::h4_frame_value("ps_view_self_illum_exposure")
         }
         "vs_alpha_blend_mode" | "ps_alpha_blend_mode" => floats([f32::from(mode), 0.0, 0.0, 0.0]),
         "ps_tiling_vpos_offset" => floats([0.0; 4]),
         // `ComputeDepthFade(fragpos · z)`: whole pixels.
         "psDepthConstants" => floats([0.0, 0.0, 1.0, 0.0]),
-        super::shield::DEPTH_DECODE => floats([
+        super::super::shield::DEPTH_DECODE => floats([
             camera.depth_scale * camera.depth_map[0],
             camera.depth_map[1],
             camera.perspective,
             eye,
         ]),
-        super::shield::WORLD_SCALE => floats([camera.scale; 4]),
-        other => super::super::gen3::pipeline::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
+        super::super::shield::WORLD_SCALE => floats([camera.scale; 4]),
+        other => super::super::super::gen3::pipeline::frame_value(frame, gen3::shaders::H3Dialect::Halo4, other, size, 0.0)
             .or_else(|| functions.get(other).cloned())
             .or_else(|| material.values.get(other).cloned()),
     }

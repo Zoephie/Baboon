@@ -143,7 +143,7 @@ pub(crate) struct H3ParticleLook {
     pub(in crate::app::model_preview) palette: H3ParticleProperty,
     pub(crate) shader: Arc<H3SpriteShader>,
     /// Halo 4's: drawn through its material from packed state, not as quads.
-    pub(crate) h4: Option<Arc<super::super::h4::particles::H4ParticleRender>>,
+    pub(crate) h4: Option<Arc<super::super::h4::effects::particles::H4ParticleRender>>,
     /// Halo 3's colours are light, and Halo 2's are what shows.
     pub(in crate::app::model_preview) exposed: bool,
     /// Reach's and Halo 4's own game time, lighting, exposure and shapes:
@@ -295,7 +295,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<H3ParticleLook
                 }
                 None => None,
             };
-            Some(Arc::new(super::super::h4::particles::read_h4_particle_render(reader, root, strip.as_ref()).ok()?))
+            Some(Arc::new(super::super::h4::effects::particles::read_h4_particle_render(reader, root, strip.as_ref()).ok()?))
         }
         false => None,
     };

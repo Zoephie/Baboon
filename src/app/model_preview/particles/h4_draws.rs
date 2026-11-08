@@ -61,7 +61,7 @@ impl H3ParticleSystem {
         time: f32,
         draws: &mut Vec<H4EmitterDraw>,
     ) {
-        use super::super::h4::particles::{H4ParticleState, pack_particle_state};
+        use super::super::h4::effects::particles::{H4ParticleState, pack_particle_state};
         let system = self;
         let look = &*system.look;
         for (emitter, running) in system.emitters.iter().zip(running) {

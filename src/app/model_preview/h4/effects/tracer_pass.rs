@@ -6,9 +6,9 @@
 //! `docs/h4-preview-research/tracers.md` §4.
 
 use eframe::glow::{self, HasContext};
-use super::effect_gl::{H4EffectCx, material_functions};
-use super::tracers::H4TracerDraw;
-use super::super::h4::materials::H4EffectMaterial;
+use super::super::effects::gl::{H4EffectCx, material_functions};
+use super::super::tracers::H4TracerDraw;
+use super::super::super::h4::materials::H4EffectMaterial;
 use crate::core::hlsl::parse::Type;
 
 /// `k_maxRowsPerInstance`.

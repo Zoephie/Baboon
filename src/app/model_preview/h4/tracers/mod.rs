@@ -22,7 +22,7 @@ use super::super::effects::{
     read_part_placement,
 };
 use super::super::particles::{read_ends, slerped};
-use super::particles::{pack_argb8, pack_half2, pack_ushort2n};
+use super::effects::particles::{pack_argb8, pack_half2, pack_ushort2n};
 use super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::*;
 use crate::app::model_preview::common::math::length;

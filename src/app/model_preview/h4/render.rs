@@ -4,7 +4,7 @@
 use eframe::glow::{self, HasContext};
 
 use super::super::common::slots::GameSlots;
-use super::effect_gl::H4EffectCx;
+use super::effects::gl::H4EffectCx;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::gen3::effects::screen::H3ScreenSettings;
@@ -211,7 +211,7 @@ impl Gen3Game for H4Game {
                         let material = &at.definition.material;
                         let effects = &mut h4.effects;
                         let mut fx = H4EffectCx { gl, state: effects, frame, depth, size, placeholder, object: at.object };
-                        super::tracer_pass::draw_h4_tracer(&mut fx, material, &draw);
+                        super::effects::tracer_pass::draw_h4_tracer(&mut fx, material, &draw);
                         Some(true)
                     } else {
                         Some(false)
@@ -229,7 +229,7 @@ impl Gen3Game for H4Game {
                         Some(draw) => {
                             let effects = &mut h4.effects;
                             let mut fx = H4EffectCx { gl, state: effects, frame, depth, size, placeholder, object: at.object };
-                            super::light_volume_pass::draw_h4_light_volume(&mut fx, material, &draw);
+                            super::effects::light_volume_pass::draw_h4_light_volume(&mut fx, material, &draw);
                             Some(true)
                         }
                         None => Some(false),
@@ -248,7 +248,7 @@ impl Gen3Game for H4Game {
                     } else {
                         let effects = &mut h4.effects;
                         let mut fx = H4EffectCx { gl, state: effects, frame, depth, size, placeholder, object: system.object };
-                        super::particle_pass::draw_h4_particles(&mut fx, render, &draws);
+                        super::effects::particle_pass::draw_h4_particles(&mut fx, render, &draws);
                         Some(true)
                     }
                 }

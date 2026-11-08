@@ -6,9 +6,9 @@
 use crate::app::model_preview::load::TagReader;
 use blam_tags::TagStruct;
 
-use super::super::common::fields::elements;
-use super::super::common::named_function::tag_function_at;
-use super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
+use super::super::super::common::fields::elements;
+use super::super::super::common::named_function::tag_function_at;
+use super::super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
 
 /// `alpha_blend_mode_enum` values the draw tells apart.
 const BLEND_OPAQUE: u8 = 0;
