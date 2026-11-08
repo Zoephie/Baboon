@@ -58,3 +58,52 @@ pub(in crate::app::model_preview) fn merge_preview_append(dst: &mut RenderModelP
         }
     }
 }
+
+/// Add `other` to `preview`, moved onto `parent` and owned by object `owner`.
+pub(in crate::app::model_preview) fn merge_attached(
+    preview: &mut RenderModelPreview,
+    mut other: RenderModelPreview,
+    parent: MarkerFrame,
+    child: MarkerFrame,
+    owner: u8,
+    name: &str,
+) {
+    let Some(vertex_base) = VertexBase::of(preview.vertices.len(), other.vertices.len(), Overflow::RefusesAppend) else {
+        return;
+    };
+    let index_base = preview.indices.len() as u32;
+    let material_base = preview.materials.len() as u16;
+    let bound = [f32::from(parent.node), 0.0, 0.0, 0.0];
+    for vertex in &mut other.vertices {
+        vertex.position = attach_point(&parent, &child, vertex.position);
+        vertex.normal = attach_vector(&parent, &child, vertex.normal);
+        vertex.tangent = attach_vector(&parent, &child, vertex.tangent);
+        vertex.binormal = attach_vector(&parent, &child, vertex.binormal);
+        vertex.node_indices = bound;
+        vertex.node_weights = [1.0, 0.0, 0.0, 0.0];
+        for axis in 0..3 {
+            preview.bounds_min[axis] = preview.bounds_min[axis].min(vertex.position[axis]);
+            preview.bounds_max[axis] = preview.bounds_max[axis].max(vertex.position[axis]);
+        }
+    }
+    preview.vertices.append(&mut other.vertices);
+    preview.indices.extend(other.indices.iter().map(|&index| vertex_base.offset(index)));
+    for material in &mut other.materials {
+        material.object = owner;
+    }
+    preview.materials.append(&mut other.materials);
+    let label = |region: &str| format!("{name}: {region}");
+    let node = usize::try_from(parent.node).unwrap_or(0);
+    for mut batch in other.batches {
+        batch.index_start += index_base;
+        batch.material_index += material_base;
+        batch.region_name = label(&batch.region_name);
+        // Moved and bound as its vertices are.
+        batch.sort_position = batch.sort_position.map(|(point, _)| (attach_point(&parent, &child, point), node));
+        preview.batches.push(batch);
+    }
+    for mut region in other.regions {
+        region.name = label(&region.name);
+        preview.regions.push(region);
+    }
+}

@@ -42,3 +42,73 @@ pub(in crate::app::model_preview) fn bsp_display_name(reference: &str) -> String
         .unwrap_or(reference)
         .to_owned()
 }
+
+/// A structure BSP previews its own geometry, layered into `render` /
+/// `collision` / `portals` / `weather` regions so each is a toggle.
+pub(super) fn load_structure_bsp(model_tag: &TagFile, entry: &TagEntry) -> Result<ModelPreviewData, String> {
+    let preview = build_sbsp_preview(model_tag, false)?;
+    Ok(model_preview_data(
+        entry.key.clone(),
+        entry.display_path.clone(),
+        preview,
+        Vec::new(),
+    ))
+}
+
+/// A scenario previews a composite of the structure BSPs the user has
+/// checked — each selected BSP loads render-only and lands as one region,
+/// so the region list doubles as the per-BSP toggle. Nothing loads until
+/// something is checked: a campaign scenario's full BSP set is far too
+/// much to parse unasked.
+pub(super) fn load_scenario(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    reader: Option<&TagReader>,
+    settings: &PreviewLoadSettings,
+) -> Result<ModelPreviewData, String> {
+    let bsps = scenario_bsp_paths(model_tag);
+    if bsps.is_empty() {
+        return Err("This scenario lists no structure BSPs.".to_owned());
+    }
+    let mut preview = RenderModelPreview::default();
+    let mut notes = Vec::new();
+    if !settings.scenario_selection.is_empty() {
+        let Some(reader) = reader else {
+            return Err("Scenario preview requires a loaded source.".to_owned());
+        };
+        preview.bounds_min = [f32::INFINITY; 3];
+        preview.bounds_max = [f32::NEG_INFINITY; 3];
+        for &index in &settings.scenario_selection {
+            let Some(Some(reference)) = bsps.get(index) else {
+                continue;
+            };
+            // One BSP that will not read leaves the rest showing.
+            let read = || {
+                let tag = reader.load(reference, "scenario_structure_bsp", b"sbsp")
+                    .map_err(|error| format!("Could not load {reference}: {error}"))?;
+                build_sbsp_preview(&tag, true).map_err(|error| format!("{reference}: {error}"))
+            };
+            match feature(&mut notes, reference, || Some(read())) {
+                Some(Ok(mut bsp_preview)) => {
+                    rebrand_preview_region(&mut bsp_preview, &bsp_display_name(reference));
+                    merge_preview_append(&mut preview, &bsp_preview);
+                }
+                Some(Err(error)) => notes.push(error),
+                None => {}
+            }
+        }
+        if !preview.bounds_min.iter().all(|bound| bound.is_finite()) {
+            preview.bounds_min = [0.0; 3];
+            preview.bounds_max = [0.0; 3];
+        }
+    }
+    let mut data = model_preview_data(
+        entry.key.clone(),
+        entry.display_path.clone(),
+        preview,
+        Vec::new(),
+    );
+    data.scenario_bsps = bsps;
+    data.notes = notes;
+    Ok(data)
+}

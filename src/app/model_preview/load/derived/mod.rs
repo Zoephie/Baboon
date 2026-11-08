@@ -203,5 +203,30 @@ fn append_jms_triangles(
     push_derived_batch(preview, region_name, color, &triples);
 }
 
+/// Collision and physics tags carry no render geometry of their own —
+/// their preview is derived: collision BSPs walked into triangles, physics
+/// primitives tessellated. Posed on the owning `.model`'s skeleton when
+/// one is beside them, unposed otherwise.
+pub(super) fn load_collision_or_physics(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    reader: Option<&TagReader>,
+) -> Result<ModelPreviewData, String> {
+    let group = model_tag.header.group_tag.to_be_bytes();
+    let skeleton = reader.and_then(|reader| owning_model_skeleton(&reader.source, entry));
+    let nodes = skeleton.as_ref().map(|skeleton| skeleton.nodes());
+    let preview = if &group == b"coll" {
+        build_collision_preview(model_tag, nodes)?
+    } else {
+        build_physics_preview(model_tag, nodes)?
+    };
+    Ok(model_preview_data(
+        entry.key.clone(),
+        entry.display_path.clone(),
+        preview,
+        Vec::new(),
+    ))
+}
+
 #[cfg(test)]
 mod tests;
