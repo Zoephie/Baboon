@@ -1467,6 +1467,36 @@ mod tests {
         assert!(!armor("minor_scl"));
         assert!(!armor("minor_dog"));
     }
+
+    /// The depth window must cover an animation's travel: the reach bound is
+    /// at least the largest per-frame chain length, and an empty pose adds
+    /// nothing.
+    #[test]
+    fn pose_reach_covers_the_travelling_frame() {
+        let frame = |x: f32| {
+            vec![
+                PreviewNodeTransform {
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    translation: [x, 0.0, 0.9],
+                    scale: 1.0,
+                },
+                PreviewNodeTransform {
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    translation: [0.0, 0.0, 0.25],
+                    scale: 1.0,
+                },
+            ]
+        };
+        let pose = PreviewAnimationPose::new(0, vec![frame(0.0), frame(3.0)]);
+        let reach = pose.reach;
+        let travelled = (3.0f32 * 3.0 + 0.9 * 0.9).sqrt() + 0.25;
+        assert!(
+            reach >= travelled - 1e-4,
+            "reach {reach} misses the travelled frame {travelled}"
+        );
+        let empty = PreviewAnimationPose::new(0, Vec::new());
+        assert_eq!(empty.reach, 0.0);
+    }
 }
 
 /// Whether the preview loaded now is the geometry `geometry_id`.

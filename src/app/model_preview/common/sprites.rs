@@ -335,3 +335,27 @@ mod layer_tests {
         assert!(h3_layered_distance(2, 5.0) > h3_layered_distance(2, 1.0));
     }
 }
+
+/// Halo 2's, 3's and Reach's antennas, whose maps follow Halo CE's in the
+/// slot's, each with whether it is Reach's; Reach's far ends are at `tips`.
+/// Those on a permutation not shown are left out.
+pub(in crate::app::model_preview) fn h2_antennas(
+    frame: &ModelGpuFrame,
+    textures: &[Option<glow::NativeTexture>],
+    bones: Option<&[[f32; 4]]>,
+    view: &common::view::ViewFrame,
+    tips: &[Option<[f32; 3]>],
+) -> Vec<(Vec<crate::app::model_preview::common::sprites::AntennaQuad>, glow::NativeTexture, bool)> {
+    let preview = &frame.preview;
+    preview
+        .antennas
+        .iter()
+        .zip(textures)
+        .enumerate()
+        .filter(|(index, _)| frame.shown.is(common::features::paths::ANTENNAS, *index))
+        .filter_map(|(index, (antenna, texture))| {
+            let tip = tips.get(index).copied().flatten();
+            Some((antenna.quads(bones, view, tip), (*texture)?, antenna.is_reach()))
+        })
+        .collect()
+}

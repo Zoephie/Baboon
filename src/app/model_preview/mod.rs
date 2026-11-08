@@ -67,7 +67,7 @@ pub(in crate::app) use materials::*;
 pub(in crate::app) use load::build_render_preview;
 // Started by the source loader when a Campaign Evolved install mounts.
 pub(in crate::app) use campaign_evolved::prewarm_ce_mesh_sync_index;
-pub(in crate::app) use renderer::material_color;
+pub(in crate::app) use common::palette::material_color;
 use renderer::*;
 use viewport::*;
 use frame::*;

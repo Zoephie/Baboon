@@ -13,6 +13,7 @@ pub(in crate::app::model_preview) mod flares;
 pub(in crate::app::model_preview) mod geometry;
 pub(in crate::app::model_preview) mod image;
 pub(in crate::app::model_preview) mod marker;
+pub(in crate::app::model_preview) mod palette;
 pub(in crate::app::model_preview) mod math;
 pub(in crate::app::model_preview) mod named_function;
 pub(in crate::app::model_preview) mod plain;

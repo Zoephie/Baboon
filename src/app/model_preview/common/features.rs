@@ -646,5 +646,30 @@ mod tests {
         }
     }
 
-
+    /// With `BLAM_TEST_HREK`: the marine's radio antenna is drawn only while
+    /// its `trooper_radio` backpack is.
+    #[test]
+    fn kit_reach_antenna_shows_only_with_its_permutation() {
+        use crate::app::model_preview::harness::kit::kit_root;
+        use crate::app::model_preview::{ModelPreviewState, ModelRegionSelection};
+        use crate::core::game::GameId;
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
+        let path = "objects\\characters\\marine\\marine";
+        let data = crate::app::model_preview::harness::kit::kit_preview(
+            &root,
+            crate::core::game::GameId::HaloReach,
+            path,
+            "biped",
+            b"bipd",
+        );
+        let shown = |permutation: &str| {
+            let mut state = ModelPreviewState::default();
+            let selection = ModelRegionSelection { enabled: true, permutation: permutation.to_owned() };
+            state.region_selections.insert("flair_backpack".to_owned(), selection);
+            let shown = super::FeatureShown::of(&data.preview, &state.region_selections);
+            shown.list(super::paths::ANTENNAS).to_vec()
+        };
+        assert_eq!(shown("trooper_radio"), [true]);
+        assert_eq!(shown("trooper"), [false]);
+    }
 }

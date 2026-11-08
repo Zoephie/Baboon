@@ -299,3 +299,191 @@ pub(in crate::app::model_preview) fn ce_flare_pixels(camera: &ModelGpuCamera, vi
     let down = half[1] * camera.scale * camera.clip_scale[1] / w * viewport[1] as f32;
     across + down
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_camera_light_keeps_its_place_as_the_view_orbits() {
+        let toward_eye = |yaw, pitch| unrotate_view_vector(yaw, pitch, [0.0, -1.0, 0.0]);
+        let share = |yaw, pitch| {
+            let (light, eye): ([f32; 3], [f32; 3]) = (h2_camera_light(yaw, pitch), toward_eye(yaw, pitch));
+            (0..3).map(|axis| light[axis] * eye[axis]).sum::<f32>()
+        };
+        for (yaw, pitch) in [(0.0, 0.0), (1.5, 0.4), (3.1, -0.6), (-2.0, 1.0)] {
+            assert!((share(yaw, pitch) - share(0.0, 0.0)).abs() < 1e-5);
+        }
+        assert!(share(0.0, 0.0) > 0.5);
+    }
+
+    /// The extended render distance must clip exactly at its declared bounds
+    /// in both projections, wherever the dolly has put the eye: near plane
+    /// just in front of the eye, far plane at t = K, and post-divide depth
+    /// monotone between them so the depth test orders correctly.
+    #[test]
+    fn depth_remap_clips_at_the_near_and_far_planes_for_any_eye() {
+        let k = PREVIEW_RENDER_DISTANCE;
+
+        // Orthographic: w = 1, so z = t·x + y must span NDC over t ∈ [-K, K].
+        let [x, y] = depth_map_coefficients(None);
+        assert!(((-k) * x + y - -1.0).abs() < 1e-5);
+        assert!((k * x + y - 1.0).abs() < 1e-5);
+
+        // Perspective, from the default framing's eye down to a dolly deep
+        // inside a level.
+        for eye in [1.9, 0.5, 0.02, 0.0005] {
+            let [x, y] = depth_map_coefficients(Some(eye));
+            let z = |t: f32| t * x + y;
+            let w = |t: f32| 1.0 + t / eye;
+            let near = -eye * (1.0 - PERSPECTIVE_NEAR_FRACTION);
+            let tolerance = 1e-4 * w(k);
+            assert!(
+                (z(near) + w(near)).abs() < tolerance,
+                "eye {eye}: near plane moved"
+            );
+            assert!(
+                (z(k) - w(k)).abs() < tolerance,
+                "eye {eye}: far plane short of K"
+            );
+            let samples = (0..=64)
+                .map(|step| near + (k - near) * step as f32 / 64.0)
+                .map(|t| z(t) / w(t))
+                .collect::<Vec<_>>();
+            // Strictly increasing wherever f32 can tell the samples apart;
+            // at the deepest dolly the far samples round together, so ties
+            // are allowed there but never a reversal.
+            assert!(
+                samples.windows(2).all(|pair| if eye >= 0.02 {
+                    pair[1] > pair[0]
+                } else {
+                    pair[1] >= pair[0]
+                }),
+                "eye {eye}: post-divide depth not monotone"
+            );
+        }
+    }
+
+    #[test]
+    fn a_models_size_does_not_change_how_far_the_view_pulls_back() {
+        let widest = |half: f32| {
+            let preview = RenderModelPreview {
+                bounds_min: [-half; 3],
+                bounds_max: [half; 3],
+                ..Default::default()
+            };
+            let (_, radius) = preview_center_radius(&preview);
+            (radius * 1.1 / min_preview_scale(&preview), radius * 1.1 / 0.02)
+        };
+        let (tiny, tiny_at_a_fixed_scale) = widest(0.01);
+        let (level, level_at_a_fixed_scale) = widest(500.0);
+        assert!((tiny - level).abs() < 1.0, "{tiny} {level}");
+        assert!(tiny_at_a_fixed_scale * 1000.0 < level_at_a_fixed_scale);
+    }
+
+    fn camera(scale: f32, perspective: bool) -> PreviewCamera {
+        PreviewCamera {
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0)),
+            center: [0.0; 3],
+            radius: 1.0,
+            depth_radius: 1.0,
+            // Unrotated: view space is world space, the eye looks along +Y.
+            yaw: 0.0,
+            pitch: 0.0,
+            scale,
+            perspective,
+        }
+    }
+
+    /// How far from the viewport center a point lands, in pixels.
+    fn screen_offset(camera: &PreviewCamera, point: [f32; 3]) -> f32 {
+        (camera.project(point).pos - camera.rect.center()).length()
+    }
+
+    /// On the orbit point's plane, perspective frames exactly like the
+    /// orthographic view at every zoom, so toggling never jumps and the
+    /// pan / zoom-to-cursor math holds in both.
+    #[test]
+    fn perspective_matches_orthographic_at_the_focus_plane() {
+        for scale in [0.05, 1.0, 20.0, 400.0] {
+            let point = [0.3 / scale, 0.0, 0.2 / scale];
+            let flat = camera(scale, false).project(point).pos;
+            let deep = camera(scale, true).project(point).pos;
+            assert!(
+                (flat - deep).length() < 1e-3,
+                "scale {scale}: {flat:?} vs {deep:?}"
+            );
+        }
+    }
+
+    /// The reported defect: zooming in only magnified the picture, so the
+    /// perspective stayed the same strength and up close looked flat. With
+    /// the eye dollying in, a point the same world distance nearer the
+    /// camera than the orbit point grows ever larger relative to one on the
+    /// focus plane.
+    #[test]
+    fn zooming_in_dollies_the_eye_and_deepens_the_perspective() {
+        let convergence = |scale: f32| {
+            let camera = camera(scale, true);
+            let offset = 0.1 / scale;
+            let nearer = screen_offset(&camera, [offset, -0.2, 0.0]);
+            let on_plane = screen_offset(&camera, [offset, 0.0, 0.0]);
+            nearer / on_plane
+        };
+        let (wide, close) = (convergence(1.0), convergence(8.0));
+        assert!(wide > 1.05, "no perspective at the default zoom: {wide}");
+        assert!(
+            close > wide * 1.5,
+            "zoom did not deepen the perspective: {wide} → {close}"
+        );
+
+        // The lens itself does not change: at every zoom the eye sits where
+        // a 60° field of view frames the focus plane, `1.1 · radius /
+        // tan(30°)` out in scaled units — `1 / scale` of that in world units.
+        for scale in [1.0, 8.0, 100.0] {
+            let eye_world = camera(scale, true).eye_distance() / scale;
+            let expected = 1.1 / (30.0f32.to_radians().tan() * scale);
+            assert!((eye_world - expected).abs() < 1e-5 * expected.max(1.0));
+        }
+    }
+
+    /// Overlays behind the eye are dropped rather than drawn stretched across
+    /// the viewport; the orthographic view has no eye and keeps everything.
+    #[test]
+    fn overlay_points_behind_the_eye_are_not_drawn() {
+        let scale = 10.0;
+        let perspective = camera(scale, true);
+        let eye_world = perspective.eye_distance() / scale;
+        let in_front = [0.0, -eye_world * 0.5, 0.0];
+        let behind = [0.0, -eye_world * 1.5, 0.0];
+        assert!(perspective.project(in_front).in_front);
+        assert!(!perspective.project(behind).in_front);
+        assert!(camera(scale, false).project(behind).in_front);
+    }
+
+    /// The attribute offsets in `RenderCore::new` are hand-written against
+    /// this layout, and nothing else checks them — a reordered or resized field
+    /// would silently feed the shader the wrong bytes and show as a model that
+    /// renders but looks wrong.
+    /// A malformed shader disables the whole preview and reports it only on
+    /// stderr, so these check the structure no GPU is here to check.
+    /// The pan and zoom-to-cursor math turns screen deltas back into world
+    /// moves through `unrotate_view_vector`; if it drifts from the forward
+    /// rotation, panning smears diagonally and zoom-to-cursor orbits away
+    /// from the pointer instead of onto it.
+    #[test]
+    fn unrotate_inverts_rotate_for_any_view_angles() {
+        for (yaw, pitch) in [(0.0, 0.0), (-0.45, 0.25), (1.2, -1.4), (3.0, 0.9)] {
+            for vector in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.3, -2.0, 5.0]] {
+                let there = rotate_view_vector(yaw, pitch, vector);
+                let back = unrotate_view_vector(yaw, pitch, there);
+                for axis in 0..3 {
+                    assert!(
+                        (back[axis] - vector[axis]).abs() < 1e-5,
+                        "round trip failed at yaw {yaw} pitch {pitch}: {vector:?} -> {back:?}"
+                    );
+                }
+            }
+        }
+    }
+}
