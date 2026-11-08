@@ -606,7 +606,7 @@ mod tests {
     fn halo_4_pelican_variant_reads_its_muted_nodes() {
         let Some(root) = kit_root(GameId::Halo4) else { return };
         let path = std::path::Path::new(&root).join("objects/vehicles/human/storm_pelican/storm_pelican.model");
-        let variants = super::super::variants::read_model_variants(&blam_tags::TagFile::read(path).unwrap());
+        let variants = super::super::load::read_model_variants(&blam_tags::TagFile::read(path).unwrap());
         let cockpit = variants.iter().find(|variant| variant.name == "m70_gunship_opaque_cockpit").unwrap();
         assert_eq!(cockpit.muted_nodes.len(), 10);
         assert!(cockpit.muted_nodes.iter().any(|name| name == "b_bay_door"));

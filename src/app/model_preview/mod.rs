@@ -45,7 +45,8 @@ mod renderer;
 mod gates;
 #[cfg(test)]
 mod harness;
-mod variants;
+mod selection;
+mod panel;
 pub(in crate::app) mod effects;
 pub(in crate::app) mod weapons;
 
@@ -73,7 +74,8 @@ use renderer::*;
 use common::camera::*;
 use common::clock::*;
 use dx9::passes::{H2ChangeColors, read_h2_change_colors};
-use variants::*;
+use selection::*;
+use panel::*;
 
 // The material resolver understands the render-method shaders validated for
 // H3EK, H3ODSTEK and HREK, Halo 2's template-and-parameters `shader`, and Halo CE's

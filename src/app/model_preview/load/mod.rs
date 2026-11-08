@@ -10,6 +10,8 @@ use super::common::marker::{MarkerFrame, attach_point, attach_vector, own_marker
 
 pub(in crate::app::model_preview) mod reader;
 pub(in crate::app) use reader::TagReader;
+mod variants;
+pub(in crate::app::model_preview) use variants::*;
 
 
 /// The load-affecting slice of [`ModelPreviewState`], snapshotted before the
@@ -1035,24 +1037,6 @@ pub(super) fn expand_preview_bounds_local(min: &mut [f32; 3], max: &mut [f32; 3]
     }
 }
 
-/// One permutation a variant's region may take. `None` names nothing, which
-/// leaves the region undrawn.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct RawVariantEntry {
-    pub(super) permutation: Option<String>,
-    pub(super) probability: f32,
-}
-
-pub(super) struct RawVariantRegion {
-    pub(super) entries: Vec<RawVariantEntry>,
-    pub(super) parent: i128,
-}
-pub(super) struct RawVariant {
-    pub(super) name: String,
-    pub(super) regions: Vec<(String, RawVariantRegion)>,
-    pub(super) muted_nodes: Vec<String>,
-}
-
 /// `.weapon` tags of a loose folder, by path without the extension.
 pub(in crate::app::model_preview) fn loose_weapon_paths(root: &std::path::Path) -> Vec<String> {
     let mut found = Vec::new();
@@ -1849,7 +1833,7 @@ mod tests {
         fixture.state_mut().selected_variant = chosen;
         let state = fixture.state_mut();
         if let Some(Ok(data)) = &state.data {
-            state.region_selections = super::super::variants::compute_variant_selection(data, chosen);
+            state.region_selections = super::super::selection::compute_variant_selection(data, chosen);
         }
         // Its first permutation is not the one a variant gives it.
         let collision = RenderModelPreview {
@@ -1863,7 +1847,7 @@ mod tests {
         fixture.app.handle_model_overlays_built(stamp, key, geometry_id, Some(collision), None, Vec::new());
         let state = fixture.state();
         let Some(Ok(data)) = &state.data else { panic!("still loaded") };
-        assert_eq!(super::super::variants::detect_active_variant(data, state), Some(chosen));
+        assert_eq!(super::super::selection::detect_active_variant(data, state), Some(chosen));
     }
 
     /// A reader that panics costs its feature, with a note, and the preview it

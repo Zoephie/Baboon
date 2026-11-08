@@ -56,7 +56,7 @@ fn child_model(reader: &TagReader, entry: &VariantObject) -> Option<(Arc<TagFile
 /// The variant of `model` an object is made as: `wanted`, or with none the
 /// object's default, falling back to `default` and then the first.
 pub(in crate::app::model_preview) fn object_variant(object: &TagFile, model: &TagFile, wanted: &str) -> Option<ModelVariantPreview> {
-    let variants = super::super::variants::read_model_variants(model);
+    let variants = super::super::load::read_model_variants(model);
     let wanted = match wanted {
         "" => object_default_variant(object).unwrap_or_default(),
         name => name.to_owned(),
