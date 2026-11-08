@@ -84,6 +84,7 @@ use export::ExportFeature;
 pub(in crate::app) mod model_preview;
 use model_preview::*;
 mod editor;
+use editor::bitmap_state::*;
 use editor::EditorFeature;
 mod audio;
 use audio::AudioCommand;
