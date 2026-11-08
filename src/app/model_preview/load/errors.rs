@@ -1,14 +1,14 @@
 //! Import-tool error report extraction for model preview overlays.
 
 use super::*;
-use super::common::fields::field_name_matches;
+use super::super::common::fields::field_name_matches;
 
 /// Attach every drawable error-report primitive in `tag` to `preview`.
 ///
 /// The three model tag families share this schema (with small naming/version
 /// differences). Missing blocks and fields are intentionally tolerated: older
 /// tags and stripped shipping tags commonly retain the schema but no reports.
-pub(super) fn append_model_errors(
+pub(in crate::app::model_preview) fn append_model_errors(
     tag: &TagFile,
     preview: &mut RenderModelPreview,
     layer: ModelPreviewLayer,

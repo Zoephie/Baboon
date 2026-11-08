@@ -23,7 +23,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 mod data;
 pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
-mod errors;
 mod ce;
 pub(in crate::app) mod dx9;
 pub(in crate::app) mod h2;
@@ -53,7 +52,6 @@ pub(in crate::app) mod weapons;
 pub(in crate::app) use data::*;
 use animation::*;
 use derived::*;
-use errors::*;
 use load::*;
 use campaign_evolved::*;
 // Re-exported up to `crate::app` for the worker messages and the playback

@@ -12,6 +12,8 @@ pub(in crate::app::model_preview) mod reader;
 pub(in crate::app) use reader::TagReader;
 mod variants;
 pub(in crate::app::model_preview) use variants::*;
+mod errors;
+pub(in crate::app::model_preview) use errors::*;
 
 
 /// The load-affecting slice of [`ModelPreviewState`], snapshotted before the
