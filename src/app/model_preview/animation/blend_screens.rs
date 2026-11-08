@@ -8,6 +8,7 @@ use blam_tags::math::{RealPoint3d, RealQuaternion};
 use blam_tags::{NodeTransform, OverlayDelta, Pose, Skeleton, TagFile, TagStruct};
 
 use super::super::common::fields::elements;
+use super::super::common::math::{cross, dot, minus};
 use super::super::common::named_function::tag_function_at;
 
 /// The weights' `EPS`.
@@ -186,13 +187,13 @@ impl BlendScreenData {
                 direction(y, p)
             };
             let q = corners.map(on_sphere);
-            let normal = cross3(sub3(q[1], q[0]), sub3(q[2], q[0]));
-            let length = dot3(normal, normal).sqrt();
+            let normal = cross(minus(q[1], q[0]), minus(q[2], q[0]));
+            let length = dot(normal, normal).sqrt();
             let (normal, distance) = if length < EPS { ([0.0; 3], 0.0) } else {
                 let normal = normal.map(|value| value / length);
-                (normal, dot3(normal, q[0]))
+                (normal, dot(normal, q[0]))
             };
-            let along = dot3(normal, ray);
+            let along = dot(normal, ray);
             if along.abs() <= EPS {
                 continue;
             }
@@ -220,7 +221,7 @@ impl BlendScreenData {
         let hit = ray.map(|value| value * t);
         let mut order = [0usize, 1, 2];
         order.sort_by(|left, right| kept[*right].partial_cmp(&kept[*left]).unwrap_or(std::cmp::Ordering::Equal));
-        let (_, s) = closest_on_line3(hit, q[order[0]], sub3(q[order[1]], q[order[0]]));
+        let (_, s) = closest_on_line3(hit, q[order[0]], minus(q[order[1]], q[order[0]]));
         Some(([1.0 - s, s, 0.0], order.map(|index| corners[index]), breaks))
     }
 }
@@ -277,45 +278,33 @@ fn to_interpolation(a: f32, b: f32, c: f32) -> [f32; 3] {
     if s.abs() > EPS { [a / s, b / s, c] } else { [a, b, c] }
 }
 
-fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
-
 /// `vector3d_from_euler_angles2d`.
 fn direction(yaw: f32, pitch: f32) -> [f32; 3] {
     [yaw.cos() * pitch.cos(), yaw.sin() * pitch.cos(), pitch.sin()]
 }
 
 fn closest_on_line3(p: [f32; 3], a: [f32; 3], d: [f32; 3]) -> ([f32; 3], f32) {
-    let length = dot3(d, d).sqrt();
+    let length = dot(d, d).sqrt();
     if length <= EPS {
         return (a, 0.0);
     }
-    let t = (dot3(sub3(p, a), d) / length / length).clamp(0.0, 1.0);
+    let t = (dot(minus(p, a), d) / length / length).clamp(0.0, 1.0);
     ([a[0] + d[0] * t, a[1] + d[1] * t, a[2] + d[2] * t], t)
 }
 
 fn barycentric3(p: [f32; 3], a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> (f32, f32, f32) {
-    let across = cross3(sub3(a, c), sub3(b, c));
-    let length = dot3(across, across).sqrt();
+    let across = cross(minus(a, c), minus(b, c));
+    let length = dot(across, across).sqrt();
     if length < EPS {
         return (0.0, 0.0, 0.0);
     }
     let normal = across.map(|value| value / length);
-    let whole = 0.5 * dot3(across, normal);
+    let whole = 0.5 * dot(across, normal);
     if whole.abs() < EPS {
         return (0.0, 0.0, 0.0);
     }
-    let v = 0.5 * dot3(cross3(sub3(a, c), sub3(p, c)), normal) / whole;
-    let w = 0.5 * dot3(cross3(sub3(a, p), sub3(b, p)), normal) / whole;
+    let v = 0.5 * dot(cross(minus(a, c), minus(p, c)), normal) / whole;
+    let w = 0.5 * dot(cross(minus(a, p), minus(b, p)), normal) / whole;
     (1.0 - v - w, v, w)
 }
 
