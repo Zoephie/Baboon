@@ -24,40 +24,15 @@ use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, Random as SystemRandom, new_unattached, read_pctl_def,
     unattached_quads, update_unattached,
 };
-use super::passes::{CeMapAnimation, FramebufferBlend, read_effect_map_animation};
 use crate::app::model_preview::common::fields::argb;
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::image::H2Image;
-use super::super::materials::decode_h2_image;
 use super::super::*;
-use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high24_over_2_24, high_bits, lcg_step};
-
-/// A game tick, which is what `effects_update` steps by.
-pub(in crate::app::model_preview) const STEP: f32 = 1.0 / 30.0;
-const PRE_ROLL: f32 = 4.0;
-/// How far short of a tick the frames' time can fall by rounding alone.
-const TICK_ROUNDING: f32 = 1e-5;
-
-/// The frames' time not yet run as ticks, as `game_time_update` keeps it.
-#[derive(Debug, Clone, Copy, Default)]
-pub(in crate::app::model_preview) struct CeTicks(f32);
-
-impl CeTicks {
-    /// How many ticks a frame `dt` long runs: `game_time_get_elapsed`, which
-    /// `game_frame` runs `particles_update` and `widgets_update` by.
-    pub(in crate::app::model_preview) fn run(&mut self, dt: f32) -> u32 {
-        self.0 += dt;
-        let mut ticks = 0;
-        // A frame of two half ticks owes a whole one, whatever the rounding.
-        while self.0 >= STEP - TICK_ROUNDING {
-            self.0 -= STEP;
-            ticks += 1;
-        }
-        ticks
-    }
-}
+use crate::app::model_preview::ce::sprite_sheet::{CeSecondaryDraw, CeSecondaryMap, CeSpriteFrame, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
+use crate::app::model_preview::ce::ticks::{CeTicks, PRE_ROLL, STEP};
+use crate::app::model_preview::ce::blend::FramebufferBlend;
 /// `effect_update` runs at most this many events in a tick.
 const MOST_EVENTS_A_TICK: usize = 8;
 /// The game's pool is shared by the whole level.
@@ -155,174 +130,6 @@ impl Scales {
             tint: set("tint"),
             type_specific: set("type-specific scale"),
         }
-    }
-}
-
-/// One sprite of a bitmap's sequence: its rect across the bitmap, the point
-/// it hangs from, and the image it is cut from.
-#[derive(Debug, Clone, Copy)]
-struct CeSpriteFrame {
-    rect: [f32; 4],
-    registration: [f32; 2],
-    image: usize,
-}
-
-/// An effect shader's second map: drawn over the sprite where anchored to
-/// it or to the screen, or read as depth for a `zsprite`.
-#[derive(Debug, Clone)]
-pub(crate) struct CeSecondaryMap {
-    anchor: Anchor,
-    pub(crate) image: Arc<H2Image>,
-    animation: CeMapAnimation,
-    /// `zsprite radius scale`, where nothing means one.
-    zsprite_scale: f32,
-}
-
-/// A second map's `anchor`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Anchor {
-    WithPrimary,
-    WithScreenSpace,
-    Zsprite,
-}
-
-impl Anchor {
-    fn read(holder: TagStruct<'_>) -> Self {
-        match holder.read_enum_option("anchor").as_deref() {
-            Some("with screen space") => Self::WithScreenSpace,
-            Some("zsprite") => Self::Zsprite,
-            _ => Self::WithPrimary,
-        }
-    }
-}
-
-/// What a sprite draws its second map with.
-#[derive(Debug, Clone)]
-pub(crate) struct CeSecondaryDraw {
-    pub(crate) map: Arc<CeSecondaryMap>,
-    /// 1 over the sprite, 2 over the screen, 3 as depth.
-    pub(crate) mode: i32,
-    /// `C_TEXTURE1_XFORM`'s two rows.
-    pub(crate) rows: [[f32; 4]; 2],
-    /// How far toward the camera the map's green moves a zsprite's pixels.
-    pub(crate) radius: f32,
-}
-
-/// An effect shader's `bitmap` and how it is laid, by the field's name.
-pub(in crate::app::model_preview) fn read_secondary_map(reader: &TagReader, holder: TagStruct<'_>, bitmap_field: &str) -> Option<Arc<CeSecondaryMap>> {
-    let path = holder.read_tag_ref_path(bitmap_field).filter(|path| !path.is_empty())?;
-    let image = decode_h2_image(reader, &path, SamplerKind::Texture2D, 0)?;
-    Some(Arc::new(CeSecondaryMap {
-        anchor: Anchor::read(holder),
-        image: Arc::new(image),
-        animation: read_effect_map_animation(holder),
-        zsprite_scale: holder.read_real("zsprite radius scale").unwrap_or(0.0),
-    }))
-}
-
-impl CeSecondaryMap {
-    /// What `rasterizer_transparent_geometry_group_draw` sets for it, with
-    /// the `secondary map radius` the draw gives the shader.
-    /// Sprites draw with no object's animation, which reads every source as one.
-    pub(crate) fn draw(self: &Arc<Self>, time: f32, radius: f32) -> CeSecondaryDraw {
-        let scale = if self.zsprite_scale == 0.0 { 1.0 } else { self.zsprite_scale };
-        CeSecondaryDraw {
-            map: self.clone(),
-            mode: match self.anchor {
-                Anchor::WithPrimary => 1,
-                Anchor::WithScreenSpace => 2,
-                Anchor::Zsprite => 3,
-            },
-            rows: self.animation.rows(time, &[1.0; 4]),
-            radius: radius * scale,
-        }
-    }
-}
-
-/// A bitmap's sprites by sequence, each image's size, and the images any
-/// sprite is cut from, decoded.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct CeSpriteSheet {
-    sizes: Vec<[f32; 2]>,
-    sequences: Vec<Vec<CeSpriteFrame>>,
-    pub(crate) images: Vec<Option<Arc<H2Image>>>,
-}
-
-pub(in crate::app::model_preview) fn read_sprite_sheet(reader: &TagReader, bitmap_path: &str) -> Option<CeSpriteSheet> {
-    let bitmap = reader.load(bitmap_path, "bitmap", b"bitm").ok()?;
-    let sizes: Vec<[f32; 2]> = elements(bitmap.root(), "bitmaps")
-        .iter()
-        .map(|image| {
-            let size = |name: &str| image.read_int_any(name).unwrap_or(1).max(1) as f32;
-            [size("width"), size("height")]
-        })
-        .collect();
-    let sequences: Vec<Vec<CeSpriteFrame>> = elements(bitmap.root(), "sequences")
-        .iter()
-        .map(|sequence| {
-            elements(*sequence, "sprites")
-                .iter()
-                .map(|sprite| {
-                    let read = |name: &str| sprite.read_real(name).unwrap_or(0.0);
-                    let registration = sprite.read_point2d("registration point");
-                    CeSpriteFrame {
-                        rect: [read("left"), read("right"), read("top"), read("bottom")],
-                        registration: [registration.x, registration.y],
-                        image: sprite.read_int_any("bitmap index").unwrap_or(0).max(0) as usize,
-                    }
-                })
-                .collect()
-        })
-        .collect();
-    let used: Vec<usize> = sequences.iter().flatten().map(|sprite| sprite.image).collect();
-    let images = (0..sizes.len())
-        .map(|index| {
-            used.contains(&index)
-                .then(|| decode_h2_image(reader, bitmap_path, SamplerKind::Texture2D, index))
-                .flatten()
-                .map(Arc::new)
-        })
-        .collect();
-    Some(CeSpriteSheet { sizes, sequences, images })
-}
-
-impl CeSpriteSheet {
-    /// How many sprites a sequence has; none past the end.
-    pub(crate) fn count(&self, sequence: i32) -> usize {
-        usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).map_or(0, Vec::len)
-    }
-
-    /// `build_sprite` for one sprite, facing the view as mode 0 does: the
-    /// corners (place, then u and v) about `center`, `scale` world units to
-    /// a pixel of its image, turned by `rotation` and mirrored across.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn corners(
-        &self,
-        sequence: i32,
-        sprite: usize,
-        center: [f32; 3],
-        rotation: f32,
-        scale: f32,
-        mirror: bool,
-        view: &ViewFrame,
-    ) -> Option<(usize, [[f32; 5]; 4])> {
-        let frame = usize::try_from(sequence).ok().and_then(|at| self.sequences.get(at)).and_then(|frames| frames.get(sprite))?;
-        let size = self.sizes.get(frame.image).map_or(1.0, |size| size[0]) * scale;
-        let [left, right, top, bottom] = frame.rect;
-        let center_uv = [left + frame.registration[0], top + frame.registration[1]];
-        let (sine, cosine) = rotation.sin_cos();
-        let corner = |u: f32, v: f32| {
-            let x0 = u - center_uv[0];
-            let y0 = center_uv[1] - v;
-            let mut x = x0 * cosine - y0 * sine;
-            let y = y0 * cosine + x0 * sine;
-            if mirror {
-                x = -x;
-            }
-            let place: [f32; 3] = std::array::from_fn(|axis| center[axis] + (view.right[axis] * x + view.up[axis] * y) * size);
-            [place[0], place[1], place[2], u, v]
-        };
-        Some((frame.image, [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)]))
     }
 }
 
@@ -1097,9 +904,6 @@ fn rotate_about(vector: [f32; 3], axis: [f32; 3], sine: f32, cosine: f32) -> [f3
     let across = cross(axis, vector);
     std::array::from_fn(|at| vector[at] * cosine + across[at] * sine + axis[at] * along * (1.0 - cosine))
 }
-
-
-
 
 fn turn_by_location(location: &CeLocation, local: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|at| (0..3).map(|row| location.axes[row][at] * local[row]).sum::<f32>())

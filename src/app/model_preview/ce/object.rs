@@ -10,7 +10,7 @@ use blam_tags::TagFile;
 pub(in crate::app::model_preview) fn read_ce_object_features(
     reader: &TagReader,
     model_tag: &TagFile,
-    attached: Option<&super::super::ce::attachments::CeAttachedObject>,
+    attached: Option<&super::super::ce::weapons::CeAttachedObject>,
     preview: &mut RenderModelPreview,
 ) {
     let own = super::super::ce::lights::read_ce_lights(reader, model_tag, 0, &preview.markers, |marker| {

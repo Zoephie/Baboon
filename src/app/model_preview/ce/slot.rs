@@ -89,7 +89,7 @@ impl CeTextures {
     unsafe fn upload(gl: &glow::Context, frame: &ModelGpuFrame) -> Self {
         let preview = &frame.preview;
         let image = |image: &Option<Arc<H2Image>>| image.as_ref().and_then(|image| unsafe { upload_h2_image(gl, image) });
-        let sheets = |sheets: &[Arc<super::particles::CeSpriteSheet>]| -> Vec<Vec<Option<glow::NativeTexture>>> {
+        let sheets = |sheets: &[Arc<super::sprite_sheet::CeSpriteSheet>]| -> Vec<Vec<Option<glow::NativeTexture>>> {
             sheets.iter().map(|sheet| sheet.images.iter().map(image).collect()).collect()
         };
         let flare = |light: &super::lights::CeLight| -> Vec<Option<glow::NativeTexture>> {

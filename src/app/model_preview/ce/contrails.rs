@@ -11,7 +11,6 @@ use blam_tags::{TagFile, TagStruct};
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::super::common::view::{ViewFrame, posed_on};
 use crate::app::model_preview::common::point_physics::CePointPhysics;
-use super::passes::FramebufferBlend;
 use crate::app::model_preview::common::fields::argb;
 use super::super::common::image::H2Image;
 use super::super::materials::decode_h2_image;
@@ -19,6 +18,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_up};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
+use crate::app::model_preview::ce::blend::FramebufferBlend;
 
 const PRE_ROLL: f32 = 4.0;
 /// A generous bound; the game's is a shared pool.
@@ -603,7 +603,7 @@ impl CeContrailField {
                         let distance = dot(to_eye, to_eye).sqrt().max(0.0001);
                         fade = (dot(normal, to_eye) / distance).abs();
                         if def.edge_fades_slowly {
-                            fade = super::lights::transition_evaluate(2, fade);
+                            fade = super::transition::transition_evaluate(2, fade);
                         }
                         if def.fade_mode == FadeMode::WhenParallel {
                             fade = 1.0 - fade;

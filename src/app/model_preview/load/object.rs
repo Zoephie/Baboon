@@ -45,17 +45,17 @@ pub(super) fn load_ce_object(
     let chosen = settings.weapon.as_deref();
     let weapons = feature(&mut notes, "the biped's weapons", || {
         let known = settings.ce_equippable.as_deref();
-        is_biped.then(|| super::super::ce::attachments::biped_weapons(reader, model_tag, chosen, known))
+        is_biped.then(|| super::super::ce::weapons::biped_weapons(reader, model_tag, chosen, known))
     });
     let held = match &weapons {
         Some(weapons) => chosen
             .filter(|path| weapons.equippable.iter().any(|weapon| weapon.path == *path))
             .map(str::to_owned),
-        None => super::super::ce::attachments::first_weapon(model_tag),
+        None => super::super::ce::weapons::first_weapon(model_tag),
     };
     let attached = held.and_then(|path| {
         let attach = |preview: &mut RenderModelPreview| {
-            super::super::ce::attachments::attach_ce_weapon(reader, model_tag, &path, preview)
+            super::super::ce::weapons::attach_ce_weapon(reader, model_tag, &path, preview)
         };
         let attached = feature_into(&mut notes, "the held weapon", &mut preview, attach);
         if attached.is_none() {

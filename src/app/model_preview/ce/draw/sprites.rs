@@ -42,7 +42,7 @@ pub(in crate::app::model_preview) fn advance_ce_effects(ce: &mut ce::slot::CeSlo
 /// A Halo CE sprite through the `effect` shader: its map, framebuffer blend
 /// function and nonlinear tint, each corner's color, its corners, and the
 /// shader's second map.
-type CeSprite = (glow::NativeTexture, ce::passes::FramebufferBlend, bool, [[f32; 4]; 4], [[f32; 5]; 4], Option<ce::particles::CeSecondaryDraw>);
+type CeSprite = (glow::NativeTexture, ce::blend::FramebufferBlend, bool, [[f32; 4]; 4], [[f32; 5]; 4], Option<ce::sprite_sheet::CeSecondaryDraw>);
 
 /// What one of Halo CE's transparent groups draws.
 pub(in crate::app::model_preview) enum CeGroupDraw {
@@ -233,7 +233,7 @@ pub(in crate::app::model_preview) fn ce_groups(
     let pixel = |center: [f32; 3]| 2.0 / pixels(center, 1.0).max(0.0001);
     for (index, quad) in ce.simulations.glows.quads(glows, view, pixel) {
         if let Some(texture) = ce.textures.glows.get(index).copied().flatten() {
-            sprites.push((CE_GLOW, index, 0), false, false, (texture, ce::passes::FramebufferBlend::Add, false, quad.colors, quad.corners, None));
+            sprites.push((CE_GLOW, index, 0), false, false, (texture, ce::blend::FramebufferBlend::Add, false, quad.colors, quad.corners, None));
         }
     }
     for quad in ce.simulations.contrails.quads(contrails, change_colors, view) {
@@ -445,7 +445,7 @@ mod tests {
     fn ce_sprites_group_by_key_at_their_centroid() {
         let view = looking_along_x();
         let texture = glow::NativeTexture(std::num::NonZeroU32::new(1).unwrap());
-        let at = |x: f32| (texture, ce::passes::FramebufferBlend::AlphaBlend, false, [[1.0; 4]; 4], [[x, 0.0, 0.0, 0.0, 0.0]; 4], None);
+        let at = |x: f32| (texture, ce::blend::FramebufferBlend::AlphaBlend, false, [[1.0; 4]; 4], [[x, 0.0, 0.0, 0.0, 0.0]; 4], None);
         let mut sprites = CeSpriteGroups::default();
         sprites.push((CE_PARTICLE, 7, 0), false, false, at(2.0));
         sprites.push((CE_LIGHTNING, 0, 0), false, true, at(1.0));

@@ -7,7 +7,6 @@
 //! are as Xbox maps have them baked, against their fields.
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
-use eframe::egui::{self, Ui};
 
 use super::super::common::fields::has_flag;
 use super::super::common::time::TICKS_PER_SECOND;
@@ -20,7 +19,7 @@ const SOURCES: [&str; 9] =
 const MAP_TO: [&str; 6] = ["linear", "early", "very early", "late", "very late", "cosine"];
 const BOUNDS_MODES: [&str; 3] = ["clip", "clip and normalize", "scale to fit"];
 const ACTIVATING_ABOVE: f32 = 0.0001;
-const OUTPUTS: [&str; 4] = ["A out", "B out", "C out", "D out"];
+pub(super) const OUTPUTS: [&str; 4] = ["A out", "B out", "C out", "D out"];
 
 /// An input's value on an object at rest, as the `*_export_function_values`
 /// give it: vitality and `alive` full, damage and motion nothing; a device as
@@ -44,7 +43,7 @@ fn resting_input(name: &str, weapon: Option<TagStruct<'_>>) -> f32 {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct CeFunction {
+pub(super) struct CeFunction {
     invert: bool,
     /// Adds to its last value each tick, wrapping at 1.
     additive: bool,
@@ -65,7 +64,7 @@ struct CeFunction {
     bounds_mode: usize,
     bounds: [f32; 2],
     scale_by: f32,
-    usage: String,
+    pub(super) usage: String,
     /// `always active`: it stays on at its lower bound.
     always_active: bool,
     /// `turn off with`: the function whose being off turns this one off.
@@ -164,7 +163,7 @@ impl CeFunction {
         if self.scale_result_by != 0 {
             value *= values[self.scale_result_by];
         }
-        let mut value = super::lights::transition_evaluate(self.map_to as i32, value);
+        let mut value = super::transition::transition_evaluate(self.map_to as i32, value);
         if self.scale_by > 0.0 {
             value *= self.scale_by;
         }
@@ -208,10 +207,10 @@ impl CeFunction {
 /// What an opened object's functions need.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct CeObjectFunctions {
-    inputs: [f32; 4],
+    pub(super) inputs: [f32; 4],
     /// What each input reads, for those the object uses.
-    input_names: [Option<String>; 4],
-    functions: Vec<CeFunction>,
+    pub(super) input_names: [Option<String>; 4],
+    pub(super) functions: Vec<CeFunction>,
 }
 
 impl CeObjectFunctions {
@@ -249,7 +248,7 @@ impl CeObjectFunctions {
 
     /// Which inputs can change the outputs marked in `read`, following one
     /// function's reads of another's output.
-    fn inputs_reaching(&self, mut read: [bool; 4]) -> [bool; 4] {
+    pub(super) fn inputs_reaching(&self, mut read: [bool; 4]) -> [bool; 4] {
         let mut inputs = [false; 4];
         loop {
             let before = read;
@@ -326,110 +325,6 @@ pub(crate) type CeEventCounts = std::collections::HashMap<(u64, usize), u32>;
 /// rate, which climbs to 1 while held, and its error, none on a cool weapon.
 /// Reloading, readying, damage and the rest give 0 and 0.
 pub(crate) const CE_EVENT_SCALES: [f32; 2] = [1.0, 0.0];
-
-/// What the Effects section plays and fires, and where it keeps track.
-pub(in crate::app::model_preview) struct CeEffectControls<'a> {
-    pub(in crate::app::model_preview) effects: &'a [super::particles::CeEffectAt],
-    pub(in crate::app::model_preview) firing: &'a [super::firing::CeWeaponFiring],
-    pub(in crate::app::model_preview) geometry: u64,
-    pub(in crate::app::model_preview) counts: &'a mut CeEventCounts,
-    pub(in crate::app::model_preview) shots: &'a mut super::firing::CeShots,
-    pub(in crate::app::model_preview) scales: &'a mut [f32; 2],
-    /// The preview's clock, which shots are fired at.
-    pub(in crate::app::model_preview) time: f32,
-}
-
-/// A Fire button for each trigger of a weapon, and a Play button for each
-/// effect the objects name for their events, each under its object's name
-/// when it is not the opened one's, with the scales they go at.
-pub(in crate::app::model_preview) fn draw_ce_event_effects(ui: &mut Ui, controls: CeEffectControls<'_>, object_name: impl Fn(u8) -> Option<String>) {
-    let CeEffectControls { effects, firing, geometry, counts, shots, scales, time } = controls;
-    let named = |object: u8, name: &str| object_name(object).map_or_else(|| name.to_owned(), |object| format!("{object}: {name}"));
-    let events: Vec<(usize, String)> = effects
-        .iter()
-        .enumerate()
-        .filter_map(|(index, effect)| Some((index, named(effect.object, &effect.event.as_ref()?.name))))
-        .collect();
-    if events.is_empty() && firing.is_empty() {
-        return;
-    }
-    ui.add_space(6.0);
-    egui::CollapsingHeader::new("Effects").id_salt("ce_event_effects").show(ui, |ui| {
-        const SCALES: &str = "What effect_new_from_object is given. A firing effect gets its trigger's \
-                              rate and error; reloading, readying, damage and the rest get 0 and 0.";
-        const FIRE: &str = "Fire the trigger once, as weapon_trigger_fire does: it plays the next \
-                            of its firing effects and lights the weapon's inputs, at scale A's \
-                            rate of fire. The weapon is held as an actor holds one: it never \
-                            overheats.";
-        for (scale, name) in scales.iter_mut().zip(["scale A", "scale B"]) {
-            ui.add(egui::Slider::new(scale, 0.0..=1.0).text(name)).on_hover_text(SCALES);
-        }
-        for weapon in firing {
-            for (trigger, label) in (0..weapon.triggers.len()).zip(["primary trigger", "secondary trigger"]) {
-                if ui.small_button(format!("Fire {}", named(weapon.object, label))).on_hover_text(FIRE).clicked() {
-                    let fired = shots.entry((geometry, weapon.object)).or_default();
-                    if let Some(effect) = fired.fire(weapon, trigger, scales[0], time) {
-                        *counts.entry((geometry, effect)).or_default() += 1;
-                    }
-                    ui.ctx().request_repaint();
-                }
-            }
-        }
-        for (index, name) in events {
-            if ui.small_button(format!("Play {name}")).clicked() {
-                *counts.entry((geometry, index)).or_default() += 1;
-                ui.ctx().request_repaint();
-            }
-        }
-    });
-}
-
-/// Sliders for an opened object's inputs, and what its functions make of them.
-/// `read` is which outputs the model's shaders read, once they have resolved:
-/// the rest cannot change the picture, whatever the game uses them for.
-/// `fired` is what the panel's shots give the inputs, by name.
-pub(in crate::app::model_preview) fn draw_ce_function_controls(
-    ui: &mut Ui,
-    functions: &CeObjectFunctions,
-    name: Option<&str>,
-    key: CeObjectKey,
-    set: &mut CeFunctionInputs,
-    read: Option<[bool; 4]>,
-    fired: impl Fn(&str) -> Option<f32>,
-) {
-    const UNREAD: &str = "No shader or light on this model reads this.";
-    let reaching = read.map_or([true; 4], |read| functions.inputs_reaching(read));
-    let read = read.unwrap_or([true; 4]);
-    let mut values = functions.inputs_for(set, key);
-    ui.add_space(6.0);
-    ui.push_id(key.1, |ui| {
-    ui.horizontal(|ui| {
-        ui.strong(name.map_or("Object Functions".to_owned(), |name| format!("{name} Functions")));
-        let changed = values != functions.inputs;
-        if ui.add_enabled(changed, egui::Button::new("Reset")).clicked() {
-            values = functions.inputs;
-            set.remove(&key);
-        }
-    });
-    let before = values;
-    for ((value, name), active) in values.iter_mut().zip(&functions.input_names).zip(reaching) {
-        let Some(name) = name else {
-            continue;
-        };
-        ui.add_enabled(active, egui::Slider::new(value, 0.0..=1.0).text(name))
-            .on_disabled_hover_text(UNREAD);
-    }
-    if values != before {
-        set.insert(key, values);
-    }
-    let time = object_time(ui.input(|input| input.time) as f32, key.1);
-    let outputs = functions.outputs(&functions.with_fired(values, fired), time);
-    for (index, function) in functions.functions.iter().take(OUTPUTS.len()).enumerate() {
-        let text = format!("{}: {:.2}  {}", OUTPUTS[index], outputs[index], function.usage);
-        ui.add_enabled(read[index], egui::Label::new(text)).on_disabled_hover_text(UNREAD);
-    }
-    });
-}
 
 /// An object's chain of parent structs, ending at `object`.
 fn struct_chain(object: &TagFile) -> Option<Vec<TagStruct<'_>>> {

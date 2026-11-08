@@ -244,7 +244,7 @@ struct RunningFlag {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CeFlagField {
     time: Option<f32>,
-    ticks: super::particles::CeTicks,
+    ticks: super::ticks::CeTicks,
     running: Vec<RunningFlag>,
 }
 
@@ -389,7 +389,7 @@ impl CeFlagField {
             if ticks == 0 {
                 continue;
             }
-            let dt = ticks as f32 * super::particles::STEP;
+            let dt = ticks as f32 * super::ticks::STEP;
             for (flag, running) in flags.iter().zip(&mut self.running) {
                 running.update(flag, &attached_of(flag), ground, dt);
             }

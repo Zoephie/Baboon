@@ -172,7 +172,7 @@ pub(in crate::app::model_preview) struct PreviewLoadSettings {
     /// Halo CE: the weapon a biped holds, by path.
     pub(in crate::app::model_preview) weapon: Option<String>,
     /// Halo CE: the biped's weapons, when an earlier load found them.
-    pub(in crate::app::model_preview) ce_equippable: Option<Vec<super::super::ce::attachments::CeEquippable>>,
+    pub(in crate::app::model_preview) ce_equippable: Option<Vec<super::super::ce::weapons::CeEquippable>>,
     /// Halo 2 units: what the left hand holds, by path.
     pub(in crate::app::model_preview) secondary_weapon: Option<String>,
     /// Halo 2 units: their weapons, when an earlier load found them.

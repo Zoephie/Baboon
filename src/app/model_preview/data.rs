@@ -283,9 +283,9 @@ pub(in crate::app) struct ModelPreviewData {
     /// An opened Halo CE object's functions.
     pub(in crate::app) ce_object_functions: Option<super::ce::functions::CeObjectFunctions>,
     /// What the opened Halo CE object brings with it.
-    pub(in crate::app) ce_attached: Vec<super::ce::attachments::CeAttachedObject>,
+    pub(in crate::app) ce_attached: Vec<super::ce::weapons::CeAttachedObject>,
     /// Halo CE bipeds: what the unit can hold.
-    pub(in crate::app) ce_weapons: Option<super::ce::attachments::CeBipedWeapons>,
+    pub(in crate::app) ce_weapons: Option<super::ce::weapons::CeBipedWeapons>,
     /// Halo 2: the functions of an opened object.
     pub(in crate::app) object_functions: Option<super::functions::ObjectFunctions>,
     /// Halo 2 units: what they can hold.

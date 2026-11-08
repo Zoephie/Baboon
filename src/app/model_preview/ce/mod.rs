@@ -3,7 +3,7 @@
 
 pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod object;
-pub(super) mod attachments;
+pub(super) mod weapons;
 pub(super) mod contrails;
 pub(in crate::app::model_preview) mod draw;
 pub(super) mod firing;
@@ -16,6 +16,11 @@ pub(super) mod passes;
 pub(in crate::app::model_preview) mod render;
 pub(in crate::app::model_preview) mod slot;
 pub(super) mod widgets;
+pub(super) mod ticks;
+pub(super) mod sprite_sheet;
+pub(super) mod transition;
+pub(super) mod blend;
+pub(super) mod panel;
 
 /// What a Halo CE object brings to its preview beyond its geometry: its
 /// lights' flares, antennas, effects, firing, contrails and widgets.

@@ -10,7 +10,6 @@ use blam_tags::{TagFile, TagStruct};
 use super::super::common::fields::{elements, function_slot, function_slot_of, has_flag, object_block};
 use crate::app::model_preview::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
-use super::passes::FramebufferBlend;
 use crate::app::model_preview::common::fields::argb;
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::image::H2Image;
@@ -19,6 +18,7 @@ use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, nonzero_unit};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
+use crate::app::model_preview::ce::blend::FramebufferBlend;
 
 /// One of `frames`, as tool leaves it.
 #[derive(Debug, Clone, Copy)]

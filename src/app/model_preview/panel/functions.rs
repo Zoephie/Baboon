@@ -9,7 +9,7 @@ pub(in crate::app::model_preview) fn draw_object_functions(ui: &mut Ui, data: &M
         data.ce_attached.get(held).map(|held| held.name.clone())
     };
     let time = frame::preview_clock(ui);
-    let controls = ce::functions::CeEffectControls {
+    let controls = ce::panel::CeEffectControls {
         effects: &data.preview.ce.effects,
         firing: &data.preview.ce.firing,
         geometry: data.geometry_id,
@@ -18,7 +18,7 @@ pub(in crate::app::model_preview) fn draw_object_functions(ui: &mut Ui, data: &M
         scales: &mut state.ce_event_scales,
         time,
     };
-    ce::functions::draw_ce_event_effects(ui, controls, held_name);
+    ce::panel::draw_ce_event_effects(ui, controls, held_name);
     draw_h2_weapon_pickers(ui, data, state);
     if let Some(functions) = &data.object_functions {
         let time = ui.input(|input| input.time) as f32;
@@ -61,7 +61,7 @@ pub(in crate::app::model_preview) fn draw_object_functions(ui: &mut Ui, data: &M
     });
     let own = data.ce_object_functions.iter().map(|functions| (0, None, functions));
     for (object, name, functions) in own.chain(attached) {
-        ce::functions::draw_ce_function_controls(
+        ce::panel::draw_ce_function_controls(
             ui,
             functions,
             name,

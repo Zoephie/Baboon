@@ -14,14 +14,14 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
-use super::passes::FramebufferBlend;
 use super::super::common::fields::{elements, function_slot_of, has_flag, has_flag_after, object_block};
 use super::super::common::view::{ViewFrame, posed_on};
-use super::particles::{CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 use crate::app::model_preview::common::point_physics::CePointPhysics;
 use super::super::*;
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
+use crate::app::model_preview::ce::blend::FramebufferBlend;
+use crate::app::model_preview::ce::sprite_sheet::{CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet};
 
 /// How long a system runs before the preview first shows it.
 const PRE_ROLL: f32 = 4.0;
