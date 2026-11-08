@@ -664,16 +664,13 @@ mod tests {
         }
     }
 
-    /// Kits to resolve against: env var first, then the usual Steam location.
+    /// The kit a case resolves against, through the shared harness helper.
     ///
     /// Halo 3 and Reach both, deliberately — they are the two games this targets,
     /// and a slot table that silently only worked for one is exactly the failure
     /// worth catching.
-    fn case_kit_root(env: &str, default: &str) -> Option<PathBuf> {
-        let root = std::env::var_os(env)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(default));
-        root.is_dir().then_some(root)
+    fn case_kit_root(case: &Case) -> Option<PathBuf> {
+        crate::app::model_preview::harness::kit::kit_root(case.kit)
     }
 
     fn loose_source(tags_root: PathBuf, game: &str) -> TagSource {
@@ -706,28 +703,24 @@ mod tests {
 
     struct Case {
         game: &'static str,
-        env: &'static str,
-        default_root: &'static str,
+        kit: GameId,
         model: &'static str,
     }
 
     const CASES: [Case; 3] = [
         Case {
             game: "halo3_mcc",
-            env: "BABOON_H3EK_TAGS",
-            default_root: r"D:\SteamLibrary\steamapps\common\H3EK\tags",
+            kit: GameId::Halo3,
             model: r"objects\characters\masterchief\masterchief",
         },
         Case {
             game: "halo3_mcc",
-            env: "BABOON_H3EK_TAGS",
-            default_root: r"D:\SteamLibrary\steamapps\common\H3EK\tags",
+            kit: GameId::Halo3,
             model: r"objects\characters\dervish\dervish",
         },
         Case {
             game: "haloreach_mcc",
-            env: "BABOON_HREK_TAGS",
-            default_root: r"D:\SteamLibrary\steamapps\common\HREK\tags",
+            kit: GameId::HaloReach,
             model: r"objects\characters\brute\brute",
         },
     ];
@@ -738,11 +731,7 @@ mod tests {
     fn a_shipped_character_resolves_to_real_textures_in_both_games() {
         let mut ran = 0;
         for case in CASES {
-            let Some(root) = case_kit_root(case.env, case.default_root) else {
-                eprintln!(
-                    "skipping: {} not present (set {})",
-                    case.default_root, case.env
-                );
+            let Some(root) = case_kit_root(&case) else {
                 continue;
             };
             let source = loose_source(root, case.game);
@@ -827,7 +816,7 @@ mod tests {
     /// present on one material is what the feature was asked for.
     #[test]
     fn masterchiefs_body_shader_carries_diffuse_detail_and_normal() {
-        let Some(root) = case_kit_root(CASES[0].env, CASES[0].default_root) else {
+        let Some(root) = case_kit_root(&CASES[0]) else {
             eprintln!("skipping: H3EK not present");
             return;
         };
@@ -891,7 +880,7 @@ mod tests {
     /// discard used to punch holes through, so he is worth keeping as a fixture.
     #[test]
     fn dervish_resolves_a_detail_normal_on_top_of_his_bump_map() {
-        let Some(root) = case_kit_root(CASES[1].env, CASES[1].default_root) else {
+        let Some(root) = case_kit_root(&CASES[1]) else {
             eprintln!("skipping: H3EK not present");
             return;
         };
@@ -920,7 +909,7 @@ mod tests {
     /// authors 16.
     #[test]
     fn detail_tiling_comes_from_the_shaders_animator() {
-        let Some(root) = case_kit_root(CASES[0].env, CASES[0].default_root) else {
+        let Some(root) = case_kit_root(&CASES[0]) else {
             eprintln!("skipping: H3EK not present");
             return;
         };

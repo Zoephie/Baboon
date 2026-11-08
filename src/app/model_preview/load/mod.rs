@@ -1100,18 +1100,17 @@ mod tests {
 
     /// Root of an extracted MCC tag set, via `BLAM_TEST_<KIT>_TAGS` or the
     /// conventional local layout.
+    /// A kit's `tags` folder by its short name, through the shared harness
+    /// helper.
     fn kit_tags(kit: &str) -> Option<PathBuf> {
-        let var = format!("BLAM_TEST_{}_TAGS", kit.to_uppercase());
-        if let Ok(p) = std::env::var(&var) {
-            let p = PathBuf::from(p);
-            return p.is_dir().then_some(p);
-        }
-        let home = std::env::var("HOME").ok()?;
-        let p = PathBuf::from(home)
-            .join("Halo")
-            .join(format!("{kit}_mcc"))
-            .join("tags");
-        p.is_dir().then_some(p)
+        let game = match kit {
+            "halo2" => GameId::Halo2,
+            "halo3" => GameId::Halo3,
+            "haloreach" => GameId::HaloReach,
+            "halo4" => GameId::Halo4,
+            other => panic!("no kit named {other}"),
+        };
+        crate::app::model_preview::harness::kit::kit_root(game)
     }
 
     fn bundled_names() -> crate::core::format::TagNameIndex {

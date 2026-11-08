@@ -357,18 +357,18 @@ mod tests {
             .unwrap_or_else(|| PathBuf::from(default))
     }
 
+    /// The kit's `tags` folder, or a path that does not exist, so each
+    /// test's own "is the tag there" check skips it.
     fn h3_tags_root() -> PathBuf {
-        installed_tags(
-            "BLAM_TEST_H3EK",
-            r"C:\Program Files (x86)\Steam\steamapps\common\H3EK\tags",
-        )
+        crate::app::model_preview::harness::kit::kit_root(GameId::Halo3)
+            .unwrap_or_else(|| PathBuf::from("<set BLAM_TEST_H3EK>"))
     }
 
+    /// The kit's `tags` folder, or a path that does not exist, so each
+    /// test's own "is the tag there" check skips it.
     fn h2_tags_root() -> PathBuf {
-        installed_tags(
-            "BLAM_TEST_H2EK",
-            r"C:\Program Files (x86)\Steam\steamapps\common\H2EK\tags",
-        )
+        crate::app::model_preview::harness::kit::kit_root(GameId::Halo2)
+            .unwrap_or_else(|| PathBuf::from("<set BLAM_TEST_H2EK>"))
     }
 
     fn h2r_tags_root() -> PathBuf {
