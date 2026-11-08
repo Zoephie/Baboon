@@ -6,6 +6,9 @@
 use eframe::glow::{self, HasContext as _};
 
 use super::super::renderer::*;
+
+use super::super::common::camera::*;
+
 use super::super::*;
 use super::super::gl::pass_state::PassState;
 use super::view::ViewFrame;

@@ -69,6 +69,7 @@ pub(in crate::app) use load::build_render_preview;
 pub(in crate::app) use campaign_evolved::prewarm_ce_mesh_sync_index;
 pub(in crate::app) use renderer::material_color;
 use renderer::*;
+use common::camera::*;
 use dx9::passes::{H2ChangeColors, read_h2_change_colors};
 use variants::*;
 

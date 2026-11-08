@@ -5,6 +5,7 @@
 //! view and pose things are placed by.
 
 pub(in crate::app::model_preview) mod attached;
+pub(in crate::app::model_preview) mod camera;
 pub(in crate::app::model_preview) mod features;
 pub(in crate::app::model_preview) mod fields;
 pub(in crate::app::model_preview) mod geometry;

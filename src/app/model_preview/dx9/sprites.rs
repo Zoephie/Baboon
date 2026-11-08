@@ -12,6 +12,7 @@ use super::super::gen3::pipeline::h3_layered_distance;
 use super::super::common::view::ViewFrame;
 use super::super::gl::pass_state::PassState;
 use super::super::renderer::*;
+use super::super::common::view::ce_flare_view;
 use super::pipeline::Dx9Game;
 
 impl RenderCore {

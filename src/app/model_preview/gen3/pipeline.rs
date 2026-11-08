@@ -20,6 +20,8 @@ use super::super::reach::lights::{ReachLitLight, inline_rows};
 use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
 use super::super::renderer::*;
+use super::super::common::camera::*;
+use super::super::common::view::ce_flare_view;
 use super::super::dx9::passes::{H2Layer};
 use super::super::common::image::H2Image;
 use super::super::*;

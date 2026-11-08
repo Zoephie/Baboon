@@ -7,7 +7,7 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_lights::screen_to_relative_world;
 use super::super::gen3::pipeline::{set_value, view_projection};
-use super::super::renderer::h2_eye_position;
+use crate::app::model_preview::common::camera::h2_eye_position;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use super::lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
