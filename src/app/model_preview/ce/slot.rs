@@ -21,7 +21,7 @@ pub(in crate::app::model_preview) struct CeSimulations {
     pub(in crate::app::model_preview) glows: super::widgets::CeGlowField,
     pub(in crate::app::model_preview) flags: super::flags::CeFlagField,
     /// The effects' particles, systems and lights.
-    pub(in crate::app::model_preview) particles: super::particles::CeParticleField,
+    pub(in crate::app::model_preview) particles: super::effects::CeParticleField,
     /// The attached particle systems.
     pub(in crate::app::model_preview) pctl: super::particle_systems::CeParticleSystemField,
 }
@@ -96,8 +96,8 @@ impl CeTextures {
             let images = light.flare.iter().flat_map(|flare| &flare.images);
             images.map(|image| unsafe { upload_h2_image(gl, image) }).collect()
         };
-        let reachable = super::particles::reachable_defs(&preview.ce.effects);
-        let by_effect = |def: &Arc<super::particles::CeEffectDef>| super::particles::def_key(def);
+        let reachable = super::effects::reachable_defs(&preview.ce.effects);
+        let by_effect = |def: &Arc<super::effects::CeEffectDef>| super::effects::def_key(def);
         unsafe {
             Self {
                 light_flares: preview.ce.lights.iter().map(flare).collect(),

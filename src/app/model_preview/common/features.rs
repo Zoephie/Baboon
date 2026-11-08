@@ -448,7 +448,7 @@ impl Feature for super::super::ce::lights::CeLight {}
 impl Feature for super::super::antennas::ce::CeAntenna {}
 impl Feature for super::super::ce::widgets::CeLightVolume {}
 
-impl Feature for super::super::ce::particles::CeEffectAt {
+impl Feature for super::super::ce::effects::CeEffectAt {
     /// An event's effect runs only when played, and asks for frames then.
     fn moves(&self) -> bool {
         self.event.is_none()

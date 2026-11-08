@@ -11,7 +11,7 @@ pub(super) mod flags;
 pub(super) mod functions;
 pub(super) mod lights;
 pub(super) mod particle_systems;
-pub(super) mod particles;
+pub(super) mod effects;
 pub(super) mod passes;
 pub(in crate::app::model_preview) mod render;
 pub(in crate::app::model_preview) mod slot;
@@ -32,7 +32,7 @@ pub(crate) struct CeFeatures {
     pub antennas: Vec<super::antennas::ce::CeAntenna>,
     /// Halo CE effects the object's attachments hang on it, then those it
     /// names for its events.
-    pub effects: Vec<super::ce::particles::CeEffectAt>,
+    pub effects: Vec<super::ce::effects::CeEffectAt>,
     /// Halo CE weapons whose triggers the panel fires: the opened one, or
     /// the one the opened unit holds.
     pub firing: Vec<super::ce::firing::CeWeaponFiring>,

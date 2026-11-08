@@ -139,7 +139,7 @@ pub(in crate::app::model_preview) struct ModelGpuFrame {
     /// Each object's point lights this frame, in step with `object_states`.
     pub(in crate::app::model_preview) ce_points: Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>,
     /// The panel's plays of Halo CE's event effects.
-    pub(in crate::app::model_preview) ce_plays: ce::particles::CeEventPlays,
+    pub(in crate::app::model_preview) ce_plays: ce::effects::CeEventPlays,
     /// Draw opaque Halo 2 materials through their passes.
     pub(in crate::app::model_preview) game_shaders: bool,
     pub(in crate::app::model_preview) default_lights: bool,
@@ -342,8 +342,8 @@ pub(in crate::app::model_preview) fn ce_event_plays(
     data: &ModelPreviewData,
     counts: &ce::functions::CeEventCounts,
     scales: [f32; 2],
-) -> ce::particles::CeEventPlays {
+) -> ce::effects::CeEventPlays {
     let effects = &data.preview.ce.effects;
     let count = |index| counts.get(&(data.geometry_id, index)).copied().unwrap_or(0);
-    ce::particles::CeEventPlays { counts: (0..effects.len()).map(count).collect(), scales }
+    ce::effects::CeEventPlays { counts: (0..effects.len()).map(count).collect(), scales }
 }

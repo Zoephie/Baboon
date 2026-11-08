@@ -340,7 +340,7 @@ fn a_halo_ce_part_sorts_from_its_centroid_on_its_heaviest_node() {
 /// and has one, lives to be drawn.
 #[test]
 fn a_played_firing_effect_runs_once_on_the_held_weapon() {
-    use super::super::ce::particles::{CeEventPlays, CeObjectInputs, CeParticleField};
+    use super::super::ce::effects::{CeEventPlays, CeObjectInputs, CeParticleField};
     let Some(root) = kit_root(GameId::HaloCe) else { return };
     let rifle = "weapons\\assault rifle\\assault rifle";
     let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
@@ -440,7 +440,7 @@ fn firing_the_held_rifle_lights_its_muzzle_flash() {
 /// so it runs through once and is let go.
 #[test]
 fn a_played_event_effect_does_not_loop() {
-    use super::super::ce::particles::{CeEventPlays, CeObjectInputs, CeParticleField};
+    use super::super::ce::effects::{CeEventPlays, CeObjectInputs, CeParticleField};
     let Some(root) = kit_root(GameId::HaloCe) else { return };
     let rifle = "weapons\\plasma rifle\\plasma rifle";
     let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };

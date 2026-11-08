@@ -35,10 +35,10 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
     }
     // What each names for its events, which the panel plays: the weapon's on
     // the weapon, as `weapon_effect_new` makes them.
-    let events = super::super::ce::particles::read_ce_event_effects(reader, model_tag, 0, &preview.markers);
+    let events = super::super::ce::effects::read_ce_event_effects(reader, model_tag, 0, &preview.markers);
     preview.ce.effects.extend(events);
     if let Some((weapon, held)) = &held_tag {
-        preview.ce.effects.extend(super::super::ce::particles::read_ce_event_effects(reader, weapon, 1, &held.markers));
+        preview.ce.effects.extend(super::super::ce::effects::read_ce_event_effects(reader, weapon, 1, &held.markers));
     }
     let own = super::super::ce::firing::read_ce_weapon_firing(model_tag, 0, &preview.ce.effects);
     let held = held_tag.as_ref().and_then(|(weapon, _)| super::super::ce::firing::read_ce_weapon_firing(weapon, 1, &preview.ce.effects));
@@ -62,7 +62,7 @@ fn read_ce_features(
     ce: &mut super::super::ce::CeFeatures,
 ) {
     ce.antennas.extend(super::super::antennas::ce::read_ce_antennas(reader, object, owner, markers));
-    ce.effects.extend(super::super::ce::particles::read_ce_effects(reader, object, owner, markers));
+    ce.effects.extend(super::super::ce::effects::read_ce_effects(reader, object, owner, markers));
     ce.contrails.extend(super::super::ce::contrails::read_ce_contrails(reader, object, owner, markers));
     ce.light_volumes.extend(super::super::ce::widgets::read_ce_light_volumes(reader, object, owner, markers));
     ce.lightning.extend(super::super::ce::widgets::read_ce_lightning(reader, object, owner, markers));

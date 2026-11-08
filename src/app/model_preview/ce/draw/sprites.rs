@@ -17,7 +17,7 @@ pub(in crate::app::model_preview) fn advance_ce_effects(ce: &mut ce::slot::CeSlo
     let states = &frame.object_states;
     let inputs = |object: u8| {
         let state = states.get(object as usize);
-        ce::particles::CeObjectInputs {
+        ce::effects::CeObjectInputs {
                 active: state.map_or([false; 4], |state| state.active),
             outputs: state.map_or([0.0; 4], |state| state.outputs),
             change_colors: state.map_or([[1.0; 3]; 4], |state| state.change_colors),

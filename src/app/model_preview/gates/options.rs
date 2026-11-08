@@ -74,7 +74,7 @@ const H4: (&str, GameId) = ("BLAM_TEST_H4EK", GameId::Halo4);
 const OPTION_ROWS: &[OptionRow] = &[
     // A control: the wrong name for a bit.
     OptionRow { control: true, ..row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x1), "dies at rest") },
-    // ce::particles
+    // ce::effects
     row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x1), "can animate backwards"),
     row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x2), "animation stops at rest"),
     row(HCE.0, HCE.1, "particle", "flags", Old::Bit(0x4), "animation starts on random frame"),
@@ -1110,7 +1110,7 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(ODST.0, ODST.1, "model", "instance groups/choice", Old::Value(1), "choose all members"),
     row(REACH.0, REACH.1, "model", "instance groups/choice", Old::Value(1), "choose all members"),
     row(H4.0, H4.1, "model", "instance groups/choice", Old::Value(1), "choose all members"),
-    // ce::particles: effects
+    // ce::effects: effects
     row(HCE.0, HCE.1, "effect", "flags", Old::Prefix(&["deleted when attachment deactivates"]), "deleted when attachment deactivates"),
     row(HCE.0, HCE.1, "effect", "events/particles/create", Old::Value(1), "only in first person"),
     row(HCE.0, HCE.1, "effect", "events/parts/create in", Old::Value(0), "any environment"),

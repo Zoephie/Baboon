@@ -18,7 +18,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, has_flag, object_block};
 use crate::app::model_preview::common::time::TICKS_PER_SECOND;
-use super::particles::{CeEffectAt, Random};
+use super::effects::{CeEffectAt, Random};
 use crate::app::model_preview::ce::ticks::STEP;
 
 /// Below this a recovery time is none: tool bakes a whole tick's fall.

@@ -5,7 +5,7 @@ use crate::app::model_preview::ce::functions::{CeEventCounts, CeFunctionInputs, 
 
 /// What the Effects section plays and fires, and where it keeps track.
 pub(in crate::app::model_preview) struct CeEffectControls<'a> {
-    pub(in crate::app::model_preview) effects: &'a [super::particles::CeEffectAt],
+    pub(in crate::app::model_preview) effects: &'a [super::effects::CeEffectAt],
     pub(in crate::app::model_preview) firing: &'a [super::firing::CeWeaponFiring],
     pub(in crate::app::model_preview) geometry: u64,
     pub(in crate::app::model_preview) counts: &'a mut CeEventCounts,
