@@ -27,7 +27,7 @@ pub(in crate::app::model_preview) fn read_h4_attached_features<F: Fn(&RenderMode
     super::super::h4::lights::read_h4_light_passes(reader, preview);
     let particles = super::super::particles::read_h3_particles(reader, object, owner, markers, frame);
     preview.particles.extend(named(particles, name).map(Arc::new));
-    let volumes = super::super::gen3::light_volumes::read_h3_light_volumes(reader, object, owner, markers, frame);
+    let volumes = super::super::gen3::effects::light_volumes::read_h3_light_volumes(reader, object, owner, markers, frame);
     preview.gen3.light_volumes.extend(named(volumes, name));
     let tracers = super::super::h4::tracers::read_h4_tracers(reader, object, owner, markers, frame);
     preview.h4.tracers.extend(named(tracers, name));

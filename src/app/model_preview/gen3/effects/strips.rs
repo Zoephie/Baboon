@@ -8,15 +8,15 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::super::common::fields::{elements, has_flag};
-use super::super::common::view::{ViewFrame, posed_on};
-use super::super::functions::FunctionValues;
-use super::super::common::named_function::tag_function_at;
-use super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part, part_frame, read_part_placement};
-use super::super::particles::{
+use super::super::super::common::fields::{elements, has_flag};
+use super::super::super::common::view::{ViewFrame, posed_on};
+use super::super::super::functions::FunctionValues;
+use super::super::super::common::named_function::tag_function_at;
+use super::super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part, part_frame, read_part_placement};
+use super::super::super::particles::{
     H3ParticleVertex, H3SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader, slerped,
 };
-use super::super::*;
+use super::super::super::*;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 use crate::app::model_preview::common::attached::attached;
@@ -1164,9 +1164,9 @@ mod tests {
     use super::*;
     use crate::app::model_preview::harness::kit::{kit_root, kit_source};
     use crate::core::game::GameId;
-    use super::super::shaders::H3Blend;
-    use super::super::pipeline::EXPOSURE as H3_EXPOSURE;
-    use super::super::super::reach::lighting::{reach_alt_exposure, reach_exposure};
+    use super::super::super::shaders::H3Blend;
+    use super::super::super::pipeline::EXPOSURE as H3_EXPOSURE;
+    use super::super::super::super::reach::lighting::{reach_alt_exposure, reach_exposure};
 
     #[test]
     fn a_beam_always_has_two_profiles_and_never_more_than_its_rows() {
@@ -1466,7 +1466,7 @@ mod tests {
 
     fn reach_kit() -> Option<TagSource> {
         let root = kit_root(GameId::HaloReach)?;
-        Some(super::super::super::particles::loose_kit(&root, GameId::HaloReach))
+        Some(super::super::super::super::particles::loose_kit(&root, GameId::HaloReach))
     }
 
     fn looks_of(source: &TagSource, path: &str, group: &str, code: &[u8; 4], blocks: &str) -> Vec<StripLook> {
@@ -1484,7 +1484,7 @@ mod tests {
             return;
         };
         let beams = looks_of(&source, "objects\\weapons\\rifle\\focus_rifle\\fx\\projectile_3p", "beam_system", b"beam", "beams");
-        use super::super::super::particles::H3ParticleAlbedo;
+        use super::super::super::super::particles::H3ParticleAlbedo;
         assert_eq!(beams[1].shader.albedo, H3ParticleAlbedo::Palette2dPlasma);
         assert_eq!(beams[2].shader.albedo, H3ParticleAlbedo::PalettePlasma);
         for plasma in &beams[1..3] {

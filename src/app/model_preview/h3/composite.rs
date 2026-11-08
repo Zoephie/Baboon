@@ -3,7 +3,7 @@
 
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::screen_effects::H3ScreenSettings;
+use super::super::gen3::effects::screen::H3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
 use crate::app::model_preview::gl::screen::screen_program;

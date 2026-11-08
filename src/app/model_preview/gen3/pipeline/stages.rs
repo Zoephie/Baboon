@@ -56,8 +56,8 @@ pub(super) struct Gen3Frame<'a> {
     accumulation: glow::NativeTexture,
     pub(super) batches: Vec<Gen3Batch>,
     bloomed: bool,
-    screen: gen3::screen_effects::H3ScreenSettings,
-    shaders: Vec<gen3::screen_effects::H3ScreenShader>,
+    screen: gen3::effects::screen::H3ScreenSettings,
+    shaders: Vec<gen3::effects::screen::H3ScreenShader>,
 }
 
 impl Gen3State {
@@ -398,7 +398,7 @@ impl Gen3State {
                 let view = ce_flare_view(&frame.camera);
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let effects = &frame.preview.gen3.screen_effects;
-                gen3::screen_effects::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
+                gen3::effects::screen::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
             };
             self.stops = game.stops(&screen);
             Some(Gen3Frame {

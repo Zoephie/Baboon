@@ -9,24 +9,24 @@ use std::sync::Arc;
 use blam_tags::{TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::super::common::fields::{elements, has_flag};
+use super::super::super::common::fields::{elements, has_flag};
 use crate::app::model_preview::common::sprites::AntennaQuad;
-use super::super::common::view::{ViewFrame, posed_on};
-use super::super::functions::FunctionValues;
-use super::super::common::named_function::tag_function_at;
-use super::super::effects::{
+use super::super::super::common::view::{ViewFrame, posed_on};
+use super::super::super::functions::FunctionValues;
+use super::super::super::common::named_function::tag_function_at;
+use super::super::super::effects::{
     EffectTimes, for_each_attached_part, part_frame, read_part_placement,
 };
-use super::super::particles::inline_real;
-use super::shaders::{H3Blend, read_h3_definition};
+use super::super::super::particles::inline_real;
+use super::super::shaders::{H3Blend, read_h3_definition};
 use crate::app::model_preview::common::image::H3Sampler;
-use super::strips::EPSILON;
-use super::super::h4::particles::{f32_to_f16, pack_argb8};
-use super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
-use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
-use super::pipeline::EXPOSURE as H3_EXPOSURE;
-use super::super::reach::lighting::reach_alt_exposure;
-use super::super::*;
+use super::super::effects::strips::EPSILON;
+use super::super::super::h4::particles::{f32_to_f16, pack_argb8};
+use super::super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
+use super::super::super::gen3::materials::{H3Bitmap, read_h3_bitmap, resolve_embedded_method};
+use super::super::pipeline::EXPOSURE as H3_EXPOSURE;
+use super::super::super::reach::lighting::reach_alt_exposure;
+use super::super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{clamped_unit, cross, length};
 use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
@@ -519,7 +519,7 @@ fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<H3Volum
         let map = base.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
         let baked = resolved
             .as_ref()
-            .and_then(|resolved| super::super::gen3::materials::read_resolved_map(reader, resolved, "base_map"));
+            .and_then(|resolved| super::super::super::gen3::materials::read_resolved_map(reader, resolved, "base_map"));
         match baked {
             Some((bitmap, sampler)) => (Some(bitmap), Some(sampler)),
             None => (Some(read_h3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?), None),
@@ -541,7 +541,7 @@ fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<H3Volum
         blend,
         sampler,
         bitmap,
-        sort_layer: super::super::particles::h3_sort_layer(shader),
+        sort_layer: super::super::super::particles::h3_sort_layer(shader),
         reach,
         circular,
         depth_fade,
@@ -1360,7 +1360,7 @@ mod tests {
     #[test]
     fn kit_halo_4_volumes_draw_through_their_material() {
         let Some(root) = kit_root(GameId::Halo4) else { return };
-        let source = super::super::super::particles::loose_kit(&root, GameId::Halo4);
+        let source = super::super::super::super::particles::loose_kit(&root, GameId::Halo4);
         let path = "objects\\vehicles\\covenant\\turrets\\plasma_turret\\fx\\tripod_light_volume";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
         let volume = read_definition(&crate::app::model_preview::load::TagReader::new(&source), elements(tag.root(), "light_volumes")[0]).expect(path);

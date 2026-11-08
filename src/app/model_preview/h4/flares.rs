@@ -12,7 +12,7 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::fields::{elements, has_flag};
-use super::super::gen3::flares::{OcclusionOffset, rotation_function};
+use super::super::gen3::effects::flares::{OcclusionOffset, rotation_function};
 use super::super::common::view::posed_on;
 use super::super::functions::FunctionValues;
 use super::super::common::image::H2Image;

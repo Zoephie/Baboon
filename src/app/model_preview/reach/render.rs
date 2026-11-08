@@ -5,7 +5,7 @@
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
-use super::super::gen3::screen_effects::H3ScreenSettings;
+use super::super::gen3::effects::screen::H3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::h3_set_cull;
 use super::lights::ReachLitLight;

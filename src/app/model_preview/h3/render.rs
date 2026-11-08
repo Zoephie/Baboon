@@ -10,7 +10,7 @@ use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::particles::particle_floats;
 use super::slot::H3Slot;
-use super::super::gen3::screen_effects::H3ScreenSettings;
+use super::super::gen3::effects::screen::H3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
 use super::bloom::H3Bloom;
 

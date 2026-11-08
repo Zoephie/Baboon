@@ -185,13 +185,13 @@ impl Gen3State {
         slot: usize,
         framebuffer: glow::NativeFramebuffer,
         size: [i32; 2],
-        screen: &gen3::screen_effects::H3ScreenSettings,
-        shaders: &[gen3::screen_effects::H3ScreenShader],
+        screen: &gen3::effects::screen::H3ScreenSettings,
+        shaders: &[gen3::effects::screen::H3ScreenShader],
     ) {
         let blur = screen.blur();
         let vision = frame.preview.h3.vision.clone().filter(|_| screen.vision() > 0.0);
         let suck = frame.preview.h3.motion_blur.zip(screen.suck());
-        if !shaders.iter().any(gen3::screen_effects::H3ScreenShader::at_frame_end)
+        if !shaders.iter().any(gen3::effects::screen::H3ScreenShader::at_frame_end)
             && blur.is_none()
             && vision.is_none()
             && suck.is_none()

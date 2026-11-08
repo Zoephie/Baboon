@@ -7,13 +7,13 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::super::common::fields::{elements, has_flag, has_flag_labelled};
-use super::super::common::view::{ViewFrame, posed_on};
-use super::super::functions::FunctionValues;
-use super::super::common::named_function::tag_function_at;
-use super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
-use super::super::*;
-use super::super::reach::lighting::REACH_SCREEN_NOISE_BITMAP;
+use super::super::super::common::fields::{elements, has_flag, has_flag_labelled};
+use super::super::super::common::view::{ViewFrame, posed_on};
+use super::super::super::functions::FunctionValues;
+use super::super::super::common::named_function::tag_function_at;
+use super::super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
+use super::super::super::*;
+use super::super::super::reach::lighting::REACH_SCREEN_NOISE_BITMAP;
 use crate::core::h2_pixel_shader::SamplerKind;
 
 /// `build_saturation_matrix`'s weights.
@@ -565,13 +565,13 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
 
 /// `rasterizer_globals`' default bitmap that Reach's final composite reads
 /// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
-pub(in crate::app::model_preview) fn read_reach_screen_noise(reader: &TagReader) -> Option<super::super::gen3::materials::H3Bitmap> {
+pub(in crate::app::model_preview) fn read_reach_screen_noise(reader: &TagReader) -> Option<super::super::super::gen3::materials::H3Bitmap> {
     let globals =
         reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let defaults = elements(globals.root(), "default bitmaps");
     let noise = defaults.get(REACH_SCREEN_NOISE_BITMAP)?;
     let path = noise.read_tag_ref_path("default bitmaps").filter(|path| !path.is_empty())?;
-    super::super::gen3::materials::read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
+    super::super::super::gen3::materials::read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
 }
 
 /// Every `shader_screen` these can draw, as materials of no batch, which gives

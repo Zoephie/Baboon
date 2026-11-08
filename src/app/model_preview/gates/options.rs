@@ -1011,7 +1011,7 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(ODST.0, ODST.1, "weapon", "attachments/change color", Old::Value(2), "secondary"),
     row(ODST.0, ODST.1, "weapon", "attachments/change color", Old::Value(3), "tertiary"),
     row(ODST.0, ODST.1, "weapon", "attachments/change color", Old::Value(4), "quaternary"),
-    // gen3::strips: Halo 3, ODST and Reach. Halo 3's and ODST's tag layouts
+    // gen3::effects::strips: Halo 3, ODST and Reach. Halo 3's and ODST's tag layouts
     // number their input variables differently from one another, so only
     // Reach's have a by-number row.
     row(H3.0, H3.1, "beam_system", "beams/appearance flags", Old::Prefix(&["double-sided"]), "double-sided"),
@@ -1058,7 +1058,7 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(REACH.0, REACH.1, "contrail_system", "contrails/emission rate/Output Modifier", Old::Value(1), "Plus"),
     row(REACH.0, REACH.1, "contrail_system", "contrails/emission rate/Output Modifier", Old::Value(2), "Times"),
     row(REACH.0, REACH.1, "contrail_system", "contrails/emission rate/Input Variable", Old::Value(7), "contrail age"),
-    // gen3::light_volumes
+    // gen3::effects::light_volumes
     row(REACH.0, REACH.1, "light_volume_system", "light_volumes/flags", Old::Prefix(&["lod enabled"]), "lod enabled"),
     row(REACH.0, REACH.1, "light_volume_system", "light_volumes/flags", Old::Prefix(&["disable precompiled profiles"]), "disable precompiled profiles"),
     row(REACH.0, REACH.1, "light_volume_system", "light_volumes/flags", Old::Prefix(&["force precompile profiles"]), "force precompile profiles"),
@@ -1075,7 +1075,7 @@ const OPTION_ROWS: &[OptionRow] = &[
     row(REACH.0, REACH.1, "light_volume_system", "light_volumes/length/Output Modifier", Old::Value(2), "Times"),
     row(H4.0, H4.1, "light_volume_system", "light_volumes/length/Output Modifier", Old::Value(1), "Plus"),
     row(H4.0, H4.1, "light_volume_system", "light_volumes/length/Output Modifier", Old::Value(2), "Times"),
-    // gen3::screen_effects
+    // gen3::effects::screen
     row(H3.0, H3.1, "area_screen_effect", "screen effects/flags", Old::Prefix(&["debug disable"]), "debug disable"),
     row(H3.0, H3.1, "area_screen_effect", "screen effects/flags", Old::Prefix(&["allow effect outside radius"]), "allow effect outside radius"),
     row(H3.0, H3.1, "area_screen_effect", "screen effects/flags", Old::Prefix(&["unattached"]), "unattached"),

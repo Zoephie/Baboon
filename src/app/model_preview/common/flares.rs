@@ -1,6 +1,6 @@
 //! What a Halo CE or Halo 2 flare hands the sprite pass: where it tests its
 //! occlusion from, and the quad it draws. Gen3's occlusion offset is its
-//! own (`gen3::flares`), with a different default.
+//! own (`gen3::effects::flares`), with a different default.
 
 use blam_tags::TagStruct;
 

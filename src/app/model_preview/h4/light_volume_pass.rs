@@ -5,7 +5,7 @@
 //! (X360 0x82B96320) and a strip of rows in order.
 
 use eframe::glow::{self, HasContext};
-use super::super::gen3::light_volumes::H4VolumeDraw;
+use super::super::gen3::effects::light_volumes::H4VolumeDraw;
 use super::effect_gl::{H4EffectCx, material_functions};
 use super::super::h4::materials::H4EffectMaterial;
 use crate::core::hlsl::parse::Type;

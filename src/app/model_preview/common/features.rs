@@ -390,15 +390,15 @@ attached_feature!(super::super::reach::lights::ReachCheapLight, moves: |at| at.a
 attached_feature!(super::super::h4::lights::H4Light, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
 attached_feature!(super::super::h4::lights::H4CheapLight, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
 attached_feature!(super::super::h4::flares::H4FlareAt, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
-attached_feature!(super::super::gen3::flares::H3FlareAt, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
-attached_feature!(super::super::gen3::light_volumes::H3LightVolumeAt, moves: |at| at.animates(), inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(super::super::gen3::effects::flares::H3FlareAt, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
+attached_feature!(super::super::gen3::effects::light_volumes::H3LightVolumeAt, moves: |at| at.animates(), inputs: |at| at.scale_names().into_iter().collect());
 // Halo 2's light volumes draw still at rest.
 attached_feature!(super::super::h2::light_volumes::H2LightVolume, moves: |_at| false, inputs: |at| vec![at.scale_name()]);
 // Simulations run on whenever there are any.
 attached_feature!(super::super::h4::tracers::H4TracerAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 attached_feature!(super::super::particles::H3ParticleSystem, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 attached_feature!(super::super::particles::cheap::ReachCheapEmitterAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
-attached_feature!(super::super::gen3::strips::H3StripAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(super::super::gen3::effects::strips::H3StripAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 attached_feature!(super::super::h2::contrails::H2ContrailAt, moves: |_at| true, inputs: |at| vec![at.scale_name()]);
 attached_feature!(super::super::h2::liquid::H2LiquidAt, moves: |_at| true, inputs: |at| vec![at.scale_name()]);
 
@@ -408,7 +408,7 @@ impl Feature for super::super::antennas::Antenna {
     }
 }
 
-impl Feature for super::super::gen3::screen_effects::H3ScreenEffectAt {
+impl Feature for super::super::gen3::effects::screen::H3ScreenEffectAt {
     fn moves(&self) -> bool {
         true
     }

@@ -13,7 +13,7 @@ use super::super::reach::render::ReachGame;
 use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
-use super::screen_effects::H3ScreenSettings;
+use super::effects::screen::H3ScreenSettings;
 use super::shaders::H3Material;
 use super::sprites::{Gen3Sprite, Gen3Sprites};
 use super::state::Gen3State;

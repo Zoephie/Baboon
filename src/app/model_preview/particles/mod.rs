@@ -21,7 +21,7 @@ use super::functions::FunctionValues;
 use super::common::named_function::tag_function_at;
 use super::effects::EffectOnsets;
 use super::effects::{EffectTimes, ObjectEffect, object_effects, part_runs_by};
-use super::gen3::strips::{H3StripAt, read_carried_strips};
+use super::gen3::effects::strips::{H3StripAt, read_carried_strips};
 use super::gen3::shaders::{H3Blend, read_h3_definition};
 use crate::app::model_preview::common::image::H3Sampler;
 use super::common::image::H2Image;

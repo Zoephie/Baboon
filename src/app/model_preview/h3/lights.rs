@@ -16,7 +16,7 @@ use super::super::functions::FunctionValues;
 
 use super::super::common::image::H2Image;
 use super::super::common::named_function::NamedFunction;
-use super::super::gen3::flares::{H3EffectScale, H3Flare, read_h3_flare};
+use super::super::gen3::effects::flares::{H3EffectScale, H3Flare, read_h3_flare};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot};

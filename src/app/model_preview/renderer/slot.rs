@@ -65,7 +65,7 @@ pub(in crate::app::model_preview) struct SlotSimulations {
     pub(in crate::app::model_preview) particles: particles::H3ParticleField,
     /// Reach's cheap particles.
     pub(in crate::app::model_preview) reach_cheap: particles::cheap::ReachCheapField,
-    pub(in crate::app::model_preview) h3_strips: gen3::strips::H3StripField,
+    pub(in crate::app::model_preview) h3_strips: gen3::effects::strips::H3StripField,
     /// When each effect began, for Halo 2's and the gen3 games' effect parts.
     pub(in crate::app::model_preview) effect_onsets: effects::EffectOnsets,
     /// Halo 2's and the gen3 games' cloth.

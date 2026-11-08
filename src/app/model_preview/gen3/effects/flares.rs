@@ -8,25 +8,25 @@ use std::sync::Arc;
 use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use crate::app::model_preview::common::marker::MarkerFrame;
-use super::super::common::fields::{elements, has_flag, object_block};
+use super::super::super::common::fields::{elements, has_flag, object_block};
 use crate::app::model_preview::common::flares::FlareSprite;
-use super::super::common::view::{ViewFrame, posed_on};
-use super::super::effects::{
+use super::super::super::common::view::{ViewFrame, posed_on};
+use super::super::super::effects::{
     EffectTimes, for_each_attached_part, marker_name, part_markers,
 };
-use super::super::functions::FunctionValues;
+use super::super::super::functions::FunctionValues;
 use blam_tags::tag_function::transition_function_evaluate;
 
-use super::super::common::image::H2Image;
-use super::super::common::named_function::tag_function_at;
-use super::pipeline::EXPOSURE;
-use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
-use super::super::*;
+use super::super::super::common::image::H2Image;
+use super::super::super::common::named_function::tag_function_at;
+use super::super::pipeline::EXPOSURE;
+use super::super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
+use super::super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
 use crate::app::model_preview::common::attached::attached;
 
-use super::super::h3::lights::{H3Light, SMALLEST};
+use super::super::super::h3::lights::{H3Light, SMALLEST};
 
 /// A `lens_flare`'s first reflection, the only one H3 draws.
 #[derive(Debug, Clone)]

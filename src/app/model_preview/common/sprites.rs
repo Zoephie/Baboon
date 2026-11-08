@@ -182,7 +182,7 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
     if !frame.preview.gen3.strips.is_empty() {
         let values = |object: u8| frame.function_values_of_object(object).cloned();
         let (systems, particles) = (&frame.preview.particles, &simulations.particles);
-        let tracks = |strip: &std::sync::Arc<gen3::strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
+        let tracks = |strip: &std::sync::Arc<gen3::effects::strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
             particles.tracks_of(systems, strip).into_iter().map(|track| (track.id, track.place)).collect()
         };
         simulations.h3_strips.advance(&frame.preview.gen3.strips, values, &mut simulations.effect_onsets, tracks, bones, frame.time);

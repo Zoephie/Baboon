@@ -16,19 +16,19 @@ pub(in crate::app::model_preview) fn read_h3_object_features(reader: &TagReader,
         .filter(|path| !path.is_empty())
         .and_then(|path| super::super::gen3::materials::read_h3_shield_settings(reader, &path));
     preview.h3.lights = super::super::h3::lights::read_h3_lights(reader, model_tag, 0, &preview.markers, frame);
-    preview.gen3.flares = super::super::gen3::flares::read_h3_flares(reader, model_tag, 0, &preview.markers, frame);
-    preview.gen3.flares.extend(super::super::gen3::flares::light_flares(&preview.h3.lights));
+    preview.gen3.flares = super::super::gen3::effects::flares::read_h3_flares(reader, model_tag, 0, &preview.markers, frame);
+    preview.gen3.flares.extend(super::super::gen3::effects::flares::light_flares(&preview.h3.lights));
     preview.gen3.light_volumes =
-        super::super::gen3::light_volumes::read_h3_light_volumes(reader, model_tag, 0, &preview.markers, frame);
+        super::super::gen3::effects::light_volumes::read_h3_light_volumes(reader, model_tag, 0, &preview.markers, frame);
     let systems = super::super::particles::read_h3_particles(reader, model_tag, 0, &preview.markers, frame);
     preview.particles = systems.into_iter().map(Arc::new).collect();
-    let strips = super::super::gen3::strips::read_h3_strips(reader, model_tag, 0, &preview.markers, frame);
+    let strips = super::super::gen3::effects::strips::read_h3_strips(reader, model_tag, 0, &preview.markers, frame);
     preview.gen3.strips = strips.into_iter().map(Arc::new).collect();
     let carried = super::super::particles::carried_strips(&preview.particles);
     preview.gen3.strips.extend(carried);
     preview.gen3.screen_effects =
-        super::super::gen3::screen_effects::read_h3_screen_effects(reader, model_tag, 0, &preview.markers, frame);
-    super::super::gen3::screen_effects::add_screen_shader_materials(preview);
+        super::super::gen3::effects::screen::read_h3_screen_effects(reader, model_tag, 0, &preview.markers, frame);
+    super::super::gen3::effects::screen::add_screen_shader_materials(preview);
     if preview.gen3.screen_effects.iter().any(|effect| effect.turns_on_vision()) {
         preview.h3.vision = super::super::h3::vision::read_h3_vision(reader, model_tag).map(Arc::new);
     }
@@ -36,7 +36,7 @@ pub(in crate::app::model_preview) fn read_h3_object_features(reader: &TagReader,
         preview.h3.motion_blur = super::super::h3::vision::read_h3_motion_blur(reader);
     }
     if preview.gen3.screen_effects.iter().any(|effect| effect.adds_noise()) {
-        preview.reach.screen_noise = super::super::gen3::screen_effects::read_reach_screen_noise(reader);
+        preview.reach.screen_noise = super::super::gen3::effects::screen::read_reach_screen_noise(reader);
     }
     preview.antennas = super::super::antennas::read_antennas(reader, model_tag, &preview.markers);
     let markers = preview.markers.clone();
