@@ -1,38 +1,41 @@
-//! What hangs on a Halo 2 object attached to another.
+//! What hangs on a Halo 2 object, its own or one attached to another.
 
 use std::sync::Arc;
 use super::super::attachment::MarkerFrame;
 use super::super::cloth::ClothGame;
 use super::super::*;
 use super::super::load::LoadCx;
-use crate::app::model_preview::common::attached::Attached;
+use crate::app::model_preview::common::attached::named;
 
-/// What hangs on a Halo 2 object brought into the preview: its flares and
-/// lights, particle systems, light volumes, contrails, liquids, cloth and
-/// extension weapons, at `markers` as `frame` places them, named `name`.
-pub(in crate::app::model_preview) fn read_h2_attached_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
+/// What hangs on a Halo 2 object, its own or one attached to another: its
+/// flares and lights, antennas (its own only), particle systems, light
+/// volumes, contrails, liquids, cloth and extension weapons, at `cx`'s markers
+/// as its frame places them. An attached object's carry its name, which its
+/// owner's panel plays its event effects by.
+pub(in crate::app::model_preview) fn read_h2_features<F: Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize)>(
     cx: &LoadCx<'_, F>,
     preview: &mut RenderModelPreview,
 ) {
     let LoadCx { source, object, owner, markers, frame, name } = *cx;
-    // Only `fold_attached` reads a Halo 2 object's attachments, always by name.
-    let name = name.unwrap_or_default();
-    let (flares, lights, gels) =
-        super::lights::read_h2_flares(source, object, owner, markers, frame);
-    preview.h2.flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
-    preview.h2.point_lights.extend(lights.into_iter().map(|light| light.on_attached(name)));
-    preview.h2.gel_lights.extend(gels.into_iter().map(|light| light.on_attached(name)));
+    let (flares, lights, gels) = super::lights::read_h2_flares(source, object, owner, markers, frame);
+    preview.h2.flares.extend(named(flares, name));
+    preview.h2.point_lights.extend(named(lights, name));
+    preview.h2.gel_lights.extend(named(gels, name));
+    // `object_attach_antennas` runs for the object itself; what it holds
+    // brings none.
+    if name.is_none() {
+        preview.antennas = super::super::antennas::read_antennas(source, object, markers);
+    }
     // Particle systems carry the held object's event effects (`firing
     // effect` and the rest), which its owner's panel plays by name.
     let particles = super::super::particles::read_h3_particles(source, object, owner, markers, frame);
-    let particles: Vec<_> = particles.into_iter().map(|system| Arc::new(system.on_attached(name))).collect();
-    preview.particles.extend(particles);
+    preview.particles.extend(named(particles, name).map(Arc::new));
     let volumes = super::light_volumes::read_h2_light_volumes(source, object, owner, markers, frame);
-    preview.h2.light_volumes.extend(volumes.into_iter().map(|volume| volume.on_attached(name)));
+    preview.h2.light_volumes.extend(named(volumes, name));
     let contrails = super::contrails::read_h2_contrails(source, object, owner, markers, frame);
-    preview.h2.contrails.extend(contrails.into_iter().map(|contrail| contrail.on_attached(name)));
+    preview.h2.contrails.extend(named(contrails, name));
     let liquids = super::liquid::read_h2_liquids(source, object, owner, markers, frame);
-    preview.h2.liquids.extend(liquids.into_iter().map(|liquid| liquid.on_attached(name)));
+    preview.h2.liquids.extend(named(liquids, name));
     super::super::cloth::read_cloth(cx, preview, ClothGame::Halo2, [0.0; 3]);
     super::super::weapons::attached::read_extension_weapons(cx, preview);
 }

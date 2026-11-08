@@ -47,7 +47,7 @@ pub(in crate::app::model_preview) fn fold_attached(
         read_h3_attached_features(&cx, preview);
         read_extension_weapons(&cx, preview);
     } else {
-        super::super::h2::attached::read_h2_attached_features(&cx, preview);
+        super::super::h2::attached::read_h2_features(&cx, preview);
     }
     // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
     if let Some(prt) = preview.h2.prt.as_mut() {
