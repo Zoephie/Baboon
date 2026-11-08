@@ -26,25 +26,13 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
     // that `attach_ce_weapon` added, as every other feature lists them.
     let held_lights = std::mem::replace(&mut preview.ce.lights, own);
     preview.ce.lights.extend(held_lights);
-    preview.ce.antennas = super::super::antennas::ce::read_ce_antennas(source, model_tag, 0, &preview.markers);
-    preview.ce.effects = super::super::ce::particles::read_ce_effects(source, model_tag, 0, &preview.markers);
-    preview.ce.contrails = super::super::ce::contrails::read_ce_contrails(source, model_tag, 0, &preview.markers);
-    preview.ce.light_volumes = super::super::ce::widgets::read_ce_light_volumes(source, model_tag, 0, &preview.markers);
-    preview.ce.lightning = super::super::ce::widgets::read_ce_lightning(source, model_tag, 0, &preview.markers);
-    preview.ce.glows = super::super::ce::widgets::read_ce_glows(source, model_tag, 0, &preview.markers);
-    preview.ce.particle_systems = super::super::ce::particle_systems::read_ce_particle_systems(source, model_tag, 0, &preview.markers);
+    // Empty until now: only the held weapon's lights come before.
+    read_ce_features(source, model_tag, 0, &preview.markers, &mut preview.ce);
     // What hangs on the held weapon, as object 1, on its markers in the hand.
     let held_tag = attached
         .and_then(|held| load_referenced_tag_from_source(source, &held.path, "weapon", b"weap").ok().map(|tag| (tag, held)));
     if let Some((weapon, held)) = &held_tag {
-        let markers = &held.markers;
-        preview.ce.antennas.extend(super::super::antennas::ce::read_ce_antennas(source, weapon, 1, markers));
-        preview.ce.effects.extend(super::super::ce::particles::read_ce_effects(source, weapon, 1, markers));
-        preview.ce.contrails.extend(super::super::ce::contrails::read_ce_contrails(source, weapon, 1, markers));
-        preview.ce.light_volumes.extend(super::super::ce::widgets::read_ce_light_volumes(source, weapon, 1, markers));
-        preview.ce.lightning.extend(super::super::ce::widgets::read_ce_lightning(source, weapon, 1, markers));
-        preview.ce.glows.extend(super::super::ce::widgets::read_ce_glows(source, weapon, 1, markers));
-        preview.ce.particle_systems.extend(super::super::ce::particle_systems::read_ce_particle_systems(source, weapon, 1, markers));
+        read_ce_features(source, weapon, 1, &held.markers, &mut preview.ce);
     }
     // What each names for its events, which the panel plays: the weapon's on
     // the weapon, as `weapon_effect_new` makes them.
@@ -62,4 +50,23 @@ pub(in crate::app::model_preview) fn read_ce_object_features(
         let flags = super::super::ce::flags::read_ce_flags(source, weapon, 1, &held.markers, preview);
         preview.ce.flags.extend(flags);
     }
+}
+
+/// What hangs on a Halo CE object, the opened one or the weapon it holds, as
+/// `owner` at `markers`: its antennas, effects, contrails, light volumes,
+/// lightning, glows and particle systems, added after what `ce` holds.
+fn read_ce_features(
+    source: &TagSource,
+    object: &TagFile,
+    owner: u8,
+    markers: &[RenderModelPreviewMarker],
+    ce: &mut super::super::ce::CeFeatures,
+) {
+    ce.antennas.extend(super::super::antennas::ce::read_ce_antennas(source, object, owner, markers));
+    ce.effects.extend(super::super::ce::particles::read_ce_effects(source, object, owner, markers));
+    ce.contrails.extend(super::super::ce::contrails::read_ce_contrails(source, object, owner, markers));
+    ce.light_volumes.extend(super::super::ce::widgets::read_ce_light_volumes(source, object, owner, markers));
+    ce.lightning.extend(super::super::ce::widgets::read_ce_lightning(source, object, owner, markers));
+    ce.glows.extend(super::super::ce::widgets::read_ce_glows(source, object, owner, markers));
+    ce.particle_systems.extend(super::super::ce::particle_systems::read_ce_particle_systems(source, object, owner, markers));
 }
