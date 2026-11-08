@@ -47,8 +47,10 @@ pub(in crate::app::model_preview) struct H4Holograms {
     framebuffer: glow::NativeFramebuffer,
     combined: glow::NativeTexture,
     combined_framebuffer: glow::NativeFramebuffer,
-    /// The screen materials' bitmaps, for the post they were uploaded from.
-    uploaded: Option<(usize, HashMap<String, glow::NativeTexture>)>,
+    /// The screen materials' bitmaps, and the post they were uploaded from.
+    /// Holding the post keeps its address from going to a later preview's,
+    /// so a new load always uploads its own.
+    uploaded: Option<(Arc<H4HologramPost>, HashMap<String, glow::NativeTexture>)>,
 }
 
 impl H4Holograms {
@@ -435,9 +437,8 @@ impl H4Game {
         size: [i32; 2],
     ) {
         unsafe {
-            let key = Arc::as_ptr(post) as usize;
             let holograms = self.surfaces.as_mut().expect("the hologram surfaces");
-            if holograms.uploaded.as_ref().is_none_or(|(known, _)| *known != key) {
+            if !uploaded_from(holograms.uploaded.as_ref().map(|(known, _)| known), post) {
                 for texture in holograms.uploaded.take().into_iter().flat_map(|(_, map)| map.into_values()) {
                     gl.delete_texture(texture);
                 }
@@ -449,7 +450,7 @@ impl H4Game {
                         }
                     }
                 }
-                holograms.uploaded = Some((key, map));
+                holograms.uploaded = Some((post.clone(), map));
             }
             let uploaded = holograms.uploaded.as_ref().map(|(_, map)| map.clone()).unwrap_or_default();
             let pass: &Arc<H3Pass> = &material.pass;
@@ -493,9 +494,24 @@ impl H4Game {
     }
 }
 
+/// Whether the uploaded bitmaps are `post`'s: the same post, not one equal to
+/// it, since another load's can differ after an edit.
+fn uploaded_from<T>(held: Option<&Arc<T>>, post: &Arc<T>) -> bool {
+    held.is_some_and(|held| Arc::ptr_eq(held, post))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_loads_post_uploads_again_but_the_same_post_does_not() {
+        let held = Arc::new(0u8);
+        assert!(uploaded_from(Some(&held), &held.clone()));
+        // A later load reads an equal post into a new allocation.
+        assert!(!uploaded_from(Some(&held), &Arc::new(0u8)));
+        assert!(!uploaded_from(None, &held));
+    }
 
     /// The sphere rides node 0 and shrinks with node 1's scale: at rest it is
     /// the offset from node 0's bind place; posed half size and moved up, the
