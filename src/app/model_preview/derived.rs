@@ -1697,6 +1697,8 @@ pub(super) fn bsp_display_name(reference: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
     use blam_tags::math::RealRgbColor;
     use blam_tags::{
         AssInstance, AssMaterial, AssObject, AssVertex, JmsMaterial, JmsNode, JmsTriangle, JmsVertex,
@@ -1706,7 +1708,7 @@ mod tests {
     /// used to come back as no overlay at all.
     #[test]
     fn an_overlay_that_will_not_load_says_why() {
-        let tags = crate::core::test_kits::h3ek_tags();
+        let Some(tags) = kit_root(GameId::Halo3) else { return };
         let rel = "objects/vehicles/warthog/warthog.model";
         if !tags.join(rel).is_file() {
             eprintln!("skipping: BLAM_TEST_H3EK has no {rel}");
@@ -1732,10 +1734,7 @@ mod tests {
     /// 32767: every surface still closes its ring of edges into triangles.
     #[test]
     fn a_collision_bsp_past_32767_edges_keeps_every_surface() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let path = std::path::Path::new(&root).join("levels/dlc/sidewinder/sidewinder.scenario_structure_bsp");
         let tag = blam_tags::TagFile::read(&path).unwrap();
         let block = tag.root().field_path("resource interface/raw_resources[0]/raw_items/collision bsp");

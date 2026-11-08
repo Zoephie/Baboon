@@ -1061,6 +1061,7 @@ pub(super) struct RawVariant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
     use blam_tags::TagFile;
     use crate::app::editor::{
         is_model_group, is_previewable_geometry_group, is_previewable_geometry_group_for_game,
@@ -1680,8 +1681,9 @@ mod tests {
 
     #[test]
     fn a_halo3_render_model_loads_on_a_worker() {
+        let Some(tags) = crate::app::model_preview::harness::kit::kit_root(GameId::Halo3) else { return };
         check(
-            &crate::core::test_kits::h3ek_tags(),
+            &tags,
             "halo3_mcc",
             "objects/weapons/rifle/assault_rifle/assault_rifle.render_model",
         );
@@ -1689,8 +1691,9 @@ mod tests {
 
     #[test]
     fn a_classic_halo2_render_model_loads_on_a_worker() {
+        let Some(tags) = crate::app::model_preview::harness::kit::kit_root(GameId::Halo2) else { return };
         check(
-            &crate::core::test_kits::h2ek_tags(),
+            &tags,
             "halo2_mcc",
             "objects/weapons/rifle/battle_rifle/battle_rifle.render_model",
         );
@@ -1713,7 +1716,7 @@ mod tests {
     /// installed as current and left for a later frame to notice.
     #[test]
     fn a_result_for_a_superseded_request_is_dropped() {
-        let tags = crate::core::test_kits::h3ek_tags();
+        let Some(tags) = kit_root(GameId::Halo3) else { return };
         let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;
@@ -1745,7 +1748,7 @@ mod tests {
     /// stays chosen by name, and the animation plays on as it was set.
     #[test]
     fn a_reload_keeps_the_variant_and_how_the_animation_plays() {
-        let tags = crate::core::test_kits::h3ek_tags();
+        let Some(tags) = kit_root(GameId::Halo3) else { return };
         let rel = "objects/vehicles/warthog/warthog.model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;
@@ -1771,7 +1774,7 @@ mod tests {
     /// variant does, so the variant still reads as chosen, not "(custom)".
     #[test]
     fn overlays_landing_keep_the_variant_chosen() {
-        let tags = crate::core::test_kits::h3ek_tags();
+        let Some(tags) = kit_root(GameId::Halo3) else { return };
         let rel = "objects/vehicles/warthog/warthog.model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;
@@ -1826,7 +1829,7 @@ mod tests {
     /// rather than failing as a whole.
     #[test]
     fn a_scenario_with_an_unloadable_bsp_previews_with_a_note() {
-        let tags = crate::core::test_kits::h3ek_tags();
+        let Some(tags) = kit_root(GameId::Halo3) else { return };
         let rel = "levels/multi/guardian/guardian.scenario";
         if !tags.join(rel).is_file() {
             eprintln!("skipping: BLAM_TEST_H3EK has no {rel}");
@@ -1863,7 +1866,7 @@ mod tests {
     /// for the geometry loaded now lands.
     #[test]
     fn a_clip_list_for_replaced_geometry_is_dropped() {
-        let tags = crate::core::test_kits::h3ek_tags();
+        let Some(tags) = kit_root(GameId::Halo3) else { return };
         let rel = "objects/vehicles/warthog/warthog.model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;
@@ -1897,7 +1900,7 @@ mod tests {
     /// parsing the bytes from before the edit, so its result must not land.
     #[test]
     fn invalidating_drops_the_load_in_flight() {
-        let tags = crate::core::test_kits::h3ek_tags();
+        let Some(tags) = kit_root(GameId::Halo3) else { return };
         let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;
@@ -1918,7 +1921,7 @@ mod tests {
     /// preview must ask again rather than wait on a request nobody will answer.
     #[test]
     fn a_result_dropped_for_a_generation_bump_is_requested_again() {
-        let tags = crate::core::test_kits::h3ek_tags();
+        let Some(tags) = kit_root(GameId::Halo3) else { return };
         let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;
@@ -2377,21 +2380,19 @@ mod tests {
 #[cfg(test)]
 pub(super) mod kit_object_tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    // `gates.rs` still reaches the helper here until it moves (plan step L1.3).
+    pub(in crate::app::model_preview) use crate::app::model_preview::harness::kit::{kit_preview, kit_preview_with};
     use crate::app::model_preview::common::attached::Attached;
-    use crate::core::format::TagNameIndex;
     use crate::core::game::GameId;
-    use crate::core::source::TagEntryLocation;
 
-    /// The preview of the kit tag at `path`, as the panel loads it.
     /// With `BLAM_TEST_H4EK`: the Warthog's antenna sways and the CTF flag
     /// hangs as cloth, through Reach's readers. Lasky names a sensor-pack
     /// antenna, but his model has no `antenna` marker for it, so he has none,
     /// nor has the Chief either.
     #[test]
     fn halo_4_objects_bring_their_antennas_and_cloth() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let warthog = kit_preview(&root, GameId::Halo4, "objects\\vehicles\\human\\storm_warthog\\storm_warthog", "vehicle", b"vehi");
         assert!(!warthog.preview.antennas.is_empty(), "{:?}", warthog.notes);
         let lasky = kit_preview(&root, GameId::Halo4, "objects\\characters\\storm_lasky\\storm_lasky", "biped", b"bipd");
@@ -2402,45 +2403,8 @@ pub(super) mod kit_object_tests {
         assert!(chief.preview.antennas.is_empty() && chief.preview.cloth.is_empty());
     }
 
-    pub(in crate::app::model_preview) fn kit_preview(
-        root: &str,
-        game: GameId,
-        path: &str,
-        extension: &str,
-        group: &[u8; 4],
-    ) -> ModelPreviewData {
-        kit_preview_with(root, game, path, extension, group, &PreviewLoadSettings::default())
-    }
-
-    fn kit_preview_with(
-        root: &str,
-        game: GameId,
-        path: &str,
-        extension: &str,
-        group: &[u8; 4],
-        settings: &PreviewLoadSettings,
-    ) -> ModelPreviewData {
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(game),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
-        let TagSource::LooseFolder { definitions_root, .. } = &source else { unreachable!() };
-        let names = TagNameIndex::load_game(definitions_root, game).unwrap();
-        let tag = load_referenced_tag_from_source(&source, path, extension, group).unwrap();
-        let key = format!("{path}.{extension}");
-        let entry = TagEntry {
-            key: key.clone(),
-            display_path: key.clone(),
-            group_tag: u32::from_be_bytes(*group),
-            group_name: Some(extension.to_owned()),
-            location: TagEntryLocation::LooseFile(std::path::Path::new(root).join(key.replace('\\', "/"))),
-        };
-        load_model_preview(&tag, &entry, &names, Some(&source), settings).unwrap()
-    }
-
     /// Whether previewing the tag at `path` comes with any change colors.
-    fn has_colors(root: &str, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> bool {
+    fn has_colors(root: &std::path::Path, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> bool {
         let data = kit_preview(root, game, path, extension, group);
         data.change_colors.iter().any(|channel| !channel.is_empty())
     }
@@ -2449,10 +2413,7 @@ pub(super) mod kit_object_tests {
     /// beside one has none.
     #[test]
     fn only_a_halo_ce_object_has_change_colors() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         let path = "characters\\cyborg\\cyborg";
         assert!(has_colors(&root, GameId::HaloCe, path, "biped", b"bipd"));
         assert!(!has_colors(&root, GameId::HaloCe, path, "gbxmodel", b"mod2"));
@@ -2461,10 +2422,7 @@ pub(super) mod kit_object_tests {
     /// With `BLAM_TEST_H2EK`: the same for a `.model`.
     #[test]
     fn only_a_halo_2_object_has_change_colors() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         let path = "objects\\characters\\brute\\brute";
         assert!(has_colors(&root, GameId::Halo2, path, "biped", b"bipd"));
         assert!(!has_colors(&root, GameId::Halo2, path, "model", b"hlmt"));
@@ -2475,10 +2433,7 @@ pub(super) mod kit_object_tests {
     /// the machine-gun turret's is its firing light.
     #[test]
     fn a_halo_3_vehicle_brings_in_its_extension_weapons_attachments() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let path = "objects\\weapons\\turret\\machinegun_turret\\machinegun_turret";
         let data = kit_preview(&root, GameId::Halo3, path, "vehicle", b"vehi");
         // The weapon's `firing` light, attached with the primary scale
@@ -2492,10 +2447,7 @@ pub(super) mod kit_object_tests {
     /// stands straight: its length takes out what gravity does along it.
     #[test]
     fn kit_reach_warthog_hangs_its_antenna_straight() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
         let path = "objects\\vehicles\\human\\warthog\\warthog";
         let data = kit_preview(&root, GameId::HaloReach, path, "vehicle", b"vehi");
         let antennas = &data.preview.antennas;
@@ -2528,10 +2480,7 @@ pub(super) mod kit_object_tests {
     /// child object, so they come in through it.
     #[test]
     fn kit_reach_scorpion_brings_its_cannons_antennas() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
         let path = "objects\\vehicles\\human\\scorpion\\scorpion";
         let data = kit_preview(&root, GameId::HaloReach, path, "vehicle", b"vehi");
         let antennas = &data.preview.antennas;
@@ -2545,10 +2494,7 @@ pub(super) mod kit_object_tests {
     /// its `trooper_radio` backpack alone, and goes with it.
     #[test]
     fn kit_reach_marine_antenna_goes_with_its_backpack() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
         let path = "objects\\characters\\marine\\marine";
         let data = kit_preview(&root, GameId::HaloReach, path, "biped", b"bipd");
         let antennas = &data.preview.antennas;
@@ -2561,10 +2507,7 @@ pub(super) mod kit_object_tests {
     /// `flag_attach` markers, down its first column.
     #[test]
     fn kit_reach_flag_hangs_from_all_ten_markers() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
         let path = "objects\\weapons\\multiplayer\\flag\\flag";
         let data = kit_preview(&root, GameId::HaloReach, path, "weapon", b"weap");
         let cloths = &data.preview.cloth;
@@ -2584,10 +2527,7 @@ pub(super) mod kit_object_tests {
     /// pins at most and an antenna at rest.
     #[test]
     fn kit_halo_3_cloth_and_antennas_stay_halo_3s() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let path = "objects\\weapons\\multiplayer\\flag\\flag";
         let data = kit_preview(&root, GameId::Halo3, path, "weapon", b"weap");
         let cloths = &data.preview.cloth;
@@ -2605,10 +2545,7 @@ pub(super) mod kit_object_tests {
     /// (`sub_515280`), as the sword's and the flak bolt's do.
     #[test]
     fn halo_2_effects_bring_their_lens_flares_and_light_volumes() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         let path = "objects\\weapons\\melee\\energy_blade\\energy_blade";
         let sword = kit_preview(&root, GameId::Halo2, path, "weapon", b"weap");
         let flares = sword.preview.h2.flares.iter().filter(|flare| flare.effect_part().is_some());
@@ -2623,10 +2560,7 @@ pub(super) mod kit_object_tests {
     /// has nothing to catch up on, so it hangs as one started at the open.
     #[test]
     fn a_flag_restarted_late_starts_settled() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         let data = kit_preview(&root, GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap");
         let flags = &data.preview.ce.flags;
         assert!(!flags.is_empty(), "the flag weapon's flag");
@@ -2640,10 +2574,7 @@ pub(super) mod kit_object_tests {
     /// every fourth frame, and holds between.
     #[test]
     fn a_flag_moves_only_on_frames_a_tick_runs() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         let data = kit_preview(&root, GameId::HaloCe, "weapons\\flag\\flag", "weapon", b"weap");
         let flags = &data.preview.ce.flags;
         let mut field = super::super::ce::flags::CeFlagField::default();
@@ -2662,10 +2593,7 @@ pub(super) mod kit_object_tests {
     /// tag: the scorpion's turret is not white, and not the hull's colors.
     #[test]
     fn a_halo_3_child_object_has_its_own_change_colors() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\scorpion\\scorpion", "vehicle", b"vehi");
         let colored = data.attached.iter().find(|attached| attached.change_colors != [[1.0; 3]; 4]);
         let colored = colored.expect("a child with change colors");
@@ -2679,10 +2607,7 @@ pub(super) mod kit_object_tests {
     /// effects read: the warthog's chaingun lights by one the hull never reads.
     #[test]
     fn an_attached_object_answers_the_names_its_effects_read() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\warthog\\warthog", "vehicle", b"vehi");
         let name = "warthog_chaingun_illumination";
         assert!(!super::super::renderer::h2_shader_inputs(&data, 0).iter().any(|read| read == name));
@@ -2702,14 +2627,11 @@ pub(super) mod kit_object_tests {
     #[test]
     fn a_model_opened_alone_brings_its_variants_children() {
         let kits = [
-            ("BLAM_TEST_H3EK", GameId::Halo3, "objects\\vehicles\\warthog\\warthog"),
-            ("BLAM_TEST_H4EK", GameId::Halo4, "objects\\vehicles\\human\\storm_warthog\\storm_warthog"),
+            (GameId::Halo3, "objects\\vehicles\\warthog\\warthog"),
+            (GameId::Halo4, "objects\\vehicles\\human\\storm_warthog\\storm_warthog"),
         ];
-        for (variable, game, path) in kits {
-            let Ok(root) = std::env::var(variable) else {
-                eprintln!("skipping: {variable} is not set");
-                continue;
-            };
+        for (game, path) in kits {
+            let Some(root) = kit_root(game) else { continue };
             let model = kit_preview(&root, game, path, "model", b"hlmt");
             let vehicle = kit_preview(&root, game, path, "vehicle", b"vehi");
             assert!(!model.attached.is_empty(), "{path}: the model's children");
@@ -2724,10 +2646,7 @@ pub(super) mod kit_object_tests {
     /// its own, rather than both answering to one selection.
     #[test]
     fn children_of_one_name_keep_their_regions_apart() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let data = kit_preview(&root, GameId::Halo3, "objects\\vehicles\\phantom\\phantom", "vehicle", b"vehi");
         let mut names: Vec<&str> = data.preview.regions.iter().map(|region| region.name.as_str()).collect();
         let count = names.len();
@@ -2742,14 +2661,11 @@ pub(super) mod kit_object_tests {
     #[test]
     fn a_lights_own_lens_flare_comes_with_it() {
         let path = "objects\\levels\\solo\\070_waste\\cov_portable_light\\cov_portable_light";
-        for (env, game) in [("BLAM_TEST_H3EK", GameId::Halo3), ("BLAM_TEST_ODSTEK", GameId::Halo3Odst)] {
-            let Ok(root) = std::env::var(env) else {
-                eprintln!("skipping: {env} is not set");
-                continue;
-            };
+        for game in [GameId::Halo3, GameId::Halo3Odst] {
+            let Some(root) = kit_root(game) else { continue };
             let data = kit_preview(&root, game, path, "device_machine", b"mach");
             let from_lights = data.preview.gen3.flares.iter().filter(|at| at.light().is_some()).count();
-            assert_eq!(from_lights, 1, "{env}: the light's flare");
+            assert_eq!(from_lights, 1, "{game:?}: the light's flare");
         }
     }
 
@@ -2757,10 +2673,7 @@ pub(super) mod kit_object_tests {
     /// every other effect does: the outskirts hog light has nothing else.
     #[test]
     fn a_halo_3_light_alone_counts_as_an_effect() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let path = "objects\\levels\\solo\\030_outskirts\\hog_light\\hog_light";
         let data = kit_preview(&root, GameId::Halo3, path, "scenery", b"scen");
         assert_eq!(data.preview.h3.lights.len(), 1);
@@ -2772,10 +2685,7 @@ pub(super) mod kit_object_tests {
     /// every part. The later games' batches carry no sort position.
     #[test]
     fn a_halo_ce_part_sorts_from_its_centroid_on_its_heaviest_node() {
-        let (Ok(ce), Ok(h3)) = (std::env::var("BLAM_TEST_HCEEK"), std::env::var("BLAM_TEST_H3EK")) else {
-            eprintln!("skipping: BLAM_TEST_HCEEK or BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let (Some(ce), Some(h3)) = (kit_root(GameId::HaloCe), kit_root(GameId::Halo3)) else { return };
         let data = kit_preview(&ce, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd");
         let preview = &data.preview;
         let mut off_the_root = 0;
@@ -2809,10 +2719,7 @@ pub(super) mod kit_object_tests {
     #[test]
     fn a_played_firing_effect_runs_once_on_the_held_weapon() {
         use super::super::ce::particles::{CeEventPlays, CeObjectInputs, CeParticleField};
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         let rifle = "weapons\\assault rifle\\assault rifle";
         let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
         let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
@@ -2861,17 +2768,14 @@ pub(super) mod kit_object_tests {
     #[test]
     fn a_preview_knows_its_game() {
         use blam_tags::game::Game;
-        let (Ok(ce), Ok(h2)) = (std::env::var("BLAM_TEST_HCEEK"), std::env::var("BLAM_TEST_H2EK")) else {
-            eprintln!("skipping: BLAM_TEST_HCEEK or BLAM_TEST_H2EK is not set");
-            return;
-        };
+        let (Some(ce), Some(h2)) = (kit_root(GameId::HaloCe), kit_root(GameId::Halo2)) else { return };
         let cyborg = kit_preview(&ce, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd");
         assert_eq!(cyborg.preview.game, Some(GameId::HaloCe));
         assert_eq!(cyborg.preview.generation, Some(Game::Halo1));
         let blade = kit_preview(&h2, GameId::Halo2, "objects\\weapons\\melee\\energy_blade\\energy_blade", "weapon", b"weap");
         assert_eq!(blade.preview.game, Some(GameId::Halo2));
         assert_eq!(blade.preview.generation, Some(Game::Halo2));
-        if let Ok(reach) = std::env::var("BLAM_TEST_HREK") {
+        if let Some(reach) = kit_root(GameId::HaloReach) {
             let spartan = kit_preview(&reach, GameId::HaloReach, "objects\\characters\\spartans\\spartans", "biped", b"bipd");
             assert_eq!(spartan.preview.game, Some(GameId::HaloReach));
             assert_eq!(spartan.preview.generation, Some(Game::Halo3));
@@ -2885,10 +2789,7 @@ pub(super) mod kit_object_tests {
     #[test]
     fn firing_the_held_rifle_lights_its_muzzle_flash() {
         use super::super::ce::firing::{CeWeaponShots, fired_input};
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         let rifle = "weapons\\assault rifle\\assault rifle";
         let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
         let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
@@ -2918,10 +2819,7 @@ pub(super) mod kit_object_tests {
     #[test]
     fn a_played_event_effect_does_not_loop() {
         use super::super::ce::particles::{CeEventPlays, CeObjectInputs, CeParticleField};
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         let rifle = "weapons\\plasma rifle\\plasma rifle";
         let settings = PreviewLoadSettings { weapon: Some(rifle.to_owned()), ..Default::default() };
         let data = kit_preview_with(&root, GameId::HaloCe, "characters\\cyborg\\cyborg", "biped", b"bipd", &settings);
@@ -2950,10 +2848,7 @@ pub(super) mod kit_object_tests {
     #[test]
     fn particle_systems_make_only_what_the_shared_array_has_room_for() {
         use super::super::ce::particle_systems::{CeParticleSystemField, MOST_SYSTEM_PARTICLES};
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         let data = kit_preview(&root, GameId::HaloCe, "scenery\\emitters\\steam jets\\steam jets", "scenery", b"scen");
         let systems = &data.preview.ce.particle_systems;
         let on = |_: u8| ([1.0; 4], [true; 4], [[1.0; 3]; 4]);

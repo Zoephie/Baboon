@@ -155,6 +155,7 @@ pub(crate) fn translate_technique(program: &Program, index: usize, pass: &str, s
 
 #[cfg(test)]
 mod tests {
+    use crate::app::model_preview::harness::kit::{kit_root, kit_source};
     use crate::core::source::TagSource;
     use super::*;
     use crate::core::game::GameId;
@@ -165,12 +166,8 @@ mod tests {
     /// waits on the effects work.
     #[test]
     fn every_kit_object_material_shader_translates() {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let folder = root.join("shaders/material_shaders/materials");
-        if !folder.is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: root.clone(),
             game: Some(GameId::Halo4),
@@ -226,16 +223,7 @@ mod tests {
     /// explicit 17) still translates, and one past the last does not.
     #[test]
     fn the_screen_space_light_techniques_translate_with_their_switches() {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
-        if !root.join("shaders/material_shaders/explicit_shaders/lighting").is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return;
-        }
-        let source = TagSource::LooseFolder {
-            root,
-            game: Some(GameId::Halo4),
-            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
-        };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         for path in ["gobo_specular", "pointphysicallycorrect"] {
             let path = format!("shaders\\material_shaders\\explicit_shaders\\lighting\\{path}");
             let program = H4ShaderSource::read(&crate::app::model_preview::load::TagReader::new(&source), &path).unwrap().program(&H4_DEFINES).unwrap();
@@ -260,12 +248,8 @@ mod tests {
     /// state from a `StructuredBuffer`.
     #[test]
     fn every_kit_effect_material_shader_translates() {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let folder = root.join("shaders/material_shaders/fx");
-        if !folder.is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: root.clone(),
             game: Some(GameId::Halo4),

@@ -642,6 +642,8 @@ void main() {{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
     use crate::core::h2_pixel_shader::{PixelShaderOptions, translate};
 
     const STAGES: [H2VertexStage; 47] = [
@@ -746,10 +748,7 @@ mod tests {
     /// With `BLAM_TEST_H2EK`: the texaccum shader links with its stage.
     #[test]
     fn the_texaccum_stage_links_with_the_kit_shader() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
             eprintln!("skipping: glslangValidator is not on PATH");
             return;
@@ -776,10 +775,7 @@ mod tests {
     /// stages, in every specular variant.
     #[test]
     fn lightmap_stages_link_with_the_kit_shaders() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
             eprintln!("skipping: glslangValidator is not on PATH");
             return;

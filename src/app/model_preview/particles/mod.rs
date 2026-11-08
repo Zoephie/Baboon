@@ -1028,9 +1028,9 @@ impl H3SpriteShader {
 /// A kit's `tags` folder as the effects tests read it, against the bundled
 /// definitions.
 #[cfg(test)]
-pub(super) fn loose_kit(root: &str, game: GameId) -> TagSource {
+pub(super) fn loose_kit(root: impl AsRef<std::path::Path>, game: GameId) -> TagSource {
     TagSource::LooseFolder {
-        root: root.into(),
+        root: root.as_ref().into(),
         game: Some(game),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     }
@@ -3695,6 +3695,8 @@ attached!(H3ParticleSystem);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::{kit_root, kit_source};
+    use crate::core::game::GameId;
 
     #[test]
     fn a_custom_shape_picks_its_point_by_radius_and_strays_by_angle() {
@@ -3974,7 +3976,7 @@ mod tests {
     }
 
     /// The first emitter of an effect's first system, from the Halo 3 kit.
-    fn kit_emitter(root: &str, path: &str) -> Arc<H3Emitter> {
+    fn kit_emitter(root: &std::path::Path, path: &str) -> Arc<H3Emitter> {
         let source = TagSource::LooseFolder {
             root: root.into(),
             game: Some(GameId::Halo3),
@@ -3991,10 +3993,7 @@ mod tests {
     /// flags, as tool's `postprocess_internal` keeps them.
     #[test]
     fn kit_emitters_update_where_tool_puts_them_and_move_as_their_flags_say() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let plain = kit_emitter(&root, "fx\\cinematics\\120lc_activation\\02\\shot_03\\halochunk_impact");
         assert_eq!(plain.update, H3ParticleUpdate::Gpu);
         assert_eq!(plain.controllers, [H3ParticleController::Physics]);
@@ -4015,10 +4014,7 @@ mod tests {
     /// no gravity) slows it, where the processor slows it first.
     #[test]
     fn a_particle_on_the_card_waits_a_frame_then_moves_before_it_accelerates() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let emitter = kit_emitter(&root, "fx\\cinematics\\120lc_activation\\02\\shot_03\\halochunk_impact");
         let particle = Particle {
             id: 1,
@@ -4056,10 +4052,7 @@ mod tests {
     /// no physics; its first frame there moves nothing.
     #[test]
     fn a_particle_at_rest_moves_to_the_card_and_drifts() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo3) else { return };
         let emitter = kit_emitter(&root, "fx\\cinematics\\100ld_confront_truth\\07\\shot_04\\tentacle_erupt");
         assert_eq!((emitter.update, emitter.card_at_rest), (H3ParticleUpdate::Cpu, true));
         let particle = Particle {
@@ -4530,19 +4523,11 @@ mod tests {
         assert_eq!(second_frame(2.5, false, false, 0.2), 3.5, "not Reach's plasma");
     }
 
-    fn reach_source(root: &str) -> TagSource {
-        loose_kit(root, GameId::HaloReach)
-    }
-
     /// With `BLAM_TEST_HREK`: Reach's particle options read by name, and its
     /// seeds handed out from the top.
     #[test]
     fn kit_reach_particles_read_their_own_options_and_seeds() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = reach_source(&root);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let plasma = read_look(&crate::app::model_preview::load::TagReader::new(&source), "fx\\particles\\plasma\\plasma_blue_medium").unwrap();
         assert!(plasma.reach && !plasma.cheap);
         assert_eq!(plasma.shader.albedo, H3ParticleAlbedo::Palette2dPlasma);
@@ -4560,11 +4545,7 @@ mod tests {
     /// axis scale, with turbulence, on the card.
     #[test]
     fn kit_reach_swarm_emits_from_a_flattened_plane_with_turbulence() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = reach_source(&root);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let path = "fx\\fx_library\\ambient\\nature\\bug_swarm\\fly_swarm";
         let effect = load_referenced_tag_from_source(&source, path, "effect", b"effe").unwrap();
         let systems = elements(effect.root(), "events").into_iter().flat_map(|event| elements(event, "particle systems"));

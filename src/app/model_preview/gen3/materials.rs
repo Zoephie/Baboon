@@ -707,21 +707,15 @@ fn h3_shield(reader: &TagReader, caches: &mut ResolveCaches) -> Option<Arc<H3Shi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     /// With `BLAM_TEST_HREK`: `color_black`, the change-color map Emile's flair
     /// names, is `a8` and samples black, so `two_change_color` leaves it
     /// untinted; `gray_50_percent`, an `a8r8g8b8`, keeps its gray.
     #[test]
     fn kit_an_a8_bitmap_samples_black_with_its_alpha() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloReach),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let first_texel = |path: &str| {
             let (image, _, _) = read_h3_bitmap(&crate::app::model_preview::load::TagReader::new(&source), path, 0, SamplerKind::Texture2D).expect(path);
             let H2Image::Flat(flat) = &*image else {

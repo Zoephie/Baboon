@@ -636,6 +636,8 @@ pub(crate) fn h3_screen_settings<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     #[test]
     fn only_odst_loses_what_is_older_than_object_falloff_and_only_on_an_object() {
@@ -808,11 +810,7 @@ mod tests {
     /// and only a pre-transparents shader stays out of the frame's end.
     #[test]
     fn kit_reach_screen_shaders_read_their_layer() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         for (path, layer) in [
             ("fx\\screen_fx\\camera_fx\\dead_static_overlay", ScreenLayer::PostUi),
             ("objects\\characters\\spartans\\fx\\night_vision\\night_vision", ScreenLayer::PreTransparents),
@@ -828,11 +826,7 @@ mod tests {
     /// by the preview's camera, and the composite's noise map reads.
     #[test]
     fn kit_reach_hides_body_damage_and_reads_its_noise_map() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let path = "objects\\characters\\spartans\\fx\\damage_feedback\\body_damage_screen_distortion";
         let tag = load_referenced_tag_from_source(&source, path, "area_screen_effect", b"sefc").expect(path);
         assert!(!elements(tag.root(), "screen effects").is_empty());

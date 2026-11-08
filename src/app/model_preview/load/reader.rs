@@ -73,6 +73,8 @@ impl TagReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     fn reader() -> TagReader {
         TagReader::new(&TagSource::LooseFolder {
@@ -94,11 +96,9 @@ mod tests {
 
     #[test]
     fn a_tag_read_twice_is_the_same_tag() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         let reader = TagReader::new(&TagSource::LooseFolder {
-            root: root.into(),
+            root,
             game: Some(crate::core::game::GameId::Halo2),
             definitions_root: crate::core::bundled::locate_definitions_root(),
         });

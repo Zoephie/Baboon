@@ -1133,6 +1133,7 @@ attached!(ReachCheapEmitterAt);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
     use crate::core::game::GameId;
 
     fn texels(width: usize, height: usize, texels: Vec<[f32; 4]>) -> CheapTexels {
@@ -1676,11 +1677,7 @@ mod tests {
     /// turbulence read.
     #[test]
     fn kit_halo_4s_type_table_matches_the_shipped_type_texture() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            eprintln!("skipping: BLAM_TEST_H4EK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::Halo4);
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let library = CheapLibrary::read(&crate::app::model_preview::load::TagReader::new(&source), "fx\\cheap_particles\\global").expect("the library");
         assert!(library.halo4());
         assert_eq!((library.types.len(), library.turbulence.len()), (152, 4));
@@ -1707,11 +1704,7 @@ mod tests {
     /// all five rows of every type agree with `globals\global_type_texture`.
     #[test]
     fn kit_the_type_table_matches_the_shipped_type_texture() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let library = CheapLibrary::read(&crate::app::model_preview::load::TagReader::new(&source), "globals\\global").expect("the library");
         assert_eq!(library.types.len(), 60);
         let tag = load_referenced_tag_from_source(&source, "globals\\global_type_texture", "bitmap", b"bitm").unwrap();
@@ -1739,11 +1732,7 @@ mod tests {
     /// they are submitted only in the first tenth of a second of its cycle.
     #[test]
     fn kit_an_electrical_fire_reads_its_postprocessed_sparks() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let path = "levels\\solo\\m52\\fx\\city_damage_fx\\building_electrical_fire";
         let object = load_referenced_tag_from_source(&source, path, "effect_scenery", b"efsc").unwrap();
         let marker = RenderModelPreviewMarker {
@@ -1783,11 +1772,7 @@ mod tests {
     /// `build_gravity_effect_vectors` makes there, not a marker of the model.
     #[test]
     fn kit_space_junk_emits_from_its_up_vector() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let path = "levels\\solo\\m45\\fx\\space_junk_huge";
         let object = load_referenced_tag_from_source(&source, path, "effect_scenery", b"efsc").unwrap();
         let marker = RenderModelPreviewMarker {

@@ -564,6 +564,7 @@ attached!(H2LightVolume);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
     use crate::app::model_preview::common::attached::Attached;
     use crate::core::game::GameId;
 
@@ -603,11 +604,7 @@ mod tests {
     /// start toward the end, as tool's solver leaves them.
     #[test]
     fn every_solved_table_climbs() {
-        let tags = crate::core::test_kits::h2ek_tags();
-        if !tags.join("globals/globals.globals").is_file() {
-            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
-            return;
-        }
+        let Some(tags) = kit_root(GameId::Halo2) else { return };
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::Halo2),

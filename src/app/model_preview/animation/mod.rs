@@ -571,6 +571,8 @@ mod tests {
     //! put it — any drift there deforms the model just by pressing play.
 
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
     use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
     use blam_tags::render_model::Node;
 
@@ -603,9 +605,7 @@ mod tests {
     /// its cockpit, bay door, caches and props.
     #[test]
     fn halo_4_pelican_variant_reads_its_muted_nodes() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let path = std::path::Path::new(&root).join("objects/vehicles/human/storm_pelican/storm_pelican.model");
         let variants = super::super::variants::read_model_variants(&blam_tags::TagFile::read(path).unwrap());
         let cockpit = variants.iter().find(|variant| variant.name == "m70_gunship_opaque_cockpit").unwrap();
@@ -1210,12 +1210,8 @@ mod tests {
     /// `model_animations` both. `BLAM_TEST_HCEEK` names the kit's `tags` folder.
     #[test]
     fn a_halo_ce_biped_plays_its_idle() {
-        let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
+        let Some(tags) = kit_root(GameId::HaloCe) else { return };
         let rel = "characters/cyborg/cyborg.biped";
-        if !tags.join(rel).is_file() {
-            eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::HaloCe),
@@ -1238,12 +1234,8 @@ mod tests {
     /// `tags` folder.
     #[test]
     fn a_halo_ce_vehicle_animates_its_gbxmodels_nodes() {
-        let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
+        let Some(tags) = kit_root(GameId::HaloCe) else { return };
         let rel = "vehicles/warthog/warthog.vehicle";
-        if !tags.join(rel).is_file() {
-            eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::HaloCe),
@@ -1275,12 +1267,8 @@ mod tests {
     /// reversing the order. `BLAM_TEST_HCEEK` names the kit's `tags` folder.
     #[test]
     fn a_halo_ce_overlay_is_applied_in_the_games_order() {
-        let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
+        let Some(tags) = kit_root(GameId::HaloCe) else { return };
         let rel = "characters/cyborg/cyborg.biped";
-        if !tags.join(rel).is_file() {
-            eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::HaloCe),
@@ -1346,12 +1334,8 @@ mod tests {
     /// `BLAM_TEST_H2EK` names a Halo 2 kit's `tags` folder.
     #[test]
     fn a_halo_2_model_plays_its_idle() {
-        let tags = crate::core::test_kits::h2ek_tags();
+        let Some(tags) = kit_root(GameId::Halo2) else { return };
         let rel = "objects/characters/masterchief/masterchief.model";
-        if !tags.join(rel).is_file() {
-            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::Halo2),
@@ -1371,12 +1355,8 @@ mod tests {
     /// everything else she plays comes from the marine's.
     #[test]
     fn a_model_lists_and_plays_what_its_graph_inherits() {
-        let tags = crate::core::test_kits::h2ek_tags();
+        let Some(tags) = kit_root(GameId::Halo2) else { return };
         let rel = "objects/characters/miranda/miranda.model";
-        if !tags.join(rel).is_file() {
-            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::Halo2),
@@ -1412,12 +1392,8 @@ mod tests {
     /// `.model` it names, and the `.model` is what holds what it draws.
     #[test]
     fn an_object_previews_through_its_model() {
-        let tags = crate::core::test_kits::h2ek_tags();
+        let Some(tags) = kit_root(GameId::Halo2) else { return };
         let rel = "objects/vehicles/pelican/pelican.vehicle";
-        if !tags.join(rel).is_file() {
-            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::Halo2),
@@ -1451,12 +1427,8 @@ mod tests {
     /// called `ultra` that no variant uses must not take its place.
     #[test]
     fn a_variant_shows_the_permutation_it_names() {
-        let tags = crate::core::test_kits::h2ek_tags();
+        let Some(tags) = kit_root(GameId::Halo2) else { return };
         let rel = "objects/characters/elite/elite.model";
-        if !tags.join(rel).is_file() {
-            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
-            return;
-        }
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::Halo2),
@@ -2219,20 +2191,14 @@ fn decode_ce_animation(
 #[cfg(test)]
 mod ce_replacement_tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     /// With `BLAM_TEST_HCEEK`: an action's clip plays over the idle, so the
     /// nodes it leaves alone stand where the idle puts them, not at bind.
     #[test]
     fn a_ce_replacement_clip_leaves_its_unanimated_nodes_to_the_idle() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloCe),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloCe) else { return };
         let path = "characters\\cyborg\\cyborg";
         let object = load_referenced_tag_from_source(&source, path, "biped", b"bipd").unwrap();
         let antr = load_object_animations(&source, &object).unwrap();

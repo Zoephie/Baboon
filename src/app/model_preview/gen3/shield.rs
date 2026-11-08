@@ -323,12 +323,7 @@ mod tests {
     }
 
     fn kit() -> Option<TagSource> {
-        let root = std::env::var("BLAM_TEST_HREK").ok()?;
-        Some(TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloReach),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        })
+        crate::app::model_preview::harness::kit::kit_source(crate::core::game::GameId::HaloReach)
     }
 
     fn model(source: &TagSource, path: &str) -> TagFile {

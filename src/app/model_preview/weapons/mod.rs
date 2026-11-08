@@ -622,6 +622,8 @@ pub(in crate::app::model_preview) fn attach_weapon(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     /// Bad node data gives no descendants rather than a hang or a panic.
     #[test]
@@ -894,14 +896,7 @@ mod tests {
     /// `any` set, which the Spartan's rifles and its grip are read from.
     #[test]
     fn a_reach_graph_reads_its_slots_from_the_any_set() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloReach),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let spartan = "objects\\characters\\spartans\\spartans";
         let graph = load_referenced_tag_from_source(&source, spartan, "model_animation_graph", b"jmad").unwrap();
         let entries = graph_entries(&graph);

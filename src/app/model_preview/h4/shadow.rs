@@ -150,6 +150,8 @@ impl H4ShadowCamera {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     #[test]
     fn bipeds_vehicles_weapons_and_crates_cast_by_default() {
@@ -217,17 +219,7 @@ mod tests {
     #[test]
     fn the_kits_chief_and_rifle_cast() {
         use crate::app::export::geometry::load_referenced_tag_from_source;
-        use crate::core::source::TagSource;
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
-        if !root.join("objects").is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return;
-        }
-        let source = TagSource::LooseFolder {
-            root,
-            game: Some(crate::core::game::GameId::Halo4),
-            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
-        };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let load = |path: &str, extension: &str, group: &[u8; 4]| {
             load_referenced_tag_from_source(&source, path, extension, group).unwrap()
         };

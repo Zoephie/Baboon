@@ -891,6 +891,8 @@ pub(in crate::app) fn resolve_h2_layer_passes<T: std::borrow::Borrow<TagFile>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     #[test]
     fn object_env_brightness_is_the_luminance_of_the_lighting() {
@@ -1048,11 +1050,7 @@ mod tests {
     /// light albedo layer, the only thing its diffuse pass has to read.
     #[test]
     fn jackal_legs_diffuse_reads_its_light_albedo() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
-        let root = std::path::PathBuf::from(root);
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         let definitions = crate::core::bundled::locate_definitions_root();
         let read = |path: &str, extension: &str, group: &[u8; 4]| {
             let file = root.join(format!("{}.{extension}", path.replace('\\', "/")));
@@ -1082,11 +1080,7 @@ mod tests {
     /// ignores the shader's input would leave the emblem on.
     #[test]
     fn a_player_emblem_is_off_without_a_player() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
-        let root = std::path::PathBuf::from(root);
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         let definitions = crate::core::bundled::locate_definitions_root();
         let read = |path: &str, extension: &str, group: &[u8; 4]| {
             let file = root.join(format!("{}.{extension}", path.replace('\\', "/")));
@@ -1113,11 +1107,7 @@ mod tests {
     /// shows through whatever is translucent over it unless the mask stops it.
     #[test]
     fn a_depth_prepass_writes_no_color() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
-        let root = std::path::PathBuf::from(root);
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         let definitions = crate::core::bundled::locate_definitions_root();
         let file = root.join("shaders/shader_passes/z_prepass/z_prepass.shader_pass");
         let pass = crate::core::source::read_tag_at_path(
@@ -1136,11 +1126,7 @@ mod tests {
     /// the function leaves a parked ghost boosting.
     #[test]
     fn an_idle_ghost_is_not_boosting() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
-        let root = std::path::PathBuf::from(root);
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         let definitions = crate::core::bundled::locate_definitions_root();
         let file = root.join("objects/vehicles/ghost/shaders/plasma_vent.shader");
         let shader = crate::core::source::read_tag_at_path(
@@ -1159,11 +1145,7 @@ mod tests {
     /// With `BLAM_TEST_H2EK`: the brute hair that drew untextured.
     #[test]
     fn brute_hair_resolves_from_the_kit() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
-        let root = std::path::PathBuf::from(root);
+        let Some(root) = kit_root(GameId::Halo2) else { return };
         let definitions = crate::core::bundled::locate_definitions_root();
         let read = |path: &str, extension: &str, group: &[u8; 4]| {
             let file = root.join(format!("{}.{extension}", path.replace('\\', "/")));

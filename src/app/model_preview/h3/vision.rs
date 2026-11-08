@@ -176,6 +176,8 @@ pub(crate) fn inverted(matrix: &[f32; 16]) -> Option<[f32; 16]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     fn vision() -> H3Vision {
         H3Vision {
@@ -197,15 +199,7 @@ mod tests {
     /// glowbug is on the player's, its lod banshee the covenant's.
     #[test]
     fn a_creature_is_classed_by_its_own_default_team() {
-        let Ok(root) = std::env::var("BLAM_TEST_ODSTEK") else {
-            eprintln!("skipping: BLAM_TEST_ODSTEK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::Halo3Odst),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::Halo3Odst) else { return };
         let class = |path: &str| {
             let tag = load_referenced_tag_from_source(&source, path, "creature", b"crea").expect(path);
             vision_class(&tag)

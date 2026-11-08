@@ -769,6 +769,8 @@ pub(in crate::app::model_preview) fn object_input(name: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     fn identity() -> Arc<TagFunction> {
         let mut function = blam_tags::tag_function::H2Function::new(FunctionType::Identity);
@@ -894,9 +896,7 @@ mod tests {
     /// With `BLAM_TEST_H4EK`: Cortana's hologram colors come from switches.
     #[test]
     fn halo_4_cortana_reads_her_function_switches() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let path = std::path::Path::new(&root).join("objects/characters/storm_cortana/storm_cortana.biped");
         let tag = TagFile::read(&path).unwrap();
         let functions = read_object_functions(&tag, None).unwrap();

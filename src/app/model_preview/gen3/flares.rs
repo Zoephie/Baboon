@@ -639,21 +639,14 @@ mod tests {
     /// `BLAM_TEST_HREK` and `BLAM_TEST_H3EK`: the kits' tags folders.
     #[test]
     fn reach_flares_read_their_curves_and_halo_3s_their_bounds() {
-        let source = |var: &str, game| {
-            let root = std::env::var(var).ok()?;
-            Some(TagSource::LooseFolder {
-                root: root.into(),
-                game: Some(game),
-                definitions_root: crate::core::bundled::locate_definitions_root(),
-            })
-        };
-        if let Some(reach) = source("BLAM_TEST_HREK", crate::core::game::GameId::HaloReach) {
+        use crate::app::model_preview::harness::kit::kit_source;
+        if let Some(reach) = kit_source(crate::core::game::GameId::HaloReach) {
             let path = "objects\\props\\human\\unsc\\light_fixture_telescoping\\fx\\wide_flare";
             let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&reach), path).unwrap();
             assert!(flare.curves.is_some());
             assert!(matches!(flare.inner, FlareInner::Fraction(_)), "{:?}", flare.inner);
         }
-        if let Some(halo3) = source("BLAM_TEST_H3EK", crate::core::game::GameId::Halo3) {
+        if let Some(halo3) = kit_source(crate::core::game::GameId::Halo3) {
             let path = "objects\\vehicles\\warthog\\fx\\running\\headlights";
             let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&halo3), path).unwrap();
             assert!(flare.curves.is_none());
@@ -670,7 +663,6 @@ mod tests {
         use crate::core::game::GameId;
         let kits = [
             (
-                "BLAM_TEST_H3EK",
                 GameId::Halo3,
                 [
                     "fx\\cinematics\\010la_jungle_intro\\01\\hatch",
@@ -679,7 +671,6 @@ mod tests {
                 ],
             ),
             (
-                "BLAM_TEST_HREK",
                 GameId::HaloReach,
                 [
                     "cinematics\\070lk_credits\\fx\\slipspace_anamorphic",
@@ -689,15 +680,9 @@ mod tests {
             ),
         ];
         let directions = [OcclusionOffset::TowardViewer, OcclusionOffset::MarkerForward, OcclusionOffset::None];
-        for (variable, game, paths) in kits {
-            let Ok(root) = std::env::var(variable) else {
-                eprintln!("skipping: {variable} is not set");
+        for (game, paths) in kits {
+            let Some(source) = crate::app::model_preview::harness::kit::kit_source(game) else {
                 continue;
-            };
-            let source = TagSource::LooseFolder {
-                root: root.into(),
-                game: Some(game),
-                definitions_root: crate::core::bundled::locate_definitions_root(),
             };
             for (path, direction) in paths.into_iter().zip(directions) {
                 let flare = read_h3_flare(&crate::app::model_preview::load::TagReader::new(&source), path).unwrap_or_else(|| panic!("{path}"));

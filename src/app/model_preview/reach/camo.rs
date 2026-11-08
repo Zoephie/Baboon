@@ -86,7 +86,8 @@ return vec4(l_camo_encoded * l_camo_encoded / {REACH_DARK_MULTIPLIER:?}, g_k_ps_
 
 #[cfg(test)]
 mod tests {
-    use crate::core::source::TagSource;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
     use super::*;
 
     #[test]
@@ -111,14 +112,7 @@ mod tests {
     /// With `BLAM_TEST_HREK`: the kit's curves read, and full camo draws.
     #[test]
     fn the_kits_camo_curves_read() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloReach),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let camo = ReachCamo::read(&crate::app::model_preview::load::TagReader::new(&source)).expect("globals' active camo");
         let full = camo.draw(1.0);
         eprintln!("NOTE full camo {full:?}, half {:?}", camo.draw(0.5));

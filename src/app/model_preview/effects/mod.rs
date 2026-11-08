@@ -917,20 +917,15 @@ mod tests {
     fn only_reach_effects_keep_their_durations() {
         use crate::app::export::geometry::load_referenced_tag_from_source;
         use crate::core::game::GameId;
-        for (env, game, path, baked) in [
-            ("BLAM_TEST_HREK", GameId::HaloReach, "objects\\equipment\\armor_lockup\\fx\\looping", false),
-            ("BLAM_TEST_H3EK", GameId::Halo3, "objects\\weapons\\support_low\\brute_shot\\fx\\detonation", true),
+        for (game, path, baked) in [
+            (GameId::HaloReach, "objects\\equipment\\armor_lockup\\fx\\looping", false),
+            (GameId::Halo3, "objects\\weapons\\support_low\\brute_shot\\fx\\detonation", true),
         ] {
-            let Ok(root) = std::env::var(env) else {
+            let Some(source) = crate::app::model_preview::harness::kit::kit_source(game) else {
                 continue;
             };
-            let source = TagSource::LooseFolder {
-                root: root.into(),
-                game: Some(game),
-                definitions_root: crate::core::bundled::locate_definitions_root(),
-            };
             let effect = load_referenced_tag_from_source(&source, path, "effect", b"effe").unwrap();
-            assert_eq!(effect.root().field("looping sounds").is_none(), baked, "{env}");
+            assert_eq!(effect.root().field("looping sounds").is_none(), baked, "{game:?}");
         }
     }
 

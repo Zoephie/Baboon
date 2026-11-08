@@ -846,19 +846,8 @@ attached!(H4FlareAt);
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn kit() -> Option<TagSource> {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
-        if !root.join("objects").is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return None;
-        }
-        Some(TagSource::LooseFolder {
-            root,
-            game: Some(crate::core::game::GameId::Halo4),
-            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
-        })
-    }
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     fn sniper_eye(source: &TagSource) -> H4FlareAt {
         let flare = read_h4_lens_flare(&crate::app::model_preview::load::TagReader::new(source), "objects\\characters\\storm_jackal\\fx\\sniper_eye")
@@ -917,7 +906,7 @@ mod tests {
     /// anamorphic bitmap, read by name from the H4 reflection layout.
     #[test]
     fn the_sniper_eye_reads_both_reflections_and_their_bitmaps() {
-        let Some(source) = kit() else { return };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let at = sniper_eye(&source);
         assert_eq!(at.flare.reflections.len(), 2);
         assert_eq!(at.flare.images.len(), 2);
@@ -930,7 +919,7 @@ mod tests {
     /// is; from behind its cone puts it out, and so does a dead Jackal.
     #[test]
     fn the_sniper_eye_shows_within_its_cone_while_alive() {
-        let Some(source) = kit() else { return };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let at = sniper_eye(&source);
         let colors = [[1.0; 3]; 4];
         let front = project([2.0, 0.0, 0.0]);
@@ -961,7 +950,7 @@ mod tests {
     /// its area in samples.
     #[test]
     fn a_simple_box_occludes_against_its_inner_share() {
-        let Some(source) = kit() else { return };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let at = sniper_eye(&source);
         assert!(at.flare.flags.simple_occlusion_box);
         let front = project([2.0, 0.0, 0.0]);
@@ -985,7 +974,7 @@ mod tests {
 
     #[test]
     fn visibility_counts_a_glimpse_as_ten_samples_and_expects_at_least_ten() {
-        let Some(source) = kit() else { return };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let at = sniper_eye(&source);
         assert_eq!(at.visibility(Some((5.0, 100.0))), 0.1);
         assert_eq!(at.visibility(Some((0.0, 100.0))), 0.0);

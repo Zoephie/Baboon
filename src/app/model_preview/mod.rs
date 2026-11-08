@@ -43,6 +43,8 @@ mod gl;
 mod renderer;
 #[cfg(test)]
 mod gates;
+#[cfg(test)]
+mod harness;
 mod variants;
 pub(in crate::app) mod effects;
 pub(in crate::app) mod weapons;

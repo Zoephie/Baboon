@@ -184,6 +184,8 @@ fn default_irradiance(normal: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     fn close(a: [f32; 3], b: [f32; 3]) -> bool {
         a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-3)
@@ -257,9 +259,7 @@ mod tests {
     /// `m80_cam_fx_global`'s, as its doc says.
     #[test]
     fn the_preview_camera_fx_is_m80s() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let path = std::path::Path::new(&root).join("environments/solo/m80_delta/m80_cam_fx_global.camera_fx_settings");
         let tag = blam_tags::TagFile::read(path).unwrap();
         let root = tag.root();

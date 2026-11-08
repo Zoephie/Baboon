@@ -1278,6 +1278,8 @@ attached!(H4TracerAt);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
     use blam_tags::tag_function::{FunctionEncoding, FunctionType, H2Function};
 
     fn function(kind: FunctionType, low: f32, high: f32) -> TagFunction {
@@ -1601,10 +1603,7 @@ mod tests {
     /// systems all read onto their materials.
     #[test]
     fn kit_halo_4_tracers_read_and_run_between_their_markers() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            eprintln!("skipping: BLAM_TEST_H4EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let source = super::super::super::particles::loose_kit(&root, crate::core::game::GameId::Halo4);
         let path = "environments\\solo\\m90_sacrifice\\fx\\beams\\parts\\beam_beamhole";
         let tag =

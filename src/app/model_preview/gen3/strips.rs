@@ -1162,6 +1162,8 @@ attached!(H3StripAt);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::{kit_root, kit_source};
+    use crate::core::game::GameId;
     use super::super::shaders::H3Blend;
     use super::super::super::renderer::{H3_EXPOSURE, reach_alt_exposure, reach_exposure};
 
@@ -1462,10 +1464,7 @@ mod tests {
     }
 
     fn reach_kit() -> Option<TagSource> {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return None;
-        };
+        let root = kit_root(GameId::HaloReach)?;
         Some(super::super::super::particles::loose_kit(&root, GameId::HaloReach))
     }
 
@@ -1505,11 +1504,7 @@ mod tests {
     /// bias and fades as they were.
     #[test]
     fn kit_halo_3_beams_keep_their_own_look() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::Halo3);
+        let Some(source) = kit_source(GameId::Halo3) else { return };
         let beams = looks_of(&source, "objects\\equipment\\autoturret\\fx\\projectile", "beam_system", b"beam", "beams");
         assert!(!beams.is_empty());
         for beam in &beams {

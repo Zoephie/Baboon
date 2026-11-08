@@ -636,6 +636,8 @@ mod tests {
     //! run against installed kits and self-skip without them.
 
     use super::*;
+    use crate::app::model_preview::harness::kit::{kit_root, kit_source};
+    use crate::core::game::GameId;
 
     /// The model's hologram and damage passes go to its own materials, never
     /// to a held weapon's.
@@ -667,7 +669,7 @@ mod tests {
     /// Halo 3 and Reach both, deliberately — they are the two games this targets,
     /// and a slot table that silently only worked for one is exactly the failure
     /// worth catching.
-    fn kit_root(env: &str, default: &str) -> Option<PathBuf> {
+    fn case_kit_root(env: &str, default: &str) -> Option<PathBuf> {
         let root = std::env::var_os(env)
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(default));
@@ -736,7 +738,7 @@ mod tests {
     fn a_shipped_character_resolves_to_real_textures_in_both_games() {
         let mut ran = 0;
         for case in CASES {
-            let Some(root) = kit_root(case.env, case.default_root) else {
+            let Some(root) = case_kit_root(case.env, case.default_root) else {
                 eprintln!(
                     "skipping: {} not present (set {})",
                     case.default_root, case.env
@@ -825,7 +827,7 @@ mod tests {
     /// present on one material is what the feature was asked for.
     #[test]
     fn masterchiefs_body_shader_carries_diffuse_detail_and_normal() {
-        let Some(root) = kit_root(CASES[0].env, CASES[0].default_root) else {
+        let Some(root) = case_kit_root(CASES[0].env, CASES[0].default_root) else {
             eprintln!("skipping: H3EK not present");
             return;
         };
@@ -889,7 +891,7 @@ mod tests {
     /// discard used to punch holes through, so he is worth keeping as a fixture.
     #[test]
     fn dervish_resolves_a_detail_normal_on_top_of_his_bump_map() {
-        let Some(root) = kit_root(CASES[1].env, CASES[1].default_root) else {
+        let Some(root) = case_kit_root(CASES[1].env, CASES[1].default_root) else {
             eprintln!("skipping: H3EK not present");
             return;
         };
@@ -918,7 +920,7 @@ mod tests {
     /// authors 16.
     #[test]
     fn detail_tiling_comes_from_the_shaders_animator() {
-        let Some(root) = kit_root(CASES[0].env, CASES[0].default_root) else {
+        let Some(root) = case_kit_root(CASES[0].env, CASES[0].default_root) else {
             eprintln!("skipping: H3EK not present");
             return;
         };
@@ -975,11 +977,7 @@ mod tests {
     /// ignored the flag fails one of them.
     #[test]
     fn halo_ce_shaders_resolve_as_the_engine_composes_them() {
-        let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
-        if !tags.join("characters/cyborg/shaders/armor.shader_model").is_file() {
-            eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
-            return;
-        }
+        let Some(tags) = kit_root(GameId::HaloCe) else { return };
         let source = loose_source(tags, "haloce_mcc");
 
         // The cyborg's armor: every map, its detail masked by the reflection
@@ -1040,15 +1038,7 @@ mod tests {
     /// in both drawing paths, and past the last one wraps.
     #[test]
     fn a_halo_ce_permutation_picks_the_image_and_wraps() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloCe),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloCe) else { return };
         let path = r"characters\grunt\shaders\grunt torso";
         let resolve = |permutation| {
             let material = RenderModelPreviewMaterial {
@@ -1087,11 +1077,7 @@ mod tests {
     /// Halo 2, against `BLAM_TEST_H2EK` (the kit's `tags`).
     #[test]
     fn halo_2_shaders_resolve_parameters_over_template_defaults() {
-        let tags = crate::core::test_kits::h2ek_tags();
-        if !tags.join("objects/characters/masterchief/shaders/masterchief.shader").is_file() {
-            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
-            return;
-        }
+        let Some(tags) = kit_root(GameId::Halo2) else { return };
         let source = loose_source(tags, "halo2_mcc");
 
         // The chief authors his maps, and his detail tiling as a `bitmap scale
@@ -1180,15 +1166,7 @@ mod tests {
     /// `+X` and `-X`, which share no edge at all.
     #[test]
     fn h2_cube_faces_join_at_their_edges() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::Halo2),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::Halo2) else { return };
         let path = "objects\\bitmaps\\reflection_maps\\vehicle_glass";
         let Some(H2Image::Cube { size, faces }) = decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Cube, 0)
         else {
@@ -1217,15 +1195,7 @@ mod tests {
     /// the global one, with its own shader's bump.
     #[test]
     fn every_h2_shader_takes_the_global_active_camo() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::Halo2),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::Halo2) else { return };
         let material = |path: &str| RenderModelPreviewMaterial {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*b"shad"),
@@ -1251,15 +1221,7 @@ mod tests {
     /// With `BLAM_TEST_H2EK`: a volume's slices all decode.
     #[test]
     fn h2_volumes_decode_every_slice() {
-        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
-            eprintln!("skipping: BLAM_TEST_H2EK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::Halo2),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::Halo2) else { return };
         let Some(H2Image::Volume { width, height, depth, rgba }) =
             decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), "rasterizer\\plasma_shield_noise", SamplerKind::Volume, 0)
         else {
@@ -1276,15 +1238,7 @@ mod tests {
     /// in, not a level's 16384 in as a volume's would.
     #[test]
     fn kit_an_arrays_layers_are_whole_chains_apart() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloReach),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let path = "globals\\global_render_texture";
         let Some(H2Image::Volume { width, height, depth, rgba }) = decode_h2_image(&crate::app::model_preview::load::TagReader::new(&source), path, SamplerKind::Volume, 0)
         else {

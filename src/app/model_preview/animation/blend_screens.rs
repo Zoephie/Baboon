@@ -598,6 +598,8 @@ fn compose(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     /// `combat:rifle:aim_still_up`'s layout: yaw 0, −55° and +73.5° by pitch
     /// ±90, ±45 and 0, and the spec's sixteen triangles.
@@ -690,9 +692,7 @@ mod tests {
     /// screens do not; the aim screen leaves out the `look` mask's nodes.
     #[test]
     fn the_spartans_rifle_idle_runs_its_aim_and_look_screens() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
         let path = std::path::Path::new(&root).join("objects/characters/spartans/spartans.model_animation_graph");
         let graph = TagFile::read(path).unwrap();
         let animation = Animation::new(&graph).unwrap();

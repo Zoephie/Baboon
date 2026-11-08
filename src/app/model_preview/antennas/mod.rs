@@ -502,6 +502,8 @@ attached!(keeps function: Antenna);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
     use crate::app::model_preview::common::math::length;
 
     fn close(a: [f32; 3], b: [f32; 3]) -> bool {
@@ -634,11 +636,7 @@ mod tests {
     /// wide, and Reach takes half a pixel off its 58 where the others take one.
     #[test]
     fn kit_reach_takes_half_a_pixel_off_an_antenna_sprite() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, crate::core::game::GameId::HaloReach);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let path = "objects\\vehicles\\human\\warthog\\bitmaps\\antenna";
         let bitmap = load_referenced_tag_from_source(&source, path, "bitmap", b"bitm").unwrap();
         let reach = antenna_sprite(&bitmap, 0, REACH_ANTENNA_TRIM).unwrap();

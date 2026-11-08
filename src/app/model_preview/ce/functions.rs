@@ -481,23 +481,16 @@ pub(in crate::app) fn read_ce_object_functions(object: &TagFile) -> Option<CeObj
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
     use crate::app::model_preview::load_referenced_tag_from_source;
-    use crate::core::source::TagSource;
 
     /// With `BLAM_TEST_HCEEK`: a function's `invert` is read by the option's
     /// name as shown, though the tag stores it as `invert#…`. Matched raw, it
     /// never read, and 17 of the kit's functions lost their inversion.
     #[test]
     fn kit_functions_read_their_invert_flag() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloCe),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloCe) else { return };
         let tag = load_referenced_tag_from_source(&source, "weapons\\plasma rifle\\plasma rifle", "weapon", b"weap")
             .unwrap();
         let functions = read_ce_object_functions(&tag).unwrap();
@@ -508,15 +501,7 @@ mod tests {
     /// With `BLAM_TEST_HCEEK`: real objects at rest, by what their tags say.
     #[test]
     fn kit_objects_rest_where_their_inputs_put_them() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloCe),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloCe) else { return };
         let biped = |path: &str| {
             let tag = load_referenced_tag_from_source(&source, path, "biped", b"bipd").unwrap();
             read_ce_object_functions(&tag).unwrap()

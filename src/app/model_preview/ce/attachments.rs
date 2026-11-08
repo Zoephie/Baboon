@@ -514,6 +514,8 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
     use crate::app::model_preview::common::math::{dot, unit_by_reciprocal};
 
     struct CeAnimationsForTest(Vec<String>);
@@ -710,15 +712,7 @@ mod tests {
     /// Warthog's gun, and the empty pair a tank's gun leaves.
     #[test]
     fn a_unit_finds_its_weapons_markers_in_its_animations() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloCe),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloCe) else { return };
         let graph = |path: &str| {
             load_referenced_tag_from_source(&source, path, "model_animations", b"antr").unwrap()
         };

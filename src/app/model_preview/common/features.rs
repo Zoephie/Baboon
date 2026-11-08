@@ -535,12 +535,12 @@ mod tests {
     /// Every object the load gate loads, by game.
     fn gate_objects() -> Vec<(String, ModelPreviewData)> {
         let mut loaded = Vec::new();
-        for (variable, game, objects) in crate::app::model_preview::gates::LOAD_SET {
-            let Ok(root) = std::env::var(variable) else {
+        for (_, game, objects) in crate::app::model_preview::gates::LOAD_SET {
+            let Some(root) = crate::app::model_preview::harness::kit::kit_root(*game) else {
                 continue;
             };
             for (path, extension, group) in *objects {
-                let data = crate::app::model_preview::load::kit_object_tests::kit_preview(&root, *game, path, extension, group);
+                let data = crate::app::model_preview::harness::kit::kit_preview(&root, *game, path, extension, group);
                 loaded.push((format!("{game:?} {path}"), data));
             }
         }

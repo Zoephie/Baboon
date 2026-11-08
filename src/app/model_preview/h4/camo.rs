@@ -89,24 +89,16 @@ impl H4Camo {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::source::TagSource;
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     /// The kit's curves at full camo (`shadow-camo-shields.md` §2.2): fully
     /// transparent, distortion 0.8914, texture strength 0.2971, the texture on
     /// and scrolling at 0.01 a second; half camo still has its lit base.
     #[test]
     fn the_kits_full_camo_reads_its_curves_straight() {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
-        if !root.join("globals").is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return;
-        }
-        let source = TagSource::LooseFolder {
-            root,
-            game: Some(crate::core::game::GameId::Halo4),
-            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
-        };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let camo = H4Camo::read(&crate::app::model_preview::load::TagReader::new(&source)).expect("globals' active camo");
         let full = camo.draw(1.0, 100.0);
         assert_eq!(full.factor[0], 1.0);

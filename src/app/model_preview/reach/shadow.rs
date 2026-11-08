@@ -199,6 +199,8 @@ pub(crate) fn hull_planes() -> [[f32; 4]; 14] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     fn inside(point: Vector) -> bool {
         hull_planes().iter().all(|plane| dot([plane[0], plane[1], plane[2]], point) <= plane[3] + 1e-4)
@@ -253,11 +255,9 @@ mod tests {
     #[test]
     fn the_kits_spartan_casts_and_its_rifle_does_not() {
         use crate::app::export::geometry::load_referenced_tag_from_source;
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
         let source = crate::core::source::TagSource::LooseFolder {
-            root: root.into(),
+            root,
             game: Some(crate::core::game::GameId::HaloReach),
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };

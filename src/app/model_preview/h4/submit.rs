@@ -332,6 +332,8 @@ pub(crate) fn hologram_rows(externs: &[[u8; 4]], pixel: &[[f32; 4]], node: [[f32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     const IDENTITY: [[f32; 4]; 3] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
 
@@ -365,9 +367,7 @@ mod tests {
     /// where the bake, at input 0, left them all one way.
     #[test]
     fn halo_4_cortanas_lights_follow_her_functions() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let root = std::path::Path::new(&root);
         let read = |path: &str| blam_tags::TagFile::read(root.join(path)).unwrap();
         let biped = read("objects/characters/storm_cortana/storm_cortana.biped");
@@ -408,9 +408,7 @@ mod tests {
     /// that does.
     #[test]
     fn halo_4_functions_with_no_input_keep_the_preview_drawing() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let root = std::path::Path::new(&root);
         let submit = |path: &str| {
             let read = |path: &str| blam_tags::TagFile::read(root.join(path)).unwrap();
@@ -453,9 +451,7 @@ mod tests {
     /// on the clock and walks its bitmap's images.
     #[test]
     fn halo_4_frame_index_walks_a_bitmaps_images() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let root = std::path::Path::new(&root);
         let read = |path: &str| blam_tags::TagFile::read(root.join(path)).unwrap();
         let material = blam_tags::material::Material::from_tag(&read(

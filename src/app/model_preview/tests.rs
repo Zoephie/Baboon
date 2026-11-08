@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
 use super::model_preview_supports_textures;
 
@@ -318,12 +319,8 @@ fn overlay_permutations_follow_the_selection_or_fall_back() {
 /// permutation name, which hid the collision layer entirely.
 #[test]
 fn halo_ce_monitor_collision_overlay_is_drawn() {
-    let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
+    let Some(tags) = kit_root(GameId::HaloCe) else { return };
     let biped = tags.join("characters/monitor/monitor.biped");
-    if !biped.is_file() {
-        eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
-        return;
-    }
     let definitions = crate::core::bundled::locate_definitions_root();
     let source = TagSource::LooseFolder {
         root: tags,

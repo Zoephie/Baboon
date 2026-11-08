@@ -5040,6 +5040,8 @@ pub(super) fn slice_bytes<T>(slice: &[T]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     /// Each game's preview goes to its family's drawing; one of no game goes
     /// to gen3 if its tag is gen3, and is drawn plainly if no tag gave it.
@@ -5216,12 +5218,9 @@ mod tests {
     /// its `trooper_radio` backpack is.
     #[test]
     fn kit_reach_antenna_shows_only_with_its_permutation() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
         let path = "objects\\characters\\marine\\marine";
-        let data = super::super::load::kit_object_tests::kit_preview(
+        let data = super::super::harness::kit::kit_preview(
             &root,
             crate::core::game::GameId::HaloReach,
             path,

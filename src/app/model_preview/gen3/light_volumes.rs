@@ -974,6 +974,7 @@ attached!(H3LightVolumeAt);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::{kit_root, kit_source};
     use crate::core::game::GameId;
 
     #[test]
@@ -1263,11 +1264,7 @@ mod tests {
     /// one reads its distances.
     #[test]
     fn kit_reach_volumes_read_circular_depth_fade_and_lod() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            eprintln!("skipping: BLAM_TEST_HREK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::HaloReach);
+        let Some(source) = kit_source(GameId::HaloReach) else { return };
         let first = |path: &str| {
             let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
             read_definition(&crate::app::model_preview::load::TagReader::new(&source), elements(tag.root(), "light_volumes")[0]).expect(path)
@@ -1286,11 +1283,7 @@ mod tests {
     /// Reach's disc, fade, lod or baked rows.
     #[test]
     fn kit_halo_3_volumes_keep_their_map() {
-        let Ok(root) = std::env::var("BLAM_TEST_H3EK") else {
-            eprintln!("skipping: BLAM_TEST_H3EK is not set");
-            return;
-        };
-        let source = super::super::super::particles::loose_kit(&root, GameId::Halo3);
+        let Some(source) = kit_source(GameId::Halo3) else { return };
         let path = "objects\\characters\\masterchief\\fx\\flashlight";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);
         let volume = read_definition(&crate::app::model_preview::load::TagReader::new(&source), elements(tag.root(), "light_volumes")[0]).expect(path);
@@ -1364,10 +1357,7 @@ mod tests {
     /// Reach's map, disc or baked rows.
     #[test]
     fn kit_halo_4_volumes_draw_through_their_material() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            eprintln!("skipping: BLAM_TEST_H4EK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let source = super::super::super::particles::loose_kit(&root, GameId::Halo4);
         let path = "objects\\vehicles\\covenant\\turrets\\plasma_turret\\fx\\tripod_light_volume";
         let tag = load_referenced_tag_from_source(&source, path, "light_volume_system", b"ltvl").expect(path);

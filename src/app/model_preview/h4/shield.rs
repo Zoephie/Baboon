@@ -140,22 +140,11 @@ pub(crate) fn h4_shield_pass(reader: &TagReader, technique: usize) -> Result<H3P
 
 #[cfg(test)]
 mod tests {
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
     use crate::core::source::TagSource;
     use crate::app::export::load_referenced_tag_from_source;
     use super::*;
-
-    fn kit() -> Option<TagSource> {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
-        if !root.join("objects").is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return None;
-        }
-        Some(TagSource::LooseFolder {
-            root,
-            game: Some(crate::core::game::GameId::Halo4),
-            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
-        })
-    }
 
     fn model(source: &TagSource, path: &str) -> TagFile {
         load_referenced_tag_from_source(source, path, "model", b"hlmt").unwrap()
@@ -167,7 +156,7 @@ mod tests {
     /// no shield.
     #[test]
     fn the_kits_bipeds_take_their_live_shield() {
-        let Some(source) = kit() else { return };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let chief = model(
             &source,
             "objects\\characters\\storm_masterchief\\storm_masterchief",

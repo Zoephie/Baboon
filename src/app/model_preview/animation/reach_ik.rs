@@ -460,6 +460,8 @@ pub(crate) fn two_bone_ik(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     fn node(name: &str, parent: i16) -> RenderModelPreviewNode {
         RenderModelPreviewNode { name: name.to_owned(), parent, ..Default::default() }
@@ -515,9 +517,7 @@ mod tests {
     /// its primary weapon, the left arm first by rank, at full weight.
     #[test]
     fn the_spartans_rifle_idle_reaches_for_its_primary_weapon() {
-        let Ok(root) = std::env::var("BLAM_TEST_HREK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloReach) else { return };
         let path = std::path::Path::new(&root).join("objects/characters/spartans/spartans.model_animation_graph");
         let graph = TagFile::read(path).unwrap();
         let animation = blam_tags::Animation::new(&graph).unwrap();

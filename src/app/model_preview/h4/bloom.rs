@@ -352,6 +352,8 @@ impl H4Bloom {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_root;
+    use crate::core::game::GameId;
 
     #[test]
     fn large_frames_scale_the_bloom_down_by_their_area() {
@@ -385,9 +387,7 @@ mod tests {
     /// hologram's is the hologram camera fx's.
     #[test]
     fn the_bloom_settings_are_their_tags() {
-        let Ok(root) = std::env::var("BLAM_TEST_H4EK") else {
-            return;
-        };
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let read = |path: &str| blam_tags::TagFile::read(std::path::Path::new(&root).join(path)).unwrap();
         let m80 = read("environments/solo/m80_delta/m80_cam_fx_global.camera_fx_settings");
         assert_eq!(H4BloomSettings::read(m80.root()), VIEW_BLOOM);

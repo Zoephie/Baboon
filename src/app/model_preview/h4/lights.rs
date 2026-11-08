@@ -710,6 +710,8 @@ attached!(H4Light, H4CheapLight);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::model_preview::harness::kit::kit_source;
+    use crate::core::game::GameId;
 
     fn lit(physical: bool, spot: bool) -> H4LitLight {
         H4LitLight {
@@ -726,19 +728,6 @@ mod tests {
             outer: 60f32.to_radians(),
             inner: 30f32.to_radians(),
         }
-    }
-
-    fn kit() -> Option<TagSource> {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
-        if !root.join("objects").is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return None;
-        }
-        Some(TagSource::LooseFolder {
-            root,
-            game: Some(crate::core::game::GameId::Halo4),
-            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
-        })
     }
 
     fn attached(tag: H4LightTag) -> H4Light {
@@ -764,7 +753,7 @@ mod tests {
     /// The Marines' monocle light, colour 0 in the kit, never draws.
     #[test]
     fn the_forge_light_draws_and_the_monocle_light_does_not() {
-        let Some(source) = kit() else { return };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let forge = read_light_tag(
             &crate::app::model_preview::load::TagReader::new(&source),
             "objects\\levels\\forge\\ff_light_white\\ff_light_white",
@@ -804,7 +793,7 @@ mod tests {
     /// the way out.
     #[test]
     fn the_jackal_eye_light_runs_on_its_scale() {
-        let Some(source) = kit() else { return };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let light = H4CheapLight {
             scale_by: "alive".to_owned(),
             ..read_cheap_light(&crate::app::model_preview::load::TagReader::new(&source), "objects\\characters\\storm_jackal\\fx\\sniper_eye")

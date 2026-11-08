@@ -577,7 +577,8 @@ pub(crate) fn custom_vert_registers(sets: &[[[f32; 2]; 4]; 5]) -> [[f32; 4]; 10]
 
 #[cfg(test)]
 mod tests {
-    use crate::core::source::TagSource;
+    use crate::app::model_preview::harness::kit::{kit_root, kit_source};
+    use crate::core::game::GameId;
     use crate::app::export::load_referenced_tag_from_source;
     use super::*;
 
@@ -676,11 +677,7 @@ mod tests {
     /// compression constants) gives back each strip vertex.
     #[test]
     fn the_rifle_casing_unpacks_to_its_strip() {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
-        if !root.join("objects").is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return;
-        }
+        let Some(root) = kit_root(GameId::Halo4) else { return };
         let path = root.join("fx/reach/particles/models/weapons/bullet_casings/sniper_rifle/sniper_rifle.particle_model");
         let strip = blam_tags::particle_model_strip(&blam_tags::TagFile::read(&path).unwrap()).unwrap();
         let model = H4ParticleModel::of(&strip).unwrap();
@@ -728,16 +725,7 @@ mod tests {
 
     #[test]
     fn the_equipment_icon_reads_its_draw() {
-        let root = std::path::PathBuf::from(crate::core::test_kits::tag_path("halo4_mcc", ""));
-        if !root.join("objects").is_dir() {
-            eprintln!("skipped: set BLAM_TEST_H4EK to a Halo 4 kit's tags folder");
-            return;
-        }
-        let source = TagSource::LooseFolder {
-            root,
-            game: Some(crate::core::game::GameId::Halo4),
-            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
-        };
+        let Some(source) = kit_source(GameId::Halo4) else { return };
         let tag = load_referenced_tag_from_source(
             &source,
             "objects\\equipment\\sprint\\fx\\particles\\equipment_icon",

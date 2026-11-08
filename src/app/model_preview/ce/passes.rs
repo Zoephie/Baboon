@@ -1927,6 +1927,8 @@ pub(in crate::app::model_preview) fn ce_model_passes(
 
 #[cfg(test)]
 mod tests {
+    use crate::app::model_preview::harness::kit::{kit_root, kit_source};
+    use crate::core::game::GameId;
     use crate::app::export::load_referenced_tag_from_source;
     use super::*;
 
@@ -1941,16 +1943,13 @@ mod tests {
     /// with its stage.
     #[test]
     fn every_model_shader_links_with_its_stage() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
             eprintln!("skipping: glslangValidator is not on PATH");
             return;
         }
         let source = TagSource::LooseFolder {
-            root: root.into(),
+            root,
             game: Some(crate::core::game::GameId::HaloCe),
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
@@ -1984,16 +1983,13 @@ mod tests {
     /// With `BLAM_TEST_HCEEK`: the kit's camouflage reads and links.
     #[test]
     fn active_camo_links_with_its_stage() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
             eprintln!("skipping: glslangValidator is not on PATH");
             return;
         }
         let source = TagSource::LooseFolder {
-            root: root.into(),
+            root,
             game: Some(crate::core::game::GameId::HaloCe),
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
@@ -2018,15 +2014,12 @@ mod tests {
     /// and links with its stage.
     #[test]
     fn every_transparent_shader_links_with_its_stage() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
+        let Some(root) = kit_root(GameId::HaloCe) else { return };
         if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
             eprintln!("skipping: glslangValidator is not on PATH");
             return;
         }
-        let tags = std::path::PathBuf::from(root);
+        let tags = root;
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(crate::core::game::GameId::HaloCe),
@@ -2146,15 +2139,7 @@ mod tests {
     /// behind them stay open and its output shuts them.
     #[test]
     fn an_eye_shader_reads_its_blink_from_an_object_function() {
-        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
-            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
-            return;
-        };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::HaloCe),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
+        let Some(source) = kit_source(GameId::HaloCe) else { return };
         let tag = load_referenced_tag_from_source(
             &source,
             "characters\\marine\\shaders\\eyes_charles",
