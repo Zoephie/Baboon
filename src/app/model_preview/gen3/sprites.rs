@@ -39,6 +39,15 @@ impl Gen3State {
         slot: usize,
         stage: SpriteStage,
     ) {
+        // A run with nothing farther than its limit sets nothing up and hands
+        // nothing back. Only once the frame's queue is built, so the call that
+        // builds it (the frame's first) still steps the simulations, syncs the
+        // maps and sorts, as before.
+        if let SpriteStage::FartherThan(limit) = stage
+            && self.sprite_queue.as_ref().is_some_and(|queue| !queue.has_farther_than(limit))
+        {
+            return;
+        }
         unsafe {
             let Some(h3) = core.begin_sprites(gl, frame, slot) else {
                 return;
@@ -133,6 +142,13 @@ pub(in crate::app::model_preview) struct SpriteQueue {
 }
 
 impl SpriteQueue {
+    /// Whether the next sprite not yet drawn is at least `limit` away, as
+    /// [`next_farther_than`](Self::next_farther_than) would draw it.
+    fn has_farther_than(&self, limit: f32) -> bool {
+        // Not nearer, which an incomparable distance is not either.
+        self.sorted.get(self.next).is_some_and(|&(distance, _)| distance.partial_cmp(&limit) != Some(std::cmp::Ordering::Less))
+    }
+
     /// The next sprite not yet drawn, if it is at least `limit` away.
     fn next_farther_than(&mut self, limit: f32) -> Option<SortedSprite> {
         let &(distance, sprite) = self.sorted.get(self.next)?;
@@ -537,5 +553,23 @@ mod tests {
             assert_eq!(now, before, "{stage:?}");
         }
         assert_eq!(queue.next, sorted.len(), "every sprite drew once");
+    }
+
+    #[test]
+    fn a_run_is_empty_exactly_when_the_queue_would_draw_nothing() {
+        let sorted = vec![
+            (9.0, SortedSprite::Volume(0)),
+            (f32::NAN, SortedSprite::Tracer(0)),
+            (3.0, SortedSprite::Leaves(0)),
+        ];
+        let limits = [10.0, 9.0, 5.0, f32::NAN, 3.0, 2.0, f32::NEG_INFINITY, f32::INFINITY];
+        for start in 0..=sorted.len() {
+            for limit in limits {
+                let queue = SpriteQueue { sorted: sorted.clone(), next: start, distortions: Vec::new() };
+                let mut drawing = SpriteQueue { sorted: sorted.clone(), next: start, distortions: Vec::new() };
+                let draws = drawing.next_farther_than(limit).is_some();
+                assert_eq!(queue.has_farther_than(limit), draws, "from {start} with limit {limit}");
+            }
+        }
     }
 }
