@@ -1005,6 +1005,40 @@ pub(super) struct CeObjectState {
     pub(in crate::app::model_preview) change_colors: [[f32; 3]; 4],
 }
 
+/// Where the names the panel's sliders offer come from, after the Halo 2
+/// passes' own and before the shield's gate, in the order the panel lists them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::app::model_preview) enum SliderSource {
+    /// The preview feature at this path.
+    Feature(&'static str),
+    /// The gen3 and Halo 4 materials' animated parameters and submit inputs,
+    /// a hologram's screen materials' with them.
+    Gen3Materials,
+}
+
+pub(in crate::app::model_preview) const SLIDER_SOURCES: [SliderSource; 20] = [
+    SliderSource::Feature("h2.flares"),
+    SliderSource::Gen3Materials,
+    SliderSource::Feature("h3.lights"),
+    SliderSource::Feature("reach.lights"),
+    SliderSource::Feature("reach.cheap_lights"),
+    SliderSource::Feature("h4.lights"),
+    SliderSource::Feature("h4.cheap_lights"),
+    SliderSource::Feature("h4.flares"),
+    SliderSource::Feature("gen3.flares"),
+    SliderSource::Feature("gen3.light_volumes"),
+    SliderSource::Feature("h4.tracers"),
+    SliderSource::Feature("particles"),
+    SliderSource::Feature("gen3.strips"),
+    SliderSource::Feature("gen3.cheap_emitters"),
+    SliderSource::Feature("gen3.screen_effects"),
+    SliderSource::Feature("h2.point_lights"),
+    SliderSource::Feature("h2.gel_lights"),
+    SliderSource::Feature("h2.light_volumes"),
+    SliderSource::Feature("h2.contrails"),
+    SliderSource::Feature("h2.liquids"),
+];
+
 /// The names the shaders, lights and effects of `object` read, besides what
 /// its functions import: 0 for the opened object, or an attached one's owner.
 pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<String> {
@@ -1019,61 +1053,29 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData, object: u8) -> Vec<Strin
         .map(|(_, texture)| texture)
         .collect();
     let passes = owned.iter().flat_map(|texture| texture.h2_layers.iter().flatten());
-    let flares = data.preview.h2.flares.iter().filter(|at| at.object == object).map(|at| at.scale_name());
-    let lights = data.preview.h2.point_lights.iter().filter(|light| light.object == object);
-    let h3_lights = data.preview.h3.lights.iter().filter(|light| light.object == object);
-    let reach_lights = data.preview.reach.lights.iter().filter(|light| light.object == object);
-    let reach_cheap = data.preview.reach.cheap_lights.iter().filter(|light| light.object == object);
-    let h4_lights = data.preview.h4.lights.iter().filter(|light| light.object == object);
-    let h4_cheap = data.preview.h4.cheap_lights.iter().filter(|light| light.object == object);
-    let h4_flares = data.preview.h4.flares.iter().filter(|at| at.object == object);
-    let h3_flares = data.preview.gen3.flares.iter().filter(|at| at.object == object);
-    let h3_volumes = data.preview.gen3.light_volumes.iter().filter(|at| at.object == object);
-    let h4_tracers = data.preview.h4.tracers.iter().filter(|at| at.object == object);
-    let h3_systems = data.preview.particles.iter().filter(|at| at.object == object);
-    let h3_strips = data.preview.gen3.strips.iter().filter(|at| at.object == object);
-    let reach_emitters = data.preview.gen3.cheap_emitters.iter().filter(|at| at.object == object);
-    let h3_screens = data.preview.gen3.screen_effects.iter().filter(|at| at.object == object);
-    let gels = data.preview.h2.gel_lights.iter().filter(|light| light.object == object);
-    let h2_volumes = data.preview.h2.light_volumes.iter().filter(|at| at.object == object).map(|at| at.scale_name());
-    let h2_contrails = data.preview.h2.contrails.iter().filter(|at| at.object == object).map(|at| at.scale_name());
-    let h2_liquids = data.preview.h2.liquids.iter().filter(|at| at.object == object).map(|at| at.scale_name());
     let h3 = owned.iter().filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
     let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
     let h4 = owned.iter().filter_map(|texture| texture.h3.as_ref()).filter_map(|material| material.h4());
     // A hologram's screen materials read its object's functions too.
     let post = h4.clone().filter_map(|submit| submit.post());
     let post = post.flat_map(|post| post.combine.submit.inputs().chain(post.composite.submit.inputs()));
-    let h3 = h3.chain(h4.flat_map(|submit| submit.inputs())).chain(post);
-    let flares = flares
-        .chain(h3)
-        .chain(h3_lights.flat_map(|light| light.inputs()))
-        .chain(reach_lights.flat_map(|light| light.inputs()))
-        .chain(reach_cheap.flat_map(|light| light.inputs()))
-        .chain(h4_lights.flat_map(|light| light.inputs()))
-        .chain(h4_cheap.flat_map(|light| light.inputs()))
-        .chain(h4_flares.flat_map(|at| at.inputs()))
-        .chain(h3_flares.map(|at| at.scale_name()))
-        .chain(h3_volumes.flat_map(|at| at.scale_names()))
-        .chain(h4_tracers.flat_map(|at| at.scale_names()))
-        .chain(h3_systems.flat_map(|at| at.scale_names()))
-        .chain(h3_strips.flat_map(|at| at.scale_names()))
-        .chain(reach_emitters.flat_map(|at| at.scale_names()))
-        .chain(h3_screens.clone().map(|at| at.scale_name()))
-        .chain(h3_screens.flat_map(|at| at.object_inputs()))
-        .chain(lights.map(|light| light.scale_name()))
-        .chain(gels.map(|light| light.scale_name()))
-        .chain(h2_volumes)
-        .chain(h2_contrails)
-        .chain(h2_liquids)
-        .filter(|name| !name.is_empty());
+    let materials: Vec<&str> =
+        h3.chain(h4.flat_map(|submit| submit.inputs())).chain(post).filter(|name| !name.is_empty()).collect();
+    let mut sourced: Vec<String> = Vec::new();
+    for source in SLIDER_SOURCES {
+        match source {
+            SliderSource::Feature(path) => sourced.extend(data.preview.feature_inputs(path, object)),
+            SliderSource::Gen3Materials => sourced.extend(materials.iter().map(|name| (*name).to_owned())),
+        }
+    }
     // `sub_6C18F0` gates the shield overlay on this itself.
     let h3_shield = owned.iter().filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
     let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(H2Layer::ShieldDamaged));
     let reach_shield = object == 0 && (data.preview.reach.shield.is_some() || data.preview.h4.shield.is_some());
     let gate = (shield || h3_shield || reach_shield).then_some("current_shield_damage");
     let gate = gate.into_iter().chain(h3_shield.then_some(gen3::pipeline::H3_OVERSHIELD));
-    for name in passes.flat_map(|pass| pass.function_inputs()).chain(flares).chain(gate) {
+    let sourced = sourced.iter().map(String::as_str);
+    for name in passes.flat_map(|pass| pass.function_inputs()).chain(sourced).chain(gate) {
         if !names.iter().any(|known| known == name) {
             names.push(name.to_owned());
         }
