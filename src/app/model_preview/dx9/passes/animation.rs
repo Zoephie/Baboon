@@ -2,6 +2,25 @@
 
 use super::*;
 
+/// What a game's own shader animates on a pass past the template's
+/// animations, evaluated at draw: Halo CE's rows and constants.
+pub(crate) trait PassAnimation: std::fmt::Debug + Send + Sync {
+    /// Whether it looks different from one moment to the next.
+    fn moves(&self) -> bool;
+    /// Whether it moves by itself while `outputs` hold.
+    fn moves_with(&self, outputs: &[f32; 4]) -> bool;
+    /// Which of the object's outputs it reads.
+    fn outputs_read(&self) -> [bool; 4];
+    /// Whether anything here follows an object output.
+    fn reads_outputs(&self) -> bool;
+    /// The texture rows, reworked for `time` and `outputs`.
+    fn apply_rows(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]);
+    /// The value constant `register` holds, if it animates it.
+    fn constant(&self, register: u32, value: &mut [f32; 4], time: f32, change_colors: &[[f32; 3]; 4], outputs: &[f32; 4]);
+    /// The constant that holds the way back along the view.
+    fn eye_register(&self) -> Option<u32>;
+}
+
 /// What one of a shader parameter's `animation properties` drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum H2AnimationKind {

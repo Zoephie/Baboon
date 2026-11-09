@@ -16,6 +16,7 @@ use super::super::dx9::passes::{
     H2_GLSL_VERSION,
 };
 use super::super::common::image::H2Image;
+use super::super::dx9::passes::{CeNumeric, PassAnimation};
 use super::super::common::fields::{argb, has_flag, has_flag_in_any};
 use super::super::dx9::stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};

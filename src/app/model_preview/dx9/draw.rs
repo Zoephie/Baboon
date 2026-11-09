@@ -40,7 +40,7 @@ pub(in crate::app::model_preview) struct Dx9Gl {
     /// The style of the self shadow drawn last, which its passes and a later
     /// apply bind the light from.
     pub(in crate::app::model_preview) shadow: Option<ShadowStyle>,
-    pub(in crate::app::model_preview) ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
+    pub(in crate::app::model_preview) ce_points_now: Option<Vec<[[f32; 4]; super::stage::CE_POINT_LIGHT_ROWS]>>,
 }
 
 impl Dx9Gl {
@@ -718,7 +718,7 @@ impl RenderCore {
                         &change_colors,
                         &outputs,
                     );
-                    if animation.eye_register == Some(*register) {
+                    if animation.eye_register() == Some(*register) {
                         let [x, y, z] =
                             unrotate_view_vector(frame.camera.yaw, frame.camera.pitch, [0.0, -1.0, 0.0]);
                         value = [x, y, z, 1.0];

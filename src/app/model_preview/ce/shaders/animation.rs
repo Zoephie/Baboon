@@ -132,45 +132,6 @@ pub(crate) struct CeModelAnimation {
     pub(super) plasma: Option<CePlasma>,
 }
 
-/// A `numeric` shader: its first map holds digits, and which one draws comes
-/// from an object output, as `rasterizer_dx9_transparent_chicago_draw` has it.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CeNumeric {
-    /// The first map, whose images are the digits.
-    pub(in crate::app::model_preview) map: String,
-    /// How many digits it holds, the base of the count.
-    pub(in crate::app::model_preview) count: usize,
-    /// `numeric counter limit`.
-    pub(in crate::app::model_preview) limit: i32,
-    /// The digit of this pass.
-    pub(in crate::app::model_preview) digit: usize,
-    /// The material's permutation: which place of the number it shows.
-    pub(in crate::app::model_preview) place: usize,
-    /// `numeric countdown timer`: it reads a clock only scripts set, not the
-    /// object. A preview has no script, so that stays at its zero.
-    pub(in crate::app::model_preview) timer: bool,
-}
-
-impl CeNumeric {
-    fn number(&self, outputs: &[f32; 4]) -> i32 {
-        // Eight images mean a different output from the usual ten.
-        let output = outputs[if self.count == 8 { 3 } else { 0 }];
-        ((output * self.limit as f32 + 0.5).floor() as i32).clamp(0, self.limit)
-    }
-
-    pub(crate) fn shows(&self, outputs: &[f32; 4]) -> bool {
-        if self.timer {
-            return self.digit == 0;
-        }
-        let base = self.count.max(1) as i32;
-        let mut number = self.number(outputs);
-        for _ in 0..self.place {
-            number /= base;
-        }
-        (number % base) as usize == self.digit
-    }
-}
-
 /// One of plasma's two noise lookups.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct CePlasmaNoise {
@@ -269,20 +230,20 @@ impl CeMeter {
     }
 }
 
-impl CeModelAnimation {
-    pub(crate) fn moves(&self) -> bool {
+impl PassAnimation for CeModelAnimation {
+    fn moves(&self) -> bool {
         self.maps.iter().any(|map| map.moves(&[0.0; 4]))
             || self.colors.iter().any(CeColorAnimation::moves)
     }
 
     /// Whether it moves by itself while `outputs` hold: plasma's noise always
     /// runs, but there is nothing to see of it at no intensity.
-    pub(crate) fn moves_with(&self, outputs: &[f32; 4]) -> bool {
+    fn moves_with(&self, outputs: &[f32; 4]) -> bool {
         self.plasma.as_ref().is_some_and(|plasma| plasma.intensity(outputs) > 0.0)
     }
 
     /// Which of the object's outputs this reads.
-    pub(crate) fn outputs_read(&self) -> [bool; 4] {
+    fn outputs_read(&self) -> [bool; 4] {
         let mut read = [false; 4];
         let sources = self
             .maps
@@ -297,7 +258,7 @@ impl CeModelAnimation {
     }
 
     /// Whether anything here follows an object output.
-    pub(crate) fn reads_outputs(&self) -> bool {
+    fn reads_outputs(&self) -> bool {
         self.fade_source.is_some()
             || self.meter.is_some()
             || self.plasma.is_some()
@@ -305,7 +266,7 @@ impl CeModelAnimation {
             || self.colors.iter().any(|color| color.follows_output)
     }
 
-    pub(crate) fn apply_rows(
+    fn apply_rows(
         &self,
         rows: &mut [[f32; 4]; H2_TEXTURE_ROWS],
         time: f32,
@@ -321,7 +282,7 @@ impl CeModelAnimation {
     }
 
     /// The color `register` holds, if it is one of these.
-    pub(crate) fn constant(
+    fn constant(
         &self,
         register: u32,
         value: &mut [f32; 4],
@@ -337,6 +298,10 @@ impl CeModelAnimation {
         {
             *value = *constant;
         }
+    }
+
+    fn eye_register(&self) -> Option<u32> {
+        self.eye_register
     }
 }
 

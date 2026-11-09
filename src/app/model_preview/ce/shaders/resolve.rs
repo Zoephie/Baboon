@@ -2,10 +2,10 @@
 
 use super::super::super::*;
 use super::super::super::ce::shaders::{
-    CeNumeric, ce_camo_pass, ce_model_passes, ce_transparent_passes,
+    ce_camo_pass, ce_model_passes, ce_transparent_passes,
     read_ce_camo_settings,
 };
-use super::super::super::dx9::passes::{
+use super::super::super::dx9::passes::{CeNumeric, 
     H2DrawPass, H2Layer,
 };
 use crate::core::h2_pixel_shader::SamplerKind;

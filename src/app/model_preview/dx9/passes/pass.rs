@@ -185,7 +185,7 @@ pub(crate) struct H2DrawPass {
     pub(in crate::app::model_preview) animated_tint_facing: Vec<H2AnimatedTint>,
     pub(in crate::app::model_preview) animated_tint_glancing: Vec<H2AnimatedTint>,
     /// Halo CE reworks its rows and a constant by its own functions.
-    pub(crate) ce_animation: Option<std::sync::Arc<CeModelAnimation>>,
+    pub(crate) ce_animation: Option<std::sync::Arc<dyn PassAnimation>>,
 }
 
 impl H2DrawPass {

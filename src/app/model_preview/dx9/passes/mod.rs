@@ -13,7 +13,6 @@ use blam_tags::tag_function::FunctionType;
 use super::super::functions::FunctionValues;
 
 use super::super::h2::prt::H2PrtLight;
-use super::super::ce::shaders::{CeModelAnimation, CeNumeric};
 use super::stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::super::common::image::H2Image;
 use crate::core::h2_pixel_shader::{
@@ -30,6 +29,8 @@ mod pass;
 pub(in crate::app::model_preview) use pass::*;
 mod animation;
 pub(in crate::app::model_preview) use animation::*;
+mod numeric;
+pub(in crate::app::model_preview) use numeric::*;
 mod globals;
 pub(in crate::app::model_preview) use globals::*;
 mod change_colors;

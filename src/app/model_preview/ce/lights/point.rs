@@ -2,9 +2,7 @@
 
 use super::*;
 
-/// Point lights a model takes: position and inverse radius squared, direction
-/// and spot A, color and spot B, for each of two.
-pub(crate) const CE_POINT_LIGHT_ROWS: usize = 6;
+pub(crate) use super::super::super::dx9::stage::CE_POINT_LIGHT_ROWS;
 
 /// `lights_prepare_for_object_dynamic` for one object: the two lights strongest
 /// at `center`, within `reach` of their radius.

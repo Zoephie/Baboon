@@ -179,3 +179,29 @@ fn ce_colors_blend_the_short_way_round_the_hue() {
     let back = hsv_to_rgb(rgb_to_hsv(color));
     assert!(color.iter().zip(back).all(|(a, b)| (a - b).abs() < 1e-5), "{back:?}");
 }
+
+/// The dx9 pipeline is neutral: Halo CE's shaders hook into it through
+/// `PassAnimation`, and only its game table (`render.rs`) names Halo CE.
+#[test]
+fn only_the_dx9_game_table_names_halo_ce() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/model_preview/dx9");
+    let mut files = vec![root.clone()];
+    let mut naming = Vec::new();
+    while let Some(path) = files.pop() {
+        if path.is_dir() {
+            files.extend(std::fs::read_dir(&path).unwrap().map(|entry| entry.unwrap().path()));
+            continue;
+        }
+        if path.extension().is_none_or(|extension| extension != "rs") || path == root.join("render.rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).unwrap();
+        for (number, line) in source.lines().enumerate() {
+            // Spelled apart, so this test's own source is not a match.
+            if [concat!("super::", "ce::"), concat!("model_preview::", "ce::")].iter().any(|path| line.contains(path)) {
+                naming.push(format!("{}:{}", path.display(), number + 1));
+            }
+        }
+    }
+    assert!(naming.is_empty(), "dx9 names Halo CE at {naming:?}");
+}

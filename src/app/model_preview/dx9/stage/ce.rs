@@ -1,5 +1,8 @@
 //! The GLSL Halo CE's transparent stages draw with.
 
+/// Point lights a model takes: position and inverse radius squared, direction
+/// and spot A, color and spot B, for each of two.
+pub(crate) const CE_POINT_LIGHT_ROWS: usize = 6;
 
 /// The first map's cube coordinate, from `cube` and the map's transform, and
 /// everything else as `CE_TRANSPARENT` has it.

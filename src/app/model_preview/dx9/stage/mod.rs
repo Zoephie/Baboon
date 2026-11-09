@@ -6,7 +6,6 @@
 //! transforms. The preview has no fog, and the pixel shaders scale the scene
 //! by `color1.a`, so `color1` is left at 1.
 
-use super::super::ce::lights::CE_POINT_LIGHT_ROWS;
 use super::super::h2::prt::H2_PRT_REGISTERS;
 use super::super::renderer::model_vertex_prelude;
 
@@ -14,6 +13,7 @@ mod kind;
 pub(in crate::app::model_preview) use kind::*;
 mod ce;
 use ce::*;
+pub(crate) use ce::CE_POINT_LIGHT_ROWS;
 mod h2;
 mod source;
 #[cfg(test)]
