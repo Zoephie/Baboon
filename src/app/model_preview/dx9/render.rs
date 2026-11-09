@@ -1,39 +1,26 @@
-//! The dx9 games' drawing, as the renderer hands each frame over: Halo CE
-//! and Halo 2.
+//! A dx9 game's drawing, as the renderer hands each frame over: the slot's
+//! own draw, the dx9 passes with the game's hooks, then its sprites and
+//! bloom. The game table holds one for each dx9 game.
 
-use super::super::ce::render::CeGame;
 use super::super::frame::ModelGpuFrame;
-use super::super::h2::render::H2Game;
 use super::super::renderer::{FrameCx, GameRender};
 use super::pipeline::Dx9Game;
-use crate::core::game::GameId;
 
-/// Halo CE's and Halo 2's drawing: the slot's own draw, the dx9 passes with the game's
-/// hooks, then its sprites and bloom.
+/// A dx9 game's drawing, through `G`'s hooks.
 #[derive(Default)]
-pub(in crate::app::model_preview) struct Dx9Render {
-    ce: CeGame,
-    h2: H2Game,
+pub(in crate::app::model_preview) struct Dx9Pipeline<G> {
+    game: G,
     /// What the bloom covers, from the shading to the finish.
     bloom_order: Option<Vec<usize>>,
 }
 
-impl Dx9Render {
-    fn game(&mut self, game: Option<GameId>) -> &mut dyn Dx9Game {
-        match game {
-            Some(GameId::HaloCe) => &mut self.ce,
-            _ => &mut self.h2,
-        }
-    }
-}
-
-impl GameRender for Dx9Render {
+impl<G: Dx9Game> GameRender for Dx9Pipeline<G> {
     fn begin(&mut self, frame: &ModelGpuFrame) {
-        self.game(frame.preview.game).begin(frame);
+        self.game.begin(frame);
     }
 
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
-        unsafe { self.game(cx.frame.preview.game).prepare(cx) }
+        unsafe { self.game.prepare(cx) }
     }
 
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
@@ -43,19 +30,20 @@ impl GameRender for Dx9Render {
                 .draw_slot_batches(cx.gl, cx.frame, cx.slot, &|core, material| {
                     core.dx9_replaces_slots(cx.frame, material)
                 });
-            let game = self.game(cx.frame.preview.game);
-            self.bloom_order = cx.core.draw_dx9_passes(game, cx.gl, cx.frame, cx.slot);
+            self.bloom_order = cx
+                .core
+                .draw_dx9_passes(&mut self.game, cx.gl, cx.frame, cx.slot);
         }
     }
 
     unsafe fn finish(&mut self, cx: &mut FrameCx<'_>) {
         unsafe {
             if cx.core.draws_object_sprites(cx.frame) {
-                let game = self.game(cx.frame.preview.game);
-                cx.core.draw_dx9_sprites(game, cx.gl, cx.frame, cx.slot);
+                cx.core
+                    .draw_dx9_sprites(&mut self.game, cx.gl, cx.frame, cx.slot);
             }
             if let Some(order) = self.bloom_order.take() {
-                self.game(cx.frame.preview.game).bloom(cx, order);
+                self.game.bloom(cx, order);
             }
         }
     }
@@ -67,9 +55,6 @@ impl GameRender for Dx9Render {
         uploads: u64,
         visit: &mut dyn FnMut(&str, &dyn std::fmt::Debug),
     ) {
-        let Self { ce, h2, .. } = self;
-        for game in [ce as &dyn Dx9Game, h2] {
-            game.each_simulation(slot, uploads, visit);
-        }
+        self.game.each_simulation(slot, uploads, visit);
     }
 }

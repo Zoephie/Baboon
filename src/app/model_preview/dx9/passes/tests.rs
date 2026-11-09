@@ -120,9 +120,10 @@ fn normalization_faces_hold_their_own_direction() {
 }
 
 /// The dx9 pipeline is neutral: Halo CE's shaders hook into it through
-/// `PassAnimation`, and only its game table (`render.rs`) names Halo CE.
+/// `PassAnimation` and `PassVisibility`, and its drawing through `Dx9Game`,
+/// which the renderer's game table picks.
 #[test]
-fn only_the_dx9_game_table_names_halo_ce() {
+fn dx9_names_no_halo_ce() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/model_preview/dx9");
     let mut files = vec![root.clone()];
     let mut naming = Vec::new();
@@ -135,9 +136,7 @@ fn only_the_dx9_game_table_names_halo_ce() {
             );
             continue;
         }
-        if path.extension().is_none_or(|extension| extension != "rs")
-            || path == root.join("render.rs")
-        {
+        if path.extension().is_none_or(|extension| extension != "rs") {
             continue;
         }
         // How many modules below `dx9` this file's module is: a `super`

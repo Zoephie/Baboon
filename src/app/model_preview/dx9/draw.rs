@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 /// The DX9 pipeline's GL state on the shared core: the linked pass programs,
 /// the pass targets, the frame copy, the gel, bloom and the self shadow. The
-/// core owns it, not `Dx9Render`, because Halo 3's shadow draws through it.
+/// core owns it, not a `Dx9Pipeline`, because Halo 3's shadow draws through it.
 pub(in crate::app::model_preview) struct Dx9Gl {
     /// Linked pass programs. `None` records a failure, so it is not retried
     /// every frame and the material keeps drawing as it did.

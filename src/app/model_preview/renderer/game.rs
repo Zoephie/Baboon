@@ -1,8 +1,9 @@
 //! The game table: what each game's renderer is handed per frame, the trait it implements, and the route from a preview to its game.
 
 use super::super::super::GameId;
+use super::super::dx9::render::Dx9Pipeline;
 use super::super::gen3::render::Gen3Pipeline;
-use super::super::{ModelGpuFrame, RenderCore, RenderModelPreview, common, dx9, h3, h4, reach};
+use super::super::{ModelGpuFrame, RenderCore, RenderModelPreview, ce, common, h2, h3, h4, reach};
 use eframe::glow;
 
 /// What a game's drawing is handed each frame.
@@ -43,7 +44,8 @@ pub(in crate::app::model_preview) trait GameRender {
 #[derive(Default)]
 pub(super) struct GameRenders {
     pub(super) plain: common::plain::PlainRender,
-    pub(super) dx9: dx9::render::Dx9Render,
+    pub(super) ce: Dx9Pipeline<ce::render::CeGame>,
+    pub(super) h2: Dx9Pipeline<h2::render::H2Game>,
     pub(super) h3: Gen3Pipeline<h3::render::H3Game>,
     pub(super) reach: Gen3Pipeline<reach::render::ReachGame>,
     pub(super) h4: Gen3Pipeline<h4::render::H4Game>,
@@ -60,12 +62,13 @@ impl GameRenders {
     ) {
         let Self {
             plain,
-            dx9,
+            ce,
+            h2,
             h3,
             reach,
             h4,
         } = self;
-        for game in [plain as &dyn GameRender, dx9, h3, reach, h4] {
+        for game in [plain as &dyn GameRender, ce, h2, h3, reach, h4] {
             game.each_simulation(slot, uploads, visit);
         }
     }
@@ -76,7 +79,8 @@ impl GameRenders {
             Route::Halo3 => &mut self.h3,
             Route::Reach => &mut self.reach,
             Route::Halo4 => &mut self.h4,
-            Route::Dx9 => &mut self.dx9,
+            Route::HaloCe => &mut self.ce,
+            Route::Halo2 => &mut self.h2,
             Route::Plain => &mut self.plain,
         }
     }
@@ -101,7 +105,8 @@ pub(super) enum Route {
     Halo3,
     Reach,
     Halo4,
-    Dx9,
+    HaloCe,
+    Halo2,
     Plain,
 }
 
@@ -114,7 +119,8 @@ impl Route {
             Some(GameId::Halo3 | GameId::Halo3Odst) => Self::Halo3,
             Some(GameId::HaloReach) => Self::Reach,
             Some(GameId::Halo4) => Self::Halo4,
-            Some(GameId::HaloCe | GameId::Halo2) => Self::Dx9,
+            Some(GameId::HaloCe) => Self::HaloCe,
+            Some(GameId::Halo2) => Self::Halo2,
             _ if preview.generation == Some(blam_tags::game::Game::Halo3) => Self::Halo3,
             _ => Self::Plain,
         }
@@ -130,7 +136,7 @@ mod tests {
     use super::*;
     use eframe::egui;
 
-    /// Each game's preview goes to its family's drawing; one of no game goes
+    /// Each game's preview goes to its own drawing; one of no game goes
     /// to gen3 if its tag is gen3, and is drawn plainly if no tag gave it.
     #[test]
     fn a_preview_routes_by_its_game_then_its_generation() {
@@ -152,8 +158,11 @@ mod tests {
             Route::Reach
         );
         assert_eq!(route(Some(GameId::Halo4), Some(Game::Halo3)), Route::Halo4);
-        assert_eq!(route(Some(GameId::HaloCe), Some(Game::Halo1)), Route::Dx9);
-        assert_eq!(route(Some(GameId::Halo2), Some(Game::Halo2)), Route::Dx9);
+        assert_eq!(
+            route(Some(GameId::HaloCe), Some(Game::Halo1)),
+            Route::HaloCe
+        );
+        assert_eq!(route(Some(GameId::Halo2), Some(Game::Halo2)), Route::Halo2);
         assert_eq!(
             route(None, Some(Game::Halo3)),
             Route::Halo3,
