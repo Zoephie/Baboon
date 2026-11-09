@@ -140,7 +140,7 @@ fn volume_heading(volume_random: bool, place: [f32; 3], random: &mut Random) -> 
 
 /// Reach's emitter `axis scale`, which tool's postprocess makes ones when it
 /// is all nothing.
-pub(super) fn reach_axis_scale(raw: [f32; 3]) -> [f32; 3] {
+pub(super) fn later_axis_scale(raw: [f32; 3]) -> [f32; 3] {
     if raw == [0.0; 3] { [1.0; 3] } else { raw }
 }
 
@@ -287,7 +287,7 @@ fn step_location(
         // What was made outlives its event, and goes on falling and landing.
         let rest = ParticleState {
             system_age: 1.0,
-            game_time: particle_game_time(system.look.reach, now),
+            game_time: particle_game_time(system.look.later_look, now),
             ..Default::default()
         };
         let frame = emitter_frame(emitter, origin, axes, state.as_ref().unwrap_or(&rest));
@@ -386,7 +386,7 @@ pub(super) fn system_state(
     }
     Some(ParticleState {
         system_age: system.times.age(system.event, since)?,
-        game_time: particle_game_time(system.look.reach, time),
+        game_time: particle_game_time(system.look.later_look, time),
         effect_a,
         effect_b: read(&system.secondary_by),
         location_seed: system.location_seed,

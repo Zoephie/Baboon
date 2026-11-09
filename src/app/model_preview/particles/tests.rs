@@ -634,13 +634,13 @@ fn only_halo_2_reads_a_particles_rotation() {
     );
     assert_eq!(
         resolved(
-            SeedAllocator::halo3(),
+            SeedAllocator::counting(),
             "particle rotation{physics rotation}"
         ),
         0.0
     );
     assert_eq!(
-        resolved(SeedAllocator::halo3(), "distance from emitter"),
+        resolved(SeedAllocator::counting(), "distance from emitter"),
         0.0
     );
 }
@@ -714,7 +714,7 @@ fn reach_game_time_runs_in_seconds_and_comes_round_at_two_hours() {
 #[test]
 fn reach_hands_out_the_highest_free_seed_then_reuses_from_the_fifth() {
     use ParticleInput::{Random, Seed};
-    let mut seeds = SeedAllocator::reach(0);
+    let mut seeds = SeedAllocator::by_taken(0);
     let taken: Vec<_> = (0..10).map(|_| seeded(&mut seeds, Random)).collect();
     let expected = [
         Seed(7),
@@ -732,7 +732,7 @@ fn reach_hands_out_the_highest_free_seed_then_reuses_from_the_fifth() {
         taken, expected,
         "states 25 to 22, 7 to 4, then the table's 24 and 5"
     );
-    let mut halo3 = SeedAllocator::halo3();
+    let mut halo3 = SeedAllocator::counting();
     assert_eq!(seeded(&mut halo3, Random), Seed(0), "Halo 3 counts up");
 }
 
@@ -742,14 +742,14 @@ fn reach_hands_out_the_highest_free_seed_then_reuses_from_the_fifth() {
 fn reach_steps_around_a_seed_read_by_name() {
     use ParticleInput::{Random, Seed, SystemRandom, SystemSeed};
     let explicit = ParticleInput::named("particle correlation 4").state_bit();
-    let mut seeds = SeedAllocator::reach(explicit);
+    let mut seeds = SeedAllocator::by_taken(explicit);
     let taken: Vec<_> = (0..8).map(|_| seeded(&mut seeds, Random)).collect();
     assert_eq!(
         taken[3..],
         [Seed(4), Seed(2), Seed(1), Seed(0), Seed(6)],
         "seed 4 skipped"
     );
-    let mut seeds = SeedAllocator::reach(0);
+    let mut seeds = SeedAllocator::by_taken(0);
     let systems: Vec<_> = (0..5).map(|_| seeded(&mut seeds, SystemRandom)).collect();
     let expected = [
         SystemSeed(3),
@@ -777,13 +777,13 @@ fn reach_seeds_a_range_only_when_the_function_is_ranged() {
     let flat = varying(Random, Random, false);
     assert_eq!(flat.used_states(), Random.state_bit());
     let mut reach = flat.clone();
-    reach.allocate(&mut SeedAllocator::reach(0));
+    reach.allocate(&mut SeedAllocator::by_taken(0));
     assert_eq!((reach.input, reach.range), (Seed(7), Random));
     let mut halo3 = flat;
-    halo3.allocate(&mut SeedAllocator::halo3());
+    halo3.allocate(&mut SeedAllocator::counting());
     assert_eq!((halo3.input, halo3.range), (Seed(0), Seed(1)));
     let mut ranged = varying(Random, Random, true);
-    ranged.allocate(&mut SeedAllocator::reach(0));
+    ranged.allocate(&mut SeedAllocator::by_taken(0));
     assert_eq!((ranged.input, ranged.range), (Seed(7), Seed(6)));
 }
 
@@ -810,7 +810,7 @@ fn a_reach_controller_marks_each_parameter_before_seeding_it() {
             .for_each(|parameter| parameter.allocate(&mut seeds));
         (parameters[2].modifier, seeds.used())
     };
-    let (modifier, used) = run(SeedAllocator::reach_controller());
+    let (modifier, used) = run(SeedAllocator::by_taken_controller());
     assert_eq!(
         modifier,
         SystemSeed(0),
@@ -820,12 +820,12 @@ fn a_reach_controller_marks_each_parameter_before_seeding_it() {
         .iter()
         .fold(0, |used, state| used | 1 << state);
     assert_eq!(
-        used & REACH_ALLOCATED_STATES,
+        used & ALLOCATED_STATES,
         seeds,
         "and `system random` itself, which the emitter drops"
     );
     assert_eq!(
-        run(SeedAllocator::reach(0)).0,
+        run(SeedAllocator::by_taken(0)).0,
         SystemSeed(1),
         "unmarked, it takes 9"
     );
@@ -839,9 +839,9 @@ fn reach_seeds_the_emission_axis_angle_fifth_and_halo_3_last() {
         let random = || varying(ParticleInput::Random, ParticleInput::Other, false);
         let mut properties: [_; 18] = std::array::from_fn(|_| random());
         let mut seeds = if reach {
-            SeedAllocator::reach(0)
+            SeedAllocator::by_taken(0)
         } else {
-            SeedAllocator::halo3()
+            SeedAllocator::counting()
         };
         for at in emitter_seed_order(reach) {
             properties[at].allocate(&mut seeds);
@@ -867,9 +867,9 @@ fn reach_seeds_the_emission_axis_angle_fifth_and_halo_3_last() {
 /// nothing, so it does not fade in at all.
 #[test]
 fn a_reach_lod_keeps_its_feathers_and_takes_no_near_pair() {
-    assert_eq!(reach_baked_lod([0.0; 4]), [0.0, 20.0, 0.0, 5.0]);
-    assert_eq!(reach_baked_lod([1.0, 8.0, 2.0, 3.0]), [1.0, 8.0, 2.0, 3.0]);
-    let reach = Some(reach_baked_lod([0.0; 4]));
+    assert_eq!(later_baked_lod([0.0; 4]), [0.0, 20.0, 0.0, 5.0]);
+    assert_eq!(later_baked_lod([1.0, 8.0, 2.0, 3.0]), [1.0, 8.0, 2.0, 3.0]);
+    let reach = Some(later_baked_lod([0.0; 4]));
     assert_eq!(lod_amount(reach, 0.5), 1.0, "no fade in");
     let halo3 = Some(baked_lod([0.0; 4], true, [150.0].into_iter()));
     assert!(
@@ -994,8 +994,8 @@ fn test_particle() -> Particle {
 /// `axis scale` scales the place after the shape, and all nothing is ones.
 #[test]
 fn reachs_axis_scale_flattens_what_its_shape_emits() {
-    assert_eq!(reach_axis_scale([0.0; 3]), [1.0; 3]);
-    assert_eq!(reach_axis_scale([0.0, 2.0, 2.0]), [0.0, 2.0, 2.0]);
+    assert_eq!(later_axis_scale([0.0; 3]), [1.0; 3]);
+    assert_eq!(later_axis_scale([0.0, 2.0, 2.0]), [0.0, 2.0, 2.0]);
     let emitter = Emitter {
         axis_scale: [2.0, 1.0, 0.0],
         ..test_emitter(EmissionShape::Plane)
@@ -1265,7 +1265,7 @@ fn kit_reach_particles_read_their_own_options_and_seeds() {
         "fx\\particles\\plasma\\plasma_blue_medium",
     )
     .unwrap();
-    assert!(plasma.reach && !plasma.cheap);
+    assert!(plasma.later_look && !plasma.cheap);
     assert_eq!(plasma.shader.albedo, ParticleAlbedo::Palette2dPlasma);
     assert!(plasma.shader.plasma_second_sprite);
     assert_eq!(plasma.shader.sphere_warp, Some(0.2));

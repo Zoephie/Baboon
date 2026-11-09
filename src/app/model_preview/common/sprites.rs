@@ -348,7 +348,7 @@ pub(in crate::app::model_preview) unsafe fn draw_particle_system(
             .get(index)
             .copied()
             .unwrap_or_default();
-        if system.look.shader.albedo == particles::ParticleAlbedo::H2Distortion {
+        if system.look.shader.albedo == particles::ParticleAlbedo::FrameDistortion {
             // `sub_915630`: before a pass that reads `GLOBAL particle
             // distortion`, the frame as it stands is copied there.
             textures[2] = copy_frame(gl, targets.distortion_copy);

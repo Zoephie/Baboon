@@ -109,16 +109,16 @@ fn read_h2_frames(tag: &TagFile, first: usize) -> (Vec<[f32; 4]>, [f32; 4]) {
 /// `effect_shader_*`'s pixel stage and blend, by the template that names the
 /// pass, by name alone: the distortion one lives under `particle\` too.
 fn h2_particle_pass(template: &str) -> Option<(ParticleAlbedo, Gen3Blend, bool)> {
-    use ParticleAlbedo::{Diffuse, H2Distortion, H2MultiplyAdd, H2Tint};
+    use ParticleAlbedo::{BrightTint, Diffuse, FrameDistortion, MultiplyAdd};
     Some(
         match template.rsplit(['\\', '/']).next().unwrap_or_default() {
             "particle_additive" => (Diffuse, Gen3Blend::AddSrcTimesSrcAlpha, false),
-            "particle_additive_tint" => (H2Tint, Gen3Blend::AddSrcTimesSrcAlpha, false),
+            "particle_additive_tint" => (BrightTint, Gen3Blend::AddSrcTimesSrcAlpha, false),
             "particle_alpha_blend" => (Diffuse, Gen3Blend::AlphaBlend, false),
-            "particle_alpha_blend_tint" => (H2Tint, Gen3Blend::AlphaBlend, false),
-            "particle_alpha_multiply_add" => (H2MultiplyAdd, Gen3Blend::PreMultiplied, false),
+            "particle_alpha_blend_tint" => (BrightTint, Gen3Blend::AlphaBlend, false),
+            "particle_alpha_multiply_add" => (MultiplyAdd, Gen3Blend::PreMultiplied, false),
             // Its alpha test passes anything above nothing, which the albedo does.
-            "particle_alpha_blend_distortion" => (H2Distortion, Gen3Blend::AlphaBlend, false),
+            "particle_alpha_blend_distortion" => (FrameDistortion, Gen3Blend::AlphaBlend, false),
             "particle_alpha_test_no_lighting_fixed_for_glass" => {
                 (Diffuse, Gen3Blend::AlphaBlend, true)
             }
@@ -174,7 +174,7 @@ pub(in crate::app::model_preview) fn read_h2_look(
             .iter()
             .find(|entry| entry.read_string_id("name").as_deref() == Some(name))
     };
-    let distorts = albedo == ParticleAlbedo::H2Distortion;
+    let distorts = albedo == ParticleAlbedo::FrameDistortion;
     let map_name = if distorts {
         "bump_map"
     } else {
@@ -287,7 +287,7 @@ pub(in crate::app::model_preview) fn read_h2_look(
         shader: Arc::new(shader),
         material: None,
         exposed: false,
-        reach: false,
+        later_look: false,
         cheap: false,
         used_states: 0,
     };
@@ -416,19 +416,19 @@ mod tests {
         );
         assert_eq!(
             pass("particle_alpha_blend_tint"),
-            Some((ParticleAlbedo::H2Tint, Gen3Blend::AlphaBlend, false))
+            Some((ParticleAlbedo::BrightTint, Gen3Blend::AlphaBlend, false))
         );
         assert_eq!(
             pass("particle_alpha_multiply_add"),
-            Some((
-                ParticleAlbedo::H2MultiplyAdd,
-                Gen3Blend::PreMultiplied,
-                false
-            ))
+            Some((ParticleAlbedo::MultiplyAdd, Gen3Blend::PreMultiplied, false))
         );
         assert_eq!(
             pass("particle_alpha_blend_distortion"),
-            Some((ParticleAlbedo::H2Distortion, Gen3Blend::AlphaBlend, false))
+            Some((
+                ParticleAlbedo::FrameDistortion,
+                Gen3Blend::AlphaBlend,
+                false
+            ))
         );
     }
 

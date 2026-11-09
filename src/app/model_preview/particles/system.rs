@@ -3,7 +3,7 @@
 use super::super::{RenderModelPreviewMarker, TagReader};
 use super::emitter::{Emitter, ParticleTrigger, read_emitter};
 use super::look::{ParticleLook, read_look};
-use super::rules::{ParticleRules, baked_lod, near_fade_range, reach_baked_lod};
+use super::rules::{ParticleRules, baked_lod, later_baked_lod, near_fade_range};
 use super::sim::location;
 use super::{
     EffectTimes, Gen3StripAt, MarkerFrame, ObjectEffect, ViewFrame, attached, dot, elements,
@@ -123,8 +123,8 @@ pub(super) fn read_system_parts(
             if let Some(own) = own {
                 Some((own.baked_lod)(raw, any_camera, &mut rates))
             } else if !has_flag_labelled(system, "flags", &LOD_ALWAYS_ONE) {
-                Some(if look.reach {
-                    reach_baked_lod(raw)
+                Some(if look.later_look {
+                    later_baked_lod(raw)
                 } else {
                     baked_lod(raw, any_camera, rates)
                 })
@@ -134,7 +134,7 @@ pub(super) fn read_system_parts(
         },
         sort_bias: system.read_int_any("sort bias").unwrap_or(0) as f32,
         world: system.read_enum_option("coordinate system").as_deref() == Some("world"),
-        near_range: near_fade_range(look.reach, real("near fade range")),
+        near_range: near_fade_range(look.later_look, real("near fade range")),
         near_cutoff: cutoff,
         look,
         emitters,

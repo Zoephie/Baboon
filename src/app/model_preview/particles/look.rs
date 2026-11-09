@@ -4,7 +4,7 @@ use super::super::TagReader;
 use super::emitter::ParticleTrigger;
 use super::property::ParticleProperty;
 use super::rules::{MOST_FRAMES, ParticleRules, still_particles_move};
-use super::seeds::{REACH_ALLOCATED_STATES, SeedAllocator};
+use super::seeds::{ALLOCATED_STATES, SeedAllocator};
 use super::shader::{SpriteShader, parameter, read_sprite_shader};
 use super::{Gen3Blend, elements, has_flag, tag_function_at};
 use blam_tags::TagStruct;
@@ -59,12 +59,12 @@ pub(crate) enum ParticleAlbedo {
     PalettePlasma = 8,
     /// Halo 2's `effect_shader_*_tint`: the texel's fourth power toward itself
     /// by the tint, so that bright stays white.
-    H2Tint = 9,
+    BrightTint = 9,
     /// Halo 2's `effect_shader_alpha_multiply_add`, whose colour and alpha part.
-    H2MultiplyAdd = 10,
+    MultiplyAdd = 10,
     /// Halo 2's `effect_shader_alphablend_distortion`: the frame as it stands,
     /// read where its `v8u8` bump map pushes, times the particle's colour.
-    H2Distortion = 11,
+    FrameDistortion = 11,
     /// Reach's `palettized_2d_plasma`: the plasma's noises with no alpha
     /// term, looked up at the depth fade rather than the palette value.
     Palette2dPlasma = 12,
@@ -177,8 +177,8 @@ pub(crate) struct ParticleLook {
     /// Halo 3's colours are light, and Halo 2's are what shows.
     pub(in crate::app::model_preview) exposed: bool,
     /// Reach's and Halo 4's own game time, lighting, exposure and shapes:
-    /// [`ParticleRules::reach_look`].
-    pub(in crate::app::model_preview) reach: bool,
+    /// [`ParticleRules::later_look`].
+    pub(in crate::app::model_preview) later_look: bool,
     /// Reach's `uses cheap shader`: `particle_render_fast.hlsl`.
     pub(in crate::app::model_preview) cheap: bool,
     /// Reach's `runtime m_used_particle_states` (prt3+460): the states its
@@ -194,10 +194,10 @@ pub(in crate::app::model_preview) enum ParticleLighting {
     Ambient,
     Directional,
     /// Reach's `per_vertex_ambient`: the probe's ambient, on the vertex.
-    ReachAmbient,
+    PerVertexAmbient,
     /// Reach's `per_pixel_smooth`: between the probe's dark and bright, by
     /// how the bent normal faces its bright direction.
-    ReachSmooth,
+    PerPixelSmooth,
 }
 
 /// `ravi_order_0` and `ravi_order_3`, of `calculate_and_set_ravi_constants`'
@@ -403,10 +403,10 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
     // Reach's `c_particle_definition::postprocess` (tool 0x140DD6FA0) takes
     // the mask of all seven before allocating them in this order. Its
     // attachments' scales come between, which the preview does not read.
-    let mut seeds = if rules.reach_postprocess_seeds {
-        SeedAllocator::reach(used_states_of(&properties) & REACH_ALLOCATED_STATES)
+    let mut seeds = if rules.postprocess_seeds {
+        SeedAllocator::by_taken(used_states_of(&properties) & ALLOCATED_STATES)
     } else {
-        SeedAllocator::halo3()
+        SeedAllocator::counting()
     };
     properties
         .iter_mut()
@@ -421,7 +421,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
     if cheap {
         // `particle_render_fast.hlsl` warps nothing and lights no pixel.
         sprite_shader.sphere_warp = None;
-        if sprite_shader.lighting == ParticleLighting::ReachSmooth {
+        if sprite_shader.lighting == ParticleLighting::PerPixelSmooth {
             sprite_shader.lighting = ParticleLighting::None;
         }
     }
@@ -483,7 +483,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
         shader: Arc::new(sprite_shader),
         material,
         exposed: true,
-        reach: rules.reach_look,
+        later_look: rules.later_look,
         cheap,
         used_states: seeds.used(),
     })

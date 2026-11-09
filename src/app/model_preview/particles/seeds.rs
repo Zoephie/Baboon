@@ -12,13 +12,13 @@ pub(in crate::app::model_preview) struct SeedAllocator {
     /// Halo 3 and ODST: `particle rotation` reads the 0 their state list writes.
     rotation_unread: bool,
     /// Reach's: seeds go by which states are taken, not by counting.
-    pub(super) reach: Option<ReachSeeds>,
+    pub(super) taken: Option<TakenSeeds>,
 }
 
 /// Reach tool's `allocate_random_seed` (0x14106CFA0): the highest seed not
 /// yet taken, and once none is left, the next of a table of reuses.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ReachSeeds {
+pub(super) struct TakenSeeds {
     /// The states taken, by [`ParticleInput::state_bit`].
     pub(super) used: u32,
     /// `dword_1428F5DE4`, shared by both tables. The shipped tool starts it at
@@ -32,7 +32,7 @@ pub(super) struct ReachSeeds {
 }
 
 /// `particle random`'s seeds, highest state first: 25 to 22, then 7 to 4.
-const REACH_PARTICLE_SEEDS: [ParticleInput; 8] = {
+const TAKEN_PARTICLE_SEEDS: [ParticleInput; 8] = {
     use ParticleInput::Seed;
     [
         Seed(7),
@@ -47,7 +47,7 @@ const REACH_PARTICLE_SEEDS: [ParticleInput; 8] = {
 };
 
 /// The particle reuse table (tool 0x141FFF3C0): states 22, 7, 23, 6, 24, 5, 25, 4.
-const REACH_PARTICLE_REUSE: [ParticleInput; 8] = {
+const TAKEN_PARTICLE_REUSE: [ParticleInput; 8] = {
     use ParticleInput::Seed;
     [
         Seed(4),
@@ -63,7 +63,7 @@ const REACH_PARTICLE_REUSE: [ParticleInput; 8] = {
 
 /// `system random`'s seeds, highest state first, which is also the system
 /// reuse table (tool 0x141FFF3E0): states 27, 26, 9, 8.
-const REACH_SYSTEM_SEEDS: [ParticleInput; 4] = {
+const TAKEN_SYSTEM_SEEDS: [ParticleInput; 4] = {
     use ParticleInput::SystemSeed;
     [SystemSeed(3), SystemSeed(2), SystemSeed(1), SystemSeed(0)]
 };
@@ -71,9 +71,9 @@ const REACH_SYSTEM_SEEDS: [ParticleInput; 4] = {
 /// What tool's postprocesses keep of a mask of used states before
 /// allocating: all but the two pseudo states, `particle random` and `system
 /// random`.
-pub(super) const REACH_ALLOCATED_STATES: u32 = 0x0FFF_FFF3;
+pub(super) const ALLOCATED_STATES: u32 = 0x0FFF_FFF3;
 
-impl ReachSeeds {
+impl TakenSeeds {
     fn take(&mut self, seeds: &[ParticleInput], reuse: &[ParticleInput]) -> ParticleInput {
         let free = seeds
             .iter()
@@ -91,7 +91,7 @@ impl ReachSeeds {
 
 impl SeedAllocator {
     /// For a Halo 3 or ODST tag's properties.
-    pub(super) fn halo3() -> Self {
+    pub(super) fn counting() -> Self {
         Self {
             rotation_unread: true,
             ..Self::default()
@@ -100,42 +100,42 @@ impl SeedAllocator {
 
     /// For a Reach tag's properties, with `used` the states its definition
     /// reads already. Reach writes 0 for `particle rotation`, as Halo 3 does.
-    pub(super) fn reach(used: u32) -> Self {
-        let seeds = ReachSeeds {
+    pub(super) fn by_taken(used: u32) -> Self {
+        let seeds = TakenSeeds {
             used,
             reuse: 4,
             marks_each: false,
         };
         Self {
             rotation_unread: true,
-            reach: Some(seeds),
+            taken: Some(seeds),
             ..Self::default()
         }
     }
 
     /// For one of a Reach movement's controllers: a mask of its own.
-    pub(super) fn reach_controller() -> Self {
-        let mut seeds = Self::reach(0);
+    pub(super) fn by_taken_controller() -> Self {
+        let mut seeds = Self::by_taken(0);
         seeds
-            .reach
+            .taken
             .iter_mut()
-            .for_each(|reach| reach.marks_each = true);
+            .for_each(|taken| taken.marks_each = true);
         seeds
     }
 
     /// The states Reach's allocations have taken so far; none for Halo 3's.
     pub(super) fn used(&self) -> u32 {
-        self.reach.map_or(0, |reach| reach.used)
+        self.taken.map_or(0, |taken| taken.used)
     }
 
     pub(super) fn allocate(&mut self, input: &mut ParticleInput) {
-        match (*input, self.reach.as_mut()) {
+        match (*input, self.taken.as_mut()) {
             (ParticleInput::Rotation, _) if self.rotation_unread => *input = ParticleInput::Other,
-            (ParticleInput::Random, Some(reach)) => {
-                *input = reach.take(&REACH_PARTICLE_SEEDS, &REACH_PARTICLE_REUSE)
+            (ParticleInput::Random, Some(taken)) => {
+                *input = taken.take(&TAKEN_PARTICLE_SEEDS, &TAKEN_PARTICLE_REUSE)
             }
-            (ParticleInput::SystemRandom, Some(reach)) => {
-                *input = reach.take(&REACH_SYSTEM_SEEDS, &REACH_SYSTEM_SEEDS)
+            (ParticleInput::SystemRandom, Some(taken)) => {
+                *input = taken.take(&TAKEN_SYSTEM_SEEDS, &TAKEN_SYSTEM_SEEDS)
             }
             (ParticleInput::Random, None) => {
                 *input = ParticleInput::Seed(self.particle % SEEDS);

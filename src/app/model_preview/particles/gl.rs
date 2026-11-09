@@ -43,14 +43,14 @@ fn particle_fragment() -> String {
                 "albedo_palette_plasma",
                 &(ParticleAlbedo::PalettePlasma as i32),
             ),
-            ("albedo_h2_tint", &(ParticleAlbedo::H2Tint as i32)),
+            ("albedo_h2_tint", &(ParticleAlbedo::BrightTint as i32)),
             (
                 "albedo_h2_multiply_add",
-                &(ParticleAlbedo::H2MultiplyAdd as i32),
+                &(ParticleAlbedo::MultiplyAdd as i32),
             ),
             (
                 "albedo_h2_distortion",
-                &(ParticleAlbedo::H2Distortion as i32),
+                &(ParticleAlbedo::FrameDistortion as i32),
             ),
             (
                 "albedo_palette_2d_plasma",
@@ -133,7 +133,7 @@ pub(in crate::app::model_preview) struct ParticleGl {
     depth: Option<glow::NativeUniformLocation>,
     screen: Option<glow::NativeUniformLocation>,
     smooth: Option<glow::NativeUniformLocation>,
-    reach_light: Option<glow::NativeUniformLocation>,
+    own_light: Option<glow::NativeUniformLocation>,
     contrast: Option<glow::NativeUniformLocation>,
     sphere_warp: Option<glow::NativeUniformLocation>,
     palette_shift: Option<glow::NativeUniformLocation>,
@@ -176,7 +176,7 @@ impl ParticleGl {
             gl.uniform_1_f32(self.fade.as_ref(), range);
             gl.uniform_4_f32_slice(self.depth.as_ref(), &scene_depth_terms(camera));
             gl.uniform_1_i32(self.albedo.as_ref(), look.albedo as i32);
-            if look.albedo == particles::ParticleAlbedo::H2Distortion {
+            if look.albedo == particles::ParticleAlbedo::FrameDistortion {
                 let mut viewport = [0; 4];
                 gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
                 let [x, y, width, height] = viewport.map(|value| value as f32);
@@ -202,7 +202,7 @@ impl ParticleGl {
             if let Some([scale, offset]) = contrast {
                 let light = reach_particle_light();
                 let rows = [light.direction, light.bright, light.dark];
-                gl.uniform_3_f32_slice(self.reach_light.as_ref(), rows.as_flattened());
+                gl.uniform_3_f32_slice(self.own_light.as_ref(), rows.as_flattened());
                 gl.uniform_2_f32(self.contrast.as_ref(), scale, offset);
             }
             gl.uniform_1_f32(self.sphere_warp.as_ref(), look.sphere_warp.unwrap_or(0.0));
@@ -298,7 +298,7 @@ pub(in crate::app::model_preview) unsafe fn gen3_particle_gl(
             depth: gl.get_uniform_location(program, "u_depth"),
             screen: gl.get_uniform_location(program, "u_screen"),
             smooth: gl.get_uniform_location(program, "u_smooth"),
-            reach_light: gl.get_uniform_location(program, "u_reach_light"),
+            own_light: gl.get_uniform_location(program, "u_reach_light"),
             contrast: gl.get_uniform_location(program, "u_contrast"),
             sphere_warp: gl.get_uniform_location(program, "u_sphere_warp"),
             palette_shift: gl.get_uniform_location(program, "u_palette_shift"),

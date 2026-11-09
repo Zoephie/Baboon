@@ -170,8 +170,8 @@ impl ParticleSystem {
         if look.material.is_some() {
             return;
         }
-        let light = particle_exposure(look.shader.blend, look.exposed, look.reach, stops);
-        let initial = match (look.tint_from_lightmap, look.reach) {
+        let light = particle_exposure(look.shader.blend, look.exposed, look.later_look, stops);
+        let initial = match (look.tint_from_lightmap, look.later_look) {
             (false, _) => [1.0; 3],
             (true, false) => lightmap_tint(lighting),
             (true, true) => reach_lightmap_tint(),
@@ -186,7 +186,7 @@ impl ParticleSystem {
         for (emitter, running) in system.emitters.iter().zip(running) {
             let base = ParticleState {
                 system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
-                game_time: particle_game_time(look.reach, time),
+                game_time: particle_game_time(look.later_look, time),
                 effect_a: system_state(system, values, time, time - onset)
                     .map_or(0.0, |state| state.effect_a),
                 effect_b: system_state(system, values, time, time - onset)
@@ -286,7 +286,7 @@ impl ParticleSystem {
                 // the normal.
                 let lit_by = |normal: [f32; 3]| match shading {
                     ParticleLighting::Ambient => ravi(shading, normal, lighting),
-                    ParticleLighting::ReachAmbient => ambient,
+                    ParticleLighting::PerVertexAmbient => ambient,
                     _ => [1.0; 3],
                 };
                 let (frames, corner) = match look.sequences.get(particle.sequence) {

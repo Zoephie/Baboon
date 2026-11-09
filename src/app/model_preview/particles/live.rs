@@ -119,7 +119,7 @@ impl ParticleSystem {
         for (emitter, running) in system.emitters.iter().zip(running) {
             let base = ParticleState {
                 system_age: system.times.age(system.event, time - onset).unwrap_or(1.0),
-                game_time: particle_game_time(look.reach, time),
+                game_time: particle_game_time(look.later_look, time),
                 effect_a: system_state(system, values, time, time - onset)
                     .map_or(0.0, |state| state.effect_a),
                 effect_b: system_state(system, values, time, time - onset)

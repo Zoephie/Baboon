@@ -21,21 +21,21 @@ pub(in crate::app::model_preview) const MOST_FRAMES: usize = 15;
 pub(in crate::app::model_preview) struct ParticleRules {
     /// Reach: a sprite system's options read their parameters through the
     /// resolver, with Reach's depth fade, warp, palette shift and plasma.
-    pub(in crate::app::model_preview) reach_render_method: bool,
+    pub(in crate::app::model_preview) later_render_method: bool,
     /// Halo 4: drawn through the particle's own `actual material`; its
     /// `actual shader` is the deprecated render method's remains.
     pub(in crate::app::model_preview) read_material: Option<ParticleMaterialReader>,
     /// Reach and Halo 4: `c_particle_definition::postprocess` (tool
     /// 0x140DD6FA0) and `effect_postprocess` (0x140DD5070) seed the
     /// properties, controllers first.
-    pub(in crate::app::model_preview) reach_postprocess_seeds: bool,
+    pub(in crate::app::model_preview) postprocess_seeds: bool,
     /// Reach and Halo 4: `uses cheap shader` draws `particle_render_fast.hlsl`.
     pub(in crate::app::model_preview) cheap_shader: bool,
     /// Reach and Halo 4: the sprite adds its constant at illumination.
     pub(in crate::app::model_preview) adds_at_illum: bool,
     /// Reach and Halo 4: the look's own game time, lighting, exposure and
-    /// shapes (stored as `ParticleLook::reach`).
-    pub(in crate::app::model_preview) reach_look: bool,
+    /// shapes (stored as `ParticleLook::later_look`).
+    pub(in crate::app::model_preview) later_look: bool,
     /// Reach and Halo 4: a card's acceleration lerps between its ends.
     pub(in crate::app::model_preview) card_lerps: bool,
     /// Reach and Halo 4: `volume emitter particle velocities are random`.
@@ -60,12 +60,12 @@ pub(in crate::app::model_preview) struct ParticleRules {
 impl ParticleRules {
     /// A game's with none of its own.
     pub(in crate::app::model_preview) const DEFAULT: Self = Self {
-        reach_render_method: false,
+        later_render_method: false,
         read_material: None,
-        reach_postprocess_seeds: false,
+        postprocess_seeds: false,
         cheap_shader: false,
         adds_at_illum: false,
-        reach_look: false,
+        later_look: false,
         card_lerps: false,
         random_volume_velocities: false,
         scales_axes: false,
@@ -147,7 +147,7 @@ pub(super) const POSTPROCESS_EPSILON: f32 = 0.0001;
 /// whatever the camera mode. The feathers stay as authored, nothing included:
 /// `calc_lod_amount` (the 360's 0x82EE59C8) tests `in + feather in` with the
 /// raw one, and only multiplies by the inverse it bakes.
-pub(super) fn reach_baked_lod(raw: [f32; 4]) -> [f32; 4] {
+pub(super) fn later_baked_lod(raw: [f32; 4]) -> [f32; 4] {
     let [near, far, feather_in, feather_out] = raw;
     let or = |value: f32, default: f32| {
         if value.abs() < POSTPROCESS_EPSILON {
@@ -170,16 +170,16 @@ pub(super) fn near_fade_range(clamped: bool, range: f32) -> f32 {
 }
 
 /// Where MCC's Reach particle clock comes round, in seconds.
-const REACH_GAME_TIME_WRAP: f32 = 7200.0;
+const LATER_GAME_TIME_WRAP: f32 = 7200.0;
 
 /// The `game time` state at `time` seconds in. Halo 3's is the clock's
 /// fraction of a second. Reach's particles read `g_render_time+0x18`
 /// (`s_render_time::update`, the 360's 0x827477A8, MCC sub_14084E170), the
 /// frames' seconds summed whole; MCC converts its counter as a signed int, so
 /// it runs to 7200 s and comes round from -7200 s.
-pub(in crate::app::model_preview) fn particle_game_time(reach_clock: bool, time: f32) -> f32 {
-    if reach_clock {
-        (time + REACH_GAME_TIME_WRAP).rem_euclid(2.0 * REACH_GAME_TIME_WRAP) - REACH_GAME_TIME_WRAP
+pub(in crate::app::model_preview) fn particle_game_time(later_clock: bool, time: f32) -> f32 {
+    if later_clock {
+        (time + LATER_GAME_TIME_WRAP).rem_euclid(2.0 * LATER_GAME_TIME_WRAP) - LATER_GAME_TIME_WRAP
     } else {
         time.rem_euclid(1.0)
     }

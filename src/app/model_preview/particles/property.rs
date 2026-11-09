@@ -24,7 +24,7 @@ pub(super) enum ParticleInput {
     EffectB,
     /// The particle's own rotation, as Halo 2 reads it. Halo 3 and ODST's
     /// `update_states_internal` write 0 here instead (MCC halo3.dll
-    /// 0x180221B18, ODST 0x1406D46B0), which [`SeedAllocator::halo3`] keeps.
+    /// 0x180221B18, ODST 0x1406D46B0), which [`SeedAllocator::counting`] keeps.
     Rotation,
     LocationSeed,
     /// Reach's `particle velocity`, 20: `get_state_value` reads
@@ -205,14 +205,14 @@ impl ParticleProperty {
     /// input, its range (Reach's only when the function is ranged), and its
     /// modifier when it has one.
     pub(super) fn allocate(&mut self, seeds: &mut SeedAllocator) {
-        if let Some(reach) = seeds.reach.as_mut().filter(|reach| reach.marks_each) {
-            reach.used |= self.used_states();
+        if let Some(taken) = seeds.taken.as_mut().filter(|taken| taken.marks_each) {
+            taken.used |= self.used_states();
         }
         if self.function.as_constant().is_some() {
             return;
         }
         seeds.allocate(&mut self.input);
-        if seeds.reach.is_none() || self.function.is_ranged() {
+        if seeds.taken.is_none() || self.function.is_ranged() {
             seeds.allocate(&mut self.range);
         }
         if self.adds.is_some() {

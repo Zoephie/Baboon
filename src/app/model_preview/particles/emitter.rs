@@ -11,8 +11,8 @@ use super::rules::{
     ParticleController, ParticleRules, ParticleUpdate, flagged_controllers, movement_parameter,
     particle_update,
 };
-use super::seeds::{REACH_ALLOCATED_STATES, SeedAllocator};
-use super::sim::{Random, reach_axis_scale};
+use super::seeds::{ALLOCATED_STATES, SeedAllocator};
+use super::sim::{Random, later_axis_scale};
 use super::{elements, has_flag};
 use blam_tags::TagStruct;
 
@@ -356,9 +356,9 @@ pub(super) const EMITTER_PROPERTIES: [&str; 18] = [
 /// [`EMITTER_PROPERTIES`]: Reach's `effect_postprocess` (tool 0x140DD5070)
 /// goes in tag order, and Halo 3's and ODST's allocate `emission axis angle`
 /// last.
-pub(super) fn emitter_seed_order(reach_postprocess: bool) -> [usize; 18] {
+pub(super) fn emitter_seed_order(later_postprocess: bool) -> [usize; 18] {
     std::array::from_fn(|at| match at {
-        _ if reach_postprocess => at,
+        _ if later_postprocess => at,
         0..4 => at,
         4..17 => at + 1,
         _ => 4,
@@ -393,12 +393,12 @@ pub(super) fn read_emitter(
         particle_update(system_flagged, look.any_attachments, movement_flagged);
     let controllers = flagged_controllers(movement_flagged);
     let (physics, flock, collider, turbulence);
-    if rules.reach_postprocess_seeds {
+    if rules.postprocess_seeds {
         // `c_particle_controller::fully_index_parameters_and_postprocess`
         // (tool 0x140DD92D0): each controller first, with a mask of its own.
         // The preview reads no wind, nor swarm's parameter 5, so what those
         // take is not counted.
-        let mut seeds = [(); 4].map(|_| SeedAllocator::reach_controller());
+        let mut seeds = [(); 4].map(|_| SeedAllocator::by_taken_controller());
         physics = read_physics(reader, emitter, movement_flagged, &mut seeds[0]);
         flock = read_flock(reader, emitter, movement_flagged, &mut seeds[1]);
         collider = read_collider(reader, emitter, movement_flagged, &mut seeds[2]);
@@ -406,13 +406,13 @@ pub(super) fn read_emitter(
         // `get_used_particle_states` (0x140DD9B40) of the movement, the
         // emitter's own postprocess (0x140AE36E0), then its particle's.
         let movement_used = seeds.iter().fold(0, |used, seeds| used | seeds.used());
-        let own = (movement_used | used_states_of(&properties)) & REACH_ALLOCATED_STATES;
-        let mut seeds = SeedAllocator::reach(own | look.used_states);
+        let own = (movement_used | used_states_of(&properties)) & ALLOCATED_STATES;
+        let mut seeds = SeedAllocator::by_taken(own | look.used_states);
         for at in emitter_seed_order(true) {
             properties[at].allocate(&mut seeds);
         }
     } else {
-        let mut seeds = SeedAllocator::halo3();
+        let mut seeds = SeedAllocator::counting();
         for at in emitter_seed_order(false) {
             properties[at].allocate(&mut seeds);
         }
@@ -497,7 +497,7 @@ pub(super) fn read_emitter(
                 "volume emitter particle velocities are random",
             ),
         axis_scale: if rules.scales_axes {
-            reach_axis_scale([raw_scale.x, raw_scale.y, raw_scale.z])
+            later_axis_scale([raw_scale.x, raw_scale.y, raw_scale.z])
         } else {
             [1.0; 3]
         },

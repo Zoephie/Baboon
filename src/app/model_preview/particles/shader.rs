@@ -114,7 +114,7 @@ impl SpriteShader {
 
     /// Reach's `per_pixel_smooth` contrast, when its pixels are lit so.
     pub(crate) fn smooth_contrast(&self) -> Option<[f32; 2]> {
-        (self.lighting == ParticleLighting::ReachSmooth).then_some(self.contrast)
+        (self.lighting == ParticleLighting::PerPixelSmooth).then_some(self.contrast)
     }
 
     /// What a leaf draws with: only a map, cut out at half its alpha.
@@ -211,7 +211,7 @@ pub(in crate::app::model_preview) fn read_sprite_shader(
             .unwrap_or_default()
             .to_owned()
     };
-    let reach_method = ParticleRules::of(reader.source.game()).reach_render_method;
+    let reach_method = ParticleRules::of(reader.source.game()).later_render_method;
     let resolved = resolve_embedded_method(reader, shader);
     let resolved_real =
         |name: &str, default: f32| inline_real(resolved.as_ref(), name).unwrap_or(default);
@@ -268,8 +268,8 @@ pub(in crate::app::model_preview) fn read_sprite_shader(
         lighting: match chosen("lighting").as_str() {
             "per_vertex_ravi_order_0" => ParticleLighting::Ambient,
             "per_pixel_ravi_order_3" => ParticleLighting::Directional,
-            "per_vertex_ambient" => ParticleLighting::ReachAmbient,
-            "per_pixel_smooth" => ParticleLighting::ReachSmooth,
+            "per_vertex_ambient" => ParticleLighting::PerVertexAmbient,
+            "per_pixel_smooth" => ParticleLighting::PerPixelSmooth,
             // `smoke_lighting` draws normals into the low-res transparency
             // buffer, and `lit_particle_overdraw_apply.hlsl` lights that in a
             // pass of its own, whose compositing was not read: it draws unlit.
@@ -394,7 +394,7 @@ fn sprite_xform(shader: TagStruct<'_>, name: &str) -> [f32; 4] {
 fn read_albedo_constants(
     shader: TagStruct<'_>,
     resolved: Option<&ResolvedRenderMethod>,
-    reach_render_method: bool,
+    later_render_method: bool,
 ) -> AlbedoConstants {
     let real = |name: &str| inline_real(resolved, name).unwrap_or(0.0);
     let tint = match inline_value(resolved, "tint_color") {
@@ -403,7 +403,7 @@ fn read_albedo_constants(
     };
     // `albedo_palettized_plasma.render_method_option`'s, which Reach's 2d
     // plasma shares.
-    let alpha_modulation = if reach_render_method {
+    let alpha_modulation = if later_render_method {
         inline_real(resolved, "alpha_modulation_factor").unwrap_or(0.1)
     } else {
         real("alpha_modulation_factor")

@@ -32,17 +32,17 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
 /// Reach's particles, whose simulation Halo 4's takes on with terms of its
 /// own.
 pub(in crate::app::model_preview) const REACH_PARTICLES: ParticleRules = ParticleRules {
-    reach_render_method: true,
+    later_render_method: true,
     only_facing_still_particles_move: true,
     ..SIMULATION
 };
 
 /// What Reach's particles and Halo 4's share.
 pub(in crate::app::model_preview) const SIMULATION: ParticleRules = ParticleRules {
-    reach_postprocess_seeds: true,
+    postprocess_seeds: true,
     cheap_shader: true,
     adds_at_illum: true,
-    reach_look: true,
+    later_look: true,
     card_lerps: true,
     random_volume_velocities: true,
     scales_axes: true,
