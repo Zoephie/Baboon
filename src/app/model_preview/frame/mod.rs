@@ -4,7 +4,13 @@
 use super::dx9::passes::{
     Dx9Layer, change_colors_for, h2_object_light_direction, h2_prt_object_lights,
 };
-use super::*;
+use super::{
+    MaterialTextures, ModelGpuCamera, ModelPreviewData, ModelPreviewState, ModelRenderMode,
+    PreviewCamera, RenderModelPreview, animation_skinning_rows, camera_light, ce, common, dx9,
+};
+use eframe::egui;
+use eframe::egui::Ui;
+use std::sync::Arc;
 
 mod visibility;
 pub(in crate::app::model_preview) use visibility::*;

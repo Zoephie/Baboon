@@ -1,6 +1,10 @@
 //! Which batches, instances, markers and layers a frame draws.
 
-use super::*;
+use super::super::{
+    MaterialTextures, ModelPreviewLayer, ModelPreviewState, ModelRegionSelection,
+    RenderModelPreview,
+};
+use std::collections::HashMap;
 
 /// Leave out what only a shield draws, once the materials are known.
 pub(in crate::app::model_preview) fn without_shield_parts(
@@ -118,7 +122,12 @@ pub(in crate::app::model_preview) fn model_layer_visible(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::{
+        MaterialTextures, ModelPreviewLayer, ModelPreviewState, ModelRegionSelection,
+        RenderModelPreview, RenderModelPreviewBatch,
+    };
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn a_shields_parts_leave_the_ordinary_passes_once_materials_are_known() {

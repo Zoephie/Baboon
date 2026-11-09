@@ -1,7 +1,8 @@
 //! The function inputs and values a frame reads: the sliders, the attached objects' values and whether anything moves.
 
 use super::super::dx9::passes::Dx9Layer;
-use super::*;
+use super::super::{MaterialTextures, ModelPreviewData, RenderModelPreview, gen3};
+use super::object_functions;
 
 /// Where the names the panel's sliders offer come from, after the Halo 2
 /// passes' own and before the shield's gate, in the order the panel lists them.
