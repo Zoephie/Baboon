@@ -386,9 +386,12 @@ impl Gen3Game for H4Game {
                     let onset =
                         cx.onsets
                             .of(system.object, system.scale_name(), values, frame.time);
-                    let draws = cx
+                    let draws: Vec<_> = cx
                         .particles
-                        .h4_draws(index, system, values, bones, view, frame.time, onset);
+                        .live_emitters(index, system, values, bones, view, frame.time, onset)
+                        .into_iter()
+                        .map(super::effects::particle_pass::H4EmitterDraw::packed)
+                        .collect();
                     if draws.is_empty() {
                         Some(false)
                     } else {

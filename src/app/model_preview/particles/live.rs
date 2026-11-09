@@ -1,4 +1,5 @@
-//! Halo 4's packed particle draws, built from the same fields.
+//! The live particles of a system, each as the card's update shader leaves
+//! it, for a game that draws its particles through a material of its own.
 
 use super::property::{ParticleState, lod_amount};
 use super::rules::particle_game_time;
@@ -6,25 +7,60 @@ use super::sim::{ParticleField, RunningEmitter, emitter_frame, location, system_
 use super::system::ParticleSystem;
 use super::{FunctionValues, ViewFrame, dot, minus};
 
-/// One Halo 4 emitter's draw: its particles packed as the card holds them,
-/// and the matrix from their space to the world.
+/// One live particle as the card's update shader leaves it
+/// (`s_particle_state`), for a game that draws its particles from their
+/// states to pack.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(in crate::app::model_preview) struct LiveParticle {
+    /// In emitter space.
+    pub(in crate::app::model_preview) position: [f32; 3],
+    /// Half the quad's extent.
+    pub(in crate::app::model_preview) size: f32,
+    pub(in crate::app::model_preview) velocity: [f32; 3],
+    pub(in crate::app::model_preview) aspect: f32,
+    pub(in crate::app::model_preview) random: [f32; 4],
+    pub(in crate::app::model_preview) random2: [f32; 4],
+    pub(in crate::app::model_preview) physical_rotation: f32,
+    pub(in crate::app::model_preview) manual_rotation: f32,
+    pub(in crate::app::model_preview) animated_frame: f32,
+    pub(in crate::app::model_preview) manual_frame: f32,
+    pub(in crate::app::model_preview) birth_time: f32,
+    pub(in crate::app::model_preview) inverse_lifespan: f32,
+    /// Of its life, 0 to 1.
+    pub(in crate::app::model_preview) age: f32,
+    pub(in crate::app::model_preview) intensity: f32,
+    pub(in crate::app::model_preview) rotation_rate: f32,
+    pub(in crate::app::model_preview) frame_rate: f32,
+    pub(in crate::app::model_preview) simulation: [f32; 2],
+    pub(in crate::app::model_preview) black_point: f32,
+    pub(in crate::app::model_preview) white_point: f32,
+    pub(in crate::app::model_preview) palette: f32,
+    pub(in crate::app::model_preview) axis: [f32; 3],
+    /// Tint times colour, and alpha.
+    pub(in crate::app::model_preview) color: [f32; 4],
+    /// The spawn colour, and the exposure exponent in `.3`.
+    pub(in crate::app::model_preview) initial_color: [f32; 4],
+}
+
+/// One emitter's live particles at one location, and the matrix from their
+/// space to the world.
 #[derive(Debug, Clone)]
-pub(crate) struct H4EmitterDraw {
+pub(in crate::app::model_preview) struct LiveEmitter {
     /// `vs_emitter_to_world_matrix`: forward, left, up and position.
-    pub(crate) to_world: [[f32; 3]; 4],
-    pub(crate) states: Vec<[u32; 20]>,
+    pub(in crate::app::model_preview) to_world: [[f32; 3]; 4],
+    pub(in crate::app::model_preview) particles: Vec<LiveParticle>,
     /// `near fade range` and its cutoff.
-    pub(crate) near: [f32; 2],
+    pub(in crate::app::model_preview) near: [f32; 2],
     /// `psBlackOrWhitePointEnabled`: set unless the black point is ever 0
     /// and the white point 1 (`c_particle_emitter_definition` postprocess).
-    pub(crate) black_or_white: bool,
+    pub(in crate::app::model_preview) black_or_white: bool,
 }
 
 impl ParticleField {
-    /// Halo 4: each emitter of `system`'s particles as `pack_particle_state`
-    /// writes them, for its material to draw.
+    /// Each emitter of `system`'s live particles, at each of its locations,
+    /// for its material to draw.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn h4_draws(
+    pub(in crate::app::model_preview) fn live_emitters(
         &self,
         index: usize,
         system: &ParticleSystem,
@@ -33,14 +69,14 @@ impl ParticleField {
         view: &ViewFrame,
         time: f32,
         onset: f32,
-    ) -> Vec<H4EmitterDraw> {
+    ) -> Vec<LiveEmitter> {
         let mut draws = Vec::new();
         if system.hidden || system.look.material.is_none() {
             return draws;
         }
         if system.child {
             for run in self.instances.get(index).into_iter().flatten() {
-                system.h4_draws_at(
+                system.live_emitters_at(
                     &run.running,
                     (run.origin, run.axes, run.start),
                     values,
@@ -55,7 +91,7 @@ impl ParticleField {
             return draws;
         };
         let (origin, axes) = location(system, bones);
-        system.h4_draws_at(
+        system.live_emitters_at(
             running,
             (origin, axes, onset),
             values,
@@ -68,18 +104,16 @@ impl ParticleField {
 }
 
 impl ParticleSystem {
-    /// `particle_update.fx`'s outputs for each live particle of a location,
-    /// packed.
-    fn h4_draws_at(
+    /// `particle_update.fx`'s outputs for each live particle of a location.
+    fn live_emitters_at(
         &self,
         running: &[RunningEmitter],
         (origin, axes, onset): ([f32; 3], [[f32; 3]; 3], f32),
         values: Option<&FunctionValues>,
         view: &ViewFrame,
         time: f32,
-        draws: &mut Vec<H4EmitterDraw>,
+        draws: &mut Vec<LiveEmitter>,
     ) {
-        use super::super::h4::effects::particles::{H4ParticleState, pack_particle_state};
         let system = self;
         let look = &*system.look;
         for (emitter, running) in system.emitters.iter().zip(running) {
@@ -105,7 +139,7 @@ impl ParticleSystem {
             };
             // `random u/v mirror` reads bit 0 of `256·random`.
             let mirror = |flip: bool| if flip { 1.5 / 256.0 } else { 0.5 / 256.0 };
-            let mut states = Vec::with_capacity(running.particles.len());
+            let mut live = Vec::with_capacity(running.particles.len());
             for particle in &running.particles {
                 let state = particle.state(base);
                 let tint = emitter.tint.color(&state);
@@ -123,7 +157,7 @@ impl ParticleSystem {
                     .as_ref()
                     .and_then(|terms| terms.white_point())
                     .map_or(1.0, |white| white.scalar(&state));
-                let packed = H4ParticleState {
+                live.push(LiveParticle {
                     position: particle.position,
                     size: emitter.size.scalar(&state) * emitter.scale.scalar(&state) * size_factor,
                     velocity: particle.velocity,
@@ -163,15 +197,14 @@ impl ParticleSystem {
                     axis: particle.axis,
                     color: [rgb[0], rgb[1], rgb[2], alpha],
                     initial_color: [1.0, 1.0, 1.0, 0.0],
-                };
-                states.push(pack_particle_state(&packed));
+                });
             }
-            if states.is_empty() {
+            if live.is_empty() {
                 continue;
             }
-            draws.push(H4EmitterDraw {
+            draws.push(LiveEmitter {
                 to_world: [turned[0], turned[1], turned[2], offset],
-                states,
+                particles: live,
                 near: [system.near_range.recip(), system.near_cutoff],
                 black_or_white: emitter
                     .black_point

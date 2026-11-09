@@ -6,9 +6,11 @@
 //! `docs/h4-preview-research/particles.md`.
 
 use super::super::super::gen3::shaders::{Gen3Pass, Gen3Value};
-use super::super::super::particles::H4EmitterDraw;
+use super::super::super::particles::LiveEmitter;
 use super::super::effects::gl::{H4EffectCx, H4EffectGl, material_functions};
-use super::super::effects::particles::{H4ParticleRender, custom_vert_registers};
+use super::super::effects::particles::{
+    H4ParticleRender, custom_vert_registers, pack_particle_state,
+};
 use crate::core::hlsl::parse::Type;
 use eframe::glow::{self, HasContext};
 
@@ -20,6 +22,32 @@ const DEFAULT_LIGHTING: [[f32; 3]; 4] = [
     [1.177_747, 1.145_916, 1.145_916],
     [0.5, 0.48, 0.48],
 ];
+
+/// One Halo 4 emitter's draw: its particles packed as the card holds them,
+/// and the matrix from their space to the world.
+#[derive(Debug, Clone)]
+pub(in crate::app::model_preview) struct H4EmitterDraw {
+    /// `vs_emitter_to_world_matrix`: forward, left, up and position.
+    pub(in crate::app::model_preview) to_world: [[f32; 3]; 4],
+    pub(in crate::app::model_preview) states: Vec<[u32; 20]>,
+    /// `near fade range` and its cutoff.
+    pub(in crate::app::model_preview) near: [f32; 2],
+    /// `psBlackOrWhitePointEnabled`.
+    pub(in crate::app::model_preview) black_or_white: bool,
+}
+
+impl H4EmitterDraw {
+    /// An emitter's live particles, each packed as `pack_particle_state`
+    /// writes it.
+    pub(in crate::app::model_preview) fn packed(live: LiveEmitter) -> Self {
+        Self {
+            to_world: live.to_world,
+            states: live.particles.iter().map(pack_particle_state).collect(),
+            near: live.near,
+            black_or_white: live.black_or_white,
+        }
+    }
+}
 
 /// The system postprocess's far fade when the tag has none:
 /// range at its floor, the cutoff 10000.

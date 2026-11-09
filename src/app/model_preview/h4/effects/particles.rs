@@ -3,7 +3,7 @@
 //! `pack_particle_state` packs it for the vertex shader to unpack. See
 //! `docs/h4-preview-research/particles.md`.
 
-use super::super::super::particles::ParticleMaterial;
+use super::super::super::particles::{LiveParticle, ParticleMaterial};
 use crate::app::model_preview::load::TagReader;
 use blam_tags::TagStruct;
 
@@ -485,40 +485,6 @@ fn custom_verts(bitmap: TagStruct<'_>) -> [[[f32; 2]; 4]; 5] {
     [UNIT_QUAD; 5]
 }
 
-/// One particle as the update shader leaves it (`s_particle_state`), the
-/// words of `pack_particle_state` to come.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct H4ParticleState {
-    /// In emitter space.
-    pub(crate) position: [f32; 3],
-    /// Half the quad's extent.
-    pub(crate) size: f32,
-    pub(crate) velocity: [f32; 3],
-    pub(crate) aspect: f32,
-    pub(crate) random: [f32; 4],
-    pub(crate) random2: [f32; 4],
-    pub(crate) physical_rotation: f32,
-    pub(crate) manual_rotation: f32,
-    pub(crate) animated_frame: f32,
-    pub(crate) manual_frame: f32,
-    pub(crate) birth_time: f32,
-    pub(crate) inverse_lifespan: f32,
-    /// Of its life, 0 to 1.
-    pub(crate) age: f32,
-    pub(crate) intensity: f32,
-    pub(crate) rotation_rate: f32,
-    pub(crate) frame_rate: f32,
-    pub(crate) simulation: [f32; 2],
-    pub(crate) black_point: f32,
-    pub(crate) white_point: f32,
-    pub(crate) palette: f32,
-    pub(crate) axis: [f32; 3],
-    /// Tint times colour, and alpha.
-    pub(crate) color: [f32; 4],
-    /// The spawn colour, and the exposure exponent in `.3`.
-    pub(crate) initial_color: [f32; 4],
-}
-
 /// f32 to f16, rounding to nearest even (HLSL `f32tof16` \[inferred\]).
 pub(crate) fn f32_to_f16(value: f32) -> u32 {
     let bits = value.to_bits();
@@ -578,7 +544,7 @@ pub(crate) fn pack_argb8([r, g, b, a]: [f32; 4]) -> u32 {
 }
 
 /// `pack_particle_state`: the twenty words of `s_raw_particle_state`.
-pub(crate) fn pack_particle_state(state: &H4ParticleState) -> [u32; 20] {
+pub(crate) fn pack_particle_state(state: &LiveParticle) -> [u32; 20] {
     let [x, y, z] = state.position.map(f32::to_bits);
     let [vx, vy, vz] = state.velocity;
     [
@@ -644,7 +610,7 @@ mod tests {
     /// the spawn colour white with exponent 0 → 0x00FFFFFF.
     #[test]
     fn the_equipment_icon_packs_as_the_report_has_it() {
-        let state = H4ParticleState {
+        let state = LiveParticle {
             size: 0.115,
             aspect: 1.0,
             inverse_lifespan: 0.5,

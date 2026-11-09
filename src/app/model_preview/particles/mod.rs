@@ -56,7 +56,7 @@ mod sim;
 pub(in crate::app::model_preview) use sim::*;
 mod vertices;
 pub(in crate::app::model_preview) use vertices::*;
-mod h4_draws;
-pub(in crate::app::model_preview) use h4_draws::*;
+mod live;
+pub(in crate::app::model_preview) use live::*;
 #[cfg(test)]
 mod tests;
