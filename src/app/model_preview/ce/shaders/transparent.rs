@@ -131,13 +131,13 @@ fn enum_values(stage: TagStruct<'_>, after: &str) -> Vec<i32> {
 }
 
 /// Which vertex stage draws the first map.
-fn transparent_stage(first_map: i32, screenspace: bool) -> H2VertexStage {
+fn transparent_stage(first_map: i32, screenspace: bool) -> Dx9VertexStage {
     match first_map {
-        1 => H2VertexStage::CeTransparentReflection,
-        2 => H2VertexStage::CeTransparentObject,
-        3 => H2VertexStage::CeTransparentViewer,
-        _ if screenspace => H2VertexStage::CeTransparentScreen,
-        _ => H2VertexStage::CeTransparent,
+        1 => Dx9VertexStage::CeTransparentReflection,
+        2 => Dx9VertexStage::CeTransparentObject,
+        3 => Dx9VertexStage::CeTransparentViewer,
+        _ if screenspace => Dx9VertexStage::CeTransparentScreen,
+        _ => Dx9VertexStage::CeTransparent,
     }
 }
 
@@ -146,7 +146,7 @@ fn read_transparent_maps(
     maps: Option<&TagBlock<'_>>,
     cube_first: bool,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> (Vec<H2DrawTexture>, Vec<CeMapAnimation>) {
+) -> (Vec<Dx9DrawTexture>, Vec<CeMapAnimation>) {
     let mut textures = Vec::new();
     let mut animations = Vec::new();
     for slot in 0..4usize {
@@ -216,17 +216,17 @@ fn transparent_pass(
     first_map: i32,
     flags: &ShaderFlags<'_>,
     fragment: String,
-    textures: Vec<H2DrawTexture>,
+    textures: Vec<Dx9DrawTexture>,
     constants: Vec<(u32, [f32; 4])>,
     animation: CeModelAnimation,
-) -> H2DrawPass {
+) -> Dx9DrawPass {
     let has = |flag: &str| flags.has(flag);
-    let depth = H2Depth { compare: Some(H2Compare::LessOrEqual), write: false };
+    let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: false };
     let stage = transparent_stage(first_map, has("first map is in screenspace"));
-    let mut pass = H2DrawPass::new(stage, fragment, depth);
+    let mut pass = Dx9DrawPass::new(stage, fragment, depth);
     pass.channels = [true, true, true, false];
     pass.blend = Some(FramebufferBlend::read(root).gl());
-    pass.cull = if has("two-sided") { H2Cull::None } else { H2Cull::Back };
+    pass.cull = if has("two-sided") { Dx9Cull::None } else { Dx9Cull::Back };
     pass.hidden_by_camo = !has("don't fade active-camouflage");
     pass.depth_bias = decal_bias(flags.has("decal"));
     pass.numeric = has("numeric").then(|| first_map_digits(root)).flatten();
@@ -253,7 +253,7 @@ fn generic_pass(
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Result<H2DrawPass, String> {
+) -> Result<Dx9DrawPass, String> {
     let first_map = option_index(root, "first map type", &GENERIC_FIRST_MAP_TYPES);
     let maps = root.field("maps").and_then(|field| field.as_block());
     let (textures, maps) = read_transparent_maps(maps.as_ref(), first_map != 0, bitmap);
@@ -325,7 +325,7 @@ fn chicago_pass(
     flags: &ShaderFlags<'_>,
     field: &str,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Result<H2DrawPass, String> {
+) -> Result<Dx9DrawPass, String> {
     let first_map = option_index(root, "first map type", &FIRST_MAP_TYPES);
     let maps = root.field(field).and_then(|field| field.as_block());
     let (textures, animations) = read_transparent_maps(maps.as_ref(), first_map != 0, bitmap);
@@ -387,7 +387,7 @@ pub(in crate::app::model_preview) fn ce_transparent_passes(
     root: TagStruct<'_>,
     group: &[u8; 4],
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Vec<H2DrawPass> {
+) -> Vec<Dx9DrawPass> {
     let Some(directory) = shader_directory(reader) else {
         return Vec::new();
     };

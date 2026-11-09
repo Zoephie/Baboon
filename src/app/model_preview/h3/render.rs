@@ -18,7 +18,7 @@ use super::super::frame::ModelGpuFrame;
 use super::bloom::H3Bloom;
 use super::super::gen3::shadow::h3_shadow_style;
 use super::super::gen3::pipeline::h3_set_cull;
-use super::super::dx9::passes::H2Layer;
+use super::super::dx9::passes::Dx9Layer;
 use super::light_pass::draw_dynamic_lights;
 
 /// Halo 3's and ODST's hooks: the pipeline's defaults, the self shadow, and
@@ -114,7 +114,7 @@ impl Gen3Game for H3Game {
         }
         let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
         unsafe {
-            cx.core.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowApply, None);
+            cx.core.draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowApply, None);
             gl.bind_vertex_array(Some(cx.core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);

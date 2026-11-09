@@ -2,7 +2,7 @@
 
 use super::super::common::slots::GameSlots;
 use super::super::common::view::ViewFrame;
-use super::super::dx9::passes::H2Layer;
+use super::super::dx9::passes::Dx9Layer;
 use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
 use super::super::renderer::FrameCx;
@@ -66,7 +66,7 @@ impl Dx9Game for CeGame {
                 let ce = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
                 draw_ce_transparents(cx.core, cx.gl, cx.frame, cx.slot, ce, &mut self.effect_gl);
             } else {
-                cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None);
+                cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, Dx9Layer::Transparent, None);
             }
         }
     }

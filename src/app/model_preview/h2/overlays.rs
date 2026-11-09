@@ -1,7 +1,7 @@
 //! The shaders a Halo 2 `.model` draws again over its render model.
 
 use blam_tags::TagFile;
-use super::super::dx9::passes::H2Layer;
+use super::super::dx9::passes::Dx9Layer;
 use super::super::*;
 
 /// The shaders a `.model` lays over its render model: its hologram shader
@@ -24,7 +24,7 @@ pub(in crate::app::model_preview) fn add_overlay_shaders(model_tag: &TagFile, pr
                 shader_path,
                 shader_group,
                 overlay: false,
-                shield: Some(H2Layer::HologramBloom),
+                shield: Some(Dx9Layer::HologramBloom),
                 permutation: 0,
                 object: 0,
             });
@@ -34,8 +34,8 @@ pub(in crate::app::model_preview) fn add_overlay_shaders(model_tag: &TagFile, pr
     let damage = model_tag.root().field("new damage info").and_then(|field| field.as_block());
     if let Some(damage) = damage.and_then(|block| block.element(0)) {
         let shaders = [
-            ("shield damaged shader", H2Layer::ShieldDamaged),
-            ("overshield shader", H2Layer::Overshield),
+            ("shield damaged shader", Dx9Layer::ShieldDamaged),
+            ("overshield shader", Dx9Layer::Overshield),
         ];
         for (name, layer) in shaders {
             let Some(shader_path) = damage.read_tag_ref_path(name).filter(|path| !path.is_empty())

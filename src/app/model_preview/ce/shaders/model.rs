@@ -59,7 +59,7 @@ fn tinted(color: &ReflectionColor) -> [f32; 4] {
     ]
 }
 
-fn build_passes(pass: ModelPass<'_>) -> Vec<H2DrawPass> {
+fn build_passes(pass: ModelPass<'_>) -> Vec<Dx9DrawPass> {
     let common = pass.common;
     let fragment = common.entry(&format!(
         "ShaderModel(i, {}, {}, {}, {}, false)",
@@ -68,15 +68,15 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<H2DrawPass> {
         pass.detail_function,
         pass.detail_before_reflection,
     ));
-    let depth = H2Depth { compare: Some(H2Compare::LessOrEqual), write: !pass.decal };
-    let mut draw = H2DrawPass::new(H2VertexStage::CeModel, fragment, depth);
+    let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: !pass.decal };
+    let mut draw = Dx9DrawPass::new(Dx9VertexStage::CeModel, fragment, depth);
     draw.channels = [true, true, true, false];
     if pass.decal {
         draw.depth_bias = MODEL_DECAL_DEPTH_BIAS;
-        draw.blend = Some(H2Blend {
-            equation: H2BlendEquation::Add,
-            source: H2BlendFactor::SrcAlpha,
-            destination: H2BlendFactor::OneMinusSrcAlpha,
+        draw.blend = Some(Dx9Blend {
+            equation: Dx9BlendEquation::Add,
+            source: Dx9BlendFactor::SrcAlpha,
+            destination: Dx9BlendFactor::OneMinusSrcAlpha,
             constant: [0; 4],
         });
     }
@@ -132,8 +132,8 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<H2DrawPass> {
     }
     // The game draws the far side again, with its normals turned to face.
     let mut back = draw.clone();
-    draw.cull = H2Cull::Back;
-    back.cull = H2Cull::Front;
+    draw.cull = Dx9Cull::Back;
+    back.cull = Dx9Cull::Front;
     back.texture_rows[3][1] = -1.0;
     vec![draw, back]
 }
@@ -153,7 +153,7 @@ pub(in crate::app::model_preview) fn ce_model_passes(
     flags: &ShaderFlags<'_>,
     common: &mut Option<Option<CeModelCommon>>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Vec<H2DrawPass> {
+) -> Vec<Dx9DrawPass> {
     if !matches!(group, b"soso" | b"senv") {
         return Vec::new();
     }

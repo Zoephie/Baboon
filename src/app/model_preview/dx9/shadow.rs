@@ -4,7 +4,7 @@
 use super::super::*;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::{Made, Sampling, Texels};
-use super::super::dx9::passes::{H2Layer, h2_prt_lights};
+use super::super::dx9::passes::{Dx9Layer, h2_prt_lights};
 use eframe::glow::{self, HasContext as _};
 
 pub(in crate::app::model_preview) const H2_SHADOW_MAP_SIZE: i32 = 2048;
@@ -126,7 +126,7 @@ impl RenderCore {
                 gl.enable(glow::POLYGON_OFFSET_FILL);
                 gl.polygon_offset(slope, depth);
             }
-            self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowCaster, None);
+            self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowCaster, None);
             gl.disable(glow::POLYGON_OFFSET_FILL);
             state.restore(gl);
             if !style.stencil_mask {
@@ -137,7 +137,7 @@ impl RenderCore {
             gl.enable(glow::STENCIL_TEST);
             gl.stencil_func(glow::ALWAYS, 1, 0xFF);
             gl.stencil_op(glow::KEEP, glow::KEEP, glow::REPLACE);
-            self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowMask, None);
+            self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::ShadowMask, None);
             gl.disable(glow::STENCIL_TEST);
             true
         }

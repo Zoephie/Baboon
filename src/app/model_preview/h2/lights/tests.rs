@@ -128,7 +128,7 @@ fn light() -> H2Light {
         brightness: [1.0, 1.0],
         color_animation: None,
         brightness_animation: None,
-        diffuse_layer: H2Layer::LightDiffuse,
+        diffuse_layer: Dx9Layer::LightDiffuse,
         radius: 2.0,
         specular_radius: 3.0,
         effect_duration: 0.0,

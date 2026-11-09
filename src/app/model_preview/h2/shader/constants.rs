@@ -36,12 +36,12 @@ pub(super) fn extern_value(name: &str, specular_brightness: f32) -> [f32; 4] {
     }
 }
 
-fn parameter_vector(value: &H2ParameterValue, specular_brightness: f32) -> [f32; 4] {
+fn parameter_vector(value: &Dx9ParameterValue, specular_brightness: f32) -> [f32; 4] {
     match value {
-        H2ParameterValue::Value(value) => [*value; 4],
-        H2ParameterValue::Color([r, g, b]) => [*r, *g, *b, 1.0],
-        H2ParameterValue::Extern(name) => extern_value(name, specular_brightness),
-        H2ParameterValue::Bitmap(_) | H2ParameterValue::Missing => [0.0, 0.0, 0.0, 1.0],
+        Dx9ParameterValue::Value(value) => [*value; 4],
+        Dx9ParameterValue::Color([r, g, b]) => [*r, *g, *b, 1.0],
+        Dx9ParameterValue::Extern(name) => extern_value(name, specular_brightness),
+        Dx9ParameterValue::Bitmap(_) | Dx9ParameterValue::Missing => [0.0, 0.0, 0.0, 1.0],
     }
 }
 
@@ -78,27 +78,27 @@ pub(super) fn read_custom_channels(implementation: TagStruct<'_>) -> Option<[boo
 /// Turn a resolved pass into what the renderer draws. `bitmap` decodes a map
 /// by path in the shape its sampler wants; `scale` gives a parameter's tiling.
 pub(in crate::app) fn prepare_draw_pass(
-    pass: &H2Pass,
+    pass: &Dx9Pass,
     psh: &str,
     cases: HashMap<String, i32>,
     specular_brightness: f32,
     mut bitmap: impl FnMut(&str, SamplerKind) -> Option<std::sync::Arc<Image>>,
     scale: impl Fn(&str) -> [f32; 2],
-) -> Result<H2DrawPass, String> {
-    let stage = H2VertexStage::from_path(&pass.vertex_shader)
+) -> Result<Dx9DrawPass, String> {
+    let stage = Dx9VertexStage::from_path(&pass.vertex_shader)
         .ok_or_else(|| format!("No vertex stage for {}", pass.vertex_shader))?;
     let options = PixelShaderOptions { cases, alpha_test: pass.alpha_test };
     let translated = translate(psh, H2_GLSL_VERSION, &options)?;
     let pixel = pixel_constants(pass, &translated.constants, specular_brightness);
     let textures = draw_textures(pass, &translated.samplers, &mut bitmap);
     let vertex = vertex_constants(pass, stage, specular_brightness, &scale);
-    Ok(H2DrawPass {
+    Ok(Dx9DrawPass {
         stage,
         fragment: translated.glsl,
         blend: pass.blend,
         depth: pass.depth,
         depth_bias: 0.0,
-        cull: H2Cull::Frame,
+        cull: Dx9Cull::Frame,
         hidden_by_camo: false,
         numeric: None,
         channels: pass.custom_channels.unwrap_or_else(|| channel_mask(&pass.channels)),
@@ -122,12 +122,12 @@ pub(in crate::app) fn prepare_draw_pass(
 }
 
 /// `pass`'s value for the parameter `name`, if it has one.
-fn parameter_of<'a>(pass: &'a H2Pass, name: &str) -> Option<&'a H2ParameterValue> {
+fn parameter_of<'a>(pass: &'a Dx9Pass, name: &str) -> Option<&'a Dx9ParameterValue> {
     pass.parameters.iter().find(|(parameter, _)| parameter == name).map(|(_, value)| value)
 }
 
 /// The animations `pass` runs on the parameter `name`.
-fn animations_of(pass: &H2Pass, name: &str) -> Vec<H2Animation> {
+fn animations_of(pass: &Dx9Pass, name: &str) -> Vec<H2Animation> {
     pass.animations.get(name).cloned().unwrap_or_default()
 }
 
@@ -143,7 +143,7 @@ struct PixelConstants {
 
 /// The translated pixel shader's constant bindings, filled from `pass`'s
 /// parameters component by component.
-fn pixel_constants(pass: &H2Pass, bindings: &[ConstantBinding], specular_brightness: f32) -> PixelConstants {
+fn pixel_constants(pass: &Dx9Pass, bindings: &[ConstantBinding], specular_brightness: f32) -> PixelConstants {
     let lookup = |name: &str| parameter_of(pass, name);
     let mut constants: Vec<(u32, [f32; 4])> = Vec::new();
     let mut animated_constants = Vec::new();
@@ -170,13 +170,13 @@ fn pixel_constants(pass: &H2Pass, bindings: &[ConstantBinding], specular_brightn
             if animations.iter().any(|animation| !animation.is_transform()) {
                 animated_constants.push((binding.register, index, animations));
             }
-            if let Some(H2ParameterValue::Extern(source)) = lookup(&binding.source)
+            if let Some(Dx9ParameterValue::Extern(source)) = lookup(&binding.source)
                 && let Some(channel) = change_color_channel(source)
                 && index < 3
             {
                 change_colors.push((binding.register, index, channel));
             }
-            if let Some(H2ParameterValue::Extern(source)) = lookup(&binding.source)
+            if let Some(Dx9ParameterValue::Extern(source)) = lookup(&binding.source)
                 && matches!(
                     source.as_str(),
                     "LIGHT diffuse color"
@@ -189,7 +189,7 @@ fn pixel_constants(pass: &H2Pass, bindings: &[ConstantBinding], specular_brightn
             {
                 light_colors.push((binding.register, index));
             }
-            if matches!(lookup(&binding.source), Some(H2ParameterValue::Extern(name)) if name == ACTIVE_CAMO_AMOUNT)
+            if matches!(lookup(&binding.source), Some(Dx9ParameterValue::Extern(name)) if name == ACTIVE_CAMO_AMOUNT)
                 && index < 4
             {
                 camo_amounts.push((binding.register, index));
@@ -203,17 +203,17 @@ fn pixel_constants(pass: &H2Pass, bindings: &[ConstantBinding], specular_brightn
 /// camera externs, the bump map for active camo's, or an extern the renderer
 /// binds (normalization, texaccum, falloff, gel, the frame copy).
 fn draw_textures(
-    pass: &H2Pass,
+    pass: &Dx9Pass,
     samplers: &[SamplerBinding],
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<std::sync::Arc<Image>>,
-) -> Vec<H2DrawTexture> {
+) -> Vec<Dx9DrawTexture> {
     samplers
         .iter()
         .map(|sampler| {
             let value = pass.textures.get(sampler.slot as usize).map(|texture| &texture.value);
             let image = match value {
-                Some(H2ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
-                Some(H2ParameterValue::Extern(name)) if CAMERA_FEEDS.contains(&name.as_str()) => {
+                Some(Dx9ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
+                Some(Dx9ParameterValue::Extern(name)) if CAMERA_FEEDS.contains(&name.as_str()) => {
                     Some(std::sync::Arc::new(Image::Flat(TextureImage {
                         rgba: vec![0, 0, 0, 255],
                         width: 1,
@@ -223,9 +223,9 @@ fn draw_textures(
                         scale: [1.0, 1.0],
                     })))
                 }
-                Some(H2ParameterValue::Extern(name)) if name == ACTIVE_CAMO_BUMP => {
+                Some(Dx9ParameterValue::Extern(name)) if name == ACTIVE_CAMO_BUMP => {
                     match parameter_of(pass, "bump_map") {
-                        Some(H2ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
+                        Some(Dx9ParameterValue::Bitmap(path)) => bitmap(path.as_str(), sampler.kind),
                         _ => None,
                     }
                 }
@@ -233,18 +233,18 @@ fn draw_textures(
             };
             let normalization = matches!(
                 value,
-                Some(H2ParameterValue::Extern(name)) if name == VECTOR_NORMALIZATION
+                Some(Dx9ParameterValue::Extern(name)) if name == VECTOR_NORMALIZATION
             );
             let texaccum = matches!(
                 value,
-                Some(H2ParameterValue::Extern(name)) if name == TEXACCUM_TARGET
+                Some(Dx9ParameterValue::Extern(name)) if name == TEXACCUM_TARGET
             );
             let falloff = matches!(
                 value,
-                Some(H2ParameterValue::Extern(name)) if name == LIGHT_FALLOFF
+                Some(Dx9ParameterValue::Extern(name)) if name == LIGHT_FALLOFF
             );
-            let gel = matches!(value, Some(H2ParameterValue::Extern(name)) if name == LIGHT_GEL);
-            H2DrawTexture {
+            let gel = matches!(value, Some(Dx9ParameterValue::Extern(name)) if name == LIGHT_GEL);
+            Dx9DrawTexture {
                 slot: sampler.slot,
                 kind: sampler.kind,
                 image,
@@ -253,7 +253,7 @@ fn draw_textures(
                 gel,
                 frame_copy: matches!(
                     value,
-                    Some(H2ParameterValue::Extern(name))
+                    Some(Dx9ParameterValue::Extern(name))
                         if name == FRAME_COPY || name == WATER_REFRACTION
                 ),
                 falloff,
@@ -278,10 +278,10 @@ struct VertexConstants {
 }
 
 /// The texture rows a `stage` starts from before its constants fill them.
-fn default_texture_rows(stage: H2VertexStage) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+fn default_texture_rows(stage: Dx9VertexStage) -> [[f32; 4]; H2_TEXTURE_ROWS] {
     if stage.uses_scale_rows() {
         std::array::from_fn(|row| {
-            if (row == 3 && stage.is_lightmap()) || (row == 2 && stage == H2VertexStage::Texaccum) {
+            if (row == 3 && stage.is_lightmap()) || (row == 2 && stage == Dx9VertexStage::Texaccum) {
                 [1.0; 4]
             } else {
                 [1.0, 1.0, 0.0, 0.0]
@@ -295,8 +295,8 @@ fn default_texture_rows(stage: H2VertexStage) -> [[f32; 4]; H2_TEXTURE_ROWS] {
 /// `pass`'s vertex constants, in order: a lightmap stage's light vectors, the
 /// `Vn` tints, then the texture rows, by value or by `scale`'s tiling.
 fn vertex_constants(
-    pass: &H2Pass,
-    stage: H2VertexStage,
+    pass: &Dx9Pass,
+    stage: Dx9VertexStage,
     specular_brightness: f32,
     scale: &impl Fn(&str) -> [f32; 2],
 ) -> VertexConstants {

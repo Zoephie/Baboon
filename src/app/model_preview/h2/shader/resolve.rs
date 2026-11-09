@@ -3,7 +3,7 @@
 
 use super::super::super::*;
 use super::super::super::common::fields::has_flag;
-use super::super::super::dx9::passes::{H2DrawPass, H2Layer, H2ParameterValue, animation_function};
+use super::super::super::dx9::passes::{Dx9DrawPass, Dx9Layer, Dx9ParameterValue, animation_function};
 use super::super::shader::{h2_pass_needs_frame_texture, prepare_draw_pass, resolve_h2_layer_passes};
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -89,11 +89,11 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
     textures.used_shader_parameters_only = template.is_none();
     // The game skips the specular pass for a shader with no specular type.
     let has_specular = !root.field("specular type").is_some_and(|field| field.enum_is("none"));
-    for layer in H2Layer::ALL {
-        if (layer == H2Layer::LightSpecular && !has_specular) || layer.tag_name().is_empty() {
+    for layer in Dx9Layer::ALL {
+        if (layer == Dx9Layer::LightSpecular && !has_specular) || layer.tag_name().is_empty() {
             continue;
         }
-        let has_texaccum = [H2Layer::Texaccum, H2Layer::LightAlbedo]
+        let has_texaccum = [Dx9Layer::Texaccum, Dx9Layer::LightAlbedo]
             .iter()
             .any(|layer| !textures.h2_layers[*layer as usize].is_empty());
         textures.h2_layers[layer as usize] = prepare_h2_passes(
@@ -117,13 +117,13 @@ pub(in crate::app::model_preview) fn resolve_h2_shader(
                 let defaults = template.as_ref()?.parameters.get(BUMP)?;
                 Some(defaults.default_bitmap.clone()).filter(|path| !path.is_empty())
             });
-        textures.h2_layers[H2Layer::ActiveCamo as usize] =
+        textures.h2_layers[Dx9Layer::ActiveCamo as usize] =
             prepare_h2_camo_passes(reader, bump, caches);
     }
     // Passes draw it with Game Shaders on: an emblem's overlay does, and is only
     // off for want of a player. Without them, and with no slots, it is bare.
     if textures.slots.iter().all(Option::is_none)
-        && textures.h2_layers[H2Layer::Transparent as usize].is_empty()
+        && textures.h2_layers[Dx9Layer::Transparent as usize].is_empty()
     {
         let template = root.read_tag_ref_path("template").unwrap_or_default();
         let leaf = tag_path::name(&template);
@@ -158,7 +158,7 @@ fn prepare_h2_camo_passes(
     reader: &TagReader,
     bump: Option<String>,
     caches: &mut ResolveCaches,
-) -> Vec<H2DrawPass> {
+) -> Vec<Dx9DrawPass> {
     let shader = caches
         .h2_camo_shader
         .get_or_insert_with(|| {
@@ -183,7 +183,7 @@ fn prepare_h2_camo_passes(
         &h2_shader_parameters(root),
         template.as_deref(),
         caches,
-        H2Layer::ActiveCamo,
+        Dx9Layer::ActiveCamo,
         false,
         bump,
     )
@@ -211,10 +211,10 @@ fn prepare_h2_passes(
     parameters: &HashMap<String, TagStruct<'_>>,
     template: Option<&H2TemplateDefaults>,
     caches: &mut ResolveCaches,
-    layer: H2Layer,
+    layer: Dx9Layer,
     has_texaccum: bool,
     camo_bump: Option<String>,
-) -> Vec<H2DrawPass> {
+) -> Vec<Dx9DrawPass> {
     let TagSource::LooseFolder { root, .. } = &reader.source else {
         return Vec::new();
     };
@@ -231,7 +231,7 @@ fn prepare_h2_passes(
     if let Some(path) = camo_bump {
         for pass in &mut passes {
             pass.parameters.retain(|(name, _)| name != "bump_map");
-            pass.parameters.push(("bump_map".to_owned(), H2ParameterValue::Bitmap(path.clone())));
+            pass.parameters.push(("bump_map".to_owned(), Dx9ParameterValue::Bitmap(path.clone())));
         }
     }
     let mut cases = HashMap::from(["specular", "lightmap"].map(|name| {
@@ -248,7 +248,7 @@ fn prepare_h2_passes(
     for pass in &passes {
         // The texaccum target and friends need a frame this preview does not
         // render, so such a material keeps the slots.
-        if layer != H2Layer::Transparent && h2_pass_needs_frame_texture(pass, has_texaccum) {
+        if layer != Dx9Layer::Transparent && h2_pass_needs_frame_texture(pass, has_texaccum) {
             return Vec::new();
         }
         let file = directory.join(pass.pixel_shader_file());
@@ -284,7 +284,7 @@ fn prepare_h2_passes(
         match drawn {
             Ok(drawn) => prepared.push(drawn),
             Err(error) => {
-                if layer == H2Layer::Transparent {
+                if layer == Dx9Layer::Transparent {
                     eprintln!("model preview: {}: {error}", pass.path);
                 }
                 return Vec::new();

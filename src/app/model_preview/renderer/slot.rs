@@ -4,7 +4,7 @@ use super::*;
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::texture::{upload_image, upload_texture};
 use super::super::particles::{sprite_maps, upload_cheap_render_texture};
-use super::super::dx9::passes::{H2DrawPass, H2_LAYER_COUNT};
+use super::super::dx9::passes::{Dx9DrawPass, H2_LAYER_COUNT};
 use crate::app::model_preview::common::image::Sampler;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow;
@@ -119,7 +119,7 @@ pub(in crate::app::model_preview) struct ModelGpuSlot {
     /// the slot follows.
     pub(in crate::app::model_preview) uploads: u64,
     /// Per batch, where its transparent passes sort from.
-    pub(in crate::app::model_preview) h2_sort_points: Vec<[f32; 3]>,
+    pub(in crate::app::model_preview) sort_points: Vec<[f32; 3]>,
     /// GL textures per material, in `RenderModelPreview::materials` order.
     pub(in crate::app::model_preview) materials: Vec<MaterialGlTextures>,
     /// The `textures_id` the uploaded `materials` belong to, so a reloaded
@@ -166,7 +166,7 @@ impl ModelGpuSlot {
             Ok(Self {
                 mesh_id: None,
                 uploads: 0,
-                h2_sort_points: Vec::new(),
+                sort_points: Vec::new(),
                 vertex_array,
                 vertex_buffer,
                 prt_buffer,
@@ -223,7 +223,7 @@ impl ModelGpuSlot {
 
     pub(super) unsafe fn upload_geometry(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
         self.mesh_id = Some(frame.mesh_id);
-        self.h2_sort_points = h2_sort_points(&frame.preview);
+        self.sort_points = sort_points(&frame.preview);
         unsafe {
             gl.bind_vertex_array(Some(self.vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
@@ -432,7 +432,7 @@ impl ModelGpuSlot {
                     uploaded.textures[index] = unsafe { upload_texture(gl, image) };
                 }
                 uploaded.detail = material.detail;
-                let upload = |passes: &[H2DrawPass]| -> Vec<Vec<Option<glow::NativeTexture>>> {
+                let upload = |passes: &[Dx9DrawPass]| -> Vec<Vec<Option<glow::NativeTexture>>> {
                     passes
                         .iter()
                         .map(|pass| {
@@ -465,7 +465,7 @@ impl ModelGpuSlot {
 /// One material's textures on the GPU, in `TextureSlot` order.
 pub(in crate::app::model_preview) struct MaterialGlTextures {
     pub(in crate::app::model_preview) textures: [Option<glow::NativeTexture>; SLOT_COUNT],
-    /// By `H2Layer` and pass, one texture per entry of its `textures`.
+    /// By `Dx9Layer` and pass, one texture per entry of its `textures`.
     pub(in crate::app::model_preview) h2_textures: [Vec<Vec<Option<glow::NativeTexture>>>; H2_LAYER_COUNT],
     pub(super) uv_scales: [[f32; 2]; SLOT_COUNT],
     pub(in crate::app::model_preview) detail: DetailComposition,

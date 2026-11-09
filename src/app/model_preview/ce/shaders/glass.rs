@@ -13,7 +13,7 @@ fn lit_rows(scale: [f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
     rows
 }
 
-/// `H2VertexStage::Bumped`'s rows for one map at `scale`.
+/// `Dx9VertexStage::Bumped`'s rows for one map at `scale`.
 pub(super) fn bumped_rows(scale: f32) -> [[f32; 4]; H2_TEXTURE_ROWS] {
     let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
     rows[0] = [1.0, 1.0, 0.0, 0.0];
@@ -27,7 +27,7 @@ pub(super) fn glass_passes(
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Result<Vec<H2DrawPass>, String> {
+) -> Result<Vec<Dx9DrawPass>, String> {
     let read = |name: &str| read_shader_source(directory, name);
     let has = |flag: &str| flags.has(flag);
     let two_sided = has("two-sided");
@@ -48,9 +48,9 @@ pub(super) fn glass_passes(
         let register = shader.register("c_tint_and_intensity").unwrap_or(0);
         let size = scale("background tint map scale");
         passes.push(SimplePass {
-            stage: H2VertexStage::CeGlassLit,
+            stage: Dx9VertexStage::CeGlassLit,
             fragment: shader.entry("pixel_main(i)"),
-            blend: plain_blend(H2BlendFactor::Zero, H2BlendFactor::SrcColor),
+            blend: plain_blend(Dx9BlendFactor::Zero, Dx9BlendFactor::SrcColor),
             two_sided,
             write_depth: false,
             channels: [true, true, true, false],
@@ -86,9 +86,9 @@ pub(super) fn glass_passes(
         let size = real("bump map scale");
         let size = if size == 0.0 { 1.0 } else { size };
         let mut draw = SimplePass {
-            stage: if flat_surface { H2VertexStage::CeGlassFlat } else { H2VertexStage::Bumped },
+            stage: if flat_surface { Dx9VertexStage::CeGlassFlat } else { Dx9VertexStage::Bumped },
             fragment: shader.entry("pixel_main(i)"),
-            blend: plain_blend(H2BlendFactor::SrcAlpha, H2BlendFactor::One),
+            blend: plain_blend(Dx9BlendFactor::SrcAlpha, Dx9BlendFactor::One),
             two_sided,
             write_depth: false,
             channels: [true, true, true, false],
@@ -115,9 +115,9 @@ pub(super) fn glass_passes(
         let shader = translate_fx(GLASS_DIFFUSE_FILE, H2_GLSL_VERSION, &[], read)?;
         let (base, fine) = (scale("diffuse map scale"), scale("diffuse detail map scale"));
         passes.push(SimplePass {
-            stage: H2VertexStage::CeGlassLit,
+            stage: Dx9VertexStage::CeGlassLit,
             fragment: shader.entry("main_T0_P0(i)"),
-            blend: plain_blend(H2BlendFactor::SrcAlpha, H2BlendFactor::OneMinusSrcAlpha),
+            blend: plain_blend(Dx9BlendFactor::SrcAlpha, Dx9BlendFactor::OneMinusSrcAlpha),
             two_sided,
             write_depth: false,
             channels: [true, true, true, false],

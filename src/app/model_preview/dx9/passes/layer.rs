@@ -3,7 +3,7 @@
 
 /// A layer the preview draws, in the order the game's `render_scene` does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H2Layer {
+pub(crate) enum Dx9Layer {
     Texaccum,
     /// A late fill of the texaccum target, drawn to it per light in the game,
     /// for shaders whose color changes rather than sitting in a base map.
@@ -55,7 +55,7 @@ pub(crate) enum H2Layer {
 
 pub(crate) const H2_LAYER_COUNT: usize = 26;
 
-impl H2Layer {
+impl Dx9Layer {
     pub(crate) const ALL: [Self; H2_LAYER_COUNT] = [
         Self::Texaccum,
         Self::LightAlbedo,

@@ -3,70 +3,70 @@ use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
 use crate::core::h2_pixel_shader::{PixelShaderOptions, translate};
 
-const STAGES: [H2VertexStage; 47] = [
-    H2VertexStage::CeActiveCamo,
-    H2VertexStage::CePlasma,
-    H2VertexStage::CeGlassLit,
-    H2VertexStage::CeGlassFlat,
-    H2VertexStage::CeMeter,
-    H2VertexStage::CeWaterOpacity,
-    H2VertexStage::CeModel,
-    H2VertexStage::CeTransparent,
-    H2VertexStage::CeTransparentReflection,
-    H2VertexStage::CeTransparentObject,
-    H2VertexStage::CeTransparentViewer,
-    H2VertexStage::CeTransparentScreen,
-    H2VertexStage::LightDiffuseTarget,
-    H2VertexStage::LightDiffuseDetail,
-    H2VertexStage::LightDiffuse,
-    H2VertexStage::LightGel,
-    H2VertexStage::LightGelTarget,
-    H2VertexStage::LightGelDetail,
-    H2VertexStage::LightSpecular,
-    H2VertexStage::LightFrustum,
-    H2VertexStage::LightFrustumTarget,
-    H2VertexStage::LightFrustumDetail,
-    H2VertexStage::Emissive,
-    H2VertexStage::Environment,
-    H2VertexStage::LightmapTarget,
-    H2VertexStage::LightmapTargetEye,
-    H2VertexStage::ActiveCamo,
-    H2VertexStage::ShadowCaster,
-    H2VertexStage::ShadowMask,
-    H2VertexStage::TextureCamera,
-    H2VertexStage::Water,
-    H2VertexStage::Hologram,
-    H2VertexStage::Prt,
-    H2VertexStage::PrtDetail,
-    H2VertexStage::LightmapEye,
-    H2VertexStage::LightmapEyeBlend,
-    H2VertexStage::Texaccum,
-    H2VertexStage::Lightmap,
-    H2VertexStage::LightmapEnv,
-    H2VertexStage::LightmapMark,
-    H2VertexStage::LightmapEnvStencil,
-    H2VertexStage::LightmapMarkStencil,
-    H2VertexStage::LightmapStencil,
-    H2VertexStage::Default,
-    H2VertexStage::Reflection,
-    H2VertexStage::Offset,
-    H2VertexStage::Bumped,
+const STAGES: [Dx9VertexStage; 47] = [
+    Dx9VertexStage::CeActiveCamo,
+    Dx9VertexStage::CePlasma,
+    Dx9VertexStage::CeGlassLit,
+    Dx9VertexStage::CeGlassFlat,
+    Dx9VertexStage::CeMeter,
+    Dx9VertexStage::CeWaterOpacity,
+    Dx9VertexStage::CeModel,
+    Dx9VertexStage::CeTransparent,
+    Dx9VertexStage::CeTransparentReflection,
+    Dx9VertexStage::CeTransparentObject,
+    Dx9VertexStage::CeTransparentViewer,
+    Dx9VertexStage::CeTransparentScreen,
+    Dx9VertexStage::LightDiffuseTarget,
+    Dx9VertexStage::LightDiffuseDetail,
+    Dx9VertexStage::LightDiffuse,
+    Dx9VertexStage::LightGel,
+    Dx9VertexStage::LightGelTarget,
+    Dx9VertexStage::LightGelDetail,
+    Dx9VertexStage::LightSpecular,
+    Dx9VertexStage::LightFrustum,
+    Dx9VertexStage::LightFrustumTarget,
+    Dx9VertexStage::LightFrustumDetail,
+    Dx9VertexStage::Emissive,
+    Dx9VertexStage::Environment,
+    Dx9VertexStage::LightmapTarget,
+    Dx9VertexStage::LightmapTargetEye,
+    Dx9VertexStage::ActiveCamo,
+    Dx9VertexStage::ShadowCaster,
+    Dx9VertexStage::ShadowMask,
+    Dx9VertexStage::TextureCamera,
+    Dx9VertexStage::Water,
+    Dx9VertexStage::Hologram,
+    Dx9VertexStage::Prt,
+    Dx9VertexStage::PrtDetail,
+    Dx9VertexStage::LightmapEye,
+    Dx9VertexStage::LightmapEyeBlend,
+    Dx9VertexStage::Texaccum,
+    Dx9VertexStage::Lightmap,
+    Dx9VertexStage::LightmapEnv,
+    Dx9VertexStage::LightmapMark,
+    Dx9VertexStage::LightmapEnvStencil,
+    Dx9VertexStage::LightmapMarkStencil,
+    Dx9VertexStage::LightmapStencil,
+    Dx9VertexStage::Default,
+    Dx9VertexStage::Reflection,
+    Dx9VertexStage::Offset,
+    Dx9VertexStage::Bumped,
 ];
 
 #[test]
 fn every_transparent_vertex_shader_has_a_stage() {
     let dir = "rasterizer\\vertex_shaders_dx9\\";
     for (name, stage) in [
-        ("transparent_generic_default", H2VertexStage::Default),
-        ("transparent_generic_reflection", H2VertexStage::Reflection),
-        ("transparent_generic_reflection_sky", H2VertexStage::Reflection),
-        ("transparent_generic_offset", H2VertexStage::Offset),
-        ("stencil_env_bumped_tangentspace", H2VertexStage::Bumped),
+        ("transparent_generic_default", Dx9VertexStage::Default),
+        ("transparent_generic_reflection", Dx9VertexStage::Reflection),
+        ("transparent_generic_reflection_sky", Dx9VertexStage::Reflection),
+        ("transparent_generic_offset", Dx9VertexStage::Offset),
+        ("stencil_env_bumped_tangentspace", Dx9VertexStage::Bumped),
     ] {
-        assert_eq!(H2VertexStage::from_path(&format!("{dir}{name}")), Some(stage));
+        assert_eq!(Dx9VertexStage::from_path(&format!("{dir}{name}")), Some(stage));
     }
-    assert_eq!(H2VertexStage::from_path("rasterizer\\unknown"), None);
-    assert_eq!(H2VertexStage::from_path("Rasterizer\\Hologram"), Some(H2VertexStage::Hologram));
+    assert_eq!(Dx9VertexStage::from_path("rasterizer\\unknown"), None);
+    assert_eq!(Dx9VertexStage::from_path("Rasterizer\\Hologram"), Some(Dx9VertexStage::Hologram));
 }
 
 /// Stages must link with what the translator produces, so a varying
@@ -116,7 +116,7 @@ fn the_texaccum_stage_links_with_the_kit_shader() {
     let source = String::from_utf8_lossy(&std::fs::read(file).unwrap()).into_owned();
     let dir = crate::core::test_kits::unique_temp_dir("h2_texaccum_stage");
     let (vertex, pixel) = (dir.join("pass.vert"), dir.join("pass.frag"));
-    std::fs::write(&vertex, H2VertexStage::Texaccum.source("#version 330\n")).unwrap();
+    std::fs::write(&vertex, Dx9VertexStage::Texaccum.source("#version 330\n")).unwrap();
     let shader = translate(&source, "#version 330\n", &PixelShaderOptions::default()).unwrap();
     std::fs::write(&pixel, shader.glsl).unwrap();
     let output = std::process::Command::new("glslangValidator")
@@ -140,13 +140,13 @@ fn lightmap_stages_link_with_the_kit_shaders() {
     let directory = std::path::Path::new(&root).join("rasterizer/pixel_shaders_dx9");
     let dir = crate::core::test_kits::unique_temp_dir("h2_lightmap_stages");
     for (pass, stage) in [
-        ("lightmap_tex_detail", H2VertexStage::Lightmap),
-        ("lightmap_tex_env", H2VertexStage::LightmapEnv),
-        ("lightmap_tex_four_change_color", H2VertexStage::LightmapMark),
-        ("lightmap_tex_env_detail", H2VertexStage::LightmapEnvStencil),
-        ("lightmap_tex_detail_blend_specular", H2VertexStage::LightmapMarkStencil),
-        ("lightmap_honor_guard", H2VertexStage::LightmapStencil),
-        ("lightmap_env", H2VertexStage::LightmapTarget),
+        ("lightmap_tex_detail", Dx9VertexStage::Lightmap),
+        ("lightmap_tex_env", Dx9VertexStage::LightmapEnv),
+        ("lightmap_tex_four_change_color", Dx9VertexStage::LightmapMark),
+        ("lightmap_tex_env_detail", Dx9VertexStage::LightmapEnvStencil),
+        ("lightmap_tex_detail_blend_specular", Dx9VertexStage::LightmapMarkStencil),
+        ("lightmap_honor_guard", Dx9VertexStage::LightmapStencil),
+        ("lightmap_env", Dx9VertexStage::LightmapTarget),
     ] {
         let file = directory.join(format!("shaders_shader_passes_lightmap_{pass}_3.psh"));
         let source = String::from_utf8_lossy(&std::fs::read(file).unwrap()).into_owned();

@@ -5,7 +5,7 @@
 pub(in crate::app) const H2_TEXTURE_ROWS: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(in crate::app) enum H2VertexStage {
+pub(in crate::app) enum Dx9VertexStage {
     /// All four texture coordinates through their transforms.
     Default,
     /// `tc0` is the reflection vector. The sky variant only pins the result

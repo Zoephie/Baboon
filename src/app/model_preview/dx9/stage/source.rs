@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl H2VertexStage {
+impl Dx9VertexStage {
     fn outputs(self) -> &'static str {
         match self {
             Self::Default => {

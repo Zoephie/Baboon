@@ -16,9 +16,9 @@ use super::ce::shaders::{
 use super::gen3::shaders::{
     H3Material, H3Shield, H3Sources,
 };
-use super::dx9::stage::H2VertexStage;
+use super::dx9::stage::Dx9VertexStage;
 use super::dx9::passes::{
-    H2DrawPass, H2Layer, H2_LAYER_COUNT, h2_shadow_passes,
+    Dx9DrawPass, Dx9Layer, H2_LAYER_COUNT, h2_shadow_passes,
 };
 use super::common::image::Image;
 use crate::core::h2_pixel_shader::SamplerKind;

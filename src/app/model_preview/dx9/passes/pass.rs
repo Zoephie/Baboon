@@ -3,7 +3,7 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(in crate::app) enum H2ParameterValue {
+pub(in crate::app) enum Dx9ParameterValue {
     Bitmap(String),
     Value(f32),
     Color([f32; 3]),
@@ -14,7 +14,7 @@ pub(in crate::app) enum H2ParameterValue {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app) enum H2BlendFactor {
+pub(in crate::app) enum Dx9BlendFactor {
     Zero,
     One,
     SrcColor,
@@ -33,7 +33,7 @@ pub(in crate::app) enum H2BlendFactor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app) enum H2BlendEquation {
+pub(in crate::app) enum Dx9BlendEquation {
     Add,
     Subtract,
     ReverseSubtract,
@@ -42,16 +42,16 @@ pub(in crate::app) enum H2BlendEquation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::app) struct H2Blend {
-    pub(in crate::app) equation: H2BlendEquation,
-    pub(in crate::app) source: H2BlendFactor,
-    pub(in crate::app) destination: H2BlendFactor,
+pub(in crate::app) struct Dx9Blend {
+    pub(in crate::app) equation: Dx9BlendEquation,
+    pub(in crate::app) source: Dx9BlendFactor,
+    pub(in crate::app) destination: Dx9BlendFactor,
     /// ARGB as stored, for the `constant` factors.
     pub(in crate::app) constant: [u8; 4],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app) enum H2Compare {
+pub(in crate::app) enum Dx9Compare {
     Never,
     Less,
     Equal,
@@ -64,7 +64,7 @@ pub(in crate::app) enum H2Compare {
 
 /// Which faces a pass draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app) enum H2Cull {
+pub(in crate::app) enum Dx9Cull {
     /// As the preview's Render Backfaces has it.
     Frame,
     Back,
@@ -74,16 +74,16 @@ pub(in crate::app) enum H2Cull {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app) struct H2Depth {
+pub(in crate::app) struct Dx9Depth {
     /// `None` turns the depth test off.
-    pub(in crate::app) compare: Option<H2Compare>,
+    pub(in crate::app) compare: Option<Dx9Compare>,
     pub(in crate::app) write: bool,
 }
 
 /// A vertex constant the pass fills from a parameter: for a bitmap, a row of
 /// its texture transform.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::app) struct H2VertexConstant {
+pub(in crate::app) struct Dx9VertexConstant {
     pub(in crate::app) parameter: String,
     pub(in crate::app) bank: String,
     pub(in crate::app) register: i32,
@@ -91,32 +91,32 @@ pub(in crate::app) struct H2VertexConstant {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(in crate::app) struct H2PassTexture {
+pub(in crate::app) struct Dx9PassTexture {
     pub(in crate::app) parameter: String,
     pub(in crate::app) mode: String,
-    pub(in crate::app) value: H2ParameterValue,
+    pub(in crate::app) value: Dx9ParameterValue,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(in crate::app) struct H2Pass {
+pub(in crate::app) struct Dx9Pass {
     pub(in crate::app) path: String,
     pub(in crate::app) implementation: usize,
     pub(in crate::app) vertex_shader: String,
     /// `None` draws without blending.
-    pub(in crate::app) blend: Option<H2Blend>,
-    pub(in crate::app) depth: H2Depth,
+    pub(in crate::app) blend: Option<Dx9Blend>,
+    pub(in crate::app) depth: Dx9Depth,
     pub(in crate::app) channels: String,
     pub(in crate::app) custom_channels: Option<[bool; 4]>,
     pub(in crate::app) alpha_test: Option<AlphaTest>,
     /// One per texture stage, in stage order.
-    pub(in crate::app) textures: Vec<H2PassTexture>,
-    pub(in crate::app) parameters: Vec<(String, H2ParameterValue)>,
-    pub(in crate::app) vertex_constants: Vec<H2VertexConstant>,
+    pub(in crate::app) textures: Vec<Dx9PassTexture>,
+    pub(in crate::app) parameters: Vec<(String, Dx9ParameterValue)>,
+    pub(in crate::app) vertex_constants: Vec<Dx9VertexConstant>,
     /// What the shader animates of `parameters`, by parameter.
     pub(in crate::app) animations: std::collections::BTreeMap<String, Vec<H2Animation>>,
 }
 
-impl H2Pass {
+impl Dx9Pass {
     /// The kit's generated source for this pass's implementation.
     pub(in crate::app) fn pixel_shader_file(&self) -> String {
         format!("{}_{}.psh", self.path.replace(['\\', '/'], "_"), self.implementation)
@@ -125,7 +125,7 @@ impl H2Pass {
 
 /// One texture unit of a pass. A `None` image draws the unit's placeholder.
 #[derive(Debug, Clone)]
-pub(crate) struct H2DrawTexture {
+pub(crate) struct Dx9DrawTexture {
     pub(crate) slot: u32,
     pub(crate) kind: SamplerKind,
     pub(crate) image: Option<std::sync::Arc<Image>>,
@@ -145,20 +145,20 @@ pub(crate) struct H2DrawTexture {
 /// A pass ready for the renderer: resolved, translated and decoded on the
 /// worker, with no GL state yet.
 #[derive(Debug, Clone)]
-pub(crate) struct H2DrawPass {
-    pub(crate) stage: H2VertexStage,
+pub(crate) struct Dx9DrawPass {
+    pub(crate) stage: Dx9VertexStage,
     pub(crate) fragment: String,
-    pub(crate) blend: Option<H2Blend>,
-    pub(crate) depth: H2Depth,
+    pub(crate) blend: Option<Dx9Blend>,
+    pub(crate) depth: Dx9Depth,
     /// Added to its window depth: what `rasterizer_dx9_set_decal_zbias` sets.
     pub(crate) depth_bias: f32,
-    pub(crate) cull: H2Cull,
+    pub(crate) cull: Dx9Cull,
     /// Faded out entirely on a fully camouflaged object.
     pub(crate) hidden_by_camo: bool,
     /// One digit of a Halo CE numeric display: drawn while that digit shows.
     pub(crate) numeric: Option<CeNumeric>,
     pub(crate) channels: [bool; 4],
-    pub(crate) textures: Vec<H2DrawTexture>,
+    pub(crate) textures: Vec<Dx9DrawTexture>,
     /// Pixel constant registers, by register index.
     pub(crate) constants: Vec<(u32, [f32; 4])>,
     pub(crate) texture_rows: [[f32; 4]; H2_TEXTURE_ROWS],
@@ -188,16 +188,16 @@ pub(crate) struct H2DrawPass {
     pub(crate) ce_animation: Option<std::sync::Arc<dyn PassAnimation>>,
 }
 
-impl H2DrawPass {
+impl Dx9DrawPass {
     /// A pass with nothing bound, its stage's values and textures to fill.
-    pub(in crate::app::model_preview) fn new(stage: H2VertexStage, fragment: String, depth: H2Depth) -> Self {
+    pub(in crate::app::model_preview) fn new(stage: Dx9VertexStage, fragment: String, depth: Dx9Depth) -> Self {
         Self {
             stage,
             fragment,
             blend: None,
             depth,
             depth_bias: 0.0,
-            cull: H2Cull::Frame,
+            cull: Dx9Cull::Frame,
             hidden_by_camo: false,
             numeric: None,
             channels: [true; 4],
@@ -300,7 +300,7 @@ impl H2DrawPass {
 
 /// One face of the cube that normalizes a vector by sampling it, in the GL
 /// face order: each texel holds its own direction, packed to 0..1.
-pub(crate) fn h2_normalization_face(face: usize, size: usize) -> Vec<u8> {
+pub(crate) fn normalization_face(face: usize, size: usize) -> Vec<u8> {
     let mut rgba = Vec::with_capacity(size * size * 4);
     for y in 0..size {
         for x in 0..size {

@@ -1,7 +1,7 @@
 //! The function inputs and values a frame reads: the sliders, the attached objects' values and whether anything moves.
 
 use super::*;
-use super::super::dx9::passes::H2Layer;
+use super::super::dx9::passes::Dx9Layer;
 
 /// Where the names the panel's sliders offer come from, after the Halo 2
 /// passes' own and before the shield's gate, in the order the panel lists them.
@@ -68,7 +68,7 @@ pub(in crate::app::model_preview) fn h2_shader_inputs(data: &ModelPreviewData, o
     }
     // `sub_6C18F0` gates the shield overlay on this itself.
     let h3_shield = owned.iter().filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
-    let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(H2Layer::ShieldDamaged));
+    let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(Dx9Layer::ShieldDamaged));
     let reach_shield = object == 0 && (data.preview.reach.shield.is_some() || data.preview.h4.shield.is_some());
     let gate = (shield || h3_shield || reach_shield).then_some("current_shield_damage");
     let gate = gate.into_iter().chain(h3_shield.then_some(gen3::pipeline::H3_OVERSHIELD));

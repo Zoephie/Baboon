@@ -4,7 +4,7 @@
 use super::*;
 use super::super::super::common::sprite_gl::link_sprite_gl;
 use super::super::super::common::view::ce_flare_view;
-use super::super::super::dx9::passes::H2Layer;
+use super::super::super::dx9::passes::Dx9Layer;
 use eframe::glow::{self, HasContext as _};
 
 /// Halo CE's transparents as `rasterizer_transparent_geometry_draw` draws
@@ -31,7 +31,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(
             core.slots[slot].sync_sprite_textures(gl, frame);
             groups = ce_groups(gl, ce, frame, bones, &view);
         }
-        let points = &core.slots[slot].h2_sort_points;
+        let points = &core.slots[slot].sort_points;
         let parts = frame.visible_batches.iter().map(|&index| {
             let place = frame.preview.batches.get(index).and_then(|batch| batch.sort_position);
             let point = match place {
@@ -55,7 +55,7 @@ pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(
                     } else {
                         gl.enable(glow::CULL_FACE);
                     }
-                    core.draw_h2_passes(gl, frame, slot, &[index], H2Layer::Transparent, None);
+                    core.draw_h2_passes(gl, frame, slot, &[index], Dx9Layer::Transparent, None);
                 }
                 Transparent::Group(group) => {
                     let Some(flares) = core.sprite_gl.as_ref().and_then(Option::as_ref) else {

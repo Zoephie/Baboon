@@ -27,7 +27,7 @@ fn every_model_shader_links_with_its_stage() {
     let common = read_common(&crate::app::model_preview::load::TagReader::new(&source)).expect("the kit's model shader translates");
     let dir = crate::core::test_kits::unique_temp_dir("ce_model_shaders");
     let (vertex, pixel) = (dir.join("pass.vert"), dir.join("pass.frag"));
-    std::fs::write(&vertex, H2VertexStage::CeModel.source(H2_GLSL_VERSION)).unwrap();
+    std::fs::write(&vertex, Dx9VertexStage::CeModel.source(H2_GLSL_VERSION)).unwrap();
     for (environment, mask, function, before) in (0..2).flat_map(|environment| {
         (0..9).flat_map(move |mask| {
             (0..3).flat_map(move |function| {

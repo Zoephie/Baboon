@@ -6,7 +6,7 @@ use super::super::super::ce::shaders::{
     read_ce_camo_settings,
 };
 use super::super::super::dx9::passes::{CeNumeric, 
-    H2DrawPass, H2Layer,
+    Dx9DrawPass, Dx9Layer,
 };
 use crate::core::h2_pixel_shader::SamplerKind;
 use std::sync::Arc;
@@ -118,21 +118,21 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
         caches.h2_images.insert(key, decoded.clone());
         decoded
     };
-    textures.h2_layers[H2Layer::Lightmap as usize] =
+    textures.h2_layers[Dx9Layer::Lightmap as usize] =
         ce_model_passes(reader, root, &group, &flags, &mut common, &mut bitmap);
     let transparent = ce_transparent_passes(reader, root, &group, &mut bitmap);
     if matches!(&group, b"soso" | b"senv") {
         let settings = caches.ce_camo.get_or_insert_with(|| read_ce_camo_settings(reader));
         if let Some(settings) = settings {
             let two_sided = flags.has("two-sided");
-            textures.h2_layers[H2Layer::ActiveCamo as usize] =
+            textures.h2_layers[Dx9Layer::ActiveCamo as usize] =
                 vec![ce_camo_pass(settings, two_sided, &mut bitmap)];
         }
     }
-    textures.h2_layers[H2Layer::Transparent as usize] =
+    textures.h2_layers[Dx9Layer::Transparent as usize] =
         expand_ce_digits(reader, transparent, permutation, caches);
     caches.ce_model_common = common;
-    if !textures.h2_layers[H2Layer::Transparent as usize].is_empty() {
+    if !textures.h2_layers[Dx9Layer::Transparent as usize].is_empty() {
         return textures;
     }
     if !matches!(&group, b"soso" | b"senv") {
@@ -149,10 +149,10 @@ pub(in crate::app::model_preview) fn resolve_ce_shader(
 /// Split each numeric pass into one per digit its bitmap holds.
 fn expand_ce_digits(
     reader: &TagReader,
-    passes: Vec<H2DrawPass>,
+    passes: Vec<Dx9DrawPass>,
     place: usize,
     caches: &mut ResolveCaches,
-) -> Vec<H2DrawPass> {
+) -> Vec<Dx9DrawPass> {
     let mut expanded = Vec::with_capacity(passes.len());
     for pass in passes {
         let Some(numeric) = pass.numeric.clone() else {

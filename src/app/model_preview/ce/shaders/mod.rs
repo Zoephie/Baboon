@@ -12,13 +12,13 @@ use std::sync::{Arc, LazyLock};
 use blam_tags::{TagBlock, TagFieldData, TagStruct};
 
 use super::super::dx9::passes::{
-    H2Blend, H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2Depth, H2DrawPass, H2DrawTexture,
+    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass, Dx9DrawTexture,
     H2_GLSL_VERSION,
 };
 use super::super::common::image::Image;
 use super::super::dx9::passes::{CeNumeric, PassAnimation};
 use super::super::common::fields::{argb, has_flag, has_flag_in_any};
-use super::super::dx9::stage::{H2_TEXTURE_ROWS, H2VertexStage};
+use super::super::dx9::stage::{H2_TEXTURE_ROWS, Dx9VertexStage};
 use crate::core::ce_pixel_shader::{TranslatedFxShader, translate_fx};
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::source::TagSource;

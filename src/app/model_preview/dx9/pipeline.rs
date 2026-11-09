@@ -6,9 +6,9 @@
 use eframe::glow::{self, HasContext as _};
 use super::shadow::ShadowStyle;
 use super::super::*;
-use super::passes::{H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT, H2Layer};
+use super::passes::{H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT, Dx9Layer};
 use super::sprites::Dx9Sprites;
-use super::draw::h2_draw_order;
+use super::draw::draw_order;
 
 /// Where Halo CE's and Halo 2's shading differ.
 pub(in crate::app::model_preview) trait Dx9Game {
@@ -21,7 +21,7 @@ pub(in crate::app::model_preview) trait Dx9Game {
 
     /// The transparent layer, in `order`.
     unsafe fn transparents(&mut self, cx: &mut FrameCx<'_>, order: &[usize]) {
-        unsafe { cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None) }
+        unsafe { cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, Dx9Layer::Transparent, None) }
     }
 
     /// After the transparents: the game's shield layers, in `order`.
@@ -67,7 +67,7 @@ impl RenderCore {
             if frame.game_shaders && self.h2_camo_on(frame) {
                 let order = frame.visible_batches.clone();
                 self.copy_h2_frame(gl, frame, &order);
-                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::ActiveCamo, None);
+                self.draw_h2_passes(gl, frame, slot, &order, Dx9Layer::ActiveCamo, None);
             } else if frame.game_shaders {
                 // The lit layers, the self shadow, then every light.
                 let order = frame.visible_batches.clone();
@@ -75,7 +75,7 @@ impl RenderCore {
                 self.fill_h2_texaccum(gl, frame, slot, &order);
                 let lightmap = frame.h2_lightmap_layer();
                 self.draw_h2_passes(gl, frame, slot, &order, lightmap, None);
-                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Prt, None);
+                self.draw_h2_passes(gl, frame, slot, &order, Dx9Layer::Prt, None);
                 if frame.self_shadow
                     && !frame.default_lights
                     && self.draw_h2_shadow(gl, frame, slot, &order, ShadowStyle::h2(frame))
@@ -85,13 +85,13 @@ impl RenderCore {
                     gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
                     let shadowed = Some(&H2_SHADOWED_LIGHT);
                     self.draw_h2_passes(gl, frame, slot, &order, lightmap, shadowed);
-                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Prt, shadowed);
+                    self.draw_h2_passes(gl, frame, slot, &order, Dx9Layer::Prt, shadowed);
                     gl.disable(glow::STENCIL_TEST);
                 }
                 for layer in [
-                    H2Layer::Environment,
-                    H2Layer::SelfIllumination,
-                    H2Layer::Overlay,
+                    Dx9Layer::Environment,
+                    Dx9Layer::SelfIllumination,
+                    Dx9Layer::Overlay,
                 ] {
                     self.draw_h2_passes(gl, frame, slot, &order, layer, None);
                 }
@@ -103,7 +103,7 @@ impl RenderCore {
                             gl.stencil_func(glow::EQUAL, 0, 0xFF);
                             gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
                         }
-                        for layer in [H2Layer::LightDiffuse, H2Layer::LightSpecular] {
+                        for layer in [Dx9Layer::LightDiffuse, Dx9Layer::LightSpecular] {
                             self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
                         }
                         gl.disable(glow::STENCIL_TEST);
@@ -111,9 +111,9 @@ impl RenderCore {
                 }
                 // `render_lights`: the game's own lights, each drawn over the layers it lights.
                 game.lights(&mut FrameCx { gl, frame, core: self, slot }, &order);
-                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
+                self.draw_h2_passes(gl, frame, slot, &order, Dx9Layer::Hologram, None);
             }
-            let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
+            let order = draw_order(frame, &self.slots[slot].sort_points);
             game.transparents(&mut FrameCx { gl, frame, core: self, slot }, &order);
             game.shields(&mut FrameCx { gl, frame, core: self, slot }, &order);
             // `rasterizer_postprocess_scene` blooms the finished frame,

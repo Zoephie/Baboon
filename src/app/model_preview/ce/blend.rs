@@ -2,7 +2,7 @@
 
 use blam_tags::TagStruct;
 use super::super::dx9::passes::{
-    H2Blend, H2BlendEquation, H2BlendFactor,
+    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor,
 };
 
 /// A Halo CE `framebuffer blend function`, by name. A number the list does
@@ -47,19 +47,19 @@ impl FramebufferBlend {
     }
 
     /// `srcblend_table`, `destblend_table` and `blendop_table`.
-    pub(in crate::app::model_preview) fn gl(self) -> H2Blend {
-        use H2BlendFactor::{DstColor, One, OneMinusSrcAlpha, SrcAlpha, SrcColor, Zero};
+    pub(in crate::app::model_preview) fn gl(self) -> Dx9Blend {
+        use Dx9BlendFactor::{DstColor, One, OneMinusSrcAlpha, SrcAlpha, SrcColor, Zero};
         let (equation, source, destination) = match self {
-            Self::Multiply => (H2BlendEquation::Add, DstColor, Zero),
-            Self::DoubleMultiply => (H2BlendEquation::Add, DstColor, SrcColor),
-            Self::Add => (H2BlendEquation::Add, One, One),
-            Self::Subtract => (H2BlendEquation::ReverseSubtract, One, One),
-            Self::ComponentMin => (H2BlendEquation::Min, One, One),
-            Self::ComponentMax => (H2BlendEquation::Max, One, One),
-            Self::AlphaMultiplyAdd => (H2BlendEquation::Add, One, OneMinusSrcAlpha),
-            Self::AlphaBlend => (H2BlendEquation::Add, SrcAlpha, OneMinusSrcAlpha),
+            Self::Multiply => (Dx9BlendEquation::Add, DstColor, Zero),
+            Self::DoubleMultiply => (Dx9BlendEquation::Add, DstColor, SrcColor),
+            Self::Add => (Dx9BlendEquation::Add, One, One),
+            Self::Subtract => (Dx9BlendEquation::ReverseSubtract, One, One),
+            Self::ComponentMin => (Dx9BlendEquation::Min, One, One),
+            Self::ComponentMax => (Dx9BlendEquation::Max, One, One),
+            Self::AlphaMultiplyAdd => (Dx9BlendEquation::Add, One, OneMinusSrcAlpha),
+            Self::AlphaBlend => (Dx9BlendEquation::Add, SrcAlpha, OneMinusSrcAlpha),
         };
-        H2Blend { equation, source, destination, constant: [0; 4] }
+        Dx9Blend { equation, source, destination, constant: [0; 4] }
     }
 }
 

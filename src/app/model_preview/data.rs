@@ -120,7 +120,7 @@ pub(crate) struct RenderModelPreviewMaterial {
     pub overlay: bool,
     /// Halo 2: which of a model's damage or hologram shaders this is, drawn
     /// from no batch of its own while the object says so.
-    pub shield: Option<dx9::passes::H2Layer>,
+    pub shield: Option<dx9::passes::Dx9Layer>,
     /// Halo CE: which image of each bitmap it draws, wrapping at their count.
     pub permutation: usize,
     /// Which object owns it, for its function outputs and change colors: 0

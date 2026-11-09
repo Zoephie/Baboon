@@ -2,7 +2,7 @@
 //! from its state, the visibility it derives and the function values.
 
 use super::*;
-use super::dx9::passes::{H2Layer, change_colors_for, h2_object_light_direction, h2_prt_object_lights};
+use super::dx9::passes::{Dx9Layer, change_colors_for, h2_object_light_direction, h2_prt_object_lights};
 
 mod visibility;
 pub(in crate::app::model_preview) use visibility::*;
@@ -240,10 +240,10 @@ impl ModelGpuFrame {
     }
 
     /// Transparent passes draw whether or not game shaders are on.
-    pub(in crate::app::model_preview) fn h2_draws(&self, layer: H2Layer) -> bool {
+    pub(in crate::app::model_preview) fn h2_draws(&self, layer: Dx9Layer) -> bool {
         match layer {
-            H2Layer::Transparent => true,
-            H2Layer::ActiveCamo => self.active_camo,
+            Dx9Layer::Transparent => true,
+            Dx9Layer::ActiveCamo => self.active_camo,
             _ => self.game_shaders,
         }
     }
@@ -308,7 +308,7 @@ impl ModelGpuFrame {
             textures
                 .get(batch.material_index as usize)
                 .is_some_and(|material| {
-                    H2Layer::ALL
+                    Dx9Layer::ALL
                         .iter()
                         .filter(|layer| self.h2_draws(**layer))
                         .flat_map(|layer| &material.h2_layers[*layer as usize])
@@ -322,8 +322,8 @@ impl ModelGpuFrame {
         })
     }
 
-    pub(in crate::app::model_preview) fn h2_lightmap_layer(&self) -> H2Layer {
-        if self.default_lights { H2Layer::Lightmap } else { H2Layer::ObjectLightmap }
+    pub(in crate::app::model_preview) fn h2_lightmap_layer(&self) -> Dx9Layer {
+        if self.default_lights { Dx9Layer::Lightmap } else { Dx9Layer::ObjectLightmap }
     }
 
     /// Which way the object path's direct light lies from a surface.

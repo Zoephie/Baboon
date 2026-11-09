@@ -6,14 +6,14 @@ use crate::app::model_preview::gen3::shadow::{H3_SHADOW_APPLY, H3_SHADOW_APPLY_B
 /// The passes behind the preview's own key light shadow. Under the default
 /// lights the game draws no shadows at all: layers 10 and 11 only run for a
 /// light object that casts them.
-pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 4] {
-    let pass = |stage, fragment: String, compare, write| H2DrawPass {
+pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
+    let pass = |stage, fragment: String, compare, write| Dx9DrawPass {
         stage,
         fragment,
         blend: None,
         depth_bias: 0.0,
-        depth: H2Depth { compare: Some(compare), write },
-        cull: H2Cull::Frame,
+        depth: Dx9Depth { compare: Some(compare), write },
+        cull: Dx9Cull::Frame,
         hidden_by_camo: false,
         numeric: None,
         channels: [false; 4],
@@ -36,18 +36,18 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 4] {
     };
     [
         (
-            H2Layer::ShadowCaster,
+            Dx9Layer::ShadowCaster,
             pass(
-                H2VertexStage::ShadowCaster,
+                Dx9VertexStage::ShadowCaster,
                 format!("{H2_GLSL_VERSION}void main() {{}}\n"),
-                H2Compare::LessOrEqual,
+                Dx9Compare::LessOrEqual,
                 true,
             ),
         ),
         (
-            H2Layer::ShadowMask,
+            Dx9Layer::ShadowMask,
             pass(
-                H2VertexStage::ShadowMask,
+                Dx9VertexStage::ShadowMask,
                 format!(
                     "{H2_GLSL_VERSION}in vec4 v_tc0;
 uniform sampler2D u_shadow_map;
@@ -59,16 +59,16 @@ void main() {{
 }}
 "
                 ),
-                H2Compare::Equal,
+                Dx9Compare::Equal,
                 false,
             ),
         ),
         (
-            H2Layer::GelMask,
-            H2DrawPass {
+            Dx9Layer::GelMask,
+            Dx9DrawPass {
                 channels: [false, false, false, true],
                 ..pass(
-                    H2VertexStage::LightGel,
+                    Dx9VertexStage::LightGel,
                     format!(
                         "{H2_GLSL_VERSION}in vec4 v_tc3;
 in vec4 v_color1;
@@ -79,28 +79,28 @@ void main() {{
 }}
 "
                     ),
-                    H2Compare::Equal,
+                    Dx9Compare::Equal,
                     false,
                 )
             },
         ),
         (
-            H2Layer::ShadowApply,
-            H2DrawPass {
+            Dx9Layer::ShadowApply,
+            Dx9DrawPass {
                 depth_bias: H3_SHADOW_APPLY_BIAS,
                 // The accumulation's alpha is what covers the background.
                 channels: [true, true, true, false],
-                blend: Some(H2Blend {
-                    equation: H2BlendEquation::Add,
-                    source: H2BlendFactor::Zero,
-                    destination: H2BlendFactor::SrcAlpha,
+                blend: Some(Dx9Blend {
+                    equation: Dx9BlendEquation::Add,
+                    source: Dx9BlendFactor::Zero,
+                    destination: Dx9BlendFactor::SrcAlpha,
                     constant: [0; 4],
                 }),
                 ..pass(
-                    H2VertexStage::ShadowMask,
+                    Dx9VertexStage::ShadowMask,
                     format!("{H2_GLSL_VERSION}{H3_SHADOW_APPLY}"),
                     // The lit pass's depth is another program's: near, not equal.
-                    H2Compare::LessOrEqual,
+                    Dx9Compare::LessOrEqual,
                     false,
                 )
             },

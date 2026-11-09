@@ -13,7 +13,7 @@ pub(in crate::app::model_preview::h2) struct H2Light {
     pub(super) color_animation: Option<Arc<TagFunction>>,
     pub(super) brightness_animation: Option<Arc<TagFunction>>,
     /// The diffuse pass's variant its `diffuse contrast` picks.
-    pub(super) diffuse_layer: H2Layer,
+    pub(super) diffuse_layer: Dx9Layer,
     pub(super) radius: f32,
     pub(super) specular_radius: f32,
     /// `duration`: how long it lasts when an effect makes it, or 0 for ever.
@@ -141,7 +141,7 @@ pub(super) fn read_h2_light(
         brightness,
         color_animation: scale_function(root, "color animation"),
         brightness_animation: scale_function(root, "brightness animation"),
-        diffuse_layer: H2Layer::diffuse_with_contrast(root.read_enum_option("diffuse contrast").as_deref()),
+        diffuse_layer: Dx9Layer::diffuse_with_contrast(root.read_enum_option("diffuse contrast").as_deref()),
         radius,
         specular_radius: specular_radius.unwrap_or(radius),
         effect_duration: root.read_real("duration").unwrap_or(0.0),
@@ -223,7 +223,7 @@ impl H2Light {
 
 impl H2PointLight {
     /// The layer its diffuse draws on.
-    pub(crate) fn diffuse_layer(&self) -> H2Layer {
+    pub(crate) fn diffuse_layer(&self) -> Dx9Layer {
         self.light.diffuse_layer
     }
 

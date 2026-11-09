@@ -30,9 +30,9 @@ fn the_shader_wins_then_the_template_then_the_pass() {
     let pass = level(&[("a", "value", "", 3.0), ("b", "value", "", 3.0), ("c", "value", "", 3.0)]);
     let levels = [&shader, &template, &pass];
     for (name, expected) in [("a", 1.0), ("b", 2.0), ("c", 3.0)] {
-        assert_eq!(resolve_parameter(levels, name, "value"), H2ParameterValue::Value(expected));
+        assert_eq!(resolve_parameter(levels, name, "value"), Dx9ParameterValue::Value(expected));
     }
-    assert_eq!(resolve_parameter(levels, "d", "value"), H2ParameterValue::Missing);
+    assert_eq!(resolve_parameter(levels, "d", "value"), Dx9ParameterValue::Missing);
 }
 
 #[test]
@@ -43,13 +43,13 @@ fn a_bitmap_with_no_tag_falls_through_and_kinds_do_not_cross() {
     let levels = [&shader, &template, &pass];
     assert_eq!(
         resolve_parameter(levels, "map", "bitmap"),
-        H2ParameterValue::Bitmap("default".to_owned())
+        Dx9ParameterValue::Bitmap("default".to_owned())
     );
 }
 
 #[test]
 fn named_blends_match_the_games_tables() {
-    use H2BlendFactor::*;
+    use Dx9BlendFactor::*;
     assert_eq!(named_blend("add"), Some((One, One)));
     assert_eq!(named_blend("multiply"), Some((DstColor, Zero)));
     assert_eq!(named_blend("add src times dstalpha"), Some((DstAlpha, One)));
@@ -62,25 +62,25 @@ fn named_blends_match_the_games_tables() {
 
 #[test]
 fn rows_and_constants_come_from_the_pass() {
-    let pass = H2Pass {
+    let pass = Dx9Pass {
         path: String::new(),
         implementation: 0,
         vertex_shader: "rasterizer\\vertex_shaders_dx9\\transparent_generic_default".to_owned(),
         blend: None,
-        depth: H2Depth { compare: None, write: false },
+        depth: Dx9Depth { compare: None, write: false },
         channels: "color only".to_owned(),
         custom_channels: None,
         alpha_test: None,
         textures: Vec::new(),
         parameters: vec![
-            ("tint".to_owned(), H2ParameterValue::Color([0.25, 0.5, 0.75])),
-            ("glow".to_owned(), H2ParameterValue::Value(0.5)),
-            ("primary".to_owned(), H2ParameterValue::Extern("OBJECT change color primary".to_owned())),
+            ("tint".to_owned(), Dx9ParameterValue::Color([0.25, 0.5, 0.75])),
+            ("glow".to_owned(), Dx9ParameterValue::Value(0.5)),
+            ("primary".to_owned(), Dx9ParameterValue::Extern("OBJECT change color primary".to_owned())),
         ],
         vertex_constants: vec![
-            H2VertexConstant { parameter: "map".to_owned(), bank: "Cn [0,12]".to_owned(), register: 2, components: "xyw row1 (2D affine xform)".to_owned() },
-            H2VertexConstant { parameter: "map".to_owned(), bank: "Cn [0,12]".to_owned(), register: 3, components: "xyw row2 (2D affine xform)".to_owned() },
-            H2VertexConstant { parameter: "tint".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "xyzw".to_owned() },
+            Dx9VertexConstant { parameter: "map".to_owned(), bank: "Cn [0,12]".to_owned(), register: 2, components: "xyw row1 (2D affine xform)".to_owned() },
+            Dx9VertexConstant { parameter: "map".to_owned(), bank: "Cn [0,12]".to_owned(), register: 3, components: "xyw row2 (2D affine xform)".to_owned() },
+            Dx9VertexConstant { parameter: "tint".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "xyzw".to_owned() },
         ],
         animations: Default::default(),
     };
@@ -88,7 +88,7 @@ fn rows_and_constants_come_from_the_pass() {
                    float4 c1 : register(C1);\nfloat4 c2 : register(C2);\n\
                    float4 main(\n)\n{\n    return c1 * c2;\n}\n";
     let drawn = prepare_draw_pass(&pass, psh, HashMap::new(), 1.0, |_, _| None, |_| [4.0, 8.0]).unwrap();
-    assert_eq!(drawn.stage, H2VertexStage::Default);
+    assert_eq!(drawn.stage, Dx9VertexStage::Default);
     assert_eq!(drawn.channels, [true, true, true, false]);
     assert_eq!(drawn.constants, [(1, [0.25, 0.5, 0.75, 0.5]), (2, [1.0, 1.0, 1.0, 0.0])]);
     assert_eq!(drawn.texture_rows[2], [4.0, 0.0, 0.0, 0.0]);
@@ -101,23 +101,23 @@ fn rows_and_constants_come_from_the_pass() {
 
 #[test]
 fn tint_color_and_brightness_share_a_register() {
-    let pass = H2Pass {
+    let pass = Dx9Pass {
         path: String::new(),
         implementation: 0,
         vertex_shader: "rasterizer\\vertex_shaders_dx9\\transparent_generic_default".to_owned(),
         blend: None,
-        depth: H2Depth { compare: None, write: false },
+        depth: Dx9Depth { compare: None, write: false },
         channels: "color only".to_owned(),
         custom_channels: None,
         alpha_test: None,
         textures: Vec::new(),
         parameters: vec![
-            ("color".to_owned(), H2ParameterValue::Color([0.5, 0.0, 0.25])),
-            ("bright".to_owned(), H2ParameterValue::Value(0.8)),
+            ("color".to_owned(), Dx9ParameterValue::Color([0.5, 0.0, 0.25])),
+            ("bright".to_owned(), Dx9ParameterValue::Value(0.8)),
         ],
         vertex_constants: vec![
-            H2VertexConstant { parameter: "color".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "xyz/rgb (color)".to_owned() },
-            H2VertexConstant { parameter: "bright".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "w (value)".to_owned() },
+            Dx9VertexConstant { parameter: "color".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "xyz/rgb (color)".to_owned() },
+            Dx9VertexConstant { parameter: "bright".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "w (value)".to_owned() },
         ],
         animations: Default::default(),
     };
@@ -127,19 +127,19 @@ fn tint_color_and_brightness_share_a_register() {
 
 #[test]
 fn frame_textures_other_than_normalization_are_refused() {
-    let pass = |name: &str| H2Pass {
+    let pass = |name: &str| Dx9Pass {
         path: String::new(),
         implementation: 3,
         vertex_shader: String::new(),
         blend: None,
-        depth: H2Depth { compare: None, write: false },
+        depth: Dx9Depth { compare: None, write: false },
         channels: String::new(),
         custom_channels: None,
         alpha_test: None,
-        textures: vec![H2PassTexture {
+        textures: vec![Dx9PassTexture {
             parameter: String::new(),
             mode: String::new(),
-            value: H2ParameterValue::Extern(name.to_owned()),
+            value: Dx9ParameterValue::Extern(name.to_owned()),
         }],
         parameters: Vec::new(),
         vertex_constants: Vec::new(),
@@ -171,14 +171,14 @@ fn jackal_legs_diffuse_reads_its_light_albedo() {
         .ok()
     };
     let shader = read("objects\\characters\\jackal\\shaders\\jackal_legs", "shader", b"shad").unwrap();
-    let layer = |layer: H2Layer| {
+    let layer = |layer: Dx9Layer| {
         resolve_h2_layer_passes(&shader, read, layer.tag_name(), layer.implementation()).unwrap()
     };
-    assert!(layer(H2Layer::Texaccum).is_empty());
-    let albedo = layer(H2Layer::LightAlbedo);
+    assert!(layer(Dx9Layer::Texaccum).is_empty());
+    let albedo = layer(Dx9Layer::LightAlbedo);
     assert_eq!(albedo.len(), 1);
-    assert_eq!(H2VertexStage::from_path(&albedo[0].vertex_shader), Some(H2VertexStage::Lightmap));
-    let diffuse = layer(H2Layer::LightDiffuse);
+    assert_eq!(Dx9VertexStage::from_path(&albedo[0].vertex_shader), Some(Dx9VertexStage::Lightmap));
+    let diffuse = layer(Dx9Layer::LightDiffuse);
     assert_eq!(diffuse.len(), 1);
     assert!(h2_pass_needs_frame_texture(&diffuse[0], false));
     assert!(!h2_pass_needs_frame_texture(&diffuse[0], true));
@@ -205,9 +205,9 @@ fn a_player_emblem_is_off_without_a_player() {
         "objects\\characters\\elite\\shaders\\elite_emblem",
     ] {
         let shader = read(path, "shader", b"shad").unwrap();
-        let passes = resolve_h2_layer_passes(&shader, read, H2Layer::Overlay.tag_name(), 0).unwrap();
+        let passes = resolve_h2_layer_passes(&shader, read, Dx9Layer::Overlay.tag_name(), 0).unwrap();
         let value = passes[0].parameters.iter().find(|(name, _)| name == EMBLEM_INPUT);
-        assert_eq!(value.map(|(_, value)| value), Some(&H2ParameterValue::Value(0.0)), "{path}");
+        assert_eq!(value.map(|(_, value)| value), Some(&Dx9ParameterValue::Value(0.0)), "{path}");
     }
 }
 
@@ -266,13 +266,13 @@ fn brute_hair_resolves_from_the_kit() {
         .ok()
     };
     let shader = read("objects\\characters\\brute\\shaders\\brute_hair", "shader", b"shad").unwrap();
-    let passes = resolve_h2_layer_passes(&shader, read, H2Layer::Transparent.tag_name(), 0).unwrap();
+    let passes = resolve_h2_layer_passes(&shader, read, Dx9Layer::Transparent.tag_name(), 0).unwrap();
     assert_eq!(passes.len(), 1);
     let pass = &passes[0];
     let blend = pass.blend.unwrap();
-    assert_eq!(blend.source, H2BlendFactor::One);
-    assert_eq!(blend.destination, H2BlendFactor::OneMinusSrcAlpha);
-    assert_eq!(pass.depth, H2Depth { compare: Some(H2Compare::LessOrEqual), write: false });
+    assert_eq!(blend.source, Dx9BlendFactor::One);
+    assert_eq!(blend.destination, Dx9BlendFactor::OneMinusSrcAlpha);
+    assert_eq!(pass.depth, Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: false });
     assert_eq!(pass.vertex_constants.len(), 4);
     assert_eq!(pass.vertex_constants[2].parameter, "change_color_map");
     assert_eq!(pass.vertex_constants[2].register, 2);
@@ -282,7 +282,7 @@ fn brute_hair_resolves_from_the_kit() {
     assert_eq!(pass.textures[0].parameter, "alpha_blend_map");
     for texture in &pass.textures {
         assert!(
-            matches!(&texture.value, H2ParameterValue::Bitmap(path) if path.contains("brute")),
+            matches!(&texture.value, Dx9ParameterValue::Bitmap(path) if path.contains("brute")),
             "{texture:?}"
         );
     }
@@ -291,11 +291,11 @@ fn brute_hair_resolves_from_the_kit() {
     };
     assert_eq!(
         extern_of("change_color_primary"),
-        Some(H2ParameterValue::Extern("OBJECT change color primary".to_owned()))
+        Some(Dx9ParameterValue::Extern("OBJECT change color primary".to_owned()))
     );
     assert_eq!(
         extern_of("global_light_hack"),
-        Some(H2ParameterValue::Extern("LIGHTMAP object direct color".to_owned()))
+        Some(Dx9ParameterValue::Extern("LIGHTMAP object direct color".to_owned()))
     );
 
     let custom = "shaders\\shader_passes\\transparent\\alpha_detail_masked";
@@ -304,7 +304,7 @@ fn brute_hair_resolves_from_the_kit() {
         .unwrap()
         .blend
         .unwrap();
-    assert_eq!(blend.source, H2BlendFactor::ConstantColor);
+    assert_eq!(blend.source, Dx9BlendFactor::ConstantColor);
     assert_eq!(blend.constant, [0, 255, 255, 255], "custom blends carry their constant");
 
     let file = root.join("rasterizer/pixel_shaders_dx9").join(pass.pixel_shader_file());
@@ -336,7 +336,7 @@ fn brute_hair_resolves_from_the_kit() {
         |_| [1.0, 1.0],
     )
     .unwrap();
-    assert_eq!(drawn.stage, H2VertexStage::from_path(&pass.vertex_shader).unwrap());
+    assert_eq!(drawn.stage, Dx9VertexStage::from_path(&pass.vertex_shader).unwrap());
     assert!(!drawn.change_colors.is_empty());
     let object = read("objects\\characters\\brute\\brute", "biped", b"bipd").unwrap();
     let colors = read_change_colors(&object);

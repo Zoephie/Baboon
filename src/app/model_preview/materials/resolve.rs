@@ -44,14 +44,14 @@ pub(crate) fn resolve_model_textures(
     share_object_layers(materials, &mut textures);
     for texture in &mut textures {
         // A pass with no object implementation still has the fallback's.
-        if texture.h2_layers[H2Layer::ObjectLightmap as usize].is_empty() {
-            texture.h2_layers[H2Layer::ObjectLightmap as usize] =
-                texture.h2_layers[H2Layer::Lightmap as usize].clone();
+        if texture.h2_layers[Dx9Layer::ObjectLightmap as usize].is_empty() {
+            texture.h2_layers[Dx9Layer::ObjectLightmap as usize] =
+                texture.h2_layers[Dx9Layer::Lightmap as usize].clone();
         }
-        let lit = [H2Layer::Lightmap, H2Layer::Prt]
+        let lit = [Dx9Layer::Lightmap, Dx9Layer::Prt]
             .iter()
             .flat_map(|layer| &texture.h2_layers[*layer as usize])
-            .any(|pass| pass.stage != H2VertexStage::CeModel);
+            .any(|pass| pass.stage != Dx9VertexStage::CeModel);
         if lit || texture.h3.is_some() {
             for (layer, pass) in h2_shadow_passes() {
                 texture.h2_layers[layer as usize] = vec![pass];
@@ -66,14 +66,14 @@ pub(crate) fn resolve_model_textures(
 /// object; a hologram shader's bloom passes go to the frame's bloom with the
 /// rest. A held weapon is an object of its own, without them.
 pub(super) fn share_object_layers(materials: &[RenderModelPreviewMaterial], textures: &mut [MaterialTextures]) {
-    let transparent = H2Layer::Transparent as usize;
-    let bloom = H2Layer::Bloom as usize;
+    let transparent = Dx9Layer::Transparent as usize;
+    let bloom = Dx9Layer::Bloom as usize;
     if let Some(overlay) = materials.iter().position(|material| material.overlay) {
         let passes = std::mem::take(&mut textures[overlay].h2_layers[transparent]);
-        share_with_object(materials, textures, materials[overlay].object, H2Layer::Hologram as usize, &passes);
+        share_with_object(materials, textures, materials[overlay].object, Dx9Layer::Hologram as usize, &passes);
     }
     for (layer, from) in
-        [(H2Layer::ShieldDamaged, transparent), (H2Layer::Overshield, transparent), (H2Layer::HologramBloom, bloom)]
+        [(Dx9Layer::ShieldDamaged, transparent), (Dx9Layer::Overshield, transparent), (Dx9Layer::HologramBloom, bloom)]
     {
         if let Some(owner) = materials.iter().position(|material| material.shield == Some(layer)) {
             let passes = std::mem::take(&mut textures[owner].h2_layers[from]);
@@ -88,7 +88,7 @@ fn share_with_object(
     textures: &mut [MaterialTextures],
     object: u8,
     layer: usize,
-    passes: &[H2DrawPass],
+    passes: &[Dx9DrawPass],
 ) {
     for (material, texture) in materials.iter().zip(textures) {
         if material.object == object {

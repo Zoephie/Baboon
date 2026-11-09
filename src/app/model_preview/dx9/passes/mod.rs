@@ -13,7 +13,7 @@ use blam_tags::tag_function::FunctionType;
 use super::super::functions::FunctionValues;
 
 use super::super::h2::prt::H2PrtLight;
-use super::stage::{H2_TEXTURE_ROWS, H2VertexStage};
+use super::stage::{H2_TEXTURE_ROWS, Dx9VertexStage};
 use super::super::common::image::Image;
 use crate::core::h2_pixel_shader::{
     AlphaTest, SamplerKind,

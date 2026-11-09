@@ -9,7 +9,7 @@ pub(super) fn meter_pass(
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Result<H2DrawPass, String> {
+) -> Result<Dx9DrawPass, String> {
     let rgb = |name: &str| {
         let color = root.read_rgb(name);
         [color.red, color.green, color.blue]
@@ -39,9 +39,9 @@ pub(super) fn meter_pass(
     let read = |name: &str| read_shader_source(directory, name);
     let shader = translate_fx(METER_FILE, H2_GLSL_VERSION, &[], read)?;
     let mut pass = SimplePass {
-        stage: H2VertexStage::CeMeter,
+        stage: Dx9VertexStage::CeMeter,
         fragment: shader.entry("pixel_main(i)"),
-        blend: plain_blend(H2BlendFactor::One, H2BlendFactor::One),
+        blend: plain_blend(Dx9BlendFactor::One, Dx9BlendFactor::One),
         two_sided: has("two-sided"),
         write_depth: false,
         channels: [true, true, true, false],
@@ -62,7 +62,7 @@ pub(super) fn water_passes(
     root: TagStruct<'_>,
     flags: &ShaderFlags<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Result<Vec<H2DrawPass>, String> {
+) -> Result<Vec<Dx9DrawPass>, String> {
     let read = |name: &str| read_shader_source(directory, name);
     let has = |flag: &str| flags.has(flag);
     let path = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
@@ -78,7 +78,7 @@ pub(super) fn water_passes(
     let mut passes = Vec::new();
     let surface = |call: &str, blend, channels, textures, constants| {
         SimplePass {
-            stage: H2VertexStage::CeWaterOpacity,
+            stage: Dx9VertexStage::CeWaterOpacity,
             fragment: opacity.entry(call),
             blend,
             two_sided: true,
@@ -93,7 +93,7 @@ pub(super) fn water_passes(
     if modulates_reflection {
         passes.push(surface(
             "main_T0_P0(i)",
-            plain_blend(H2BlendFactor::One, H2BlendFactor::Zero),
+            plain_blend(Dx9BlendFactor::One, Dx9BlendFactor::Zero),
             [false, false, false, true],
             vec![texture(0, SamplerKind::Texture2D, base.clone()), normalization(1)],
             constants.clone(),
@@ -102,19 +102,19 @@ pub(super) fn water_passes(
     if has("base map color modulates background") {
         passes.push(surface(
             "main_T0_P1(i)",
-            plain_blend(H2BlendFactor::Zero, H2BlendFactor::SrcColor),
+            plain_blend(Dx9BlendFactor::Zero, Dx9BlendFactor::SrcColor),
             [true, true, true, false],
             vec![texture(0, SamplerKind::Texture2D, base), normalization(1)],
             constants,
         ));
     }
     let shader = translate_fx(WATER_REFLECTION_FILE, H2_GLSL_VERSION, &[], read)?;
-    let source = if modulates_reflection { H2BlendFactor::DstAlpha } else { H2BlendFactor::One };
+    let source = if modulates_reflection { Dx9BlendFactor::DstAlpha } else { Dx9BlendFactor::One };
     passes.push(
         SimplePass {
-            stage: H2VertexStage::Bumped,
+            stage: Dx9VertexStage::Bumped,
             fragment: shader.entry("pixel_main(i)"),
-            blend: plain_blend(source, H2BlendFactor::One),
+            blend: plain_blend(source, Dx9BlendFactor::One),
             two_sided: true,
             write_depth: true,
             channels: [true, true, true, false],
@@ -137,7 +137,7 @@ pub(super) fn plasma_pass(
     directory: &std::path::Path,
     root: TagStruct<'_>,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> Result<H2DrawPass, String> {
+) -> Result<Dx9DrawPass, String> {
     let real = |name: &str| root.read_real(name).unwrap_or(0.0);
     let tinted = |brightness: &str, tint: &str| {
         let color = root.read_rgb(tint);
@@ -173,9 +173,9 @@ pub(super) fn plasma_pass(
     let read = |name: &str| read_shader_source(directory, name);
     let shader = translate_fx(PLASMA_FILE, H2_GLSL_VERSION, &[], read)?;
     let mut pass = SimplePass {
-        stage: H2VertexStage::CePlasma,
+        stage: Dx9VertexStage::CePlasma,
         fragment: shader.entry("pixel_main(i)"),
-        blend: plain_blend(H2BlendFactor::SrcAlpha, H2BlendFactor::One),
+        blend: plain_blend(Dx9BlendFactor::SrcAlpha, Dx9BlendFactor::One),
         two_sided: true,
         write_depth: false,
         channels: [true, true, true, false],
@@ -190,12 +190,12 @@ pub(super) fn plasma_pass(
 }
 
 /// A pass that draws nothing, for a surface with nothing to show a lone model.
-pub(super) fn unseen_pass() -> H2DrawPass {
+pub(super) fn unseen_pass() -> Dx9DrawPass {
     let fragment = format!(
         "{H2_GLSL_VERSION}in vec4 v_color0;\nout vec4 out_color;\nvoid main() {{ discard; }}\n"
     );
-    let depth = H2Depth { compare: Some(H2Compare::LessOrEqual), write: false };
-    let mut pass = H2DrawPass::new(H2VertexStage::CeMeter, fragment, depth);
+    let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: false };
+    let mut pass = Dx9DrawPass::new(Dx9VertexStage::CeMeter, fragment, depth);
     pass.channels = [false; 4];
     pass
 }

@@ -59,8 +59,8 @@ pub(super) const WHITE: u8 = 255;
 
 pub(super) const GREY: u8 = 128;
 
-pub(super) fn texture(slot: u32, kind: SamplerKind, image: Option<Arc<Image>>) -> H2DrawTexture {
-    H2DrawTexture {
+pub(super) fn texture(slot: u32, kind: SamplerKind, image: Option<Arc<Image>>) -> Dx9DrawTexture {
+    Dx9DrawTexture {
         slot,
         kind,
         image,
@@ -110,23 +110,23 @@ impl<'a> ShaderFlags<'a> {
 
 /// A pass of the shaders below: nothing but what differs.
 pub(super) struct SimplePass {
-    pub(super) stage: H2VertexStage,
+    pub(super) stage: Dx9VertexStage,
     pub(super) fragment: String,
-    pub(super) blend: H2Blend,
+    pub(super) blend: Dx9Blend,
     pub(super) two_sided: bool,
     pub(super) write_depth: bool,
     pub(super) channels: [bool; 4],
-    pub(super) textures: Vec<H2DrawTexture>,
+    pub(super) textures: Vec<Dx9DrawTexture>,
     pub(super) constants: Vec<(u32, [f32; 4])>,
     pub(super) rows: [[f32; 4]; H2_TEXTURE_ROWS],
 }
 
 impl SimplePass {
-    pub(super) fn build(self) -> H2DrawPass {
-        let depth = H2Depth { compare: Some(H2Compare::LessOrEqual), write: self.write_depth };
-        let mut pass = H2DrawPass::new(self.stage, self.fragment, depth);
+    pub(super) fn build(self) -> Dx9DrawPass {
+        let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: self.write_depth };
+        let mut pass = Dx9DrawPass::new(self.stage, self.fragment, depth);
         pass.blend = Some(self.blend);
-        pass.cull = if self.two_sided { H2Cull::None } else { H2Cull::Back };
+        pass.cull = if self.two_sided { Dx9Cull::None } else { Dx9Cull::Back };
         pass.channels = self.channels;
         pass.textures = self.textures;
         pass.constants = self.constants;
@@ -136,11 +136,11 @@ impl SimplePass {
     }
 }
 
-pub(super) fn plain_blend(source: H2BlendFactor, destination: H2BlendFactor) -> H2Blend {
-    H2Blend { equation: H2BlendEquation::Add, source, destination, constant: [0; 4] }
+pub(super) fn plain_blend(source: Dx9BlendFactor, destination: Dx9BlendFactor) -> Dx9Blend {
+    Dx9Blend { equation: Dx9BlendEquation::Add, source, destination, constant: [0; 4] }
 }
 
-pub(super) fn normalization(slot: u32) -> H2DrawTexture {
+pub(super) fn normalization(slot: u32) -> Dx9DrawTexture {
     let mut cube = texture(slot, SamplerKind::Cube, None);
     cube.normalization = true;
     cube

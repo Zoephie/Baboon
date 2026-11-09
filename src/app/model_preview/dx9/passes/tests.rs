@@ -75,9 +75,9 @@ fn only_a_non_constant_function_moves() {
 
 #[test]
 fn the_lights_choose_between_the_game_s_two_lightmap_paths() {
-    assert_eq!(H2Layer::Lightmap.implementation(), 3);
-    assert_eq!(H2Layer::ObjectLightmap.implementation(), 2);
-    assert_eq!(H2Layer::ObjectLightmap.tag_name(), H2Layer::Lightmap.tag_name());
+    assert_eq!(Dx9Layer::Lightmap.implementation(), 3);
+    assert_eq!(Dx9Layer::ObjectLightmap.implementation(), 2);
+    assert_eq!(Dx9Layer::ObjectLightmap.tag_name(), Dx9Layer::Lightmap.tag_name());
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn a_block_with_no_weights_shares_them_evenly() {
 #[test]
 fn normalization_faces_hold_their_own_direction() {
     let center = |face: usize, size: usize| -> [u8; 3] {
-        let rgba = h2_normalization_face(face, size);
+        let rgba = normalization_face(face, size);
         let at = (size / 2 * size + size / 2) * 4;
         [rgba[at], rgba[at + 1], rgba[at + 2]]
     };
@@ -126,12 +126,12 @@ fn normalization_faces_hold_their_own_direction() {
 
 #[test]
 fn the_source_file_follows_the_pass_path() {
-    let pass = H2Pass {
+    let pass = Dx9Pass {
         path: "shaders\\shader_passes\\transparent\\lit".to_owned(),
         implementation: 0,
         vertex_shader: String::new(),
         blend: None,
-        depth: H2Depth { compare: None, write: false },
+        depth: Dx9Depth { compare: None, write: false },
         channels: String::new(),
         custom_channels: None,
         alpha_test: None,

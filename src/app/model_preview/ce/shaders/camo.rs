@@ -47,7 +47,7 @@ pub(in crate::app::model_preview) fn ce_camo_pass(
     settings: &CeCamoSettings,
     two_sided: bool,
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<Image>>,
-) -> H2DrawPass {
+) -> Dx9DrawPass {
     /// `refraction amount` is in pixels of the half-width the game draws at.
     const HALF_WIDTH: f32 = 320.0;
     let distortion =
@@ -59,9 +59,9 @@ pub(in crate::app::model_preview) fn ce_camo_pass(
     let [red, green, blue] = settings.tint;
     rows[1] = [red, green, blue, 0.0];
     SimplePass {
-        stage: H2VertexStage::CeActiveCamo,
+        stage: Dx9VertexStage::CeActiveCamo,
         fragment: settings.fragment.clone(),
-        blend: plain_blend(H2BlendFactor::One, H2BlendFactor::Zero),
+        blend: plain_blend(Dx9BlendFactor::One, Dx9BlendFactor::Zero),
         two_sided,
         write_depth: true,
         channels: [true, true, true, false],

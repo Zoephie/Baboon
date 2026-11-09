@@ -12,7 +12,7 @@ use super::super::common::features::paths;
 use super::super::renderer::FrameCx;
 use crate::app::model_preview::common::sprite_gl::{ce_flare_occlusion, draw_flare_sprites};
 use super::slot::H2Slot;
-use super::super::dx9::passes::H2Layer;
+use super::super::dx9::passes::Dx9Layer;
 
 /// Halo 2's own part of the dx9 shading: its cloth, its gel lights' maps,
 /// its light volumes, liquids and contrails, and its flares.
@@ -44,8 +44,8 @@ impl Dx9Game for H2Game {
             frame.function_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
         };
         for (layer, name) in [
-            (H2Layer::ShieldDamaged, "current_shield_damage"),
-            (H2Layer::Overshield, "object_overshield_amount"),
+            (Dx9Layer::ShieldDamaged, "current_shield_damage"),
+            (Dx9Layer::Overshield, "object_overshield_amount"),
         ] {
             if value(name) > 0.0 {
                 unsafe { cx.core.draw_h2_passes(cx.gl, frame, cx.slot, order, layer, None) };

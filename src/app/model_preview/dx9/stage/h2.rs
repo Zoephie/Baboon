@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl H2VertexStage {
+impl Dx9VertexStage {
     /// From a pass's `vertex shader` reference, which ignores case as every
     /// tag reference does.
     pub(in crate::app) fn from_path(path: &str) -> Option<Self> {

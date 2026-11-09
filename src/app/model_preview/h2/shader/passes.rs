@@ -91,20 +91,20 @@ pub(super) type Parameters = HashMap<String, ParameterLevel>;
 /// The game's lookup: the first level holding the name, except that a bitmap
 /// with no tag falls through to the next level. A level only answers for its
 /// own kind of parameter.
-pub(super) fn resolve_parameter(levels: [&Parameters; 3], name: &str, kind: &str) -> H2ParameterValue {
+pub(super) fn resolve_parameter(levels: [&Parameters; 3], name: &str, kind: &str) -> Dx9ParameterValue {
     for level in levels {
         let Some(found) = level.get(name).filter(|found| found.kind == kind) else {
             continue;
         };
         match kind {
             "bitmap" if found.bitmap.is_empty() => continue,
-            "bitmap" => return H2ParameterValue::Bitmap(found.bitmap.clone()),
-            "value" => return H2ParameterValue::Value(found.value),
-            "color" => return H2ParameterValue::Color(found.color),
+            "bitmap" => return Dx9ParameterValue::Bitmap(found.bitmap.clone()),
+            "value" => return Dx9ParameterValue::Value(found.value),
+            "color" => return Dx9ParameterValue::Color(found.color),
             _ => break,
         }
     }
-    H2ParameterValue::Missing
+    Dx9ParameterValue::Missing
 }
 
 fn insert_level(
@@ -185,8 +185,8 @@ fn read_alpha_test(implementation: TagStruct<'_>) -> Option<AlphaTest> {
     Some(AlphaTest { compare, reference })
 }
 
-pub(super) fn named_blend(mode: &str) -> Option<(H2BlendFactor, H2BlendFactor)> {
-    use H2BlendFactor::*;
+pub(super) fn named_blend(mode: &str) -> Option<(Dx9BlendFactor, Dx9BlendFactor)> {
+    use Dx9BlendFactor::*;
     Some(match mode {
         "add" => (One, One),
         "multiply" => (DstColor, Zero),
@@ -198,8 +198,8 @@ pub(super) fn named_blend(mode: &str) -> Option<(H2BlendFactor, H2BlendFactor)> 
     })
 }
 
-fn blend_factor(name: &str) -> Option<H2BlendFactor> {
-    use H2BlendFactor::*;
+fn blend_factor(name: &str) -> Option<Dx9BlendFactor> {
+    use Dx9BlendFactor::*;
     Some(match name {
         "zero" => Zero,
         "one" => One,
@@ -223,8 +223,8 @@ fn blend_factor(name: &str) -> Option<H2BlendFactor> {
 /// The game draws a `logic-op` function, or `custom` with no state, unblended.
 /// The signed functions are its add and subtract: MCC's shader compiler maps
 /// them so (`sub_6DB880`, table 0xE9DB6C), where the Xbox had signed ops.
-pub(super) fn blend_equation(name: &str) -> Option<H2BlendEquation> {
-    use H2BlendEquation::*;
+pub(super) fn blend_equation(name: &str) -> Option<Dx9BlendEquation> {
+    use Dx9BlendEquation::*;
     Some(match name {
         "add" | "add signed" => Add,
         "subtract" | "reverse subtract signed" => Subtract,
@@ -235,12 +235,12 @@ pub(super) fn blend_equation(name: &str) -> Option<H2BlendEquation> {
     })
 }
 
-fn read_blend(implementation: TagStruct<'_>) -> Option<H2Blend> {
+fn read_blend(implementation: TagStruct<'_>) -> Option<Dx9Blend> {
     let mode = implementation.read_enum_option("alpha-blend")?;
     if mode != "custom" {
         let (source, destination) = named_blend(&mode)?;
-        return Some(H2Blend {
-            equation: H2BlendEquation::Add,
+        return Some(Dx9Blend {
+            equation: Dx9BlendEquation::Add,
             source,
             destination,
             constant: [0; 4],
@@ -251,7 +251,7 @@ fn read_blend(implementation: TagStruct<'_>) -> Option<H2Blend> {
         Some(TagFieldData::ArgbColor(color)) => color.0,
         _ => 0,
     };
-    Some(H2Blend {
+    Some(Dx9Blend {
         equation: blend_equation(&state.read_enum_option("blend function")?)?,
         source: blend_factor(&state.read_enum_option("blend src factor")?)?,
         destination: blend_factor(&state.read_enum_option("blend dst factor")?)?,
@@ -259,8 +259,8 @@ fn read_blend(implementation: TagStruct<'_>) -> Option<H2Blend> {
     })
 }
 
-fn compare(name: &str) -> Option<H2Compare> {
-    use H2Compare::*;
+fn compare(name: &str) -> Option<Dx9Compare> {
+    use Dx9Compare::*;
     Some(match name {
         "never" => Never,
         "less" => Less,
@@ -274,13 +274,13 @@ fn compare(name: &str) -> Option<H2Compare> {
     })
 }
 
-fn read_depth(implementation: TagStruct<'_>) -> H2Depth {
-    const OFF: H2Depth = H2Depth { compare: None, write: false };
-    let test = |compare, write| H2Depth { compare: Some(compare), write };
+fn read_depth(implementation: TagStruct<'_>) -> Dx9Depth {
+    const OFF: Dx9Depth = Dx9Depth { compare: None, write: false };
+    let test = |compare, write| Dx9Depth { compare: Some(compare), write };
     match implementation.read_enum_option("depth").as_deref() {
-        Some("default opaque") => test(H2Compare::Equal, false),
-        Some("default opaque write") => test(H2Compare::LessOrEqual, true),
-        Some("default transparent") => test(H2Compare::LessOrEqual, false),
+        Some("default opaque") => test(Dx9Compare::Equal, false),
+        Some("default opaque write") => test(Dx9Compare::LessOrEqual, true),
+        Some("default transparent") => test(Dx9Compare::LessOrEqual, false),
         Some("custom") => implementation
             .descend("depth state[0]")
             .and_then(|state| {
@@ -299,7 +299,7 @@ pub(super) fn read_pass(
     index: usize,
     shader: &Parameters,
     template: &Parameters,
-) -> Result<H2Pass, String> {
+) -> Result<Dx9Pass, String> {
     let implementation = pass
         .descend(&format!("implementations[{index}]"))
         .ok_or_else(|| format!("{path} has no implementation {index}"))?;
@@ -327,7 +327,7 @@ pub(super) fn read_pass(
         .iter()
         .map(|(name, level)| {
             let value = match externs.get(name) {
-                Some(source) => H2ParameterValue::Extern(source.clone()),
+                Some(source) => Dx9ParameterValue::Extern(source.clone()),
                 None => resolve_parameter(levels, name, &level.kind),
             };
             (name.clone(), value)
@@ -348,11 +348,11 @@ pub(super) fn read_pass(
             let parameter = texture.read_string_id("source parameter").unwrap_or_default();
             let source = texture.read_enum_option("source extern").unwrap_or_default();
             let value = if !source.is_empty() && source != NO_EXTERN {
-                H2ParameterValue::Extern(source)
+                Dx9ParameterValue::Extern(source)
             } else {
                 resolve_parameter(levels, &parameter, "bitmap")
             };
-            H2PassTexture {
+            Dx9PassTexture {
                 parameter,
                 mode: texture.read_enum_option("mode").unwrap_or_default(),
                 value,
@@ -360,7 +360,7 @@ pub(super) fn read_pass(
         })
         .collect();
 
-    Ok(H2Pass {
+    Ok(Dx9Pass {
         path: path.to_owned(),
         implementation: index,
         vertex_shader: implementation.read_tag_ref_path("vertex shader").unwrap_or_default(),
@@ -373,7 +373,7 @@ pub(super) fn read_pass(
         parameters,
         animations,
         vertex_constants: elements(implementation, "vs constants")
-            .map(|constant| H2VertexConstant {
+            .map(|constant| Dx9VertexConstant {
                 parameter: constant.read_string_id("source parameter").unwrap_or_default(),
                 bank: constant.read_enum_option("register bank").unwrap_or_default(),
                 register: constant.read_int_any("register index").unwrap_or(0) as i32,
@@ -385,11 +385,11 @@ pub(super) fn read_pass(
 
 /// Frame textures a pass needs that a preview has no way to produce. The
 /// texaccum target counts unless this material's own texaccum pass fills it.
-pub(in crate::app) fn h2_pass_needs_frame_texture(pass: &H2Pass, has_texaccum: bool) -> bool {
+pub(in crate::app) fn h2_pass_needs_frame_texture(pass: &Dx9Pass, has_texaccum: bool) -> bool {
     pass.textures.iter().any(|texture| {
         matches!(
             &texture.value,
-            H2ParameterValue::Extern(name)
+            Dx9ParameterValue::Extern(name)
                 if name != VECTOR_NORMALIZATION
                     && name != LIGHT_FALLOFF
                     && name != LIGHT_GEL
@@ -419,7 +419,7 @@ pub(in crate::app) fn resolve_h2_layer_passes<T: std::borrow::Borrow<TagFile>>(
     mut load: impl FnMut(&str, &str, &[u8; 4]) -> Option<T>,
     layer: &str,
     implementation: usize,
-) -> Result<Vec<H2Pass>, String> {
+) -> Result<Vec<Dx9Pass>, String> {
     let root = shader.root();
     let Some(template_path) =
         root.read_tag_ref_path("template").filter(|path| !path.is_empty())
