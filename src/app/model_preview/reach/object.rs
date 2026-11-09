@@ -19,4 +19,9 @@ pub(in crate::app::model_preview) fn read_reach_object_features(reader: &TagRead
     let center = std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
     let cx = super::super::load::LoadCx { reader, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
     super::super::reach::attached::read_reach_attached_features(&cx, center, preview);
+    // The final composite's noise map, which only an area screen effect
+    // that adds bright or dark noise reads.
+    if preview.gen3.screen_effects.iter().any(|effect| effect.adds_noise()) {
+        preview.reach.screen_noise = super::super::gen3::effects::screen::read_reach_screen_noise(reader);
+    }
 }

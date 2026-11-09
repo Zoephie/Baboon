@@ -483,3 +483,15 @@ fn particle_systems_make_only_what_the_shared_array_has_room_for() {
     assert!(made(0) > left, "on its own it makes more than {left}");
     assert!(made(MOST_SYSTEM_PARTICLES - left) <= left);
 }
+
+/// With `BLAM_TEST_HREK`: m45's holo globe hangs an area screen effect that
+/// adds noise, so opening it reads `rasterizer_globals`' noise map for
+/// Reach's final composite, as the game samples it.
+#[test]
+fn a_reach_object_whose_screen_effect_adds_noise_reads_the_composite_noise_map() {
+    let Some(root) = kit_root(GameId::HaloReach) else { return };
+    let path = "objects\\levels\\solo\\m45\\m45_corvette_holo_globe\\m45_corvette_holo_globe";
+    let globe = kit_preview(&root, GameId::HaloReach, path, "scenery", b"scen");
+    assert!(globe.preview.gen3.screen_effects.iter().any(|effect| effect.adds_noise()), "the globe's screen effect adds noise");
+    assert!(globe.preview.reach.screen_noise.is_some(), "the composite's noise map");
+}

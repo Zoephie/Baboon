@@ -36,9 +36,6 @@ pub(in crate::app::model_preview) fn read_h3_object_features(reader: &TagReader,
     if preview.gen3.screen_effects.iter().any(|effect| effect.sucks()) {
         preview.h3.motion_blur = super::super::h3::vision::read_h3_motion_blur(reader);
     }
-    if preview.gen3.screen_effects.iter().any(|effect| effect.adds_noise()) {
-        preview.reach.screen_noise = super::super::gen3::effects::screen::read_reach_screen_noise(reader);
-    }
     preview.antennas = super::super::antennas::read_antennas(reader, model_tag, &preview.markers);
     let markers = preview.markers.clone();
     let cx = super::super::load::LoadCx { reader, object: model_tag, owner: 0, markers: &markers, frame: &frame, name: None };
