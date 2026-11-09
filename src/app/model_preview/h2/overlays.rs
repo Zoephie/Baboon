@@ -32,9 +32,10 @@ pub(in crate::app::model_preview) fn add_overlay_shaders(
             preview.materials.push(RenderModelPreviewMaterial {
                 shader_path,
                 shader_group,
-                overlay: false,
-                shield: Some(Dx9Layer::HologramBloom),
-                permutation: 0,
+                ce: Default::default(),
+                h2: super::H2MaterialLook {
+                    shield: Some(Dx9Layer::HologramBloom),
+                },
                 object: 0,
             });
         }
@@ -59,9 +60,10 @@ pub(in crate::app::model_preview) fn add_overlay_shaders(
             preview.materials.push(RenderModelPreviewMaterial {
                 shader_path,
                 shader_group,
-                overlay: false,
-                shield: Some(layer),
-                permutation: 0,
+                ce: Default::default(),
+                h2: super::H2MaterialLook {
+                    shield: Some(layer),
+                },
                 object: 0,
             });
         }

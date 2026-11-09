@@ -217,9 +217,8 @@ pub(in crate::app::model_preview) fn render_model_to_preview(
             .map(|material| RenderModelPreviewMaterial {
                 shader_path: material.render_method.clone(),
                 shader_group: material.render_method_group,
-                overlay: false,
-                shield: None,
-                permutation: 0,
+                ce: Default::default(),
+                h2: Default::default(),
                 object: 0,
             })
             .collect(),

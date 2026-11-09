@@ -41,7 +41,7 @@ pub(in crate::app::model_preview) fn share_object_layers(
 ) {
     let transparent = Dx9Layer::Transparent as usize;
     let bloom = Dx9Layer::Bloom as usize;
-    if let Some(overlay) = materials.iter().position(|material| material.overlay) {
+    if let Some(overlay) = materials.iter().position(|material| material.ce.overlay) {
         let passes = std::mem::take(&mut textures[overlay].h2_layers[transparent]);
         share_with_object(
             materials,
@@ -58,7 +58,7 @@ pub(in crate::app::model_preview) fn share_object_layers(
     ] {
         if let Some(owner) = materials
             .iter()
-            .position(|material| material.shield == Some(layer))
+            .position(|material| material.h2.shield == Some(layer))
         {
             let passes = std::mem::take(&mut textures[owner].h2_layers[from]);
             share_with_object(
@@ -95,11 +95,14 @@ mod tests {
     /// to a held weapon's.
     #[test]
     fn a_models_overlay_passes_stay_on_its_own_object() {
-        let material = |object, overlay, shield| RenderModelPreviewMaterial {
-            object,
-            overlay,
-            shield,
-            ..Default::default()
+        let material = |object, overlay, shield| {
+            let mut material = RenderModelPreviewMaterial {
+                object,
+                ..Default::default()
+            };
+            material.ce.overlay = overlay;
+            material.h2.shield = shield;
+            material
         };
         let materials = [
             material(0, false, None),

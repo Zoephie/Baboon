@@ -24,6 +24,14 @@ pub(in crate::app::model_preview) mod slot;
 
 /// What a Halo 2 object brings to its preview beyond its geometry: its PRT,
 /// hologram control, flares, lights, light volumes, contrails and liquids.
+/// What a Halo 2 material carries beside the shader it names.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct H2MaterialLook {
+    /// Which of a model's damage or hologram shaders this is, drawn from no
+    /// batch of its own while the object says so.
+    pub shield: Option<super::dx9::passes::Dx9Layer>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct H2Features {
     /// Halo 2 precomputed radiance transfer, on the few models that have it.

@@ -350,7 +350,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
         attached
             .materials
             .iter_mut()
-            .for_each(|material| material.permutation = forced);
+            .for_each(|material| material.ce.permutation = forced);
     }
     let label = weapon.root().read_string("label").unwrap_or_default();
     let hold = object_reference(object, "animation graph")

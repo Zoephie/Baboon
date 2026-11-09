@@ -32,6 +32,6 @@ pub(in crate::app::model_preview) fn read_shader_permutations(
         let permutation = shaders
             .element(index)
             .and_then(|shader| shader.read_int_any("permutation"));
-        material.permutation = permutation.unwrap_or(0).max(0) as usize;
+        material.ce.permutation = permutation.unwrap_or(0).max(0) as usize;
     }
 }

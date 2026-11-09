@@ -45,9 +45,8 @@ fn model_materials(source: &TagSource, rel: &str) -> Option<Vec<RenderModelPrevi
             .map(|material| RenderModelPreviewMaterial {
                 shader_path: material.render_method.clone(),
                 shader_group: material.render_method_group,
-                overlay: false,
-                shield: None,
-                permutation: 0,
+                ce: Default::default(),
+                h2: Default::default(),
                 object: 0,
             })
             .collect(),
@@ -207,9 +206,8 @@ fn a_material_with_no_shader_reports_why() {
         &[RenderModelPreviewMaterial {
             shader_path: String::new(),
             shader_group: 0,
-            overlay: false,
-            shield: None,
-            permutation: 0,
+            ce: Default::default(),
+            h2: Default::default(),
             object: 0,
         }],
     );
@@ -273,9 +271,8 @@ fn detail_tiling_comes_from_the_shaders_animator() {
         &[RenderModelPreviewMaterial {
             shader_path: r"objects\characters\dervish\shaders\dervish_armor".to_owned(),
             shader_group: u32::from_be_bytes(*b"rmsh"),
-            overlay: false,
-            shield: None,
-            permutation: 0,
+            ce: Default::default(),
+            h2: Default::default(),
             object: 0,
         }],
     );
@@ -311,9 +308,8 @@ fn resolve_classic(source: &TagSource, path: &str, group: &[u8; 4]) -> MaterialT
         &[RenderModelPreviewMaterial {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*group),
-            overlay: false,
-            shield: None,
-            permutation: 0,
+            ce: Default::default(),
+            h2: Default::default(),
             object: 0,
         }],
     )
@@ -402,9 +398,11 @@ fn a_halo_ce_permutation_picks_the_image_and_wraps() {
         let material = RenderModelPreviewMaterial {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*b"soso"),
-            overlay: false,
-            shield: None,
-            permutation,
+            ce: crate::app::model_preview::ce::CeMaterialLook {
+                overlay: false,
+                permutation,
+            },
+            h2: Default::default(),
             object: 0,
         };
         resolve_model_textures(&source, &[material]).remove(0)
@@ -600,9 +598,8 @@ fn every_h2_shader_takes_the_global_active_camo() {
     let material = |path: &str| RenderModelPreviewMaterial {
         shader_path: path.to_owned(),
         shader_group: u32::from_be_bytes(*b"shad"),
-        overlay: false,
-        shield: None,
-        permutation: 0,
+        ce: Default::default(),
+        h2: Default::default(),
         object: 0,
     };
     let camo = |path: &str| {

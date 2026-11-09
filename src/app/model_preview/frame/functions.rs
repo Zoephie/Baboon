@@ -99,7 +99,7 @@ pub(in crate::app::model_preview) fn shader_input_names(
         .preview
         .materials
         .iter()
-        .any(|m| m.object == object && m.shield == Some(Dx9Layer::ShieldDamaged));
+        .any(|m| m.object == object && m.h2.shield == Some(Dx9Layer::ShieldDamaged));
     let reach_shield =
         object == 0 && (data.preview.reach.shield.is_some() || data.preview.h4.shield.is_some());
     let gate = (shield || gen3_shield || reach_shield).then_some("current_shield_damage");

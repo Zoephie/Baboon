@@ -29,6 +29,16 @@ pub(super) mod transition;
 pub(super) mod weapons;
 pub(super) mod widgets;
 
+/// What a Halo CE material carries beside the shader it names.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CeMaterialLook {
+    /// Drawn over the whole model, from no batch of its own: an object's
+    /// `modifier shader`.
+    pub overlay: bool,
+    /// Which image of each bitmap it draws, wrapping at their count.
+    pub permutation: usize,
+}
+
 /// What a Halo CE object brings to its preview beyond its geometry: its
 /// lights' flares, antennas, effects, firing, contrails and widgets.
 #[derive(Debug, Clone, Default)]

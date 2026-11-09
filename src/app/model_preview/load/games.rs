@@ -327,7 +327,7 @@ pub(in crate::app::model_preview) fn resolve_own_shader(
                 reader,
                 shader,
                 group,
-                material.permutation,
+                material.ce.permutation,
                 caches,
             ))
         }

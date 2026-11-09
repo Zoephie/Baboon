@@ -156,9 +156,11 @@ pub(in crate::app::model_preview) fn load_ce_object(
         preview.materials.push(RenderModelPreviewMaterial {
             shader_path,
             shader_group,
-            overlay: true,
-            shield: None,
-            permutation: 0,
+            ce: super::CeMaterialLook {
+                overlay: true,
+                permutation: 0,
+            },
+            h2: Default::default(),
             object: 0,
         });
     }
@@ -168,7 +170,7 @@ pub(in crate::app::model_preview) fn load_ce_object(
         preview
             .materials
             .iter_mut()
-            .for_each(|material| material.permutation = forced);
+            .for_each(|material| material.ce.permutation = forced);
     }
     let mut notes = Vec::new();
     // A vehicle's guns are part of it. A biped holds what it is handed.

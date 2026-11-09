@@ -3,8 +3,8 @@
 
 use super::super::GameId;
 use super::{
-    ChangeColors, MaterialTextures, PreviewAnimationEntry, antennas, ce, cloth, dx9, gen3, h2, h3,
-    h4, particles, reach,
+    ChangeColors, MaterialTextures, PreviewAnimationEntry, antennas, ce, cloth, gen3, h2, h3, h4,
+    particles, reach,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -123,14 +123,10 @@ pub(crate) struct RenderModelPreviewMaterial {
     /// Decides which extension the path resolves with, and which resolver
     /// understands the tag behind it.
     pub shader_group: u32,
-    /// Drawn over the whole model, from no batch of its own: a Halo CE
-    /// object's `modifier shader`.
-    pub overlay: bool,
-    /// Halo 2: which of a model's damage or hologram shaders this is, drawn
-    /// from no batch of its own while the object says so.
-    pub shield: Option<dx9::passes::Dx9Layer>,
-    /// Halo CE: which image of each bitmap it draws, wrapping at their count.
-    pub permutation: usize,
+    /// Halo CE's: an overlay, and which image of each bitmap it draws.
+    pub ce: super::ce::CeMaterialLook,
+    /// Halo 2's: which shield shader it is.
+    pub h2: super::h2::H2MaterialLook,
     /// Which object owns it, for its function outputs and change colors: 0
     /// for the opened one, then its attached objects in order.
     pub object: u8,
