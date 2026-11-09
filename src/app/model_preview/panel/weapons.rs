@@ -137,7 +137,7 @@ pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
     let held = primaries
         .iter()
         .find(|weapon| Some(&weapon.path) == state.weapon.as_ref());
-    let salt = ("h2_primary_picker", data.render_model_path.as_str());
+    let salt = ("primary_weapon_picker", data.render_model_path.as_str());
     if let Some(choice) = weapon_dropdown(ui, "Primary", salt, &primaries, held)
         .filter(|choice| *choice != state.weapon)
     {
@@ -158,7 +158,7 @@ pub(in crate::app::model_preview) fn draw_unit_weapon_pickers(
     let held = secondaries
         .iter()
         .find(|weapon| Some(&weapon.path) == state.secondary_weapon.as_ref());
-    let salt = ("h2_secondary_picker", data.render_model_path.as_str());
+    let salt = ("secondary_weapon_picker", data.render_model_path.as_str());
     if let Some(choice) = weapon_dropdown(ui, "Secondary", salt, &secondaries, held)
         .filter(|choice| *choice != state.secondary_weapon)
     {

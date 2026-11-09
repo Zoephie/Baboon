@@ -97,7 +97,7 @@ pub(in crate::app::model_preview) fn shader_input_names(
         .preview
         .materials
         .iter()
-        .any(|m| m.object == object && m.h2.shield == Some(Dx9Layer::ShieldDamaged));
+        .any(|m| m.object == object && m.shield_layer() == Some(Dx9Layer::ShieldDamaged));
     let own_shield = object == 0 && own_shield_gates(data);
     let gate = (shield || gen3_shield || own_shield).then_some("current_shield_damage");
     let gate = gate

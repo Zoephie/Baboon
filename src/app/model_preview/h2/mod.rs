@@ -22,8 +22,6 @@ pub(in crate::app::model_preview) mod rules;
 pub(in crate::app::model_preview) mod shader;
 pub(in crate::app::model_preview) mod slot;
 
-/// What a Halo 2 object brings to its preview beyond its geometry: its PRT,
-/// hologram control, flares, lights, light volumes, contrails and liquids.
 /// What a Halo 2 material carries beside the shader it names.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct H2MaterialLook {
@@ -32,6 +30,18 @@ pub(crate) struct H2MaterialLook {
     pub shield: Option<super::dx9::passes::Dx9Layer>,
 }
 
+impl super::RenderModelPreviewMaterial {
+    /// The shield layer a model's damage or hologram shader draws in, from
+    /// no batch of its own: Halo 2's.
+    pub(in crate::app::model_preview) fn shield_layer(
+        &self,
+    ) -> Option<super::dx9::passes::Dx9Layer> {
+        self.h2.shield
+    }
+}
+
+/// What a Halo 2 object brings to its preview beyond its geometry: its PRT,
+/// hologram control, flares, lights, light volumes, contrails and liquids.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct H2Features {
     /// Halo 2 precomputed radiance transfer, on the few models that have it.

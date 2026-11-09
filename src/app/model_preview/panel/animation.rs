@@ -231,10 +231,7 @@ pub(in crate::app::model_preview) fn draw_animation_header(
                 let no_clips = std::collections::BTreeSet::new();
                 let hidden = panel
                     .data
-                    .ce
-                    .weapons
-                    .as_ref()
-                    .map(|weapons| &weapons.hidden_clips)
+                    .own_hidden_clips()
                     .or_else(|| {
                         panel
                             .data

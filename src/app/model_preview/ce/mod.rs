@@ -39,6 +39,14 @@ pub(crate) struct CeMaterialLook {
     pub permutation: usize,
 }
 
+impl super::RenderModelPreviewMaterial {
+    /// Whether it is drawn over the whole of its object from no batch of its
+    /// own: Halo CE's `modifier shader`.
+    pub(in crate::app::model_preview) fn overlays_object(&self) -> bool {
+        self.ce.overlay
+    }
+}
+
 /// What a Halo CE object brings to its preview beyond its geometry: its
 /// lights' flares, antennas, effects, firing, contrails and widgets.
 #[derive(Debug, Clone, Default)]

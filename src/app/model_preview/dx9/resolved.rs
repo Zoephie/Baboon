@@ -42,7 +42,10 @@ pub(in crate::app::model_preview) fn share_object_layers(
 ) {
     let transparent = Dx9Layer::Transparent as usize;
     let bloom = Dx9Layer::Bloom as usize;
-    if let Some(overlay) = materials.iter().position(|material| material.ce.overlay) {
+    if let Some(overlay) = materials
+        .iter()
+        .position(|material| material.overlays_object())
+    {
         let passes = std::mem::take(&mut textures[overlay].dx9_layers[transparent]);
         share_with_object(
             materials,
@@ -59,7 +62,7 @@ pub(in crate::app::model_preview) fn share_object_layers(
     ] {
         if let Some(owner) = materials
             .iter()
-            .position(|material| material.h2.shield == Some(layer))
+            .position(|material| material.shield_layer() == Some(layer))
         {
             let passes = std::mem::take(&mut textures[owner].dx9_layers[from]);
             share_with_object(

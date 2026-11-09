@@ -23,6 +23,19 @@ pub(in crate::app) struct CeObjectData {
     pub(in crate::app) weapons: Option<super::weapons::CeBipedWeapons>,
 }
 
+impl super::super::ModelPreviewData {
+    /// The clips the unit's own held weapon hides, where its game picks them
+    /// itself: Halo CE's, by the graph's weapon labels.
+    pub(in crate::app::model_preview) fn own_hidden_clips(
+        &self,
+    ) -> Option<&std::collections::BTreeSet<usize>> {
+        self.ce
+            .weapons
+            .as_ref()
+            .map(|weapons| &weapons.hidden_clips)
+    }
+}
+
 pub(in crate::app::model_preview) fn read_ce_object_features(
     reader: &TagReader,
     model_tag: &TagFile,
