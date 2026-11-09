@@ -8,8 +8,8 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
 use eframe::glow::{self, HasContext as _};
 
+use super::super::TextureImage;
 use super::super::common::image::{Image, ImageTexels, Sampler};
-use super::super::*;
 
 /// The texture bound to a slot whose material has none: one opaque white
 /// texel, never sampled for its value (the slot's `have` flag is zero), only
