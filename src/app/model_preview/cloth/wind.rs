@@ -1,6 +1,8 @@
 //! The cloth winds of Halo 2, Halo 3 and Reach.
 
-use super::*;
+use super::links::{away_from_pole, held_from_straight_up};
+use super::rules::NEARLY_ZERO;
+use super::{cross, dot, high_bits, lcg_step, minus, unit_or_unchanged};
 
 /// `cloth_update_wind` in Halo 2: its limit from straight up, and the ticks per
 /// second that its clock counts in.

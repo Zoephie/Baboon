@@ -1,6 +1,8 @@
 //! A sheet's grid, links, pins and spheres.
 
-use super::*;
+use super::rules::ClothGame;
+use super::wind::{distance, turned_about};
+use super::{cross, dot, unit_or_unchanged};
 
 /// `wind_exclude_from_pole`: `z` is cut off, and the rest shares what remains.
 pub(super) fn held_from_straight_up(vector: [f32; 3], angle: f32) -> [f32; 3] {

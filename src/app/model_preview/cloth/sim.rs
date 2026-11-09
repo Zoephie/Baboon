@@ -1,6 +1,14 @@
 //! Running cloth and its field, stepped a tick at a time.
 
-use super::*;
+use super::super::resume_point;
+use super::links::{ClothPin, rough_sqrt};
+use super::read::{H3ClothAt, reach_binormal};
+use super::rules::{
+    ClothGame, ClothWind, ERROR_MAX, MOST_HELD_LINKS, MOST_ITERATIONS, NEARLY_ZERO,
+    REACH_CENTER_JUMP, REACH_CREATION_RELAXATIONS,
+};
+use super::wind::{H2_MOST_PASSES, H2Wind, H3Wind, ReachWind};
+use super::{cross, dot, minus, posed_on, unit_or_unchanged};
 
 /// A cloth's points as they stand.
 #[derive(Debug, Clone, Default)]

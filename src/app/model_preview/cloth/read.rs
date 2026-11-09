@@ -1,6 +1,15 @@
 //! Reading cloth tags and the cloth on an object.
 
-use super::*;
+use super::super::{
+    ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMarker,
+    RenderModelPreviewMaterial, RenderModelPreviewRegion, RenderModelPreviewVertex,
+};
+use super::links::{ClothLink, ClothPin, ClothSphere, cloth_pins, flag_grid, generate_links};
+use super::rules::{ClothGame, ClothSheetBasis, MOST_SPHERES, gravity_per_tick, tick_rate};
+use super::{
+    MarkerFrame, Overflow, VertexBase, cross, elements, has_flag, marker_name, object_block,
+};
+use blam_tags::{TagFile, TagStruct};
 
 /// A `cloth` on an object, and where its mesh lies in the model's vertices.
 #[derive(Debug, Clone)]
