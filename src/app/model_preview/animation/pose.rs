@@ -59,7 +59,11 @@ pub(crate) struct DecodedAnimationPose {
 }
 
 impl DecodedAnimationPose {
-    pub(super) fn new(skeleton: &Skeleton, pose: &blam_tags::Pose, loop_frame: usize) -> Self {
+    pub(in crate::app::model_preview) fn new(
+        skeleton: &Skeleton,
+        pose: &blam_tags::Pose,
+        loop_frame: usize,
+    ) -> Self {
         Self {
             loop_frame,
             reach_ik: Vec::new(),

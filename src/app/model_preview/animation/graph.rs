@@ -1,8 +1,8 @@
 //! An object's animation graphs: their chain, inheritance and listed animations.
 
 use super::super::super::{TagEntry, TagSource};
-use super::super::{load_referenced_tag_from_source, object_reference, preview_model_tag};
-use super::decode::ce_jma_kind;
+use super::super::ce::animation::{ce_jma_kind, load_object_animations};
+use super::super::{load_referenced_tag_from_source, preview_model_tag};
 use super::playback::PreviewAnimationEntry;
 use blam_tags::animation::classic::CeAnimations;
 use blam_tags::paths::tag_ref_path;
@@ -106,15 +106,4 @@ pub(super) fn inherited_animation_order(animations: &[Animation<'_>]) -> Vec<(us
         );
     }
     order
-}
-
-/// A Halo CE object's `model_animations`.
-pub(super) fn load_object_animations(
-    source: &TagSource,
-    object: &TagFile,
-) -> Result<TagFile, String> {
-    let reference = object_reference(object, "animation graph")
-        .ok_or("This object references no model_animations.")?;
-    load_referenced_tag_from_source(source, &reference, "model_animations", b"antr")
-        .map_err(|error| error.to_string())
 }

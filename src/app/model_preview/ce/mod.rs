@@ -1,6 +1,7 @@
 //! Halo CE: what an object brings with it, its functions, and the effects,
 //! lights and shader passes the preview draws for it.
 
+pub(in crate::app::model_preview) mod animation;
 pub(in crate::app::model_preview) mod antennas;
 pub(super) mod blend;
 pub(super) mod contrails;
