@@ -8,7 +8,7 @@ use std::sync::Arc;
 use blam_tags::TagFile;
 
 use super::common::fields::{elements, object_block};
-use super::common::image::Image;
+use super::common::image::{Image, Sampler};
 use super::common::math::{cross, dot};
 use super::common::view::{ViewFrame, posed_on};
 use super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
@@ -20,6 +20,7 @@ use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::common::math::UNSET;
 use crate::app::model_preview::common::sprites::AntennaQuad;
 use crate::core::h2_pixel_shader::SamplerKind;
+use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use spring::{ReachAntennaSpring, posed_marker};
 
 pub(super) mod spring;
@@ -193,6 +194,21 @@ impl Antenna {
     /// Whether this is Reach's, with a spring of its own.
     pub(crate) fn is_reach(&self) -> bool {
         self.reach.is_some()
+    }
+
+    /// How its gen3 bitmap samples, from `build_sprite`. Reach's
+    /// `draw_textured_transparent_quad` sets address mode 1 and filter mode
+    /// 2, taken to be clamped and trilinear. [inferred]
+    pub(crate) fn sampler(&self) -> Sampler {
+        let filter = if self.is_reach() {
+            BitmapFilterMode::Trilinear
+        } else {
+            BitmapFilterMode::Bilinear
+        };
+        Sampler {
+            address: [BitmapAddressMode::Clamp; 2],
+            filter,
+        }
     }
 
     pub(crate) fn reach_spring(&self) -> Option<&ReachAntennaSpring> {

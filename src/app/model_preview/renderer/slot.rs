@@ -11,8 +11,6 @@ use super::super::{
 };
 use super::grid::grid_line_vertices;
 use super::program::{PRT_CLUSTER_ATTRIBUTE, PRT_WEIGHTS_ATTRIBUTE, bind_preview_vertex_layout};
-use crate::app::model_preview::common::image::Sampler;
-use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow;
 use eframe::glow::HasContext as _;
 
@@ -383,25 +381,13 @@ impl ModelGpuSlot {
                 .antennas
                 .iter()
                 .map(|antenna| match &antenna.h3_bitmap {
-                    // `build_sprite`. Reach's `draw_textured_transparent_quad`
-                    // sets address mode 1 and filter mode 2, taken to be
-                    // clamped and trilinear. [inferred]
                     Some((image, texels, mips)) => {
-                        let filter = if antenna.is_reach() {
-                            BitmapFilterMode::Trilinear
-                        } else {
-                            BitmapFilterMode::Bilinear
-                        };
-                        let sampler = Sampler {
-                            address: [BitmapAddressMode::Clamp; 2],
-                            filter,
-                        };
                         crate::app::model_preview::gl::texture::upload_image_linear(
                             gl,
                             image,
                             *texels,
                             mips,
-                            Some(sampler),
+                            Some(antenna.sampler()),
                         )
                     }
                     None => upload_image(gl, &antenna.image),
