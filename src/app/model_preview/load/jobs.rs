@@ -78,13 +78,8 @@ impl Baboon {
             let model = super::super::load::read_opened_tag(&source, &entry, edits).ok()?;
             // The overlays are a load of their own.
             let reader = super::super::load::TagReader::new(&source);
-            if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
-                && is_object_family_group(model.header.group_tag, source.game())
-            {
-                return Some((
-                    super::super::ce::overlays::halo1_object_collision_overlay(&model, &reader),
-                    Ok(None),
-                ));
+            if let Some(overlays) = super::games::own_object_overlays(&model, &reader) {
+                return Some(overlays);
             }
             let model = super::super::load::preview_model_tag(&source, &model)
                 .ok()?

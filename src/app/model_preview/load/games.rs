@@ -1,6 +1,7 @@
 //! The one place the loader names a game: what each game reads of an
 //! object, a model and a Halo CE object of its own.
 
+use super::super::animation::{DecodedAnimationPose, PreviewAnimationEntry};
 use super::super::cloth::{ClothGame, ClothRules};
 use super::super::common::marker::MarkerFrame;
 use super::super::functions::{FunctionRules, TypeExporter};
@@ -169,6 +170,43 @@ pub(super) fn read_model_features(reader: Option<&TagReader>, data: &mut ModelPr
 /// shield shaders, which no other game's `.model` names.
 pub(super) fn add_overlay_shaders(model_tag: &TagFile, preview: &mut RenderModelPreview) {
     super::super::h2::overlays::add_overlay_shaders(model_tag, preview);
+}
+
+/// The collision and physics overlays of an object whose game builds them
+/// its own way: a Halo CE object's collision, through the gbxmodel it names.
+/// `None` for any other tag.
+pub(super) fn own_object_overlays(
+    model: &TagFile,
+    reader: &TagReader,
+) -> Option<(super::overlays::Overlay, super::overlays::Overlay)> {
+    let object = is_object_family_group(model.header.group_tag, reader.source.game());
+    (blam_tags::game::Game::of(model) == blam_tags::game::Game::Halo1 && object).then(|| {
+        (
+            super::super::ce::overlays::halo1_object_collision_overlay(model, reader),
+            Ok(None),
+        )
+    })
+}
+
+/// The animations of a model whose game lists them its own way: a Halo CE
+/// object's `model_animations`. `None` for any other tag.
+pub(in crate::app::model_preview) fn list_own_animations(
+    source: &TagSource,
+    model: &TagFile,
+) -> Option<Result<Vec<PreviewAnimationEntry>, String>> {
+    (blam_tags::game::Game::of(model) == blam_tags::game::Game::Halo1)
+        .then(|| super::super::ce::animation::list_ce_animations(source, model))
+}
+
+/// One of a model's animations, decoded, where its game decodes them its own
+/// way: a Halo CE object's. `None` for any other tag.
+pub(in crate::app::model_preview) fn decode_own_animation(
+    source: &TagSource,
+    model: &TagFile,
+    animation_index: usize,
+) -> Option<Result<DecodedAnimationPose, String>> {
+    (blam_tags::game::Game::of(model) == blam_tags::game::Game::Halo1)
+        .then(|| super::super::ce::animation::decode_ce_animation(source, model, animation_index))
 }
 
 /// An object whose game loads it its own way: a Halo CE object, which names

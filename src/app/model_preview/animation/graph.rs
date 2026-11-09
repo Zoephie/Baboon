@@ -1,10 +1,8 @@
 //! An object's animation graphs: their chain, inheritance and listed animations.
 
 use super::super::super::{TagEntry, TagSource};
-use super::super::ce::animation::{ce_jma_kind, load_object_animations};
 use super::super::{load_referenced_tag_from_source, preview_model_tag};
 use super::playback::PreviewAnimationEntry;
-use blam_tags::animation::classic::CeAnimations;
 use blam_tags::paths::tag_ref_path;
 use blam_tags::{Animation, TagFile};
 
@@ -15,48 +13,33 @@ pub(super) fn list_model_animations(
 ) -> Result<Vec<PreviewAnimationEntry>, String> {
     let model =
         crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
-    // A Halo CE object names its `model_animations`; Halo 2 and the Halo 3
-    // family name a `model_animation_graph` from the `.model`.
-    match blam_tags::game::Game::of(&model) {
-        blam_tags::game::Game::Halo1 => {
-            let antr = load_object_animations(source, &model)?;
-            Ok(CeAnimations::new(&antr)
-                .iter()
-                .map(|animation| PreviewAnimationEntry {
-                    name: animation
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| format!("animation {}", animation.index)),
-                    frame_count: animation.frame_count,
-                    kind: ce_jma_kind(animation).extension(),
-                    playable: animation.frame_count > 0,
-                })
-                .collect())
-        }
-        blam_tags::game::Game::Halo2 | blam_tags::game::Game::Halo3 => {
-            let model = preview_model_tag(source, &model)?.unwrap_or(model);
-            let jmad_ref = tag_ref_path(&model.root(), "animation")
-                .ok_or("This model references no animation graph.")?;
-            let chain = load_graph_chain(source, &jmad_ref)?;
-            let animations = chain
-                .iter()
-                .map(|jmad| Animation::new(jmad).map_err(|error| error.to_string()))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(inherited_animation_order(&animations)
-                .into_iter()
-                .filter_map(|(graph, index)| animations[graph].get(index))
-                .map(|group| PreviewAnimationEntry {
-                    name: group
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| format!("animation {}", group.index)),
-                    frame_count: group.frame_count.max(0) as u16,
-                    kind: blam_tags::extract::animation::jma_kind_for(group).extension(),
-                    playable: !group.blob.is_empty(),
-                })
-                .collect())
-        }
+    // A game whose objects list their animations their own way (Halo CE's
+    // name a `model_animations`); Halo 2 and the Halo 3 family name a
+    // `model_animation_graph` from the `.model`.
+    if let Some(listed) = super::super::load::list_own_animations(source, &model) {
+        return listed;
     }
+    let model = preview_model_tag(source, &model)?.unwrap_or(model);
+    let jmad_ref = tag_ref_path(&model.root(), "animation")
+        .ok_or("This model references no animation graph.")?;
+    let chain = load_graph_chain(source, &jmad_ref)?;
+    let animations = chain
+        .iter()
+        .map(|jmad| Animation::new(jmad).map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(inherited_animation_order(&animations)
+        .into_iter()
+        .filter_map(|(graph, index)| animations[graph].get(index))
+        .map(|group| PreviewAnimationEntry {
+            name: group
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("animation {}", group.index)),
+            frame_count: group.frame_count.max(0) as u16,
+            kind: blam_tags::extract::animation::jma_kind_for(group).extension(),
+            playable: !group.blob.is_empty(),
+        })
+        .collect())
 }
 
 /// A model's graph, then each `parent animation graph` above it. A parent

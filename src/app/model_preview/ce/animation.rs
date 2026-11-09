@@ -2,7 +2,7 @@
 //! JMA export would, with the rest pose from its gbxmodel.
 
 use super::super::super::TagSource;
-use super::super::animation::DecodedAnimationPose;
+use super::super::animation::{DecodedAnimationPose, PreviewAnimationEntry};
 use super::super::{load_referenced_tag_from_source, object_reference};
 use blam_tags::animation::classic::{CeAnimation, CeAnimations};
 use blam_tags::{JmaKind, NodeTransform, Skeleton, TagFile};
@@ -17,6 +17,27 @@ pub(in crate::app::model_preview) fn load_object_animations(
         .ok_or("This object references no model_animations.")?;
     load_referenced_tag_from_source(source, &reference, "model_animations", b"antr")
         .map_err(|error| error.to_string())
+}
+
+/// A Halo CE object's animations as the preview lists them, from the
+/// `model_animations` it names.
+pub(in crate::app::model_preview) fn list_ce_animations(
+    source: &TagSource,
+    object: &TagFile,
+) -> Result<Vec<PreviewAnimationEntry>, String> {
+    let antr = load_object_animations(source, object)?;
+    Ok(CeAnimations::new(&antr)
+        .iter()
+        .map(|animation| PreviewAnimationEntry {
+            name: animation
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("animation {}", animation.index)),
+            frame_count: animation.frame_count,
+            kind: ce_jma_kind(animation).extension(),
+            playable: animation.frame_count > 0,
+        })
+        .collect())
 }
 
 pub(in crate::app::model_preview) fn ce_jma_kind(animation: &CeAnimation<'_>) -> JmaKind {

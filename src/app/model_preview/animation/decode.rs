@@ -1,7 +1,6 @@
 //! Decoding an animation into poses: held layers over a base, and Halo CE's own clips.
 
 use super::super::super::{TagEntry, TagSource};
-use super::super::ce::animation::decode_ce_animation;
 use super::super::{load_referenced_tag_from_source, preview_model_tag};
 use super::graph::{inherited_animation_order, load_graph_chain};
 use super::pose::DecodedAnimationPose;
@@ -70,8 +69,9 @@ pub(super) fn decode_held_animation(
 ) -> Result<DecodedAnimationPose, String> {
     let model =
         crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
-    if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1 {
-        return decode_ce_animation(source, &model, animation_index);
+    if let Some(decoded) = super::super::load::decode_own_animation(source, &model, animation_index)
+    {
+        return decoded;
     }
     let model = preview_model_tag(source, &model)?.unwrap_or(model);
     let root = model.root();
