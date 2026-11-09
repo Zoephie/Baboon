@@ -255,7 +255,7 @@ impl H4EffectGl {
         let pass = &*material.pass;
         unsafe {
             let location = self.location(gl, pass, name);
-            if let Some(matrix) = super::super::super::gen3::pipeline::h4_matrix(frame, name) {
+            if let Some(matrix) = super::super::pass_hooks::h4_matrix(frame, name) {
                 match matrix.len() {
                     9 => gl.uniform_matrix_3_f32_slice(location.as_ref(), false, &matrix),
                     _ => gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix),

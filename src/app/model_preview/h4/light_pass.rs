@@ -7,7 +7,8 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::shaders::H3Value;
 use super::super::gen3::screen_lights::screen_to_relative_world;
-use super::super::gen3::pipeline::{h4_matrix, set_value, view_projection};
+use super::super::gen3::pipeline::{set_value, view_projection};
+use super::pass_hooks::h4_matrix;
 use super::super::frame::ModelGpuFrame;
 use crate::app::model_preview::common::camera::h2_eye_position;
 use super::super::gen3::render::Gen3Cx;

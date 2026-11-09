@@ -7,21 +7,6 @@ pub(super) const DECAL_SLOPE_BIAS: f32 = -0.5;
 
 pub(super) const DECAL_DEPTH_BIAS: f32 = -0.000005;
 
-/// Whether Reach draws this part with no face culled: `render_mesh_part_default`
-/// takes its cull mode from `c_render_method::get_culling_mode` (X360
-/// 0x826E9E40), none for `shader_foliage` (`rmfl`, 0x726D666C) and back faces
-/// for every other group. Only the material's own passes; a shield or shadow
-/// drawn over the part keeps its own culling.
-pub(in crate::app::model_preview) fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Option<u32>) -> bool {
-    let foliage = group == Some(u32::from_be_bytes(*b"rmfl"));
-    let own = [material.albedo.as_ref(), Some(&material.lit), material.camo.as_ref(), material.dynamic_light.as_ref()]
-        .into_iter()
-        .chain(material.prt.iter().map(Option::as_ref))
-        .flatten()
-        .any(|known| Arc::ptr_eq(known, pass));
-    material.dialect() == H3Dialect::Reach && foliage && own
-}
-
 /// What each blended material draws under, after any sprites farther
 /// than it: blended, depth tested and not written, culled as the model is,
 /// every channel written, the model's vertices bound. Its own blend and any

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::super::gen3::pipeline::{Gen3PassHooks, reach_draws_two_sided};
+use super::super::gen3::pipeline::Gen3PassHooks;
 use super::super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value};
 
 /// Reach's pass hooks.
@@ -32,5 +32,63 @@ impl Gen3PassHooks for ReachPassHooks {
 
     fn two_sided(&self, material: &H3Material, pass: &Arc<H3Pass>, group: Option<u32>) -> bool {
         reach_draws_two_sided(material, pass, group)
+    }
+}
+
+/// Whether Reach draws this part with no face culled: `render_mesh_part_default`
+/// takes its cull mode from `c_render_method::get_culling_mode` (X360
+/// 0x826E9E40), none for `shader_foliage` (`rmfl`, 0x726D666C) and back faces
+/// for every other group. Only the material's own passes; a shield or shadow
+/// drawn over the part keeps its own culling.
+pub(in crate::app::model_preview) fn reach_draws_two_sided(material: &H3Material, pass: &Arc<H3Pass>, group: Option<u32>) -> bool {
+    let foliage = group == Some(u32::from_be_bytes(*b"rmfl"));
+    let own = [material.albedo.as_ref(), Some(&material.lit), material.camo.as_ref(), material.dynamic_light.as_ref()]
+        .into_iter()
+        .chain(material.prt.iter().map(Option::as_ref))
+        .flatten()
+        .any(|known| Arc::ptr_eq(known, pass));
+    material.dialect() == H3Dialect::Reach && foliage && own
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::super::gen3::shaders::{H3Blend, H3MaterialDialect};
+
+    /// Reach's foliage draws both faces of its own passes; any other group
+    /// (a halogram among them), Halo 3's foliage, and a pass laid over the
+    /// part keep culling.
+    #[test]
+    fn only_reach_foliages_own_passes_draw_two_sided() {
+        let pass = || Arc::new(H3Pass { fullscreen: false, vertex: String::new(), pixel: String::new(), uniforms: Vec::new(), textures: Vec::new() });
+        let material = |dialect| H3Material {
+            dialect,
+            albedo: None,
+            lit: pass(),
+            screen_maps: Vec::new(),
+            decal: false,
+            decal_modulates_specular: false,
+            after_lighting: false,
+            sort_layer: 0,
+            prt: [None, None, Some(pass())],
+            camo: None,
+            shadow_generate: None,
+            dynamic_light: None,
+            blend: H3Blend::Additive,
+            values: Default::default(),
+            textures: Vec::new(),
+            change_colors: Vec::new(),
+            animations: Vec::new(),
+            shield: None,
+            fringe: None,
+        };
+        let foliage = Some(u32::from_be_bytes(*b"rmfl"));
+        let reach = material(H3MaterialDialect::Reach);
+        assert!(reach_draws_two_sided(&reach, &reach.lit, foliage));
+        assert!(reach_draws_two_sided(&reach, reach.prt[2].as_ref().unwrap(), foliage));
+        assert!(!reach_draws_two_sided(&reach, &pass(), foliage), "a shield over it culls");
+        assert!(!reach_draws_two_sided(&reach, &reach.lit, Some(u32::from_be_bytes(*b"rmhg"))), "a halogram culls");
+        let halo3 = material(H3MaterialDialect::Halo3);
+        assert!(!reach_draws_two_sided(&halo3, &halo3.lit, foliage));
     }
 }
