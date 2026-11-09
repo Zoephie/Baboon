@@ -3,7 +3,7 @@
 
 use super::super::cloth::{ClothGame, ClothRules};
 use super::super::common::marker::MarkerFrame;
-use super::super::functions::TypeExporter;
+use super::super::functions::{FunctionRules, TypeExporter};
 use super::super::{
     GameId, ModelPreviewData, RenderModelPreview, TagEntry, TagFile, TagSource,
     is_object_family_group,
@@ -255,6 +255,17 @@ pub(super) fn read_render_prt(
                 prt
             })
             .filter(|prt| prt.vertices.len() == preview.vertices.len());
+}
+
+/// Whose `object_get_function_value` an object of `generation` answers by:
+/// Halo 2's, or the Halo 3 family's.
+pub(in crate::app::model_preview) fn function_rules(
+    generation: blam_tags::game::Game,
+) -> FunctionRules {
+    match generation {
+        blam_tags::game::Game::Halo2 => FunctionRules::Halo2,
+        _ => FunctionRules::Gen3,
+    }
 }
 
 /// A shader whose game resolves it its own way: Halo 4's `material`, Halo

@@ -105,7 +105,7 @@ pub(super) struct ObjectFunction {
 /// Whose `object_get_function_value` an object answers by. They agree but for
 /// which function of a name answers and how `turn off with` is read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) enum FunctionRules {
+pub(in crate::app::model_preview) enum FunctionRules {
     /// Halo 2's `sub_86F2F0` and `sub_86ECD0`: the last function of a name
     /// stands, and `turn off with` reads what the type exports.
     #[default]
@@ -189,10 +189,7 @@ pub(crate) fn read_object_functions(
             })
         })
         .collect();
-    let rules = match blam_tags::game::Game::of(object) {
-        blam_tags::game::Game::Halo2 => FunctionRules::Halo2,
-        _ => FunctionRules::Gen3,
-    };
+    let rules = super::super::load::function_rules(blam_tags::game::Game::of(object));
     let switches = object_block(object, "function switches")
         .map(|block| read_function_switches(block, &name))
         .unwrap_or_default();
