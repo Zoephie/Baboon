@@ -1,6 +1,7 @@
 //! The self-shadow passes, and the shadow apply that Halo 3 shares.
 
 use super::*;
+use super::super::super::gl::glsl::fill;
 use crate::app::model_preview::gen3::shadow::{H3_SHADOW_APPLY, H3_SHADOW_APPLY_BIAS};
 
 /// The passes behind the preview's own key light shadow. Under the default
@@ -48,16 +49,9 @@ pub(crate) fn h2_shadow_passes() -> [(Dx9Layer, Dx9DrawPass); 4] {
             Dx9Layer::ShadowMask,
             pass(
                 Dx9VertexStage::ShadowMask,
-                format!(
-                    "{H2_GLSL_VERSION}in vec4 v_tc0;
-uniform sampler2D u_shadow_map;
-void main() {{
-    vec3 place = v_tc0.xyz * 0.5 + 0.5;
-    if (place.z - {H2_SHADOW_BIAS:.4} <= texture(u_shadow_map, place.xy).r) {{
-        discard;
-    }}
-}}
-"
+                fill(
+                    include_str!("shaders/shadow_mask.frag"),
+                    &[("version", &H2_GLSL_VERSION), ("bias", &format!("{H2_SHADOW_BIAS:.4}"))],
                 ),
                 Dx9Compare::Equal,
                 false,
@@ -69,16 +63,7 @@ void main() {{
                 channels: [false, false, false, true],
                 ..pass(
                     Dx9VertexStage::LightGel,
-                    format!(
-                        "{H2_GLSL_VERSION}in vec4 v_tc3;
-in vec4 v_color1;
-uniform sampler2D u_gel_map;
-out vec4 color;
-void main() {{
-    color = vec4(1.0, 1.0, 1.0, v_color1.r > 0.5 ? textureProj(u_gel_map, v_tc3).b : 0.0);
-}}
-"
-                    ),
+                    fill(include_str!("shaders/gel_mask.frag"), &[("version", &H2_GLSL_VERSION)]),
                     Dx9Compare::Equal,
                     false,
                 )
