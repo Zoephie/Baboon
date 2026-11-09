@@ -243,9 +243,7 @@ pub(super) fn model_preview_data(
         variants,
         default_variant: None,
         change_colors: Default::default(),
-        ce_object_functions: None,
-        ce_attached: Vec::new(),
-        ce_weapons: None,
+        ce: Default::default(),
         object_functions: None,
         weapons: None,
         attached: Vec::new(),
@@ -288,12 +286,9 @@ pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) default_variant: Option<String>,
     /// The object beside this model's change colors; empty otherwise.
     pub(in crate::app) change_colors: ChangeColors,
-    /// An opened Halo CE object's functions.
-    pub(in crate::app) ce_object_functions: Option<super::ce::functions::CeObjectFunctions>,
-    /// What the opened Halo CE object brings with it.
-    pub(in crate::app) ce_attached: Vec<super::ce::weapons::CeAttachedObject>,
-    /// Halo CE bipeds: what the unit can hold.
-    pub(in crate::app) ce_weapons: Option<super::ce::weapons::CeBipedWeapons>,
+    /// An opened Halo CE object's own: its functions, what it brings with
+    /// it and what it can hold.
+    pub(in crate::app) ce: super::ce::object::CeObjectData,
     /// Halo 2 and later: the functions of an opened object.
     pub(in crate::app) object_functions: Option<super::functions::ObjectFunctions>,
     /// Halo 2 and later units: what they can hold.

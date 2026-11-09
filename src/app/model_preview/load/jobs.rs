@@ -225,7 +225,8 @@ impl PreviewLoadSettings {
             },
             ce_equippable: match &state.data {
                 Some(Ok(data)) => data
-                    .ce_weapons
+                    .ce
+                    .weapons
                     .as_ref()
                     .map(|weapons| weapons.equippable.clone()),
                 _ => None,

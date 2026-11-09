@@ -208,7 +208,8 @@ impl Baboon {
                 if let Some(Ok(data)) = state.data.as_mut() {
                     // Taken only by the game it is for: H2 reads it below.
                     let ce_clip = data
-                        .ce_weapons
+                        .ce
+                        .weapons
                         .as_ref()
                         .and_then(|weapons| Some((state.clip_after_load.take()?, weapons)));
                     if let Some((clip, weapons)) = ce_clip {

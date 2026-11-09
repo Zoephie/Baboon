@@ -197,10 +197,10 @@ fn load_snapshot(data: &ModelPreviewData) -> String {
     line(
         &mut out,
         "ce_object_functions",
-        &debug_text(&data.ce_object_functions),
+        &debug_text(&data.ce.functions),
     );
-    line(&mut out, "ce_attached", &debug_text(&data.ce_attached));
-    line(&mut out, "ce_weapons", &debug_text(&data.ce_weapons));
+    line(&mut out, "ce_attached", &debug_text(&data.ce.attached));
+    line(&mut out, "ce_weapons", &debug_text(&data.ce.weapons));
     line(
         &mut out,
         "object_functions",

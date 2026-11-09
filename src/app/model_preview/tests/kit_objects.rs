@@ -699,7 +699,7 @@ fn firing_the_held_rifle_lights_its_muzzle_flash() {
         .iter()
         .find(|weapon| weapon.object == 1)
         .expect("the held rifle fires");
-    let functions = data.ce_attached[0]
+    let functions = data.ce.attached[0]
         .functions
         .as_ref()
         .expect("the rifle's functions");

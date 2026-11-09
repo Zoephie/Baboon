@@ -12,7 +12,7 @@ pub(in crate::app::model_preview) fn draw_object_functions(
     draw_ce_weapon_picker(ui, data, state);
     let held_name = |object: u8| {
         let held = usize::from(object).checked_sub(1)?;
-        data.ce_attached.get(held).map(|held| held.name.clone())
+        data.ce.attached.get(held).map(|held| held.name.clone())
     };
     let time = frame::preview_clock(ui);
     let controls = ce::panel::CeEffectControls {
@@ -62,7 +62,8 @@ pub(in crate::app::model_preview) fn draw_object_functions(
         })
     };
     let attached = data
-        .ce_attached
+        .ce
+        .attached
         .iter()
         .enumerate()
         .filter_map(|(index, object)| {
@@ -70,7 +71,8 @@ pub(in crate::app::model_preview) fn draw_object_functions(
             Some((index as u8 + 1, Some(object.name.as_str()), functions))
         });
     let own = data
-        .ce_object_functions
+        .ce
+        .functions
         .iter()
         .map(|functions| (0, None, functions));
     for (object, name, functions) in own.chain(attached) {

@@ -185,8 +185,9 @@ pub(in crate::app::model_preview) struct CeObjectState {
 fn object_functions(
     data: &ModelPreviewData,
 ) -> impl Iterator<Item = &ce::functions::CeObjectFunctions> {
-    data.ce_object_functions.iter().chain(
-        data.ce_attached
+    data.ce.functions.iter().chain(
+        data.ce
+            .attached
             .iter()
             .filter_map(|object| object.functions.as_ref()),
     )
@@ -217,12 +218,8 @@ pub(in crate::app::model_preview) fn object_states(
             change_colors: ce::functions::ce_change_colors(colors),
         }
     };
-    let mut states = vec![state(
-        data.ce_object_functions.as_ref(),
-        0,
-        &data.change_colors,
-    )];
-    for (index, object) in data.ce_attached.iter().enumerate() {
+    let mut states = vec![state(data.ce.functions.as_ref(), 0, &data.change_colors)];
+    for (index, object) in data.ce.attached.iter().enumerate() {
         states.push(state(
             object.functions.as_ref(),
             index as u8 + 1,

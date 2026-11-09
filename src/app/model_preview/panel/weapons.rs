@@ -127,7 +127,8 @@ pub(in crate::app::model_preview) fn draw_ce_weapon_picker(
     state: &mut ModelPreviewState,
 ) {
     let Some(weapons) = data
-        .ce_weapons
+        .ce
+        .weapons
         .as_ref()
         .filter(|weapons| !weapons.equippable.is_empty())
     else {

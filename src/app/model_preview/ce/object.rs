@@ -12,6 +12,17 @@ use blam_tags::TagFile;
 /// lightning, glows, particle systems, flags and the effects it names for its
 /// events, then those of the weapon it holds, as object 1 on its markers in
 /// the hand.
+/// What an opened Halo CE object loads beside its geometry.
+#[derive(Clone, Default)]
+pub(in crate::app) struct CeObjectData {
+    /// The object's functions.
+    pub(in crate::app) functions: Option<super::functions::CeObjectFunctions>,
+    /// What the object brings with it.
+    pub(in crate::app) attached: Vec<super::weapons::CeAttachedObject>,
+    /// Bipeds: what the unit can hold.
+    pub(in crate::app) weapons: Option<super::weapons::CeBipedWeapons>,
+}
+
 pub(in crate::app::model_preview) fn read_ce_object_features(
     reader: &TagReader,
     model_tag: &TagFile,
@@ -195,11 +206,11 @@ pub(in crate::app::model_preview) fn load_ce_object(
     data.change_colors = feature(&mut notes, "its change colors", || {
         read_change_colors(model_tag)
     });
-    data.ce_object_functions = feature(&mut notes, "its functions", || {
+    data.ce.functions = feature(&mut notes, "its functions", || {
         super::functions::read_ce_object_functions(model_tag)
     });
-    data.ce_attached.extend(attached);
-    data.ce_weapons = weapons;
+    data.ce.attached.extend(attached);
+    data.ce.weapons = weapons;
     data.notes = notes;
     Ok(data)
 }
