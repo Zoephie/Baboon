@@ -1,5 +1,5 @@
 //! The DX9 pass machinery on the shared core: preparing the programs, binding a pass's
-//! uniforms, drawing each material's passes in order, the texaccum fill, the frame copy and bloom.
+//! uniforms, drawing each material's passes in order, the texaccum fill and the frame copy.
 
 use super::super::dx9::passes::H2Clock;
 use super::super::dx9::passes::{
@@ -12,7 +12,6 @@ use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::SceneTarget;
-use super::super::h2::bloom::H2Bloom;
 use super::super::{
     DEPTH_UNITS, ModelGpuFrame, RenderCore, RenderModelPreview, TextureSlot, eye_position,
     link_pass_program, rotate_view_vector, unrotate_view_vector,
@@ -38,8 +37,6 @@ pub(in crate::app::model_preview) struct Dx9Gl {
     pub(in crate::app::model_preview) h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
     /// Made on first use; `Some(None)` once making it failed, so a driver
     /// that cannot is not asked again (and nothing leaks) every frame.
-    pub(in crate::app::model_preview) h2_bloom: Option<Option<H2Bloom>>,
-    /// As `h2_bloom`.
     pub(in crate::app::model_preview) h2_shadow_map:
         Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
     /// The frame's CE point lights with those its effects have made, which
@@ -59,7 +56,6 @@ impl Dx9Gl {
             h2_target: None,
             h2_frame_copy: None,
             h2_gel: None,
-            h2_bloom: None,
             h2_shadow_map: None,
             ce_points_now: None,
             shadow: None,
@@ -273,25 +269,6 @@ pub(in crate::app::model_preview) unsafe fn upload_normalization_cube(
 }
 
 impl RenderCore {
-    /// Halo 2's bloom over `bloom_order`, after the wireframe and the sprites.
-    pub(in crate::app::model_preview) unsafe fn draw_dx9_bloom(
-        &mut self,
-        gl: &glow::Context,
-        frame: &ModelGpuFrame,
-        slot: usize,
-        bloom_order: Option<Vec<usize>>,
-    ) {
-        unsafe {
-            if let Some(order) = bloom_order {
-                PassState::new()
-                    .use_program(self.program)
-                    .bind_vertex_array(self.slots[slot].vertex_array)
-                    .apply(gl);
-                self.draw_h2_bloom(gl, frame, slot, &order);
-            }
-        }
-    }
-
     fn h2_passes(frame: &ModelGpuFrame, material: usize, layer: Dx9Layer) -> &[Dx9DrawPass] {
         frame
             .textures
@@ -451,55 +428,6 @@ impl RenderCore {
                 self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::LightAlbedo, None);
             }
             state.restore(gl);
-        }
-    }
-
-    /// Write the bloom layer to the frame's alpha, and add the glow from it.
-    unsafe fn draw_h2_bloom(
-        &mut self,
-        gl: &glow::Context,
-        frame: &ModelGpuFrame,
-        slot: usize,
-        order: &[usize],
-    ) {
-        let Some((framebuffer, color, size)) = self
-            .scene
-            .as_ref()
-            .map(|scene| (scene.framebuffer, scene.color, scene.size))
-        else {
-            return;
-        };
-        unsafe {
-            PassState::new()
-                .color_mask([false, false, false, true])
-                .apply(gl);
-            gl.clear_color(0.0, 0.0, 0.0, 0.0);
-            gl.clear(glow::COLOR_BUFFER_BIT);
-            PassState::new().color_mask([true; 4]).apply(gl);
-            self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::Bloom, None);
-            // `sub_6C18F0`: the hologram shader draws while its control is up.
-            let hologram = frame
-                .preview
-                .h2
-                .hologram_control
-                .as_deref()
-                .is_some_and(|name| {
-                    frame
-                        .function_values
-                        .as_ref()
-                        .and_then(|values| values.get(name))
-                        .is_some_and(|value| *value > 0.0)
-                });
-            if hologram {
-                self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::HologramBloom, None);
-            }
-            if let Some(bloom) = self
-                .dx9
-                .h2_bloom
-                .get_or_insert_with(|| H2Bloom::new(gl, PASS_GLSL_VERSION))
-            {
-                bloom.apply(gl, framebuffer, color, size, frame.show_backfaces);
-            }
         }
     }
 

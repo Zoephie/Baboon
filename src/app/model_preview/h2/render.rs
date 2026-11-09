@@ -10,6 +10,7 @@ use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
 use super::super::gen3::pipeline::gen3_set_blend;
 use super::super::gen3::shaders::Gen3Blend;
+use super::super::gl::pass_state::PassState;
 use super::super::renderer::FrameCx;
 use super::slot::H2Slot;
 use crate::app::model_preview::common::sprite_gl::{draw_flare_sprites, sprite_occlusion};
@@ -19,6 +20,9 @@ use crate::app::model_preview::common::sprite_gl::{draw_flare_sprites, sprite_oc
 #[derive(Default)]
 pub(in crate::app::model_preview) struct H2Game {
     slots: GameSlots<H2Slot>,
+    /// The bloom's targets and programs, made on first use; `Some(None)`
+    /// once making them failed, so a driver that cannot is not asked again.
+    bloom: Option<Option<super::bloom::H2Bloom>>,
 }
 
 impl Dx9Game for H2Game {
@@ -70,8 +74,11 @@ impl Dx9Game for H2Game {
     /// `rasterizer_postprocess_scene`'s bloom over the finished frame.
     unsafe fn bloom(&mut self, cx: &mut FrameCx<'_>, order: Vec<usize>) {
         unsafe {
-            cx.core
-                .draw_dx9_bloom(cx.gl, cx.frame, cx.slot, Some(order))
+            PassState::new()
+                .use_program(cx.core.program)
+                .bind_vertex_array(cx.core.slots[cx.slot].vertex_array)
+                .apply(cx.gl);
+            super::bloom::draw_h2_bloom(cx.core, &mut self.bloom, cx.gl, cx.frame, cx.slot, &order);
         }
     }
 

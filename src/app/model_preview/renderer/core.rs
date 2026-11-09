@@ -32,11 +32,11 @@ pub(in crate::app::model_preview) struct RenderCore {
         Option<super::super::gen3::pipeline::Gen3Targets>,
     /// What a gen3 array sampler reads with nothing of its own.
     pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
-    /// As `Dx9Gl::h2_bloom`.
+    /// As `Dx9Gl::h2_shadow_map`.
     pub(in crate::app::model_preview) sprite_gl: Option<Option<SpriteGl>>,
-    /// As `Dx9Gl::h2_bloom`.
+    /// As `Dx9Gl::h2_shadow_map`.
     pub(in crate::app::model_preview) particle_gl: Option<Option<ParticleGl>>,
-    /// As `Dx9Gl::h2_bloom`.
+    /// As `Dx9Gl::h2_shadow_map`.
     pub(in crate::app::model_preview) cheap_gl: Option<Option<CheapGl>>,
     /// Particles step once a frame, however many calls draw them.
     pub(in crate::app::model_preview) sprites_advanced: bool,

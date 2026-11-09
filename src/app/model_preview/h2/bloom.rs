@@ -11,8 +11,11 @@
 
 use eframe::glow::{self, HasContext};
 
+use super::super::dx9::passes::{Dx9Layer, PASS_GLSL_VERSION};
+use super::super::frame::ModelGpuFrame;
 use super::super::gl::pass_state::PassState;
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
+use super::super::renderer::RenderCore;
 
 /// The blur amount `rasterizer_postprocess_scene` passes, in downsampled texels.
 const BLUR_RADIUS: f32 = 3.992;
@@ -159,4 +162,51 @@ fn after_bloom_state(show_backfaces: bool) -> PassState {
         .enable(glow::DEPTH_TEST)
         .culling_unless(show_backfaces)
         .bind_texture(glow::TEXTURE_2D, None)
+}
+
+/// Halo 2's bloom over `order`, after the wireframe and the sprites: the
+/// bloom layer written to the frame's alpha, and the glow added from it.
+pub(in crate::app::model_preview) unsafe fn draw_h2_bloom(
+    core: &mut RenderCore,
+    made: &mut Option<Option<H2Bloom>>,
+    gl: &glow::Context,
+    frame: &ModelGpuFrame,
+    slot: usize,
+    order: &[usize],
+) {
+    let Some((framebuffer, color, size)) = core
+        .scene
+        .as_ref()
+        .map(|scene| (scene.framebuffer, scene.color, scene.size))
+    else {
+        return;
+    };
+    unsafe {
+        PassState::new()
+            .color_mask([false, false, false, true])
+            .apply(gl);
+        gl.clear_color(0.0, 0.0, 0.0, 0.0);
+        gl.clear(glow::COLOR_BUFFER_BIT);
+        PassState::new().color_mask([true; 4]).apply(gl);
+        core.draw_h2_passes(gl, frame, slot, order, Dx9Layer::Bloom, None);
+        // `sub_6C18F0`: the hologram shader draws while its control is up.
+        let hologram = frame
+            .preview
+            .h2
+            .hologram_control
+            .as_deref()
+            .is_some_and(|name| {
+                frame
+                    .function_values
+                    .as_ref()
+                    .and_then(|values| values.get(name))
+                    .is_some_and(|value| *value > 0.0)
+            });
+        if hologram {
+            core.draw_h2_passes(gl, frame, slot, order, Dx9Layer::HologramBloom, None);
+        }
+        if let Some(bloom) = made.get_or_insert_with(|| H2Bloom::new(gl, PASS_GLSL_VERSION)) {
+            bloom.apply(gl, framebuffer, color, size, frame.show_backfaces);
+        }
+    }
 }
