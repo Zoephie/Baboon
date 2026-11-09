@@ -42,13 +42,15 @@ pub(in crate::app::model_preview) struct ParticleRules {
     pub(in crate::app::model_preview) own_system: Option<OwnParticleSystem>,
 }
 
+/// A system's look and its emitters.
+pub(in crate::app::model_preview) type SystemParts = (Arc<H3ParticleLook>, Vec<Arc<H3Emitter>>);
+
 /// A game whose particle systems read their own way.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::app::model_preview) struct OwnParticleSystem {
     /// The system's look and emitters, from the system and its particle's
     /// path.
-    pub(in crate::app::model_preview) read:
-        fn(&TagReader, TagStruct<'_>, &str) -> Option<(Arc<H3ParticleLook>, Vec<Arc<H3Emitter>>)>,
+    pub(in crate::app::model_preview) read: fn(&TagReader, TagStruct<'_>, &str) -> Option<SystemParts>,
     /// The postprocess' LOD: the raw four, whether it ignores the camera
     /// mode, and the emitters' rates.
     pub(in crate::app::model_preview) baked_lod: fn([f32; 4], bool, &mut dyn Iterator<Item = f32>) -> [f32; 4],

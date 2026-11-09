@@ -16,7 +16,7 @@ impl Gen3PassHooks for ReachPassHooks {
 
     /// A Reach static pass reads the frame's inline lights as `simple_lights`.
     fn inline_simple_lights<'a>(&self, material: &H3Material, inline: &'a [[[f32; 4]; 5]]) -> Option<&'a [f32]> {
-        (material.dialect() == H3Dialect::Reach && !inline.is_empty()).then(|| inline.as_flattened().as_flattened())
+        (material.dialect() == H3Dialect::Reach && !inline.is_empty()).then_some(inline.as_flattened().as_flattened())
     }
 
     /// `simple_light_count` for a Reach static pass.
