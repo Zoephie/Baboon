@@ -156,6 +156,58 @@ pub(super) fn load_unreal_model(
     )
 }
 
+/// What a render model's generation turns before it becomes a preview: Halo
+/// CE's markers.
+pub(super) fn turn_render_model(
+    generation: blam_tags::game::Game,
+    render_model: &mut blam_tags::RenderModel,
+) {
+    if generation == blam_tags::game::Game::Halo1 {
+        super::super::ce::render_model::turn_markers(render_model);
+    }
+}
+
+/// What a render model's generation keeps of its preview: Halo CE's sorting
+/// positions and shader permutations. The later games' sorting positions
+/// belong to a renderer the preview does not run.
+pub(super) fn finish_render_preview(
+    generation: blam_tags::game::Game,
+    render_tag: &TagFile,
+    preview: &mut RenderModelPreview,
+) {
+    if generation == blam_tags::game::Game::Halo1 {
+        super::super::ce::render_model::read_shader_permutations(render_tag, preview);
+    } else {
+        preview
+            .batches
+            .iter_mut()
+            .for_each(|batch| batch.sort_position = None);
+    }
+}
+
+/// The render model's precomputed transfer, by the fields its tag has: Halo
+/// 2's `PRT info` (which Halo 2 Anniversary's self-describing tags carry
+/// too, so this does not go by generation), and the Halo 3 family's
+/// `per_mesh_prt_data`.
+pub(super) fn read_render_prt(
+    render_tag: &TagFile,
+    render_model: &blam_tags::RenderModel,
+    render_meshes: &[blam_tags::render_model::RenderMesh],
+    preview: &mut RenderModelPreview,
+) {
+    preview.h2.prt = super::super::h2::prt::read_model_prt(render_tag, render_model, render_meshes)
+        .filter(|prt| prt.vertices.len() == preview.vertices.len());
+    // Instances draw `static_lighting_sh`, with no transfer of their own.
+    let instance_vertices = preview.instances.vertex_count;
+    preview.gen3.prt =
+        super::super::gen3::prt::read_gen3_prt(render_tag, render_model, render_meshes)
+            .map(|mut prt| {
+                prt.pad(instance_vertices);
+                prt
+            })
+            .filter(|prt| prt.vertices.len() == preview.vertices.len());
+}
+
 /// What each game's particles do differently.
 impl ParticleRules {
     pub(in crate::app::model_preview) fn of(game: Option<GameId>) -> Self {

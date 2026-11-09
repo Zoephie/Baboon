@@ -8,7 +8,7 @@ use super::super::{
     object_reference, tag_path,
 };
 use super::errors::append_model_errors;
-use super::{Overflow, VertexBase, expand_preview_bounds_local, h2_prt_lights, read_h2_prt};
+use super::{Overflow, VertexBase, expand_preview_bounds_local};
 use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::{Marker, Node, RenderMesh};
 
@@ -179,51 +179,11 @@ pub(in crate::app) fn build_render_preview(
     let mut render_model = RenderModel::from_tag(render_tag).map_err(|error| error.to_string())?;
     let render_meshes =
         RenderModel::derive_render_meshes(render_tag).map_err(|error| error.to_string())?;
-    // `matrix4x3_rotation_from_quaternion` builds a CE marker from the conjugate
-    // of what the tag stores, as it does a node, and `RenderModel` only turns
-    // the nodes.
-    if blam_tags::game::Game::of(render_tag) == blam_tags::game::Game::Halo1 {
-        for marker in render_model
-            .marker_groups
-            .iter_mut()
-            .flat_map(|group| &mut group.markers)
-        {
-            marker.rotation = marker.rotation.conjugate();
-        }
-    }
+    let generation = blam_tags::game::Game::of(render_tag);
+    super::games::turn_render_model(generation, &mut render_model);
     let mut preview = render_model_to_preview(&render_model, &render_meshes);
-    // Only Halo CE's transparents sort by where their parts are; the later
-    // games' sorting positions belong to a renderer the preview does not run.
-    if blam_tags::game::Game::of(render_tag) != blam_tags::game::Game::Halo1 {
-        preview
-            .batches
-            .iter_mut()
-            .for_each(|batch| batch.sort_position = None);
-    }
-    // A gbxmodel's `shaders` run parallel to its materials.
-    if let Some(shaders) = render_tag
-        .root()
-        .field("shaders")
-        .and_then(|field| field.as_block())
-    {
-        for (index, material) in preview.materials.iter_mut().enumerate() {
-            let permutation = shaders
-                .element(index)
-                .and_then(|shader| shader.read_int_any("permutation"));
-            material.permutation = permutation.unwrap_or(0).max(0) as usize;
-        }
-    }
-    preview.h2.prt = read_h2_prt(render_tag, &render_model, &render_meshes, &h2_prt_lights())
-        .filter(|prt| prt.vertices.len() == preview.vertices.len());
-    // Instances draw `static_lighting_sh`, with no transfer of their own.
-    let instance_vertices = preview.instances.vertex_count;
-    preview.gen3.prt =
-        super::super::gen3::prt::read_gen3_prt(render_tag, &render_model, &render_meshes)
-            .map(|mut prt| {
-                prt.pad(instance_vertices);
-                prt
-            })
-            .filter(|prt| prt.vertices.len() == preview.vertices.len());
+    super::games::finish_render_preview(generation, render_tag, &mut preview);
+    super::games::read_render_prt(render_tag, &render_model, &render_meshes, &mut preview);
     append_model_errors(render_tag, &mut preview, ModelPreviewLayer::Render);
     Ok(preview)
 }

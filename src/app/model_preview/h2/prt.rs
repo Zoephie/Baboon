@@ -145,6 +145,20 @@ fn reals(info: &TagStruct<'_>, block: &str, field: &str) -> Option<Vec<f32>> {
         .collect()
 }
 
+/// A render model's PRT data, lit by the default lights' two directions.
+pub(in crate::app::model_preview) fn read_model_prt(
+    tag: &TagFile,
+    model: &RenderModel,
+    meshes: &[RenderMesh],
+) -> Option<H2Prt> {
+    read_h2_prt(
+        tag,
+        model,
+        meshes,
+        &super::super::dx9::passes::h2_prt_lights(),
+    )
+}
+
 /// Read a Halo 2 render_model's PRT data, walking `meshes` in the order the
 /// preview appended them. `None` for a model without any, and for one whose
 /// data does not fit what the vertex stage takes.

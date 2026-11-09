@@ -3,8 +3,6 @@
 
 use super::common::geometry::{Overflow, VertexBase};
 use super::common::marker::{MarkerFrame, attach_point, attach_vector};
-use super::dx9::passes::h2_prt_lights;
-use super::h2::prt::read_h2_prt;
 use super::{ModelPreviewData, TagEntry, TagFile, TagNameIndex, TagSource};
 use model::load_model;
 use std::sync::Arc;
