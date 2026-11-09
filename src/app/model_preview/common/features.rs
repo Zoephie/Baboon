@@ -21,6 +21,10 @@ pub(in crate::app::model_preview) trait Feature {
     /// out for it, though the object has no functions of its own.
     const NEEDS_VALUES: bool = false;
 
+    /// Whether it draws through the particle program, which the sprite pass
+    /// then links.
+    const PARTICLE_PROGRAM: bool = false;
+
     /// Whether it names any function, on whichever object it hangs.
     fn names_a_function(&self) -> bool {
         false
@@ -52,6 +56,7 @@ pub(in crate::app::model_preview) trait Feature {
 impl<T: Feature> Feature for Arc<T> {
     const SPRITE: bool = T::SPRITE;
     const NEEDS_VALUES: bool = T::NEEDS_VALUES;
+    const PARTICLE_PROGRAM: bool = T::PARTICLE_PROGRAM;
 
     fn names_a_function(&self) -> bool {
         T::names_a_function(self)
@@ -84,6 +89,9 @@ pub(in crate::app::model_preview) trait FeatureList {
 
     /// Whether it holds any that draw in the object's sprite pass.
     fn draws_sprites(&self) -> bool;
+
+    /// Whether it holds any that draw through the particle program.
+    fn draws_particles(&self) -> bool;
 
     /// Whether it holds any naming a function that needs the opened
     /// object's values ([`Feature::NEEDS_VALUES`]).
@@ -133,6 +141,10 @@ impl<T: Feature> FeatureList for Vec<T> {
         T::SPRITE && !<[T]>::is_empty(self)
     }
 
+    fn draws_particles(&self) -> bool {
+        T::PARTICLE_PROGRAM && !<[T]>::is_empty(self)
+    }
+
     fn needs_values(&self) -> bool {
         T::NEEDS_VALUES && self.iter().any(Feature::names_a_function)
     }
@@ -162,6 +174,10 @@ impl<T: Feature> FeatureList for Option<T> {
 
     fn draws_sprites(&self) -> bool {
         T::SPRITE && self.is_some()
+    }
+
+    fn draws_particles(&self) -> bool {
+        T::PARTICLE_PROGRAM && self.is_some()
     }
 
     fn needs_values(&self) -> bool {
@@ -377,28 +393,33 @@ pub(in crate::app::model_preview) use features;
 
 /// [`Feature`] for kinds that hang under a region through [`Attached`]: `$moves`
 /// and `$inputs` are each kind's rule, `|at|` and `|at, object|`. A kind
-/// that draws in the sprite pass is marked `sprite` first, and one whose
+/// that draws in the sprite pass is marked `sprite` first, one whose
 /// functions need the opened object's values `values` (see
-/// [`Feature::NEEDS_VALUES`]).
+/// [`Feature::NEEDS_VALUES`]), and a sprite drawn through the particle
+/// program `sprite particles`.
 ///
 /// [`Attached`]: super::attached::Attached
 macro_rules! attached_feature {
+    (sprite particles $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
+        $crate::app::model_preview::common::features::attached_feature!(@impl true, false, true, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+    };
     (sprite values $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
-        $crate::app::model_preview::common::features::attached_feature!(@impl true, true, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+        $crate::app::model_preview::common::features::attached_feature!(@impl true, true, false, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
     };
     (values $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
-        $crate::app::model_preview::common::features::attached_feature!(@impl false, true, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+        $crate::app::model_preview::common::features::attached_feature!(@impl false, true, false, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
     };
     (sprite $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
-        $crate::app::model_preview::common::features::attached_feature!(@impl true, false, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+        $crate::app::model_preview::common::features::attached_feature!(@impl true, false, false, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
     };
     ($kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
-        $crate::app::model_preview::common::features::attached_feature!(@impl false, false, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+        $crate::app::model_preview::common::features::attached_feature!(@impl false, false, false, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
     };
-    (@impl $sprite:literal, $values:literal, $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
+    (@impl $sprite:literal, $values:literal, $particles:literal, $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
         impl $crate::app::model_preview::common::features::Feature for $kind {
             const SPRITE: bool = $sprite;
             const NEEDS_VALUES: bool = $values;
+            const PARTICLE_PROGRAM: bool = $particles;
 
             fn names_a_function(&self) -> bool {
                 let $item = self;
@@ -429,7 +450,7 @@ macro_rules! attached_feature {
 
 pub(in crate::app::model_preview) use attached_feature;
 
-attached_feature!(sprite super::super::particles::ParticleSystem, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(sprite particles super::super::particles::ParticleSystem, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 attached_feature!(sprite super::super::particles::cheap::CheapEmitterAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 
 impl Feature for super::super::antennas::Antenna {

@@ -16,7 +16,7 @@ attached_feature!(sprite super::effects::flares::Gen3FlareAt, moves: |at| at.ani
 
 attached_feature!(sprite super::effects::light_volumes::Gen3LightVolumeAt, moves: |at| at.animates(), inputs: |at| at.scale_names().into_iter().collect());
 
-attached_feature!(sprite super::effects::strips::Gen3StripAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(sprite particles super::effects::strips::Gen3StripAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 
 impl Feature for super::effects::screen::Gen3ScreenEffectAt {
     fn moves(&self) -> bool {

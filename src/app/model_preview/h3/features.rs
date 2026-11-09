@@ -13,6 +13,7 @@ attached_feature!(super::lights::H3Light, moves: |at| at.animates(), inputs: |at
 
 impl Feature for super::leaves::H3LeavesAt {
     const SPRITE: bool = true;
+    const PARTICLE_PROGRAM: bool = true;
 
     fn moves(&self) -> bool {
         true

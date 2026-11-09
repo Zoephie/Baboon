@@ -37,10 +37,7 @@ impl RenderCore {
                 .sprite_gl
                 .get_or_insert_with(|| link_sprite_gl(gl, self.program))
                 .as_ref()?;
-            if !(frame.preview.particles.is_empty()
-                && frame.preview.gen3.strips.is_empty()
-                && frame.preview.h3.leaves.is_empty())
-            {
+            if frame.preview.any_feature(|list| list.draws_particles()) {
                 self.particle_gl
                     .get_or_insert_with(|| gen3_particle_gl(gl, self.program));
             }
