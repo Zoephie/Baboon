@@ -88,6 +88,72 @@ impl ScreenChain {
         }
     }
 
+    /// A pass of a program that picks its pass by `pass`: `source` (and
+    /// `added`) into `target` scaled by `scale`, with the target's size and
+    /// the source's texel (`c_screen_postprocess::copy` and
+    /// `apply_binary_op_ex`, as Reach's and Halo 4's blooms run them).
+    ///
+    /// # Safety
+    ///
+    /// The context must be current on this thread, inside a run.
+    pub(in crate::app::model_preview) unsafe fn indexed_pass(
+        &self,
+        gl: &glow::Context,
+        target: &ColorTarget,
+        pass: i32,
+        source: (glow::NativeTexture, [i32; 2]),
+        added: Option<glow::NativeTexture>,
+        scale: [f32; 4],
+    ) {
+        unsafe {
+            self.pass(gl, target, source.0, added, |uniform| {
+                gl.uniform_1_i32(uniform("pass").as_ref(), pass);
+                gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
+                gl.uniform_2_f32(
+                    uniform("target_size").as_ref(),
+                    target.size[0] as f32,
+                    target.size[1] as f32,
+                );
+                let [width, height] = source.1.map(|side| 1.0 / side as f32);
+                gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
+            });
+        }
+    }
+
+    /// `gaussian_blur_fixed`: `surface` blurred across into `scratch` by the
+    /// `horizontal` pass, and back down by the `kernel` pass, scaled.
+    ///
+    /// # Safety
+    ///
+    /// The context must be current on this thread, inside a run.
+    pub(in crate::app::model_preview) unsafe fn blur(
+        &self,
+        gl: &glow::Context,
+        surface: &ColorTarget,
+        scratch: &ColorTarget,
+        [horizontal, kernel]: [i32; 2],
+        scale: [f32; 4],
+    ) {
+        unsafe {
+            self.indexed_pass(
+                gl,
+                scratch,
+                horizontal,
+                (surface.texture, surface.size),
+                None,
+                [1.0; 4],
+            );
+            self.indexed_pass(
+                gl,
+                surface,
+                kernel,
+                (scratch.texture, scratch.size),
+                None,
+                scale,
+            );
+        }
+    }
+
     /// End `run`: units 0 and 1 emptied, the input read by texel again, the
     /// state found put back, and `scene` bound (making the chain's targets
     /// may have left one of theirs bound when the run began).
@@ -201,4 +267,9 @@ mod gl_tests {
             gl.delete_program(program);
         }
     }
+}
+
+/// `frame` divided down to a bloom surface's size, at least a pixel each way.
+pub(in crate::app::model_preview) fn divided(frame: [i32; 2], divisor: f32) -> [i32; 2] {
+    frame.map(|side| ((side as f32 / divisor + 0.5).floor() as i32).max(1))
 }

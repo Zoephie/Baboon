@@ -9,7 +9,7 @@
 //! (`floor(side / divisor + 0.5)`, no fixed sizes; O8) and the pixel size a
 //! pass steps by, the source's.
 
-use super::super::gl::chain::ScreenChain;
+use super::super::gl::chain::{ScreenChain, divided};
 use super::super::gl::pass_state::PassState;
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
 use eframe::glow::{self, HasContext};
@@ -130,10 +130,6 @@ enum Pass {
 /// `ps_pixel_size`; offsets in texture `v` turn over for GL's upward `t`.
 const FRAGMENT: &str = include_str!("shaders/bloom.frag");
 
-fn divided(frame: [i32; 2], divisor: f32) -> [i32; 2] {
-    frame.map(|side| ((side as f32 / divisor + 0.5).floor() as i32).max(1))
-}
-
 /// MCC's high-resolution bloom scale: `min(1, 921600 / (w·h))` once the
 /// frame is wider than 1280 or taller than 720 (`use_hdr_bloom_scaling`, off
 /// by default, would replace it).
@@ -239,17 +235,8 @@ impl H4Bloom {
         scale: [f32; 4],
     ) {
         unsafe {
-            self.chain.pass(gl, target, source.0, added, |uniform| {
-                gl.uniform_1_i32(uniform("pass").as_ref(), pass as i32);
-                gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
-                gl.uniform_2_f32(
-                    uniform("target_size").as_ref(),
-                    target.size[0] as f32,
-                    target.size[1] as f32,
-                );
-                let [width, height] = source.1.map(|side| 1.0 / side as f32);
-                gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
-            });
+            self.chain
+                .indexed_pass(gl, target, pass as i32, source, added, scale)
         }
     }
 
@@ -261,24 +248,8 @@ impl H4Bloom {
         scratch: &ColorTarget,
         scale: [f32; 4],
     ) {
-        unsafe {
-            self.step(
-                gl,
-                scratch,
-                Pass::BlurHorizontal,
-                (surface.texture, surface.size),
-                None,
-                [1.0; 4],
-            );
-            self.step(
-                gl,
-                surface,
-                Pass::Kernel5,
-                (scratch.texture, scratch.size),
-                None,
-                scale,
-            );
-        }
+        let passes = [Pass::BlurHorizontal as i32, Pass::Kernel5 as i32];
+        unsafe { self.chain.blur(gl, surface, scratch, passes, scale) }
     }
 
     /// What the final composite adds: the bloom of `accumulation` by

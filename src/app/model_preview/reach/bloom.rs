@@ -5,9 +5,9 @@
 //! clamps where the game's shaders do. The final composite adds the top level
 //! at eight times. See `docs/reach-preview-research/bloom.md`.
 
-use super::super::gl::chain::ScreenChain;
+use super::super::gl::chain::{ScreenChain, divided};
 use super::super::gl::target::{ColorTarget, Made, Sampling, Texels};
-use eframe::glow::{self, HasContext};
+use eframe::glow;
 
 use crate::app::model_preview::gl::screen::screen_program;
 
@@ -54,11 +54,6 @@ fn high_resolution([width, height]: [i32; 2]) -> bool {
     } else {
         width > 1152
     }
-}
-
-/// `sub_140849480`'s `floor(side / divisor + 0.5)`, at least a texel.
-fn divided(frame: [i32; 2], divisor: f32) -> [i32; 2] {
-    frame.map(|side| ((side as f32 / divisor + 0.5).floor() as i32).max(1))
 }
 
 /// The surfaces' sizes, `sub_140848A60` fixing the small three when the
@@ -155,17 +150,8 @@ impl ReachBloom {
         scale: [f32; 4],
     ) {
         unsafe {
-            self.chain.pass(gl, target, source.0, added, |uniform| {
-                gl.uniform_1_i32(uniform("pass").as_ref(), pass as i32);
-                gl.uniform_4_f32_slice(uniform("scale").as_ref(), &scale);
-                gl.uniform_2_f32(
-                    uniform("target_size").as_ref(),
-                    target.size[0] as f32,
-                    target.size[1] as f32,
-                );
-                let [width, height] = source.1.map(|side| 1.0 / side as f32);
-                gl.uniform_2_f32(uniform("source_texel").as_ref(), width, height);
-            });
+            self.chain
+                .indexed_pass(gl, target, pass as i32, source, added, scale)
         }
     }
 
@@ -178,24 +164,8 @@ impl ReachBloom {
         scratch: &ColorTarget,
         scale: [f32; 4],
     ) {
-        unsafe {
-            self.step(
-                gl,
-                scratch,
-                Pass::BlurHorizontal,
-                (surface.texture, surface.size),
-                None,
-                [1.0; 4],
-            );
-            self.step(
-                gl,
-                surface,
-                Pass::Kernel5,
-                (scratch.texture, scratch.size),
-                None,
-                scale,
-            );
-        }
+        let passes = [Pass::BlurHorizontal as i32, Pass::Kernel5 as i32];
+        unsafe { self.chain.blur(gl, surface, scratch, passes, scale) }
     }
 
     /// What the final composite adds: `aux_small2`. Leaves `scene` bound, and
