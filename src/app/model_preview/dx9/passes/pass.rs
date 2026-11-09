@@ -1,9 +1,10 @@
 //! A dx9 pass: its blend, depth, cull, textures and constants, and the pass as drawn.
 
 use super::animation::H2AnimatedTint;
-use super::animation::{H2AnimatedRow, H2Animation, H2Clock, PassAnimation, animated_vector};
+use super::animation::{
+    H2AnimatedRow, H2Animation, H2Clock, PassAnimation, PassVisibility, animated_vector,
+};
 use super::globals::fill_components;
-use super::numeric::CeNumeric;
 use super::{DX9_TEXTURE_ROWS, Dx9VertexStage, Image, SamplerKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,8 +106,8 @@ pub(crate) struct Dx9DrawPass {
     pub(crate) cull: Dx9Cull,
     /// Faded out entirely on a fully camouflaged object.
     pub(crate) hidden_by_camo: bool,
-    /// One digit of a Halo CE numeric display: drawn while that digit shows.
-    pub(crate) numeric: Option<CeNumeric>,
+    /// Drawn only while this shows: one digit of a Halo CE numeric display.
+    pub(crate) numeric: Option<std::sync::Arc<dyn PassVisibility>>,
     pub(crate) channels: [bool; 4],
     pub(crate) textures: Vec<Dx9DrawTexture>,
     /// Pixel constant registers, by register index.

@@ -365,6 +365,7 @@ fn only_a_decal_shader_takes_the_depth_bias() {
 
 #[test]
 fn a_numeric_pass_shows_its_digit_of_its_place() {
+    use super::super::super::dx9::passes::PassVisibility as _;
     let digit = |digit, place| CeNumeric {
         map: String::new(),
         count: 10,

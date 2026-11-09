@@ -1,9 +1,9 @@
 //! Halo CE's shaders resolved to the textures and passes the preview draws.
 
 use super::super::super::ce::shaders::{
-    ce_camo_pass, ce_model_passes, ce_transparent_passes, read_ce_camo_settings,
+    CeNumeric, ce_camo_pass, ce_model_passes, ce_transparent_passes, read_ce_camo_settings,
 };
-use super::super::super::dx9::passes::{CeNumeric, Dx9DrawPass, Dx9Layer};
+use super::super::super::dx9::passes::{Dx9DrawPass, Dx9Layer};
 use super::super::super::materials::{
     DetailComposition, DetailFunction, MaterialTextures, ResolveCaches, SlotBitmap, TextureSlot,
     cached_bitmap, decode_image,
@@ -174,7 +174,7 @@ fn expand_ce_digits(
 ) -> Vec<Dx9DrawPass> {
     let mut expanded = Vec::with_capacity(passes.len());
     for pass in passes {
-        let Some(numeric) = pass.numeric.clone() else {
+        let Some(numeric) = CeNumeric::of(&pass.numeric).cloned() else {
             expanded.push(pass);
             continue;
         };
@@ -208,12 +208,12 @@ fn expand_ce_digits(
             if let Some(first) = pass.textures.first_mut() {
                 first.image = image;
             }
-            pass.numeric = Some(CeNumeric {
+            pass.numeric = Some(Arc::new(CeNumeric {
                 count,
                 digit,
                 place,
                 ..numeric.clone()
-            });
+            }));
             expanded.push(pass);
         }
     }

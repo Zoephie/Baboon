@@ -5,6 +5,14 @@ use blam_tags::tag_function::FunctionType;
 use blam_tags::{TagFunction, TagStruct};
 use std::sync::Arc;
 
+/// Whether a pass draws while the object's outputs hold, for a game's
+/// pass that shows only at some values: Halo CE's numeric digits.
+pub(crate) trait PassVisibility: std::fmt::Debug + Send + Sync {
+    fn shows(&self, outputs: &[f32; 4]) -> bool;
+    /// The game's own value, for its reader to look back into.
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
 /// What a game's own shader animates on a pass past the template's
 /// animations, evaluated at draw: Halo CE's rows and constants.
 pub(crate) trait PassAnimation: std::fmt::Debug + Send + Sync {

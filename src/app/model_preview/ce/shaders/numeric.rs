@@ -1,9 +1,11 @@
-//! A dx9 pass that draws one digit of a number, by an object output.
+//! A Halo CE pass that draws one digit of a number, by an object output.
+
+use super::super::super::dx9::passes::PassVisibility;
 
 /// A `numeric` shader: its first map holds digits, and which one draws comes
 /// from an object output, as `rasterizer_dx9_transparent_chicago_draw` has it.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CeNumeric {
+pub(in crate::app::model_preview) struct CeNumeric {
     /// The first map, whose images are the digits.
     pub(in crate::app::model_preview) map: String,
     /// How many digits it holds, the base of the count.
@@ -26,7 +28,20 @@ impl CeNumeric {
         ((output * self.limit as f32 + 0.5).floor() as i32).clamp(0, self.limit)
     }
 
-    pub(crate) fn shows(&self, outputs: &[f32; 4]) -> bool {
+    /// The pass's numeric digits, if it is a numeric display's.
+    pub(in crate::app::model_preview) fn of(
+        numeric: &Option<std::sync::Arc<dyn PassVisibility>>,
+    ) -> Option<&Self> {
+        numeric.as_ref()?.as_any().downcast_ref()
+    }
+}
+
+impl PassVisibility for CeNumeric {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn shows(&self, outputs: &[f32; 4]) -> bool {
         if self.timer {
             return self.digit == 0;
         }

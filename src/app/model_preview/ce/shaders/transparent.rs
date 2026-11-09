@@ -1,5 +1,6 @@
 //! The transparent generic and chicago shaders' passes, with their stages, fades and maps.
 
+use super::super::super::dx9::passes::PassVisibility;
 use super::animation::{
     CeColorAnimation, CeMapAnimation, CeModelAnimation, PERIODIC_FUNCTIONS, color_channel,
     function_source, identity_map_rows, nonzero, read_map_animation,
@@ -326,7 +327,10 @@ fn transparent_pass(
     };
     pass.hidden_by_camo = !has("don't fade active-camouflage");
     pass.depth_bias = decal_bias(flags.has("decal"));
-    pass.numeric = has("numeric").then(|| first_map_digits(root)).flatten();
+    pass.numeric = has("numeric")
+        .then(|| first_map_digits(root))
+        .flatten()
+        .map(|numeric| Arc::new(numeric) as Arc<dyn PassVisibility>);
     pass.textures = textures;
     pass.constants = constants;
     pass.texture_rows = identity_map_rows();

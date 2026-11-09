@@ -22,8 +22,6 @@ mod pass;
 pub(in crate::app::model_preview) use pass::*;
 mod animation;
 pub(in crate::app::model_preview) use animation::*;
-mod numeric;
-pub(in crate::app::model_preview) use numeric::*;
 mod globals;
 pub(in crate::app::model_preview) use globals::*;
 #[cfg(test)]

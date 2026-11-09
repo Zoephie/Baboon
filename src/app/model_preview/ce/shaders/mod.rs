@@ -10,7 +10,7 @@ use crate::app::model_preview::load::TagReader;
 
 use super::super::common::fields::{argb, has_flag, has_flag_in_any};
 use super::super::common::image::Image;
-use super::super::dx9::passes::{CeNumeric, PassAnimation};
+use super::super::dx9::passes::PassAnimation;
 use super::super::dx9::passes::{
     Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
     Dx9DrawTexture, PASS_GLSL_VERSION,
@@ -34,6 +34,8 @@ pub(in crate::app::model_preview) use model::*;
 mod transparent;
 pub(in crate::app::model_preview) use transparent::*;
 mod camo;
+mod numeric;
+pub(in crate::app::model_preview) use numeric::*;
 mod glass;
 mod special;
 pub(in crate::app::model_preview) use camo::*;
