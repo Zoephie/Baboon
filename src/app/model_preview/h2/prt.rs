@@ -3,6 +3,10 @@
 //! into per-vertex data and per-cluster constants at load; see
 //! `prt_project_cluster_basis` and `prt_setup_draw`.
 
+use super::super::RenderModelPreview;
+use super::super::common::streams::{VertexStream, VertexStreamKind};
+use super::super::gl::buffer::slice_bytes;
+use super::super::renderer::{PRT_CLUSTER_ATTRIBUTE, PRT_WEIGHTS_ATTRIBUTE};
 use std::collections::HashMap;
 
 use blam_tags::{RenderMesh, RenderModel, TagFile, TagStruct};
@@ -306,6 +310,69 @@ impl Dx9Binds for H2Binds {
                 let location = program.location(gl, "u_prt_light");
                 gl.uniform_3_f32_slice(location.as_ref(), &direction);
             }
+        }
+    }
+}
+
+/// Halo 2's PRT clusters and weights, beside the model's vertices.
+pub(in crate::app::model_preview) struct H2PrtStream;
+
+impl VertexStream for H2PrtStream {
+    fn kind(&self) -> VertexStreamKind {
+        VertexStreamKind::Dx9Prt
+    }
+
+    fn present(&self, preview: &RenderModelPreview) -> bool {
+        preview.h2.prt.is_some()
+    }
+
+    unsafe fn upload(
+        &self,
+        gl: &glow::Context,
+        preview: &RenderModelPreview,
+        buffer: glow::NativeBuffer,
+    ) {
+        unsafe {
+            match &preview.h2.prt {
+                Some(prt) => {
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+                    gl.buffer_data_u8_slice(
+                        glow::ARRAY_BUFFER,
+                        slice_bytes(&prt.vertices),
+                        glow::STATIC_DRAW,
+                    );
+                    let stride = std::mem::size_of::<[f32; 5]>() as i32;
+                    gl.enable_vertex_attrib_array(PRT_CLUSTER_ATTRIBUTE);
+                    gl.vertex_attrib_pointer_f32(
+                        PRT_CLUSTER_ATTRIBUTE,
+                        1,
+                        glow::FLOAT,
+                        false,
+                        stride,
+                        0,
+                    );
+                    gl.enable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
+                    gl.vertex_attrib_pointer_f32(
+                        PRT_WEIGHTS_ATTRIBUTE,
+                        4,
+                        glow::FLOAT,
+                        false,
+                        stride,
+                        4,
+                    );
+                }
+                None => {
+                    gl.disable_vertex_attrib_array(PRT_CLUSTER_ATTRIBUTE);
+                    gl.disable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
+                }
+            }
+        }
+    }
+
+    /// Halo 2 lights its PRT clusters model-wide: what is added has none.
+    fn pad(&self, preview: &mut RenderModelPreview, count: usize) {
+        if let Some(prt) = preview.h2.prt.as_mut() {
+            prt.pad(count);
         }
     }
 }

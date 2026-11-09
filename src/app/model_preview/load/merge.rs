@@ -26,13 +26,8 @@ pub(in crate::app::model_preview) fn merge_preview_append(
         expand_preview_bounds_local(&mut dst.bounds_min, &mut dst.bounds_max, vertex.position);
         dst.vertices.push(*vertex);
     }
-    // The PRT attributes stay parallel to the vertices: overlays have none.
-    if let Some(prt) = dst.h2.prt.as_mut() {
-        prt.pad(src.vertices.len());
-    }
-    if let Some(prt) = dst.gen3.prt.as_mut() {
-        prt.pad(src.vertices.len());
-    }
+    // The per-vertex streams stay parallel to the vertices: overlays have none.
+    super::pad_vertex_streams(dst, src.vertices.len());
     for batch in &src.batches {
         let start = batch.index_start as usize;
         let end = start

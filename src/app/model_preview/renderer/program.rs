@@ -141,9 +141,9 @@ pub(super) unsafe fn bind_preview_vertex_layout(
 }
 
 /// Above the attributes the main program takes, which it numbers itself.
-pub(super) const PRT_CLUSTER_ATTRIBUTE: u32 = 14;
+pub(in crate::app::model_preview) const PRT_CLUSTER_ATTRIBUTE: u32 = 14;
 
-pub(super) const PRT_WEIGHTS_ATTRIBUTE: u32 = 15;
+pub(in crate::app::model_preview) const PRT_WEIGHTS_ATTRIBUTE: u32 = 15;
 
 /// Link a pass with the main program's attribute locations, because the
 /// model's vertex array is bound to those.

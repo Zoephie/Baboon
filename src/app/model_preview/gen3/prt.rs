@@ -6,7 +6,11 @@
 //! `static_prt_ambient`, linear and quadratic are "no longer supported" and
 //! light by `static_sh`. The client (`sub_1404019F0`) clamps the gray to 0..1.
 
+use super::super::RenderModelPreview;
+use super::super::common::streams::{VertexStream, VertexStreamKind};
+use super::super::gl::buffer::slice_bytes;
 use blam_tags::TagFile;
+use eframe::glow::{self, HasContext as _};
 
 use super::super::common::fields::elements;
 use super::super::{RenderModel, preview_mesh_order};
@@ -196,6 +200,88 @@ pub(in crate::app::model_preview) fn second_order_rotation(
             (both[0][0] + both[1][1] + both[2][2]) / 2.0
         })
     })
+}
+
+/// The gen3 shaders' baked PRT coefficients, beside the model's vertices.
+pub(in crate::app::model_preview) struct Gen3PrtStream;
+
+impl VertexStream for Gen3PrtStream {
+    fn kind(&self) -> VertexStreamKind {
+        VertexStreamKind::Gen3Prt
+    }
+
+    fn present(&self, preview: &RenderModelPreview) -> bool {
+        preview.gen3.prt.is_some()
+    }
+
+    unsafe fn upload(
+        &self,
+        gl: &glow::Context,
+        preview: &RenderModelPreview,
+        buffer: glow::NativeBuffer,
+    ) {
+        unsafe {
+            match &preview.gen3.prt {
+                Some(prt) => {
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+                    gl.buffer_data_u8_slice(
+                        glow::ARRAY_BUFFER,
+                        slice_bytes(&prt.vertices),
+                        glow::STATIC_DRAW,
+                    );
+                    let stride = std::mem::size_of::<[f32; COEFFICIENTS]>() as i32;
+                    for (index, attribute) in
+                        super::pipeline::PRT_ATTRIBUTES.into_iter().enumerate()
+                    {
+                        gl.enable_vertex_attrib_array(attribute);
+                        // The first holds a fourth for the linear shader, in the
+                        // second's first place.
+                        let size = if index == 0 { 4 } else { 3 };
+                        gl.vertex_attrib_pointer_f32(
+                            attribute,
+                            size,
+                            glow::FLOAT,
+                            false,
+                            stride,
+                            index as i32 * 12,
+                        );
+                    }
+                }
+                None => {
+                    for attribute in super::pipeline::PRT_ATTRIBUTES {
+                        gl.disable_vertex_attrib_array(attribute);
+                    }
+                }
+            }
+        }
+    }
+
+    fn pad(&self, preview: &mut RenderModelPreview, count: usize) {
+        if let Some(prt) = preview.gen3.prt.as_mut() {
+            prt.pad(count);
+        }
+    }
+
+    /// An attached object's own coefficients where it has them for every
+    /// vertex; else padding.
+    fn append_attached(
+        &self,
+        preview: &mut RenderModelPreview,
+        attached: &RenderModelPreview,
+        count: usize,
+    ) {
+        if let Some(prt) = preview.gen3.prt.as_mut() {
+            match attached
+                .gen3
+                .prt
+                .as_ref()
+                .filter(|own| own.vertices.len() == count)
+            {
+                Some(own) => prt.append(own),
+                None => prt.pad(count),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

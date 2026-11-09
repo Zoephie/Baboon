@@ -1,6 +1,7 @@
 //! The DX9 pass machinery on the shared core: preparing the programs, binding a pass's
 //! uniforms, drawing each material's passes in order, the texaccum fill and the frame copy.
 
+use super::super::common::streams::VertexStreamKind;
 use super::super::dx9::passes::Dx9Clock;
 use super::super::dx9::passes::{
     DX9_REFLECTION_SCALE, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9DrawPass,
@@ -12,6 +13,7 @@ use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::SceneTarget;
+use super::super::load::has_vertex_stream;
 use super::super::{
     DEPTH_UNITS, ModelGpuFrame, RenderCore, RenderModelPreview, TextureSlot, eye_position,
     link_pass_program, rotate_view_vector, unrotate_view_vector,
@@ -318,7 +320,8 @@ impl RenderCore {
         let passes = Self::dx9_passes_of(frame, material, layer);
         self.shaders_supported
             && !passes.is_empty()
-            && (layer != Dx9Layer::Prt || (frame.prt && frame.preview.h2.prt.is_some()))
+            && (layer != Dx9Layer::Prt
+                || (frame.prt && has_vertex_stream(&frame.preview, VertexStreamKind::Dx9Prt)))
             && passes.iter().all(|pass| {
                 self.dx9
                     .pass_programs

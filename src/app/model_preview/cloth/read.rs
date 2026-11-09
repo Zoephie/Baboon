@@ -284,13 +284,8 @@ pub(in crate::app::model_preview) fn read_cloth<
             layer: ModelPreviewLayer::Render,
             sort_position: None,
         });
-        // Either game's PRT attributes stay parallel to the vertices.
-        if let Some(prt) = preview.h2.prt.as_mut() {
-            prt.pad(cloth.places.len() * 2);
-        }
-        if let Some(prt) = preview.gen3.prt.as_mut() {
-            prt.pad(cloth.places.len() * 2);
-        }
+        // The games' per-vertex streams stay parallel to the vertices.
+        super::super::load::pad_vertex_streams(preview, cloth.places.len() * 2);
         preview.cloth.push(cloth);
     }
 }

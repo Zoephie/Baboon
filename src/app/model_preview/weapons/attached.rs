@@ -40,20 +40,10 @@ pub(in crate::app::model_preview) fn fold_attached(
         name: Some(name),
     };
     read_attached_features(&cx, &attached, preview);
-    // Halo 2 lights its PRT clusters model-wide; what is attached has none here.
-    if let Some(prt) = preview.h2.prt.as_mut() {
-        prt.pad(attached.vertices.len());
-    }
-    if let Some(prt) = preview.gen3.prt.as_mut() {
-        match attached
-            .gen3
-            .prt
-            .as_ref()
-            .filter(|own| own.vertices.len() == attached.vertices.len())
-        {
-            Some(own) => prt.append(own),
-            None => prt.pad(attached.vertices.len()),
-        }
+    // The per-vertex streams stay parallel: the attached object's own where
+    // its game keeps them per object, else none.
+    for stream in super::super::load::vertex_streams() {
+        stream.append_attached(preview, &attached, attached.vertices.len());
     }
     merge_attached(preview, attached, parent, child, owner, name);
     let functions = super::super::functions::read_object_functions(object, Some(model))?;

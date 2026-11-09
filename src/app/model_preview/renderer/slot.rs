@@ -4,13 +4,14 @@ use super::super::dx9::draw::sort_points;
 use super::super::dx9::passes::{DX9_LAYER_COUNT, Dx9DrawPass};
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::texture::{upload_image, upload_texture};
+use super::super::load::vertex_streams;
 use super::super::particles::{sprite_maps, upload_cheap_render_texture};
 use super::super::{
     ALL_SLOTS, DetailComposition, ModelGpuFrame, RenderModelPreviewVertex, SLOT_COUNT, antennas,
     cloth, effects, gen3, particles,
 };
 use super::grid::grid_line_vertices;
-use super::program::{PRT_CLUSTER_ATTRIBUTE, PRT_WEIGHTS_ATTRIBUTE, bind_preview_vertex_layout};
+use super::program::bind_preview_vertex_layout;
 use eframe::glow;
 use eframe::glow::HasContext as _;
 
@@ -246,69 +247,9 @@ impl ModelGpuSlot {
                 slice_bytes(&frame.preview.indices),
                 glow::STATIC_DRAW,
             );
-            match &frame.preview.h2.prt {
-                Some(prt) => {
-                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
-                    gl.buffer_data_u8_slice(
-                        glow::ARRAY_BUFFER,
-                        slice_bytes(&prt.vertices),
-                        glow::STATIC_DRAW,
-                    );
-                    let stride = std::mem::size_of::<[f32; 5]>() as i32;
-                    gl.enable_vertex_attrib_array(PRT_CLUSTER_ATTRIBUTE);
-                    gl.vertex_attrib_pointer_f32(
-                        PRT_CLUSTER_ATTRIBUTE,
-                        1,
-                        glow::FLOAT,
-                        false,
-                        stride,
-                        0,
-                    );
-                    gl.enable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
-                    gl.vertex_attrib_pointer_f32(
-                        PRT_WEIGHTS_ATTRIBUTE,
-                        4,
-                        glow::FLOAT,
-                        false,
-                        stride,
-                        4,
-                    );
-                }
-                None => {
-                    gl.disable_vertex_attrib_array(PRT_CLUSTER_ATTRIBUTE);
-                    gl.disable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
-                }
-            }
-            match &frame.preview.gen3.prt {
-                Some(prt) => {
-                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
-                    gl.buffer_data_u8_slice(
-                        glow::ARRAY_BUFFER,
-                        slice_bytes(&prt.vertices),
-                        glow::STATIC_DRAW,
-                    );
-                    let stride = std::mem::size_of::<[f32; gen3::prt::COEFFICIENTS]>() as i32;
-                    for (index, attribute) in gen3::pipeline::PRT_ATTRIBUTES.into_iter().enumerate()
-                    {
-                        gl.enable_vertex_attrib_array(attribute);
-                        // The first holds a fourth for the linear shader, in the
-                        // second's first place.
-                        let size = if index == 0 { 4 } else { 3 };
-                        gl.vertex_attrib_pointer_f32(
-                            attribute,
-                            size,
-                            glow::FLOAT,
-                            false,
-                            stride,
-                            index as i32 * 12,
-                        );
-                    }
-                }
-                None => {
-                    for attribute in gen3::pipeline::PRT_ATTRIBUTES {
-                        gl.disable_vertex_attrib_array(attribute);
-                    }
-                }
+            // Each stream the games' models carry, in its own place in the buffer.
+            for stream in vertex_streams() {
+                stream.upload(gl, &frame.preview, self.prt_buffer);
             }
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
         }

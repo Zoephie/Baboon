@@ -4,6 +4,7 @@
 use super::super::animation::{DecodedAnimationPose, PreviewAnimationEntry};
 use super::super::cloth::{ClothGame, ClothRules};
 use super::super::common::marker::MarkerFrame;
+use super::super::common::streams::{VertexStream, VertexStreamKind};
 use super::super::dx9::passes::{Dx9DrawPass, Dx9Layer};
 use super::super::functions::{FunctionRules, TypeExporter};
 use super::super::{
@@ -376,6 +377,35 @@ pub(in crate::app::model_preview) fn shadow_passes() -> Vec<(Dx9Layer, Dx9DrawPa
     passes.push(super::super::h2::lighting::gel_mask_pass());
     passes.push(super::super::h3::shadow::shadow_apply_pass());
     passes
+}
+
+/// The streams the games' models carry beside their vertices, in the order
+/// the slot uploads them.
+pub(in crate::app::model_preview) fn vertex_streams() -> [&'static dyn VertexStream; 2] {
+    [
+        &super::super::h2::prt::H2PrtStream,
+        &super::super::gen3::prt::Gen3PrtStream,
+    ]
+}
+
+/// Whether `preview` carries the stream of `kind`.
+pub(in crate::app::model_preview) fn has_vertex_stream(
+    preview: &RenderModelPreview,
+    kind: VertexStreamKind,
+) -> bool {
+    vertex_streams()
+        .iter()
+        .any(|stream| stream.kind() == kind && stream.present(preview))
+}
+
+/// Keep every stream parallel to `count` added vertices that have none.
+pub(in crate::app::model_preview) fn pad_vertex_streams(
+    preview: &mut RenderModelPreview,
+    count: usize,
+) {
+    for stream in vertex_streams() {
+        stream.pad(preview, count);
+    }
 }
 
 pub(in crate::app::model_preview) fn resolve_own_shader(
