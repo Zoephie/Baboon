@@ -41,6 +41,20 @@ pub(in crate::app::model_preview) struct H3Game {
 }
 
 impl Gen3Game for H3Game {
+    /// Each object light's gel, by the light.
+    fn light_gels<'a>(
+        &self,
+        frame: &'a ModelGpuFrame,
+    ) -> Vec<Option<&'a super::super::common::image::Image>> {
+        frame
+            .preview
+            .h3
+            .lights
+            .iter()
+            .map(|light| light.gel.as_deref())
+            .collect()
+    }
+
     /// The `shield_impact` the object's model names.
     fn shield_settings<'a>(
         &self,

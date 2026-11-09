@@ -6,6 +6,7 @@ use std::sync::Arc;
 use eframe::glow;
 
 use super::super::RenderModelPreviewBatch;
+use super::super::common::image::Image;
 use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
@@ -117,6 +118,12 @@ pub(in crate::app::model_preview) trait Gen3Game {
     /// material carries.
     fn shield_settings<'a>(&self, _frame: &'a ModelGpuFrame) -> Option<&'a Gen3ShieldSettings> {
         None
+    }
+
+    /// The gels of the game's own object lights, one entry a light, uploaded
+    /// after the shield's textures.
+    fn light_gels<'a>(&self, _frame: &'a ModelGpuFrame) -> Vec<Option<&'a Image>> {
+        Vec::new()
     }
 
     /// Sprites after the rest, before the bloom.

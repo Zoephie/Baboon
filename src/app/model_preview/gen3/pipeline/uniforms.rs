@@ -23,7 +23,7 @@ pub(in crate::app::model_preview) struct Gen3SlotTextures {
     pub(super) materials: Vec<HashMap<String, glow::NativeTexture>>,
     /// The shield's noise, by uniform.
     pub(super) shield: HashMap<String, glow::NativeTexture>,
-    /// Each of `h3.lights`' gels, of `id`.
+    /// Each of the game's own object lights' gels, of `id`.
     pub(in crate::app::model_preview) gels: Vec<Option<glow::NativeTexture>>,
 }
 
@@ -269,16 +269,11 @@ impl Gen3State {
                     }
                 }
             }
-            uploaded.gels = frame
-                .preview
-                .h3
-                .lights
-                .iter()
-                .map(|light| {
-                    light
-                        .gel
-                        .as_ref()
-                        .and_then(|gel| upload_image_linear(gl, gel, ImageTexels::Srgb, &[], None))
+            uploaded.gels = game
+                .light_gels(frame)
+                .into_iter()
+                .map(|gel| {
+                    gel.and_then(|gel| upload_image_linear(gl, gel, ImageTexels::Srgb, &[], None))
                 })
                 .collect();
             for textures in frame.textures.iter().flat_map(|textures| textures.iter()) {
