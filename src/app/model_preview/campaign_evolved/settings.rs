@@ -1,5 +1,9 @@
 //! What the panel sets of a Campaign Evolved preview, and what a load reads.
 
+use super::super::ModelPreviewState;
+use super::super::load::OwnViewSettings;
+use crate::app::ui_kit::checkbox::CheckboxUi as _;
+
 /// The panel's Campaign Evolved settings, and what the cached preview was
 /// built with.
 #[derive(Clone, Copy, Debug)]
@@ -56,4 +60,18 @@ mod tests {
     fn campaign_evolved_preview_defaults_to_full_detail() {
         assert!(ModelPreviewState::default().campaign_evolved.high_detail);
     }
+}
+
+/// The view menu's High Detail switch, in place of the tag overlays' toggles,
+/// which a model drawn from its Unreal meshes has none of.
+pub(in crate::app::model_preview) const VIEW_SETTINGS: OwnViewSettings = OwnViewSettings {
+    draw: draw_view_settings,
+    hides_overlays: true,
+};
+
+fn draw_view_settings(ui: &mut eframe::egui::Ui, state: &mut ModelPreviewState) {
+    ui.baboon_checkbox(&mut state.campaign_evolved.high_detail, "High Detail")
+        .on_hover_text(
+            "Decode full-resolution Nanite geometry instead of Unreal's coarse fallback.",
+        );
 }

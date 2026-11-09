@@ -10,6 +10,7 @@ use super::super::super::ui_kit::style::{
     text_dark,
 };
 use super::super::super::ui_kit::tag_icons::paint_tag_icon_at;
+use super::super::load::OwnViewSettings;
 use super::super::{
     MAX_MODEL_PREVIEW_SIZE, MAX_PREVIEW_SCALE, MIN_MODEL_PREVIEW_SIZE, ModelPreviewData,
     ModelPreviewLayer, ModelPreviewState, ModelRenderMode, is_object_family_group,
@@ -30,7 +31,7 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
     state: &mut ModelPreviewState,
     model_preview_size: &mut f32,
     supports_textures: bool,
-    is_campaign_evolved: bool,
+    own_view: Option<OwnViewSettings>,
     source_game: Option<GameId>,
     has_armature: bool,
 ) {
@@ -52,15 +53,12 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                     ui.baboon_radio_value(&mut state.render_mode, mode, mode.label());
                 }
             }
-            if is_campaign_evolved {
-                ui.baboon_checkbox(&mut state.campaign_evolved.high_detail, "High Detail")
-                    .on_hover_text(
-                        "Decode full-resolution Nanite geometry instead of Unreal's coarse fallback.",
-                    );
+            if let Some(own) = own_view {
+                (own.draw)(ui, state);
             }
             ui.separator();
 
-            if !is_campaign_evolved
+            if !own_view.is_some_and(|own| own.hides_overlays)
                 && (tag.header.group_tag.to_be_bytes() == *b"hlmt"
                     || is_object_family_group(tag.header.group_tag, source_game))
             {

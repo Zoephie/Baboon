@@ -16,7 +16,7 @@ use super::super::{
 };
 use super::jobs::PreviewLoadSettings;
 use super::object::ObjectLoad;
-use super::{GameRules, LoadCx, TagReader, feature_into};
+use super::{GameRules, LoadCx, OwnViewSettings, TagReader, feature_into};
 use std::sync::Arc;
 
 /// The kit's game's load rules: its own folder's.
@@ -283,6 +283,13 @@ pub(super) fn load_own_object(
     );
     (blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1 && object)
         .then(|| super::super::ce::object::load_ce_object(model_tag, entry, reader, settings))
+}
+
+/// The view menu's own settings for `tag`, where its game shows such a model
+/// differently: a Campaign Evolved model drawn from its Unreal meshes.
+pub(in crate::app::model_preview) fn own_view_settings(tag: &TagFile) -> Option<OwnViewSettings> {
+    super::super::campaign_evolved::is_campaign_evolved_model(tag)
+        .then_some(super::super::campaign_evolved::VIEW_SETTINGS)
 }
 
 /// A Halo: Campaign Evolved `.model`, which names no `render model`: its

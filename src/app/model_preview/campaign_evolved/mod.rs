@@ -14,6 +14,7 @@ mod metahuman;
 mod packages;
 pub(in crate::app::model_preview) mod rules;
 mod settings;
+pub(in crate::app::model_preview) use settings::VIEW_SETTINGS;
 pub(in crate::app) use settings::{CampaignEvolvedLoad, CampaignEvolvedState};
 #[cfg(test)]
 mod tests;

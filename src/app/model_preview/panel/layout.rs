@@ -53,7 +53,7 @@ pub(in crate::app) fn draw_model_preview_panel(
             return;
         }
 
-        let is_campaign_evolved = super::super::campaign_evolved::is_campaign_evolved_model(tag);
+        let own_view = super::super::load::own_view_settings(tag);
 
         let Some(data_result) = state.data.take() else {
             ui.label(RichText::new("No preview loaded").color(subtle_dark()));
@@ -73,7 +73,7 @@ pub(in crate::app) fn draw_model_preview_panel(
             entry,
             source_game,
             supports_textures,
-            is_campaign_evolved,
+            own_view,
             data,
         };
 
@@ -101,7 +101,8 @@ pub(in crate::app::model_preview) struct PreviewPanel<'a> {
     pub(in crate::app::model_preview) entry: &'a TagEntry,
     pub(in crate::app::model_preview) source_game: Option<GameId>,
     pub(in crate::app::model_preview) supports_textures: bool,
-    pub(in crate::app::model_preview) is_campaign_evolved: bool,
+    /// The view menu's own settings for the tag's model, if its game has any.
+    pub(in crate::app::model_preview) own_view: Option<super::super::load::OwnViewSettings>,
     pub(in crate::app::model_preview) data: &'a ModelPreviewData,
 }
 
@@ -233,7 +234,7 @@ pub(in crate::app::model_preview) fn draw_preview_header(
         state,
         model_preview_size,
         panel.supports_textures,
-        panel.is_campaign_evolved,
+        panel.own_view,
         panel.source_game,
         !panel.data.preview.nodes.is_empty(),
     )

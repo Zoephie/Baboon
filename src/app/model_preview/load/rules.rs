@@ -52,6 +52,17 @@ pub(crate) struct GameRules {
         Option<fn(&super::super::ModelPreviewData, &super::super::ModelPreviewState, f32) -> bool>,
 }
 
+/// The view menu's own settings for a model its game shows differently,
+/// such as one drawn from another engine's meshes.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OwnViewSettings {
+    /// Drawn after the shading choices.
+    pub(crate) draw: fn(&mut eframe::egui::Ui, &mut super::super::ModelPreviewState),
+    /// Whether the model's tag overlays (render, collision and physics
+    /// models, markers) have no toggles, its geometry being none of them.
+    pub(crate) hides_overlays: bool,
+}
+
 /// A game's own controls for an object, drawn around the shared weapon
 /// pickers and function sliders.
 #[derive(Debug, Clone, Copy)]

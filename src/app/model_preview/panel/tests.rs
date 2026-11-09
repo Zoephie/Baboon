@@ -934,7 +934,7 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
                         state,
                         &mut size,
                         true,
-                        false,
+                        None,
                         Some(GameId::Halo3),
                         false,
                     );
