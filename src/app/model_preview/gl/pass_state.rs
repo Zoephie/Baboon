@@ -22,6 +22,7 @@ pub(in crate::app::model_preview) enum StateCall {
     ActiveTexture(u32),
     BindTexture(u32, Option<glow::NativeTexture>),
     PolygonOffset(f32, f32),
+    BlendColor([f32; 4]),
     /// A sampler's unit, set on the program in use.
     Uniform1i(Option<glow::NativeUniformLocation>, i32),
 }
@@ -101,8 +102,16 @@ impl PassState {
         self.with(StateCall::BindTexture(target, texture))
     }
 
+    pub(in crate::app::model_preview) fn cull_face(self, face: u32) -> Self {
+        self.with(StateCall::CullFace(face))
+    }
+
     pub(in crate::app::model_preview) fn polygon_offset(self, factor: f32, units: f32) -> Self {
         self.with(StateCall::PolygonOffset(factor, units))
+    }
+
+    pub(in crate::app::model_preview) fn blend_color(self, [red, green, blue, alpha]: [f32; 4]) -> Self {
+        self.with(StateCall::BlendColor([red, green, blue, alpha]))
     }
 
     pub(in crate::app::model_preview) fn uniform_1_i32(self, location: Option<glow::NativeUniformLocation>, value: i32) -> Self {
@@ -176,6 +185,7 @@ impl PassState {
                     StateCall::ActiveTexture(unit) => gl.active_texture(unit),
                     StateCall::BindTexture(target, texture) => gl.bind_texture(target, texture),
                     StateCall::PolygonOffset(factor, units) => gl.polygon_offset(factor, units),
+                    StateCall::BlendColor([red, green, blue, alpha]) => gl.blend_color(red, green, blue, alpha),
                     StateCall::Uniform1i(location, value) => gl.uniform_1_i32(location.as_ref(), value),
                 }
             }

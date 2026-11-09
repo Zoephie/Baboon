@@ -7,6 +7,7 @@ use super::super::gl::buffer::model_draw_range;
 use super::super::gl::target::H2Target;
 use super::super::gl::program::Linked;
 use super::super::gl::scope::PostScope;
+use super::super::gl::pass_state::PassState;
 use super::super::dx9::passes::{
     Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, H2DefaultLight, Dx9DrawPass, Dx9Layer,
     H2_GLSL_VERSION, H2_REFLECTION_SCALE,
@@ -104,6 +105,63 @@ pub(in crate::app::model_preview) fn gl_compare(compare: Dx9Compare) -> u32 {
     }
 }
 
+/// A pass's own state, set before it draws: its blend, depth test and write,
+/// depth bias, channels and face culling, each as the pass names it.
+pub(in crate::app::model_preview) fn dx9_pass_state(pass: &Dx9DrawPass) -> PassState {
+    let state = match pass.blend {
+        Some(blend) => {
+            let [alpha, red, green, blue] = blend.constant.map(|value| value as f32 / 255.0);
+            PassState::new()
+                .enable(glow::BLEND)
+                .blend_equation(gl_blend_equation(blend.equation))
+                .blend_func(gl_blend_factor(blend.source), gl_blend_factor(blend.destination))
+                .blend_color([red, green, blue, alpha])
+        }
+        None => PassState::new().disable(glow::BLEND),
+    };
+    let state = match pass.depth.compare {
+        Some(compare) => state.enable(glow::DEPTH_TEST).depth_func(gl_compare(compare)),
+        None => state.disable(glow::DEPTH_TEST),
+    };
+    let state = state.depth_mask(pass.depth.write);
+    let state = if pass.depth_bias != 0.0 {
+        state.enable(glow::POLYGON_OFFSET_FILL).polygon_offset(0.0, pass.depth_bias * DEPTH_UNITS)
+    } else {
+        state.disable(glow::POLYGON_OFFSET_FILL)
+    };
+    let state = state.color_mask(pass.channels);
+    match pass.cull {
+        Dx9Cull::Frame => state,
+        Dx9Cull::Back => state.enable(glow::CULL_FACE).cull_face(glow::BACK),
+        Dx9Cull::Front => state.enable(glow::CULL_FACE).cull_face(glow::FRONT),
+        Dx9Cull::None => state.disable(glow::CULL_FACE),
+    }
+}
+
+/// After a pass that culled its own way: the back face named again, and
+/// culling as the frame shows the model.
+pub(in crate::app::model_preview) fn dx9_after_pass_state(pass: &Dx9DrawPass, show_backfaces: bool) -> PassState {
+    if pass.cull == Dx9Cull::Frame {
+        return PassState::new();
+    }
+    PassState::new().cull_face(glow::BACK).culling_unless(show_backfaces)
+}
+
+/// After the passes drew: the shared program, and the state the wireframe
+/// pass and the UI expect.
+pub(in crate::app::model_preview) fn dx9_passes_done_state(program: glow::NativeProgram) -> PassState {
+    PassState::new()
+        .use_program(program)
+        .disable(glow::BLEND)
+        .disable(glow::POLYGON_OFFSET_FILL)
+        .blend_equation(glow::FUNC_ADD)
+        .enable(glow::DEPTH_TEST)
+        .depth_func(glow::LESS)
+        .depth_mask(true)
+        .color_mask([true; 4])
+        .active_texture(glow::TEXTURE0)
+}
+
 /// Where a batch sorts from. The game keys a part by the depth of its rigid
 /// node, and a skinned part by node 0, so skinned parts keep their order among
 /// themselves: they all share one point here, and the sort is stable.
@@ -190,8 +248,7 @@ impl RenderCore {
     pub(in crate::app::model_preview) unsafe fn draw_dx9_bloom(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize, bloom_order: Option<Vec<usize>>) {
         unsafe {
             if let Some(order) = bloom_order {
-                gl.use_program(Some(self.program));
-                gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                PassState::new().use_program(self.program).bind_vertex_array(self.slots[slot].vertex_array).apply(gl);
                 self.draw_h2_bloom(gl, frame, slot, &order);
             }
 
@@ -317,7 +374,7 @@ impl RenderCore {
             if let Some(target) = &self.dx9.h2_target {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
                 gl.viewport(0, 0, size[0], size[1]);
-                gl.disable(glow::SCISSOR_TEST);
+                PassState::new().disable(glow::SCISSOR_TEST).apply(gl);
                 // The game draws texaccum against the scene's depth: a shader
                 // may lay its depth down here alone, with its later passes
                 // testing for equal.
@@ -356,10 +413,10 @@ impl RenderCore {
             return;
         };
         unsafe {
-            gl.color_mask(false, false, false, true);
+            PassState::new().color_mask([false, false, false, true]).apply(gl);
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
-            gl.color_mask(true, true, true, true);
+            PassState::new().color_mask([true; 4]).apply(gl);
             self.draw_h2_passes(gl, frame, slot, order, Dx9Layer::Bloom, None);
             // `sub_6C18F0`: the hologram shader draws while its control is up.
             let hologram = frame.preview.h2.hologram_control.as_deref().is_some_and(|name| {
@@ -463,7 +520,7 @@ impl RenderCore {
                 };
                 drew = true;
                 unsafe {
-                    gl.use_program(Some(program.program));
+                    PassState::new().use_program(program.program).apply(gl);
                     self.bind_h2_uniforms(gl, frame, material, &program, pass, eye, light);
                     let textures = self.slots[slot]
                         .materials
@@ -471,8 +528,7 @@ impl RenderCore {
                         .and_then(|material| material.h2_textures[layer as usize].get(pass_index));
                     for (index, texture) in pass.textures.iter().enumerate() {
                         let uploaded = textures.and_then(|list| list.get(index)).copied().flatten();
-                        gl.active_texture(glow::TEXTURE0 + texture.slot);
-                        match texture.kind {
+                        let (target, bound) = match texture.kind {
                             SamplerKind::Texture2D => {
                                 let target = self.dx9.h2_target.as_ref().map(|target| target.color);
                                 let gel = self.dx9.h2_gel.and_then(|(texture, _)| texture);
@@ -486,9 +542,9 @@ impl RenderCore {
                                 } else {
                                     uploaded.or(self.placeholder)
                                 };
-                                gl.bind_texture(glow::TEXTURE_2D, bound);
+                                (glow::TEXTURE_2D, bound)
                             }
-                            SamplerKind::Cube => gl.bind_texture(
+                            SamplerKind::Cube => (
                                 glow::TEXTURE_CUBE_MAP,
                                 if texture.normalization {
                                     self.dx9.h2_normalization_cube
@@ -502,81 +558,31 @@ impl RenderCore {
                                 } else {
                                     self.black_volume
                                 };
-                                gl.bind_texture(glow::TEXTURE_3D, uploaded.or(fallback));
+                                (glow::TEXTURE_3D, uploaded.or(fallback))
                             }
-                        }
+                        };
+                        let state = PassState::new().active_texture(glow::TEXTURE0 + texture.slot).bind_texture(target, bound);
+                        // A sampler the program compiled away keeps its unit unset.
                         let location = program.location(gl, &format!("s{}", texture.slot));
-                        if location.is_some() {
-                            gl.uniform_1_i32(location.as_ref(), texture.slot as i32);
+                        match location {
+                            Some(location) => state.uniform_1_i32(Some(location), texture.slot as i32),
+                            None => state,
                         }
+                        .apply(gl);
                     }
-                    match pass.blend {
-                        Some(blend) => {
-                            gl.enable(glow::BLEND);
-                            gl.blend_equation(gl_blend_equation(blend.equation));
-                            gl.blend_func(
-                                gl_blend_factor(blend.source),
-                                gl_blend_factor(blend.destination),
-                            );
-                            let [a, r, g, b] = blend.constant.map(|value| value as f32 / 255.0);
-                            gl.blend_color(r, g, b, a);
-                        }
-                        None => gl.disable(glow::BLEND),
-                    }
-                    match pass.depth.compare {
-                        Some(compare) => {
-                            gl.enable(glow::DEPTH_TEST);
-                            gl.depth_func(gl_compare(compare));
-                        }
-                        None => gl.disable(glow::DEPTH_TEST),
-                    }
-                    gl.depth_mask(pass.depth.write);
-                    if pass.depth_bias != 0.0 {
-                        gl.enable(glow::POLYGON_OFFSET_FILL);
-                        gl.polygon_offset(0.0, pass.depth_bias * DEPTH_UNITS);
-                    } else {
-                        gl.disable(glow::POLYGON_OFFSET_FILL);
-                    }
-                    let [r, g, b, a] = pass.channels;
-                    gl.color_mask(r, g, b, a);
-                    match pass.cull {
-                        Dx9Cull::Frame => {}
-                        Dx9Cull::Back | Dx9Cull::Front => {
-                            let front = pass.cull == Dx9Cull::Front;
-                            gl.enable(glow::CULL_FACE);
-                            gl.cull_face(if front { glow::FRONT } else { glow::BACK });
-                        }
-                        Dx9Cull::None => gl.disable(glow::CULL_FACE),
-                    }
+                    dx9_pass_state(pass).apply(gl);
                     gl.draw_elements(
                         glow::TRIANGLES,
                         index_count,
                         glow::UNSIGNED_INT,
                         byte_offset,
                     );
-                    if pass.cull != Dx9Cull::Frame {
-                        gl.cull_face(glow::BACK);
-                        if frame.show_backfaces {
-                            gl.disable(glow::CULL_FACE);
-                        } else {
-                            gl.enable(glow::CULL_FACE);
-                        }
-                    }
+                    dx9_after_pass_state(pass, frame.show_backfaces).apply(gl);
                 }
             }
         }
         if drew {
-            unsafe {
-                gl.use_program(Some(self.program));
-                gl.disable(glow::BLEND);
-                gl.disable(glow::POLYGON_OFFSET_FILL);
-                gl.blend_equation(glow::FUNC_ADD);
-                gl.enable(glow::DEPTH_TEST);
-                gl.depth_func(glow::LESS);
-                gl.depth_mask(true);
-                gl.color_mask(true, true, true, true);
-                gl.active_texture(glow::TEXTURE0);
-            }
+            unsafe { dx9_passes_done_state(self.program).apply(gl) }
         }
     }
 
@@ -610,16 +616,12 @@ impl RenderCore {
                 if pass.stage == Dx9VertexStage::ShadowMask
                     && let Some(Some((_, map))) = self.dx9.h2_shadow_map
                 {
-                    gl.active_texture(glow::TEXTURE0 + H2_SHADOW_MAP_UNIT);
-                    gl.bind_texture(glow::TEXTURE_2D, Some(map));
                     let location = program.location(gl, "u_shadow_map");
-                    gl.uniform_1_i32(location.as_ref(), H2_SHADOW_MAP_UNIT as i32);
+                    PassState::new().sampler(H2_SHADOW_MAP_UNIT, glow::TEXTURE_2D, Some(map), location).apply(gl);
                 }
                 if let Some(normal) = self.h3_normal_target {
-                    gl.active_texture(glow::TEXTURE0 + normal.unit);
-                    gl.bind_texture(glow::TEXTURE_2D, Some(normal.texture));
                     let location = program.location(gl, "u_normal_target");
-                    gl.uniform_1_i32(location.as_ref(), normal.unit as i32);
+                    PassState::new().sampler(normal.unit, glow::TEXTURE_2D, Some(normal.texture), location).apply(gl);
                     let location = program.location(gl, "u_shadow_toward");
                     gl.uniform_3_f32_slice(location.as_ref(), &toward);
                     let location = program.location(gl, "u_shadow_size");
@@ -758,12 +760,59 @@ impl RenderCore {
             if let (Dx9VertexStage::LightGel, Some(location), Some((gel, _))) =
                 (pass.stage, program.location(gl, "u_gel_map"), &self.dx9.h2_gel)
             {
-                gl.active_texture(glow::TEXTURE0 + H2_GEL_MASK_UNIT);
-                gl.bind_texture(glow::TEXTURE_2D, gel.or(self.placeholder));
-                gl.uniform_1_i32(Some(&location), H2_GEL_MASK_UNIT as i32);
+                PassState::new().sampler(H2_GEL_MASK_UNIT, glow::TEXTURE_2D, gel.or(self.placeholder), Some(location)).apply(gl);
             }
             let location = program.location(gl, "zwriteout");
             gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 1.0, 1.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::super::dx9::passes::{Dx9Blend, Dx9Depth};
+    use super::super::super::gl::pass_state::StateCall;
+
+    /// A blended, biased, front-culled pass sets its state in the order the
+    /// game's does, with the blend constant's ARGB read as RGBA; a pass that
+    /// culls by the frame names no face and has nothing to put back.
+    #[test]
+    fn a_pass_sets_its_blend_depth_bias_channels_and_culling_in_order() {
+        let depth = Dx9Depth { compare: Some(Dx9Compare::LessOrEqual), write: false };
+        let mut pass = Dx9DrawPass::new(Dx9VertexStage::CeMeter, String::new(), depth);
+        pass.blend = Some(Dx9Blend {
+            equation: Dx9BlendEquation::Add,
+            source: Dx9BlendFactor::ConstantColor,
+            destination: Dx9BlendFactor::One,
+            constant: [255, 0, 51, 102],
+        });
+        pass.depth_bias = 2.0;
+        pass.channels = [true, true, true, false];
+        pass.cull = Dx9Cull::Front;
+        assert_eq!(
+            dx9_pass_state(&pass).calls(),
+            [
+                StateCall::Enable(glow::BLEND),
+                StateCall::BlendEquation(glow::FUNC_ADD),
+                StateCall::BlendFunc(glow::CONSTANT_COLOR, glow::ONE),
+                StateCall::BlendColor([0.0, 0.2, 0.4, 1.0]),
+                StateCall::Enable(glow::DEPTH_TEST),
+                StateCall::DepthFunc(glow::LEQUAL),
+                StateCall::DepthMask(false),
+                StateCall::Enable(glow::POLYGON_OFFSET_FILL),
+                StateCall::PolygonOffset(0.0, 2.0 * DEPTH_UNITS),
+                StateCall::ColorMask([true, true, true, false]),
+                StateCall::Enable(glow::CULL_FACE),
+                StateCall::CullFace(glow::FRONT),
+            ]
+        );
+        assert_eq!(
+            dx9_after_pass_state(&pass, false).calls(),
+            [StateCall::CullFace(glow::BACK), StateCall::Enable(glow::CULL_FACE)]
+        );
+        pass.cull = Dx9Cull::Frame;
+        assert!(dx9_after_pass_state(&pass, false).calls().is_empty());
+        assert!(!dx9_pass_state(&pass).calls().iter().any(|call| matches!(call, StateCall::CullFace(_))));
     }
 }
