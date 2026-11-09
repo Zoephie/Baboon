@@ -19,7 +19,7 @@ use crate::app::model_preview::common::marker::MarkerFrame;
 use super::super::common::image::Image;
 use super::super::common::named_function::NamedFunction;
 use super::super::gen3::effects::flares::{Gen3EffectScale, Gen3Flare, read_h3_flare};
-use super::super::*;
+use super::super::{RenderModelPreviewMarker, TagReader, decode_image};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::math::{cross, dot};
 use crate::core::h2_pixel_shader::SamplerKind;

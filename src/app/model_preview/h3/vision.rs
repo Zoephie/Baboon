@@ -4,9 +4,9 @@
 
 use blam_tags::{TagFile, TagStruct};
 
+use super::super::TagReader;
 use super::super::common::named_function::tag_function_at;
 use super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
-use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 
 /// `global_z_near` and `global_z_far`, which the outline's depth is measured by.
@@ -205,6 +205,7 @@ pub(crate) fn inverted(matrix: &[f32; 16]) -> Option<[f32; 16]> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::load_referenced_tag_from_source;
     use super::*;
     use crate::app::model_preview::harness::kit::kit_source;
     use crate::core::game::GameId;

@@ -2,9 +2,10 @@
 
 use super::super::cloth::ClothGame;
 use super::super::common::marker::own_marker_frame;
-use super::super::*;
+use super::super::{RenderModelPreview, TagReader};
 use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
 use blam_tags::TagFile;
+use std::sync::Arc;
 
 /// A Halo 3 or ODST object's own shield, lights, flares, light volumes,
 /// particles, strips, screen effects, antennas, cloth, extension weapons and

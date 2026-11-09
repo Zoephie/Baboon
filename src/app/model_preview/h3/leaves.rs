@@ -12,7 +12,7 @@ use super::super::gen3::materials::read_h3_bitmap;
 use super::super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::particles::{ParticleCorner, SpriteShader};
-use super::super::*;
+use super::super::{RenderModelPreviewMarker, TagReader, frame_steps, resume_point};
 use crate::app::model_preview::common::math::{cross, dot, unit_or_unchanged};
 use crate::app::model_preview::common::random::{high16_over_65536, lcg_step};
 use crate::core::h2_pixel_shader::SamplerKind;

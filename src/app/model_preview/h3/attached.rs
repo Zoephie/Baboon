@@ -2,7 +2,7 @@
 
 use super::super::cloth::ClothGame;
 use super::super::load::LoadCx;
-use super::super::*;
+use super::super::{RenderModelPreview, RenderModelPreviewMarker};
 use crate::app::model_preview::common::attached::named;
 use crate::app::model_preview::common::marker::MarkerFrame;
 use std::sync::Arc;
