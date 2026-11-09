@@ -6,7 +6,8 @@ use super::super::dx9::passes::H2Layer;
 use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
 use super::super::renderer::FrameCx;
-use super::draw::{CeEffectGl, advance_ce_effects, ce_groups, ce_has_groups, ce_sorts_transparents, draw_ce_group};
+use super::draw::{CeEffectGl, CE_EVENTS_RUNNING, advance_ce_effects, ce_groups, ce_has_groups, ce_sorts_transparents, draw_ce_group, draw_ce_transparents};
+use super::super::*;
 use crate::app::model_preview::common::sprite_gl::{ce_flare_occlusion, draw_flare_sprites};
 use super::slot::CeSlot;
 use eframe::glow::{self, HasContext as _};
@@ -23,11 +24,13 @@ pub(in crate::app::model_preview) struct CeGame {
 
 impl Dx9Game for CeGame {
     unsafe fn prepare(&mut self, cx: &mut FrameCx<'_>) {
+        // Set again if this frame steps the effects and something runs on.
+        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&cx.frame.geometry_id));
         unsafe {
             let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
             let ce = self.slots.of(slot, cx.core.slot_uploads(slot));
             if !frame.preview.ce.flags.is_empty() {
-                cx.core.move_ce_flags(gl, frame, slot, ce);
+                move_ce_flags(cx.core, gl, frame, slot, ce);
             }
             // Halo CE's effects advance once a frame, here, before anything
             // draws or lights by them.
@@ -57,7 +60,7 @@ impl Dx9Game for CeGame {
         unsafe {
             if ce_sorts_transparents(cx.frame) {
                 let ce = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
-                cx.core.draw_ce_transparents(cx.gl, cx.frame, cx.slot, ce, &mut self.effect_gl);
+                draw_ce_transparents(cx.core, cx.gl, cx.frame, cx.slot, ce, &mut self.effect_gl);
             } else {
                 cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None);
             }
@@ -130,5 +133,24 @@ impl Dx9Game for CeGame {
         if let Some(ce) = self.slots.current(slot, uploads) {
             ce.simulations.each(visit);
         }
+    }
+}
+
+/// `flag_render_proper` builds its mesh from where the sheet is now.
+pub(in crate::app::model_preview) unsafe fn move_ce_flags(
+    core: &mut RenderCore,
+    gl: &glow::Context,
+    frame: &ModelGpuFrame,
+    slot: usize,
+    ce: &mut CeSlot,
+) {
+    let uploaded = &mut core.slots[slot];
+    let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+    let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
+    let ground = lowest.fold(0.0, f32::min);
+    let written = ce.simulations.flags.advance(&frame.preview.ce.flags, bones, ground, frame.time);
+    for (first, moved) in written {
+        let moved = moved.into_iter().map(|(position, normal)| (position, normal, None));
+        unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
     }
 }

@@ -2,6 +2,7 @@
 //! overlays drawn on top (error reports, markers, the armature).
 
 use super::*;
+use super::ce::draw::ce_events_running;
 
 mod errors;
 pub(in crate::app::model_preview) use errors::*;

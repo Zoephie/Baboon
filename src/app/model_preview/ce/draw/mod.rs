@@ -7,3 +7,5 @@ mod sprites;
 pub(in crate::app::model_preview) use sprites::*;
 mod effect_gl;
 pub(in crate::app::model_preview) use effect_gl::*;
+mod transparents;
+pub(in crate::app::model_preview) use transparents::*;

@@ -1,16 +1,14 @@
 //! The GPU core every game draws through: the slots, the main program and the shared frame steps.
 
 use super::*;
-use super::super::common::sprite_gl::{SpriteGl, link_sprite_gl};
+use super::super::common::sprite_gl::SpriteGl;
 use super::super::gl::buffer::model_draw_range;
 use super::super::gl::texture::{upload_black_cube, upload_black_flat, upload_placeholder_texture, upload_solid_volume};
 use super::super::gl::target::H2Target;
-use super::super::common::view::ce_flare_view;
 use super::super::gl::link::link;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::ColorTarget;
 use super::super::particles::{H3ParticleGl, ReachCheapGl};
-use super::super::dx9::passes::H2Layer;
 use super::super::dx9::draw::Dx9Gl;
 use eframe::glow;
 
@@ -99,25 +97,6 @@ impl RenderCore {
     pub(super) fn slot_of(&self, geometry_id: u64) -> Option<usize> {
         let index = self.lru.slots.iter().position(|(id, _)| *id == geometry_id)?;
         (index < self.slots.len()).then_some(index)
-    }
-
-    /// `flag_render_proper` builds its mesh from where the sheet is now.
-    pub(in crate::app::model_preview) unsafe fn move_ce_flags(
-        &mut self,
-        gl: &glow::Context,
-        frame: &ModelGpuFrame,
-        slot: usize,
-        ce: &mut ce::slot::CeSlot,
-    ) {
-        let uploaded = &mut self.slots[slot];
-        let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-        let lowest = frame.preview.vertices.iter().map(|vertex| vertex.position[2]);
-        let ground = lowest.fold(0.0, f32::min);
-        let written = ce.simulations.flags.advance(&frame.preview.ce.flags, bones, ground, frame.time);
-        for (first, moved) in written {
-            let moved = moved.into_iter().map(|(position, normal)| (position, normal, None));
-            unsafe { uploaded.rewrite_vertices(gl, frame, first, moved) };
-        }
     }
 
     pub(super) fn new(gl: &glow::Context) -> Result<Self, String> {
@@ -398,82 +377,6 @@ impl RenderCore {
                 && preview.gen3.cheap_emitters.is_empty()
                 && preview.gen3.strips.is_empty()
                 && preview.h3.leaves.is_empty())
-    }
-
-    /// Halo CE's transparents as `rasterizer_transparent_geometry_draw` draws
-    /// them: the model's transparent parts and the effects' groups in one sort
-    /// by `z_sort`, far to near, each part from its centroid on its node.
-    pub(in crate::app::model_preview) unsafe fn draw_ce_transparents(
-        &mut self,
-        gl: &glow::Context,
-        frame: &ModelGpuFrame,
-        slot: usize,
-        ce: &mut ce::slot::CeSlot,
-        effect_gl: &mut Option<Option<CeEffectGl>>,
-    ) {
-        enum Transparent {
-            Part(usize),
-            Group(CeGroup),
-        }
-        unsafe {
-            let view = ce_flare_view(&frame.camera);
-            let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-            let mut groups = Vec::new();
-            if self.draws_object_sprites(frame) && ce_has_groups(&frame.preview) {
-                self.sprite_gl.get_or_insert_with(|| link_sprite_gl(gl, self.program));
-                self.slots[slot].sync_sprite_textures(gl, frame);
-                groups = ce_groups(gl, ce, frame, bones, &view);
-            }
-            let points = &self.slots[slot].h2_sort_points;
-            let parts = frame.visible_batches.iter().map(|&index| {
-                let place = frame.preview.batches.get(index).and_then(|batch| batch.sort_position);
-                let point = match place {
-                    Some((point, node)) => common::view::posed_on(node, point, [0.0; 3], bones).0,
-                    None => points.get(index).copied().unwrap_or(frame.camera.center),
-                };
-                (ce_z_sort(&view, point, false), Transparent::Part(index))
-            });
-            let groups = groups.into_iter().map(|group| (group.z_sort, Transparent::Group(group)));
-            let mut sorted: Vec<_> = parts.chain(groups).collect();
-            sorted.sort_by(|(a, _), (b, _)| a.total_cmp(b));
-            let vertex_array = self.slots[slot].vertex_array;
-            for (_, transparent) in sorted {
-                match transparent {
-                    Transparent::Part(index) => {
-                        // What the passes take as theirs: the model's vertices
-                        // and the frame's culling.
-                        gl.bind_vertex_array(Some(vertex_array));
-                        if frame.show_backfaces {
-                            gl.disable(glow::CULL_FACE);
-                        } else {
-                            gl.enable(glow::CULL_FACE);
-                        }
-                        self.draw_h2_passes(gl, frame, slot, &[index], H2Layer::Transparent, None);
-                    }
-                    Transparent::Group(group) => {
-                        let Some(flares) = self.sprite_gl.as_ref().and_then(Option::as_ref) else {
-                            continue;
-                        };
-                        draw_ce_group(gl, effect_gl, self.program, flares, ce, &frame.camera, group);
-                    }
-                }
-            }
-            // As the passes leave it.
-            gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(vertex_array));
-            gl.disable(glow::BLEND);
-            gl.blend_equation(glow::FUNC_ADD);
-            gl.enable(glow::DEPTH_TEST);
-            gl.depth_func(glow::LESS);
-            gl.depth_mask(true);
-            gl.color_mask(true, true, true, true);
-            gl.active_texture(glow::TEXTURE0);
-            if frame.show_backfaces {
-                gl.disable(glow::CULL_FACE);
-            } else {
-                gl.enable(glow::CULL_FACE);
-            }
-        }
     }
 
     /// The slot's uploaded maps, or none in a mode that draws without them.

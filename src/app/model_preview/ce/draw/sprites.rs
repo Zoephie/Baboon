@@ -1,7 +1,7 @@
 //! Halo CE's effect sprites: advancing the effects, grouping their sprites by key and depth, and drawing each group.
 
 use super::*;
-use super::super::super::renderer::CE_EVENTS_RUNNING;
+use std::cell::RefCell;
 use super::super::super::dx9::draw::{gl_blend_equation, gl_blend_factor};
 use super::super::super::gl::texture::upload_h2_image;
 use super::super::super::gl::buffer::slice_bytes;
@@ -9,6 +9,17 @@ use super::super::super::common::sprite_gl::SpriteGl;
 use eframe::glow::{self, HasContext as _};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+thread_local! {
+    /// Models whose played Halo CE event effects still have something
+    /// running, as the last frame drawn left them.
+    pub(in crate::app::model_preview) static CE_EVENTS_RUNNING: RefCell<std::collections::HashSet<u64>> = RefCell::new(Default::default());
+}
+
+/// Whether a played event effect on `geometry_id` still needs frames.
+pub(in crate::app::model_preview) fn ce_events_running(geometry_id: u64) -> bool {
+    CE_EVENTS_RUNNING.with(|running| running.borrow().contains(&geometry_id))
+}
 
 /// `effect_update` for Halo CE's attached effects, up to the frame's time.
 /// Stepping to a time it has reached does nothing, so the model's lights

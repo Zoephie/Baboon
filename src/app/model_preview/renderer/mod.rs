@@ -4,7 +4,6 @@
 use super::gl::scope::PostScope;
 use super::*;
 use super::dx9::draw::*;
-use super::ce::draw::*;
 use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,17 +30,6 @@ struct CachedModelGlRenderer {
     /// Geometry whose drawing panicked, with what the panic said: it is not
     /// drawn again, and the panel says why.
     failed: HashMap<u64, String>,
-}
-
-thread_local! {
-    /// Models whose played Halo CE event effects still have something
-    /// running, as the last frame drawn left them.
-    pub(in crate::app::model_preview) static CE_EVENTS_RUNNING: RefCell<std::collections::HashSet<u64>> = RefCell::new(Default::default());
-}
-
-/// Whether a played event effect on `geometry_id` still needs frames.
-pub(in crate::app::model_preview) fn ce_events_running(geometry_id: u64) -> bool {
-    CE_EVENTS_RUNNING.with(|running| running.borrow().contains(&geometry_id))
 }
 
 /// Why drawing `geometry_id` stopped, if it panicked.
@@ -134,8 +122,6 @@ impl ModelGlRenderer {
     /// shared program and grid, the game's shading, the wireframe, what the
     /// game draws over it, and the scene put back.
     pub(super) unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
-        // Set again if this frame steps the effects and something runs on.
-        CE_EVENTS_RUNNING.with(|running| running.borrow_mut().remove(&frame.geometry_id));
         unsafe {
             let Some(slot) = self.core.acquire_frame_slot(gl, frame) else {
                 return;
