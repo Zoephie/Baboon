@@ -215,6 +215,11 @@ impl ParticleMaterial for H4ParticleRender {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    /// Halo 4 starts a vertical particle a quarter turn round.
+    fn turns_vertical_a_quarter(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) fn read_h4_particle_render(

@@ -297,12 +297,12 @@ fn chained_parameter(
 /// so this is its only quarter turn; Halo 3 and Reach turn at the draw instead.
 pub(super) fn starting_rotation(
     random_rotation: bool,
-    halo4_vertical: bool,
+    quarter_turn: bool,
     random: impl FnOnce() -> f32,
 ) -> f32 {
     if random_rotation {
         random()
-    } else if halo4_vertical {
+    } else if quarter_turn {
         0.75
     } else {
         0.0

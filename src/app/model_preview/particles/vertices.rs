@@ -166,8 +166,8 @@ impl ParticleSystem {
     ) {
         let system = self;
         let look = &*system.look;
-        // Halo 4's draw through their material, from packed state.
-        if look.h4.is_some() {
+        // Systems with their own material draw through it, from packed state.
+        if look.material.is_some() {
             return;
         }
         let light = particle_exposure(look.shader.blend, look.exposed, look.reach, stops);

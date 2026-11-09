@@ -35,7 +35,7 @@ impl ParticleField {
         onset: f32,
     ) -> Vec<H4EmitterDraw> {
         let mut draws = Vec::new();
-        if system.hidden || system.look.h4.is_none() {
+        if system.hidden || system.look.material.is_none() {
             return draws;
         }
         if system.child {

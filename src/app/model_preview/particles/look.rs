@@ -102,6 +102,11 @@ impl ParticleAlbedo {
 pub(crate) trait ParticleMaterial: std::fmt::Debug + Send + Sync {
     /// The material as itself, for its game's draw.
     fn as_any(&self) -> &dyn std::any::Any;
+    /// Whether a vertical particle that doesn't start at a random rotation
+    /// starts a quarter turn round.
+    fn turns_vertical_a_quarter(&self) -> bool {
+        false
+    }
 }
 
 /// A game's reader of a particle's own material, from its tag's root and
@@ -166,8 +171,9 @@ pub(crate) struct ParticleLook {
     pub(in crate::app::model_preview) rate: ParticleProperty,
     pub(in crate::app::model_preview) palette: ParticleProperty,
     pub(crate) shader: Arc<SpriteShader>,
-    /// Halo 4's: drawn through its material from packed state, not as quads.
-    pub(crate) h4: Option<Arc<dyn ParticleMaterial>>,
+    /// The particle's own material, which its game draws from packed state,
+    /// not as quads.
+    pub(crate) material: Option<Arc<dyn ParticleMaterial>>,
     /// Halo 3's colours are light, and Halo 2's are what shows.
     pub(in crate::app::model_preview) exposed: bool,
     /// Reach's and Halo 4's own game time, lighting, exposure and shapes:
@@ -346,7 +352,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
         None => None,
     };
     let rules = ParticleRules::of(reader.source.game());
-    let h4 = match rules.read_material {
+    let material = match rules.read_material {
         Some(read_material) => {
             // The GPU draws a model's strip whole, variant by variant.
             let strip = match root
@@ -475,7 +481,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
         rate,
         palette,
         shader: Arc::new(sprite_shader),
-        h4,
+        material,
         exposed: true,
         reach: rules.reach_look,
         cheap,

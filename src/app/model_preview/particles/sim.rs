@@ -576,7 +576,8 @@ impl Emitter {
                 velocity,
                 rotation: starting_rotation(
                     look.random_rotation,
-                    look.h4.is_some() && look.vertical,
+                    look.vertical
+                        && look.material.as_ref().is_some_and(|material| material.turns_vertical_a_quarter()),
                     || random.next(),
                 ),
                 rotation_rate: self.rotation_rate.scalar(&particle_state),

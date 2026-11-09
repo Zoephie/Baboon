@@ -285,7 +285,7 @@ pub(in crate::app::model_preview) fn read_h2_look(
         rate: ParticleProperty::fixed(0.0)?,
         palette: ParticleProperty::fixed(0.0)?,
         shader: Arc::new(shader),
-        h4: None,
+        material: None,
         exposed: false,
         reach: false,
         cheap: false,

@@ -318,7 +318,7 @@ pub(super) fn render(
         data.preview
             .particles
             .iter()
-            .filter(|system| system.look.h4.is_some())
+            .filter(|system| system.look.material.is_some())
             .count(),
         data.preview.gen3.light_volumes.len(),
         data.preview

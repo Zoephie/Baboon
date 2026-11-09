@@ -316,7 +316,7 @@ impl Gen3Game for H4Game {
                 }
                 Gen3Sprite::System(index) => {
                     let system = &frame.preview.particles[index];
-                    let Some(render) = system.look.h4.as_ref().and_then(|render| {
+                    let Some(render) = system.look.material.as_ref().and_then(|render| {
                         render
                             .as_any()
                             .downcast_ref::<super::effects::particles::H4ParticleRender>()
