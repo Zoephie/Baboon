@@ -128,7 +128,7 @@ impl Gen3State {
                             continue;
                         }
                         "simple_lights" => {
-                            if let Some((lit, _)) = &state.light {
+                            if let Some(lit) = &state.light {
                                 gl.uniform_4_f32_slice(location.as_ref(), lit.rows.as_flattened());
                             } else if material.dialect() == H3Dialect::Reach && !state.inline_lights.is_empty() {
                                 let inline = state.inline_lights.as_flattened().as_flattened();
@@ -137,7 +137,7 @@ impl Gen3State {
                             continue;
                         }
                         "Shadow_Projection" => {
-                            if let Some((lit, _)) = &state.light {
+                            if let Some(lit) = &state.light {
                                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &lit.projection);
                             }
                             continue;
@@ -238,7 +238,7 @@ impl Gen3State {
                             targets.map(|targets| targets.behind)
                         }
                         "UserParameterTexture_dynamic_light_gel_texture" => {
-                            state.light.as_ref().and_then(|(_, gel)| *gel)
+                            state.light.as_ref().and_then(|light| light.gel)
                         }
                         other => uploaded.and_then(|map| {
                             map.get(&state.uploaded_key(frame, batch, material, other)).or_else(|| map.get(other))
@@ -298,11 +298,9 @@ impl Gen3State {
             self.albedo_pass(core, &drawing);
             self.albedo_decals(core, &drawing);
             game.after_albedo(&mut Gen3Cx { gl, frame, core, slot, state: self }, drawing.albedo_target, drawing.size);
-            // Whether a shadow map was drawn for the apply after the opaque pass.
-            let shadowed =
-                game.self_shadow(&mut Gen3Cx { gl, frame, core, slot, state: self }, &drawing.batches, order, drawing.framebuffer);
-            let (blended, reach_lit) = self.static_lighting(core, game, &drawing, shadowed);
-            self.dynamic_lights(core, &drawing);
+            game.self_shadow(&mut Gen3Cx { gl, frame, core, slot, state: self }, &drawing.batches, order, drawing.framebuffer);
+            let (blended, reach_lit) = self.static_lighting(core, game, &drawing);
+            self.dynamic_lights(core, game, &drawing);
             game.screen_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &reach_lit, drawing.accumulation_target);
             let sprites = self.begin_transparents(core, game, &drawing);
             self.blended_transparents(core, game, &drawing, blended, sprites);

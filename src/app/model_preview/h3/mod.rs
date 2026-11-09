@@ -8,6 +8,7 @@ pub(in crate::app::model_preview) mod bloom;
 pub(in crate::app::model_preview) mod composite;
 pub(crate) mod leaves;
 pub(crate) mod lights;
+mod light_pass;
 pub(in crate::app::model_preview) mod render;
 pub(in crate::app::model_preview) mod slot;
 pub(crate) mod vision;

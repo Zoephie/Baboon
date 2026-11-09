@@ -8,6 +8,16 @@ use std::sync::Arc;
 
 use eframe::glow;
 
+/// A light a pass draws by, one at a time and additive.
+pub(in crate::app::model_preview) struct PassLight {
+    /// `s_simple_light`, as `simple_lights` holds it.
+    pub(in crate::app::model_preview) rows: [[f32; 4]; 5],
+    /// `Shadow_Projection`, a plain column matrix.
+    pub(in crate::app::model_preview) projection: [f32; 16],
+    /// Its gel, for `dynamic_light_gel_texture`.
+    pub(in crate::app::model_preview) gel: Option<glow::NativeTexture>,
+}
+
 /// What the gen3 pipeline keeps between and within frames. `Gen3Pipeline`
 /// owns it, and the pipeline's stages are its methods, each handed the core.
 #[derive(Default)]
@@ -18,8 +28,8 @@ pub(in crate::app::model_preview) struct Gen3State {
     /// Linked passes by their address, or the pass that failed to link: each
     /// holds its pass, so no other pass can come to have its address.
     pub(in crate::app::model_preview) programs: HashMap<usize, Result<Rc<super::super::gen3::pipeline::H3Program>, Arc<super::shaders::H3Pass>>>,
-    /// The light drawing now, and its gel.
-    pub(in crate::app::model_preview) light: Option<(super::super::h3::lights::H3LitLight, Option<glow::NativeTexture>)>,
+    /// The light drawing now, which a game's dynamic lights set for each.
+    pub(in crate::app::model_preview) light: Option<PassLight>,
     /// Whether this frame's particles drew any distortion to apply.
     pub(in crate::app::model_preview) distorted: bool,
     /// `apply_distortions`' program.

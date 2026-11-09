@@ -44,17 +44,23 @@ pub(in crate::app::model_preview) trait Gen3Game {
     /// After the albedo and its decals, before the lights.
     unsafe fn after_albedo(&mut self, _cx: &mut Gen3Cx<'_>, _albedo: glow::NativeFramebuffer, _size: [i32; 2]) {}
 
-    /// The self shadow ahead of the lit pass: whether a shadow map was drawn
-    /// for the apply after the opaque pass.
+    /// The self shadow ahead of the lit pass.
     unsafe fn self_shadow(
         &mut self,
         _cx: &mut Gen3Cx<'_>,
         _batches: &[Gen3Batch],
         _order: &[usize],
         _scene: glow::NativeFramebuffer,
-    ) -> bool {
-        false
+    ) {
     }
+
+    /// After the opaque parts' lit pass, the batches in `order`: what reads
+    /// it, as Halo 3's self shadow's apply does.
+    unsafe fn after_opaque(&mut self, _cx: &mut Gen3Cx<'_>, _order: &[usize]) {}
+
+    /// After the static lighting, its blend set additive: the object's own
+    /// lights, each on its own over `batches`.
+    unsafe fn dynamic_lights(&mut self, _cx: &mut Gen3Cx<'_>, _batches: &[Gen3Batch]) {}
 
     /// The lights the lit pass reads inline, which the screen lights draw too.
     fn frame_lights(&mut self, _cx: &mut Gen3Cx<'_>) -> Vec<ReachLitLight> {

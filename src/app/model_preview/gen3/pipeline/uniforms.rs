@@ -10,7 +10,7 @@ pub(in crate::app::model_preview) struct H3SlotTextures {
     /// The shield's noise, by uniform.
     pub(super) shield: HashMap<String, glow::NativeTexture>,
     /// Each of `h3.lights`' gels, of `id`.
-    pub(super) gels: Vec<Option<glow::NativeTexture>>,
+    pub(in crate::app::model_preview) gels: Vec<Option<glow::NativeTexture>>,
 }
 
 /// `clip_position` as the matrix `mul(position, View_Projection)` wants: GLSL's

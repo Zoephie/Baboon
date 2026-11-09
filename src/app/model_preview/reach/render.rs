@@ -41,13 +41,12 @@ impl Gen3Game for ReachGame {
         batches: &[Gen3Batch],
         _order: &[usize],
         _scene: glow::NativeFramebuffer,
-    ) -> bool {
+    ) {
         self.mask = if cx.frame.self_shadow {
             unsafe { self.draw_shadow(cx, batches) }
         } else {
             None
         };
-        false
     }
 
     /// `build_simple_light_draw_list`, before the static pass reads it.

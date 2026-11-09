@@ -23,7 +23,6 @@ use super::super::gl::texture::upload_h2_image_linear;
 #[cfg(test)]
 use super::super::gl::texture::signed_bytes;
 use super::super::common::view::ce_flare_view;
-use super::super::dx9::passes::{H2Layer};
 use super::super::*;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 

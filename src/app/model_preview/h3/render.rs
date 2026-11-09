@@ -16,6 +16,9 @@ use super::super::gen3::pipeline::PictureCopies;
 use super::super::frame::ModelGpuFrame;
 use super::bloom::H3Bloom;
 use super::super::gen3::shadow::h3_shadow_style;
+use super::super::gen3::pipeline::h3_set_cull;
+use super::super::dx9::passes::H2Layer;
+use super::light_pass::draw_dynamic_lights;
 
 /// Halo 3's and ODST's hooks: the pipeline's defaults, the self shadow, and
 /// their bloom and composite.
@@ -26,6 +29,8 @@ pub(in crate::app::model_preview) struct H3Game {
     pub(super) composite_program: Option<glow::NativeProgram>,
     /// Each of the renderer's slots' state.
     pub(super) slots: GameSlots<H3Slot>,
+    /// Whether this frame's self shadow drew its map, for the apply.
+    shadowed: bool,
     /// VISR's and the motion suck's programs, and VISR's mask.
     pub(super) vision_program: Option<glow::NativeProgram>,
     pub(super) suck_program: Option<glow::NativeProgram>,
@@ -90,17 +95,34 @@ impl Gen3Game for H3Game {
         _batches: &[Gen3Batch],
         order: &[usize],
         scene: glow::NativeFramebuffer,
-    ) -> bool {
-        if !cx.frame.self_shadow {
-            return false;
-        }
-        // Generated from the light, for the apply pass after the opaque one.
-        unsafe {
+    ) {
+        self.shadowed = cx.frame.self_shadow && unsafe {
+            // Generated from the light, for the apply pass after the opaque one.
             cx.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
             let drawn = cx.core.draw_h2_shadow(cx.gl, cx.frame, cx.slot, order, h3_shadow_style(cx.frame));
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
             drawn
+        };
+    }
+
+    /// The self shadow's apply, through the dx9 shadow passes, if its map
+    /// was drawn.
+    unsafe fn after_opaque(&mut self, cx: &mut Gen3Cx<'_>, order: &[usize]) {
+        if !self.shadowed {
+            return;
         }
+        let (gl, frame, slot) = (cx.gl, cx.frame, cx.slot);
+        unsafe {
+            cx.core.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowApply, None);
+            gl.bind_vertex_array(Some(cx.core.slots[slot].vertex_array));
+            gl.enable(glow::DEPTH_TEST);
+            gl.depth_func(glow::LEQUAL);
+            h3_set_cull(gl, frame);
+        }
+    }
+
+    unsafe fn dynamic_lights(&mut self, cx: &mut Gen3Cx<'_>, batches: &[Gen3Batch]) {
+        unsafe { draw_dynamic_lights(cx, batches) }
     }
 
     unsafe fn bloom(

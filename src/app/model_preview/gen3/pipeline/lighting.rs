@@ -122,14 +122,13 @@ pub(in crate::app::model_preview) fn h3_lighting_constants(frame: &ModelGpuFrame
 impl Gen3State {
     /// The static lighting into the accumulation target: the frame's inline
     /// lights (`build_simple_light_draw_list`), the opaque parts' lit pass,
-    /// then the self shadow's apply if one was drawn. What blends, for the
+    /// then what the game draws after the opaque parts. What blends, for the
     /// transparents, and the lights the screen lights draw.
     pub(super) unsafe fn static_lighting<'b>(
         &mut self,
         core: &mut RenderCore,
         game: &mut dyn Gen3Game,
         drawing: &'b Gen3Frame<'_>,
-        shadowed: bool,
     ) -> (Vec<&'b Gen3Batch>, Vec<ReachLitLight>) {
         let Gen3Frame { gl, frame, slot, order, .. } = *drawing;
         unsafe {
@@ -157,20 +156,14 @@ impl Gen3State {
             }
             self.shadow_mask = None;
             self.pass_values = None;
-            if shadowed {
-                core.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowApply, None);
-                gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
-                gl.enable(glow::DEPTH_TEST);
-                gl.depth_func(glow::LEQUAL);
-                h3_set_cull(gl, frame);
-            }
+            game.after_opaque(&mut Gen3Cx { gl, frame, core, slot, state: self }, order);
             (blended, reach_lit)
         }
     }
 
     /// `submit_visibility_and_render`: the object's lights, additive, each
-    /// on its own.
-    pub(super) unsafe fn dynamic_lights(&mut self, core: &mut RenderCore, drawing: &Gen3Frame<'_>) {
+    /// on its own, which the game draws.
+    pub(super) unsafe fn dynamic_lights(&mut self, core: &mut RenderCore, game: &mut dyn Gen3Game, drawing: &Gen3Frame<'_>) {
         let Gen3Frame { gl, frame, slot, .. } = *drawing;
         unsafe {
             gl.enable(glow::BLEND);
@@ -178,25 +171,7 @@ impl Gen3State {
             gl.blend_equation(glow::FUNC_ADD);
             gl.color_mask(true, true, true, true);
             gl.blend_func(glow::ONE, glow::ONE);
-            let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-            for (index, light) in frame.preview.h3.lights.iter().enumerate() {
-                if !frame.shown.is(super::super::super::common::features::paths::H3_LIGHTS, index) {
-                    continue;
-                }
-                let values = frame.function_values_of_object(light.object);
-                let colors = frame.change_colors_of_object(light.object);
-                let onset = core.slots[slot].simulations.effect_onsets.of(light.object, light.scale_name(), values, frame.time);
-                let Some(lit) = light.lit(values, &colors, bones, frame.time, onset) else {
-                    continue;
-                };
-                self.light = Some((lit, core.slots[slot].h3_textures.gels.get(index).copied().flatten()));
-                for (batch, material) in &drawing.batches {
-                    if let Some(pass) = material.dynamic_light.as_ref() {
-                        self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
-                    }
-                }
-                self.light = None;
-            }
+            game.dynamic_lights(&mut Gen3Cx { gl, frame, core, slot, state: self }, &drawing.batches);
         }
     }
 

@@ -85,13 +85,12 @@ impl Gen3Game for H4Game {
         batches: &[Gen3Batch],
         _order: &[usize],
         _scene: glow::NativeFramebuffer,
-    ) -> bool {
+    ) {
         self.mask = if cx.frame.self_shadow && self.camo.is_none_or(|draw| draw.has_base) {
             unsafe { self.draw_shadow(cx, batches) }
         } else {
             None
         };
-        false
     }
 
     fn lit_values(&mut self, cx: &mut Gen3Cx<'_>) {
