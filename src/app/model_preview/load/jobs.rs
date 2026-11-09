@@ -9,9 +9,7 @@ use super::super::{
 };
 use super::load_model_preview;
 use super::merge::merge_preview_append;
-use super::overlays::{
-    Overlay, halo1_object_collision_overlay, hlmt_collision_overlay, hlmt_physics_overlay,
-};
+use super::overlays::{Overlay, hlmt_collision_overlay, hlmt_physics_overlay};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -83,7 +81,10 @@ impl Baboon {
             if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
                 && is_object_family_group(model.header.group_tag, source.game())
             {
-                return Some((halo1_object_collision_overlay(&model, &reader), Ok(None)));
+                return Some((
+                    super::super::ce::overlays::halo1_object_collision_overlay(&model, &reader),
+                    Ok(None),
+                ));
             }
             let model = super::super::load::preview_model_tag(&source, &model)
                 .ok()?

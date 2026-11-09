@@ -23,10 +23,8 @@ mod merge;
 pub(in crate::app::model_preview) use merge::*;
 mod scenario;
 pub(in crate::app::model_preview) use scenario::*;
-mod overlays;
-#[cfg(test)]
-pub(in crate::app::model_preview) use overlays::*;
 mod jobs;
+pub(in crate::app::model_preview) mod overlays;
 pub(in crate::app::model_preview) use jobs::*;
 mod guard;
 pub(in crate::app::model_preview) use guard::{feature, feature_into};

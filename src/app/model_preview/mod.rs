@@ -101,10 +101,7 @@ use load::{
     preview_mesh_order, preview_model_tag, read_model_variants, render_model_to_preview,
 };
 #[cfg(test)]
-use load::{
-    halo1_object_collision_overlay, load_model_preview, merge_preview_append,
-    preview_skeleton_nodes,
-};
+use load::{load_model_preview, merge_preview_append, preview_skeleton_nodes};
 pub(in crate::app) use materials::{
     ALL_SLOTS, DetailComposition, DetailFunction, MaterialTextures, SLOT_COUNT, TextureImage,
     TextureSlot, resolve_model_textures,

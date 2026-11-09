@@ -10,9 +10,8 @@ use super::super::{
     ModelPreviewState, ModelRegionSelection, ModelRenderMode, PHYSICS_REGION,
     PreviewAnimationEntry, PreviewAnimationPlayback, PreviewAnimationPose, RenderModelPreview,
     RenderModelPreviewBatch, RenderModelPreviewRegion, build_render_preview, frame,
-    halo1_object_collision_overlay, is_model_physics_overlay_region,
-    load_referenced_tag_from_source, merge_preview_append, model_preview_data,
-    reset_model_preview_selection, selected_variant_regions,
+    is_model_physics_overlay_region, load_referenced_tag_from_source, merge_preview_append,
+    model_preview_data, reset_model_preview_selection, selected_variant_regions,
 };
 use super::animation::{
     advance_playback_clock, animation_header_group, draw_animation_combo, frame_tick_xs,
@@ -336,7 +335,7 @@ fn halo_ce_monitor_collision_overlay_is_drawn() {
     )
     .unwrap();
     let mut preview = build_render_preview(&render).unwrap();
-    let collision = halo1_object_collision_overlay(
+    let collision = super::super::ce::overlays::halo1_object_collision_overlay(
         &object,
         &crate::app::model_preview::load::TagReader::new(&source),
     )

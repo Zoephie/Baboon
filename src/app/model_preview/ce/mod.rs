@@ -12,6 +12,7 @@ pub(super) mod flags;
 pub(super) mod functions;
 pub(super) mod lights;
 pub(in crate::app::model_preview) mod object;
+pub(in crate::app::model_preview) mod overlays;
 pub(super) mod panel;
 pub(super) mod particle_systems;
 pub(super) mod random;

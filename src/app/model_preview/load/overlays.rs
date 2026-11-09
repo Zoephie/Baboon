@@ -1,9 +1,6 @@
 //! The collision and physics overlays a model or object names.
 
-use super::super::{
-    RenderModelPreview, TagFile, model_skeleton, object_reference, render_model_skeleton,
-    tag_ref_path,
-};
+use super::super::{RenderModelPreview, TagFile, model_skeleton, tag_ref_path};
 use super::{TagReader, build_collision_preview, build_physics_preview};
 
 /// The `.model`'s collision layer, posed on its own skeleton, ready to merge
@@ -29,35 +26,6 @@ pub(in crate::app::model_preview) fn hlmt_collision_overlay(
 /// An overlay built off a model: none when the model names nothing to draw,
 /// and why when it names something that would not build.
 pub(in crate::app::model_preview) type Overlay = Result<Option<RenderModelPreview>, String>;
-
-/// Halo CE's object tag is its model wrapper. Resolve the gbxmodel bind pose
-/// with CE's corrected quaternion convention and use it to place the direct
-/// collision-model reference.
-pub(in crate::app::model_preview) fn halo1_object_collision_overlay(
-    object_tag: &TagFile,
-    reader: &TagReader,
-) -> Overlay {
-    let (Some(model_reference), Some(collision_reference)) = (
-        object_reference(object_tag, "model"),
-        object_reference(object_tag, "collision model"),
-    ) else {
-        return Ok(None);
-    };
-    let render = reader
-        .load(&model_reference, "gbxmodel", b"mod2")
-        .map_err(|error| format!("Could not load {model_reference}.gbxmodel: {error}"))?;
-    let collision = reader
-        .load(&collision_reference, "model_collision_geometry", b"coll")
-        .map_err(|error| {
-            format!("Could not load {collision_reference}.model_collision_geometry: {error}")
-        })?;
-    let nodes = render_model_skeleton(&render)
-        .map_err(|error| format!("{model_reference}.gbxmodel: {error}"))?;
-    let built = build_collision_preview(&collision, Some(&nodes));
-    built
-        .map(Some)
-        .map_err(|error| format!("{collision_reference}.model_collision_geometry: {error}"))
-}
 
 /// The `.model`'s physics layer, likewise. Reads both spellings the H2-era
 /// definitions used (`physics_model` and `physics model`); the legacy H2
