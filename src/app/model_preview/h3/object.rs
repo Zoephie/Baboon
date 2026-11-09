@@ -45,7 +45,7 @@ pub(in crate::app::model_preview) fn read_h3_object_features(
         frame,
     );
     let systems =
-        super::super::particles::read_h3_particles(reader, model_tag, 0, &preview.markers, frame);
+        super::super::particles::read_particles(reader, model_tag, 0, &preview.markers, frame);
     preview.particles = systems.into_iter().map(Arc::new).collect();
     let strips = super::super::gen3::effects::strips::read_h3_strips(
         reader,

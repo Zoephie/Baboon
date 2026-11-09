@@ -44,7 +44,7 @@ pub(in crate::app::model_preview) fn read_reach_attached_features<
     );
     preview.gen3.cheap_emitters.extend(named(cheap, name));
     let particles =
-        super::super::particles::read_h3_particles(reader, object, owner, markers, frame);
+        super::super::particles::read_particles(reader, object, owner, markers, frame);
     let particles: Vec<_> = named(particles, name).map(Arc::new).collect();
     let carried = super::super::particles::carried_strips(&particles);
     preview.particles.extend(particles);

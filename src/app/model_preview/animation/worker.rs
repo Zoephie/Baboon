@@ -9,7 +9,7 @@ use super::decode::decode_held_animation;
 use super::graph::list_model_animations;
 use super::playback::PreviewAnimationEntry;
 use super::pose::{DecodedAnimationPose, PreviewAnimationPose, PreviewNodeTransform};
-use super::skinning::h2_held_layers;
+use super::skinning::held_layers;
 use eframe::egui;
 use std::collections::HashMap;
 
@@ -148,7 +148,7 @@ impl Baboon {
             if let Some(Ok(data)) = &state.data
                 && let Some(clips) = data.animations.as_deref()
             {
-                layers = h2_held_layers(clips, selected, data, state);
+                layers = held_layers(clips, selected, data, state);
             }
             state.animation.error = None;
         }

@@ -5,7 +5,7 @@ use super::super::{RenderModelPreview, TagReader};
 use super::graph::{descendants, string_id_in};
 use super::unit::UnitWeapons;
 use super::{
-    AttachedObject, CeWeaponIk, MarkerFrame, attach_point, attach_vector, build_render_preview,
+    AttachedObject, WeaponIk, MarkerFrame, attach_point, attach_vector, build_render_preview,
     elements, fold_attached, holder_of, object_variant, weapon_ik,
 };
 use blam_tags::TagFile;
@@ -94,7 +94,7 @@ pub(in crate::app::model_preview) fn attach_weapon(
                 attach_point(&parent, &child, frame.position),
             )
         };
-        let holder = super::super::animation::ik::reach::ReachIkHolder::Weapon(owner);
+        let holder = super::super::animation::ik::reach::IkHolder::Weapon(owner);
         let node = Some(parent.node.max(0) as usize);
         preview
             .gen3
@@ -106,7 +106,7 @@ pub(in crate::app::model_preview) fn attach_weapon(
     if let Some(weapons) = ik {
         let class = string_id_in(&weapon, "weapon class");
         for mode in weapons.modes() {
-            let mut points: Vec<CeWeaponIk> = Vec::new();
+            let mut points: Vec<WeaponIk> = Vec::new();
             for entry in weapons.ik_of(mode, &class) {
                 let Some(mut point) = weapon_ik(
                     preview,

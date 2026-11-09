@@ -23,7 +23,7 @@ pub(in crate::app::model_preview) fn read_reach_object_features(
     };
     preview.gen3.ik_markers = super::super::animation::ik::reach::reach_ik_markers(
         preview,
-        super::super::animation::ik::reach::ReachIkHolder::Unit,
+        super::super::animation::ik::reach::IkHolder::Unit,
         own,
         None,
     );

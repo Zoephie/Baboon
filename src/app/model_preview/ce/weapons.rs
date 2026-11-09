@@ -375,7 +375,7 @@ pub(in crate::app::model_preview) fn attach_ce_weapon(
 #[cfg(test)]
 mod tests {
     use super::super::super::animation::ik::weapon::{
-        CeWeaponIk, LONGEST_REACH, clip_runs_weapon_ik, reach_with_arm,
+        WeaponIk, LONGEST_REACH, clip_runs_weapon_ik, reach_with_arm,
     };
     use super::super::super::common::marker::{attach_point, attach_vector};
     use super::super::super::common::math::{IDENTITY, axis_of, minus, place_of};
@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn ik_belongs_to_the_held_weapons_clips() {
-        let ik = CeWeaponIk {
+        let ik = WeaponIk {
             scope: "rifle".to_owned(),
             hand: 2,
             elbow: 1,

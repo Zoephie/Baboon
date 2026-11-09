@@ -40,9 +40,9 @@ pub(crate) struct RenderModelPreview {
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
     /// Halo CE: where a held weapon pulls the unit's hands.
-    pub weapon_ik: Vec<crate::app::model_preview::animation::ik::weapon::CeWeaponIk>,
+    pub weapon_ik: Vec<crate::app::model_preview::animation::ik::weapon::WeaponIk>,
     pub particles: Vec<Arc<particles::ParticleSystem>>,
-    pub cloth: Vec<cloth::H3ClothAt>,
+    pub cloth: Vec<cloth::ClothAt>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub antennas: Vec<antennas::Antenna>,

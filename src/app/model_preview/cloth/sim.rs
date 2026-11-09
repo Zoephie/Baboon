@@ -2,7 +2,7 @@
 
 use super::super::resume_point;
 use super::links::{ClothPin, rough_sqrt};
-use super::read::{H3ClothAt, reach_binormal};
+use super::read::{ClothAt, reach_binormal};
 use super::rules::{
     ClothGame, ClothWind, ERROR_MAX, MOST_HELD_LINKS, MOST_ITERATIONS, NEARLY_ZERO,
     REACH_CENTER_JUMP, REACH_CREATION_RELAXATIONS,
@@ -26,7 +26,7 @@ impl RunningCloth {
     /// `cloth_reset_flag_to_default_positions`. Halo 2 and 3 move the sheet up
     /// to its first pin; Reach's (the 360's 0x82C90BF8) leaves it at the
     /// world's origin, for `pin` to carry to the object.
-    pub(super) fn at_rest(cloth: &H3ClothAt, pins: &[[f32; 3]], center: [f32; 3]) -> Self {
+    pub(super) fn at_rest(cloth: &ClothAt, pins: &[[f32; 3]], center: [f32; 3]) -> Self {
         let shift = if cloth.game.rules().rests_at_first_pin {
             pins.first().copied().unwrap_or([0.0; 3])
         } else {
@@ -48,7 +48,7 @@ impl RunningCloth {
 
     /// `cloth_enforce_attachments`. Reach's first carries the whole sheet
     /// with the object's bounding sphere, where that has jumped.
-    pub(super) fn pin(&mut self, cloth: &H3ClothAt, pins: &[[f32; 3]]) {
+    pub(super) fn pin(&mut self, cloth: &ClothAt, pins: &[[f32; 3]]) {
         if cloth.game.rules().follows_center {
             let jump = minus(self.center, self.last_center);
             if dot(jump, jump) > REACH_CENTER_JUMP * REACH_CENTER_JUMP {
@@ -67,7 +67,7 @@ impl RunningCloth {
     /// `cloth_constrain_positions_relaxation`. A sheet that has come apart goes
     /// back to rest and has that pass over, until the sixteenth ends it (in
     /// Reach, the tenth). Gives back how many passes it took.
-    pub(super) fn relax(&mut self, cloth: &H3ClothAt, pins: &[[f32; 3]]) -> usize {
+    pub(super) fn relax(&mut self, cloth: &ClothAt, pins: &[[f32; 3]]) -> usize {
         let rules = cloth.game.rules();
         let (most_iterations, most_passes) = (rules.most_iterations, rules.most_passes);
         let count = cloth.iterations.clamp(1, most_iterations);
@@ -124,7 +124,7 @@ impl RunningCloth {
 
     /// Halo 2's `cloth_constrain_positions`: one pass over every link, by a
     /// rule of its own, with a held end leaving all the work to the other.
-    pub(super) fn relax_h2(&mut self, cloth: &H3ClothAt, pins: &[[f32; 3]]) {
+    pub(super) fn relax_h2(&mut self, cloth: &ClothAt, pins: &[[f32; 3]]) {
         let held = |vertex: usize| cloth.pins.iter().any(|pin| pin.vertex == vertex);
         let count = cloth.iterations.clamp(1, MOST_ITERATIONS);
         let (mut done, mut passes) = (0, 0);
@@ -176,7 +176,7 @@ impl RunningCloth {
     }
 
     /// `cloth_update_positions_verlet`.
-    pub(super) fn integrate(&mut self, cloth: &H3ClothAt, wind: [f32; 3]) {
+    pub(super) fn integrate(&mut self, cloth: &ClothAt, wind: [f32; 3]) {
         let wind = wind.map(|axis| axis * cloth.wind_scale);
         for vertex in 0..self.places.len() {
             if cloth.pins.iter().any(|pin| pin.vertex == vertex) {
@@ -200,7 +200,7 @@ impl RunningCloth {
     }
 
     /// `cloth_calculate_normals`.
-    pub(super) fn calculate_normals(&mut self, cloth: &H3ClothAt) {
+    pub(super) fn calculate_normals(&mut self, cloth: &ClothAt) {
         // Halo 2 adds to what the normal was, so each carries a little of the last tick.
         let carry = cloth.game.rules().normals_carry_over;
         let mut sums = if carry {
@@ -252,7 +252,7 @@ impl ClothField {
     /// A new sheet. Reach's `cloth_new_attachment` (the 360's 0x82C8E2F0)
     /// resets it, enforces its attachments, which carry it to the object's
     /// bounding sphere, and relaxes it five times.
-    fn created(cloth: &H3ClothAt, pins: &[[f32; 3]], center: [f32; 3]) -> RunningCloth {
+    fn created(cloth: &ClothAt, pins: &[[f32; 3]], center: [f32; 3]) -> RunningCloth {
         let mut running = RunningCloth::at_rest(cloth, pins, center);
         if cloth.game.rules().settles_new_sheet {
             running.pin(cloth, pins);
@@ -267,16 +267,16 @@ impl ClothField {
     /// have become: where they start, and each side's in turn.
     pub(crate) fn advance(
         &mut self,
-        cloths: &[H3ClothAt],
+        cloths: &[ClothAt],
         bones: Option<&[[f32; 4]]>,
         time: f32,
     ) -> Vec<(usize, Vec<MovedClothVertex>)> {
-        let pins_of = |cloth: &H3ClothAt| -> Vec<[f32; 3]> {
+        let pins_of = |cloth: &ClothAt| -> Vec<[f32; 3]> {
             let posed = |pin: &ClothPin| posed_on(pin.node, pin.position, [1.0, 0.0, 0.0], bones).0;
             cloth.pins.iter().map(posed).collect()
         };
         let center_of =
-            |cloth: &H3ClothAt| posed_on(cloth.center.0, cloth.center.1, [1.0, 0.0, 0.0], bones).0;
+            |cloth: &ClothAt| posed_on(cloth.center.0, cloth.center.1, [1.0, 0.0, 0.0], bones).0;
         self.frames += 1;
         if self.running.len() != cloths.len() || self.time.is_none_or(|last| time < last) {
             self.running = cloths

@@ -371,7 +371,7 @@ impl Feature for super::super::antennas::Antenna {
     }
 }
 
-impl Feature for super::super::cloth::H3ClothAt {
+impl Feature for super::super::cloth::ClothAt {
     fn moves(&self) -> bool {
         true
     }

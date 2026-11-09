@@ -40,7 +40,7 @@ pub(in crate::app::model_preview) fn read_h2_features<
     // Particle systems carry the held object's event effects (`firing
     // effect` and the rest), which its owner's panel plays by name.
     let particles =
-        super::super::particles::read_h3_particles(reader, object, owner, markers, frame);
+        super::super::particles::read_particles(reader, object, owner, markers, frame);
     preview
         .particles
         .extend(named(particles, name).map(Arc::new));

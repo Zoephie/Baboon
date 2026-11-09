@@ -13,7 +13,7 @@ use blam_tags::{TagFile, TagStruct};
 
 /// A `cloth` on an object, and where its mesh lies in the model's vertices.
 #[derive(Debug, Clone)]
-pub(crate) struct H3ClothAt {
+pub(crate) struct ClothAt {
     pub(super) places: Vec<[f32; 3]>,
     pub(super) indices: Vec<usize>,
     pub(super) links: Vec<ClothLink>,
@@ -32,7 +32,7 @@ pub(crate) struct H3ClothAt {
     pub(super) center: (usize, [f32; 3]),
 }
 
-impl H3ClothAt {
+impl ClothAt {
     pub(crate) fn halo2(&self) -> bool {
         self.game == ClothGame::Halo2
     }
@@ -74,7 +74,7 @@ fn read_cloth_tag(
     frame: &impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
     game: ClothGame,
     center: [f32; 3],
-) -> Option<(H3ClothAt, Vec<[f32; 2]>, Option<(String, String)>)> {
+) -> Option<(ClothAt, Vec<[f32; 2]>, Option<(String, String)>)> {
     let clamps = game.rules().clamps_properties;
     // The ranges are `tool.exe`'s postprocess, which tags on disk have not been through.
     let int = |name: &str| root.read_int_any(name).unwrap_or(0).clamp(2, 32) as usize;
@@ -145,7 +145,7 @@ fn read_cloth_tag(
     let links = generate_links(&places, &indices, real("longest_rod", 1.0, 10.0));
     let top = has_flag(root, "flags", "Uses grid attach top");
     let pins = cloth_pins(attach, secondary, [size[0], high], places.len(), top, game);
-    let cloth = H3ClothAt {
+    let cloth = ClothAt {
         places,
         indices,
         links,

@@ -10,7 +10,7 @@ use super::decode::decode_held_animation;
 #[cfg(test)]
 use super::graph::list_model_animations;
 #[cfg(test)]
-use super::skinning::h2_held_layers;
+use super::skinning::held_layers;
 use blam_tags::math::{RealQuaternion, RealVector3d};
 use blam_tags::{NodeTransform, Skeleton};
 
@@ -158,7 +158,7 @@ pub(in crate::app::model_preview) fn pose_for_shot(
                 .collect();
             panic!("H2_SHOT_CLIP: no clip {clip:?}; these are: {names:?}")
         });
-    let layers = h2_held_layers(&list, index, data, state);
+    let layers = held_layers(&list, index, data, state);
     let decoded = decode_held_animation(source, entry, index, &layers).unwrap();
     let at = std::env::var("H2_SHOT_FRAME").map_or(0, |frame| frame.parse().unwrap());
     let frame = data

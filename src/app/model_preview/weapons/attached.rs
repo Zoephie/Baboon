@@ -137,7 +137,7 @@ pub(in crate::app::model_preview) fn read_extension_weapons<
             continue;
         }
         let particles =
-            super::super::particles::read_h3_particles(reader, &weapon, owner, markers, frame);
+            super::super::particles::read_particles(reader, &weapon, owner, markers, frame);
         preview
             .particles
             .extend(named(particles, within).map(Arc::new));

@@ -202,7 +202,7 @@ impl ParticleSystem {
 }
 
 /// The systems of an object's attached effects, one at each marker of a location.
-pub(in crate::app::model_preview) fn read_h3_particles(
+pub(in crate::app::model_preview) fn read_particles(
     reader: &TagReader,
     object: &TagFile,
     owner: u8,

@@ -78,7 +78,7 @@ pub(in crate::app::model_preview) fn clip_runs_weapon_ik(clip: &str) -> bool {
 
 /// A hand held to a marker of the weapon: an IK point of the animations.
 #[derive(Debug, Clone)]
-pub(crate) struct CeWeaponIk {
+pub(crate) struct WeaponIk {
     /// Which clips hold it: a Halo CE weapon class, the second word of their
     /// names, or a Halo 2 mode, the first.
     pub(in crate::app::model_preview) scope: String,
@@ -95,7 +95,7 @@ pub(crate) struct CeWeaponIk {
     pub(in crate::app::model_preview) carried: Vec<usize>,
 }
 
-impl CeWeaponIk {
+impl WeaponIk {
     pub(in crate::app::model_preview) fn hand(&self) -> usize {
         self.hand
     }
@@ -158,7 +158,7 @@ pub(in crate::app::model_preview) fn weapon_ik(
     child: MarkerFrame,
     marker: &str,
     attach_to: &str,
-) -> Option<CeWeaponIk> {
+) -> Option<WeaponIk> {
     let named = |model: &RenderModelPreview, name: &str| {
         let found = model
             .markers
@@ -179,7 +179,7 @@ pub(in crate::app::model_preview) fn weapon_ik(
         .axes
         .map(|axis| attach_vector(&parent, &child, axis));
     let position = attach_point(&parent, &child, on_weapon.position);
-    Some(CeWeaponIk {
+    Some(WeaponIk {
         scope: scope.to_owned(),
         hand,
         elbow,

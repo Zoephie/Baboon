@@ -10,7 +10,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::super::RenderModelPreviewNode;
 use super::super::super::common::fields::elements;
-use super::reach::{ReachIkHolder, ReachIkMarker, two_bone_ik};
+use super::reach::{IkHolder, IkMarker, two_bone_ik};
 use crate::app::model_preview::common::fields::holder_of;
 use crate::app::model_preview::common::math::rigid_inverse;
 
@@ -32,7 +32,7 @@ pub(crate) struct H4IkPoint {
     /// On the unit; the node it rides is what moves.
     pub(crate) source: String,
     /// Whose `destination` marker it reaches for.
-    pub(crate) holder: ReachIkHolder,
+    pub(crate) holder: IkHolder,
     pub(crate) destination: String,
     /// A point the elbow or knee bends toward, in the unit's space.
     pub(crate) pole: Option<[f32; 3]>,
@@ -109,9 +109,9 @@ pub(crate) fn read_h4_ik_set(graph: &TagFile, index: usize) -> Vec<H4IkPoint> {
         .filter_map(|point| {
             let entry = *data.get(usize::try_from(point.read_int_any("ik point")?).ok()?)?;
             let holder = match entry.read_int_any("attach to")? {
-                ATTACH_TO_PARENT => ReachIkHolder::Parent,
-                ATTACH_TO_PRIMARY_WEAPON => ReachIkHolder::Weapon(1),
-                ATTACH_TO_SECONDARY_WEAPON => ReachIkHolder::Weapon(2),
+                ATTACH_TO_PARENT => IkHolder::Parent,
+                ATTACH_TO_PRIMARY_WEAPON => IkHolder::Weapon(1),
+                ATTACH_TO_SECONDARY_WEAPON => IkHolder::Weapon(2),
                 _ => return None,
             };
             let pole = match entry.field("pole marker").and_then(|field| field.value()) {
@@ -137,19 +137,19 @@ pub(crate) fn read_h4_ik_set(graph: &TagFile, index: usize) -> Vec<H4IkPoint> {
 /// game skips one whose object or marker it cannot find.
 pub(crate) fn apply_h4_ik_set(
     points: &[H4IkPoint],
-    markers: &[ReachIkMarker],
+    markers: &[IkMarker],
     nodes: &[RenderModelPreviewNode],
     inverse_binds: &[Matrix4],
     worlds: &mut [Matrix4],
 ) {
-    let find = |holder: ReachIkHolder, name: &str| {
+    let find = |holder: IkHolder, name: &str| {
         markers
             .iter()
             .find(|marker| marker.holder == holder && marker.name.eq_ignore_ascii_case(name))
     };
     for point in points {
         let (Some(source), Some(destination)) = (
-            find(ReachIkHolder::Unit, &point.source),
+            find(IkHolder::Unit, &point.source),
             find(point.holder, &point.destination),
         ) else {
             continue;
@@ -232,7 +232,7 @@ mod tests {
         let points = state.animation.pose.as_ref().unwrap().h4_ik_set.clone();
         assert!(!points.is_empty(), "the clip's IK set");
         let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
-        let posed = |marker: &crate::app::model_preview::animation::ik::reach::ReachIkMarker| {
+        let posed = |marker: &crate::app::model_preview::animation::ik::reach::IkMarker| {
             let skin = &rows[marker.node * 3..marker.node * 3 + 3];
             let at = [
                 marker.bind.m[0][3],
@@ -253,7 +253,7 @@ mod tests {
         for point in points.iter() {
             let (Some(source), Some(destination)) = (
                 find(
-                    crate::app::model_preview::animation::ik::reach::ReachIkHolder::Unit,
+                    crate::app::model_preview::animation::ik::reach::IkHolder::Unit,
                     &point.source,
                 ),
                 find(point.holder, &point.destination),
@@ -284,7 +284,7 @@ mod tests {
         pose.h4_ik_set = Arc::default();
         state.animation.pose = Some(Arc::new(pose));
         let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
-        let posed = |marker: &crate::app::model_preview::animation::ik::reach::ReachIkMarker| {
+        let posed = |marker: &crate::app::model_preview::animation::ik::reach::IkMarker| {
             let skin = &rows[marker.node * 3..marker.node * 3 + 3];
             let at = [
                 marker.bind.m[0][3],
@@ -299,7 +299,7 @@ mod tests {
         let (from, to) = (
             posed(
                 find(
-                    crate::app::model_preview::animation::ik::reach::ReachIkHolder::Unit,
+                    crate::app::model_preview::animation::ik::reach::IkHolder::Unit,
                     &point.source,
                 )
                 .unwrap(),
@@ -328,7 +328,7 @@ mod tests {
         let pose = state.animation.pose.as_ref().unwrap();
         assert!(!pose.reach_ik.is_empty(), "the reload's chains");
         assert!(pose.reach_ik.iter().any(|track| track.holder
-            == crate::app::model_preview::animation::ik::reach::ReachIkHolder::Weapon(1)));
+            == crate::app::model_preview::animation::ik::reach::IkHolder::Weapon(1)));
         let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
         assert!(rows.iter().flatten().all(|lane| lane.is_finite()));
     }

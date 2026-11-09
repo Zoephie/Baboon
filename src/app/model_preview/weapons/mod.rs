@@ -7,7 +7,7 @@
 
 use super::common::fields::{elements, has_flag, holder_of};
 use super::load::build_render_preview;
-use crate::app::model_preview::animation::ik::weapon::CeWeaponIk;
+use crate::app::model_preview::animation::ik::weapon::WeaponIk;
 use crate::app::model_preview::animation::ik::weapon::weapon_ik;
 use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::common::marker::{attach_point, attach_vector};

@@ -133,7 +133,7 @@ pub(in crate::app::model_preview) fn animation_skinning_rows(
 }
 
 /// What a Halo 2 unit's weapons lay over the clip at `index` of `clips`.
-pub(super) fn h2_held_layers(
+pub(super) fn held_layers(
     clips: &[PreviewAnimationEntry],
     index: usize,
     data: &ModelPreviewData,

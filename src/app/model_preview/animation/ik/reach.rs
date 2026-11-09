@@ -26,7 +26,7 @@ const SMALLEST_WEIGHT: f32 = 1e-4;
 
 /// Whose marker a target is relative to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReachIkHolder {
+pub(crate) enum IkHolder {
     /// The unit's own.
     Unit,
     /// The object the unit rides in (Halo 4's IK sets); the preview places
@@ -43,7 +43,7 @@ pub(crate) struct ReachIkTrack {
     pub(crate) rank: usize,
     /// The effector node, by name.
     pub(crate) effector: String,
-    pub(crate) holder: ReachIkHolder,
+    pub(crate) holder: IkHolder,
     pub(crate) marker: String,
     /// The effector, in the marker's space.
     pub(crate) effector_frames: Vec<(RealQuaternion, [f32; 3])>,
@@ -183,9 +183,9 @@ pub(crate) fn read_reach_ik_tracks(
             continue;
         }
         let holder = match event.read_int_any("chain usage") {
-            Some(USAGE_SELF) => ReachIkHolder::Unit,
-            Some(USAGE_PRIMARY_WEAPON) => ReachIkHolder::Weapon(1),
-            Some(USAGE_SECONDARY_WEAPON) => ReachIkHolder::Weapon(2),
+            Some(USAGE_SELF) => IkHolder::Unit,
+            Some(USAGE_PRIMARY_WEAPON) => IkHolder::Weapon(1),
+            Some(USAGE_SECONDARY_WEAPON) => IkHolder::Weapon(2),
             // World, parent and assassination targets have nothing to find
             // in a preview.
             _ => continue,
@@ -246,8 +246,8 @@ pub(crate) fn read_reach_ik_tracks(
 /// A marker an IK target can name: the node it rides and where it sits on
 /// that node in bind space.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ReachIkMarker {
-    pub(crate) holder: ReachIkHolder,
+pub(crate) struct IkMarker {
+    pub(crate) holder: IkHolder,
     pub(crate) name: String,
     pub(crate) node: usize,
     pub(crate) bind: Matrix4,
@@ -258,11 +258,11 @@ pub(crate) struct ReachIkMarker {
 /// (none: the marker's own node).
 pub(crate) fn reach_ik_markers(
     model: &super::super::super::RenderModelPreview,
-    holder: ReachIkHolder,
+    holder: IkHolder,
     place: impl Fn(&crate::app::model_preview::common::marker::MarkerFrame) -> ([[f32; 3]; 3], [f32; 3]),
     node: Option<usize>,
-) -> Vec<ReachIkMarker> {
-    let mut out: Vec<ReachIkMarker> = Vec::new();
+) -> Vec<IkMarker> {
+    let mut out: Vec<IkMarker> = Vec::new();
     for marker in &model.markers {
         if out
             .iter()
@@ -273,7 +273,7 @@ pub(crate) fn reach_ik_markers(
         let frame =
             crate::app::model_preview::common::marker::MarkerFrame::find(model, &marker.name);
         let (axes, position) = place(&frame);
-        out.push(ReachIkMarker {
+        out.push(IkMarker {
             holder,
             name: marker.name.clone(),
             node: node.unwrap_or(frame.node.max(0) as usize),
@@ -294,7 +294,7 @@ fn sampled<T: Copy>(values: &[T], a: usize, b: usize) -> Option<(T, T)> {
 /// game would solve to the offset alone.
 pub(crate) fn apply_reach_ik(
     tracks: &[ReachIkTrack],
-    markers: &[ReachIkMarker],
+    markers: &[IkMarker],
     nodes: &[RenderModelPreviewNode],
     inverse_binds: &[Matrix4],
     worlds: &mut [Matrix4],
@@ -695,12 +695,12 @@ mod tests {
         assert_eq!(
             summary,
             [
-                (2, "b_l_hand", "left_hand_spartan", ReachIkHolder::Weapon(1)),
+                (2, "b_l_hand", "left_hand_spartan", IkHolder::Weapon(1)),
                 (
                     3,
                     "b_r_hand",
                     "right_hand_spartan",
-                    ReachIkHolder::Weapon(1)
+                    IkHolder::Weapon(1)
                 ),
             ]
         );

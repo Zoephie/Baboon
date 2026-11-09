@@ -85,7 +85,7 @@ fn pins_take_the_markers_in_order_from_corner_to_corner() {
     assert_eq!(pins[3].node, 4, "the secondary takes the last vertex");
 }
 
-fn hung() -> (H3ClothAt, RunningCloth, Vec<[f32; 3]>) {
+fn hung() -> (ClothAt, RunningCloth, Vec<[f32; 3]>) {
     let (places, _, indices) = flag_grid([4, 4], [0.1, 0.1], ClothGame::Halo3);
     let links = generate_links(&places, &indices, 2.0);
     let pins = cloth_pins(
@@ -96,7 +96,7 @@ fn hung() -> (H3ClothAt, RunningCloth, Vec<[f32; 3]>) {
         false,
         ClothGame::Halo3,
     );
-    let cloth = H3ClothAt {
+    let cloth = ClothAt {
         places,
         indices,
         links,
@@ -123,7 +123,7 @@ fn hung() -> (H3ClothAt, RunningCloth, Vec<[f32; 3]>) {
 fn cloth_steps_by_its_games_ticks_whatever_the_frame_rate() {
     let ticks_over_a_second = |game: ClothGame, frames: usize| {
         let (cloth, _, _) = hung();
-        let cloths = [H3ClothAt { game, ..cloth }];
+        let cloths = [ClothAt { game, ..cloth }];
         let mut field = ClothField::default();
         field.advance(&cloths, None, 10.0);
         let settled = field.ticks;
@@ -469,7 +469,7 @@ fn reach_pins_all_ten_markers_and_no_secondary() {
 #[test]
 fn a_reach_sheet_that_comes_apart_has_its_pass_over_up_to_the_tenth() {
     let (cloth, mut running, pins) = hung();
-    let mut cloth = H3ClothAt {
+    let mut cloth = ClothAt {
         game: ClothGame::Reach,
         ..cloth
     };
@@ -497,11 +497,11 @@ fn a_reach_sheet_that_comes_apart_has_its_pass_over_up_to_the_tenth() {
 #[test]
 fn a_reach_sheet_starts_at_its_objects_bounding_sphere() {
     let (cloth, _, pins) = hung();
-    let reach = H3ClothAt {
+    let reach = ClothAt {
         game: ClothGame::Reach,
         ..cloth.clone()
     };
-    let start = |cloth: &H3ClothAt, center: [f32; 3]| {
+    let start = |cloth: &ClothAt, center: [f32; 3]| {
         let mut running = RunningCloth::at_rest(cloth, &pins, center);
         running.pin(cloth, &pins);
         running
@@ -560,7 +560,7 @@ fn the_reach_wind_moves_only_on_a_new_frame() {
 #[test]
 fn a_reach_sheet_turns_its_binormal_with_its_normal() {
     let (cloth, _, _) = hung();
-    let reach = [H3ClothAt {
+    let reach = [ClothAt {
         game: ClothGame::Reach,
         ..cloth.clone()
     }];
