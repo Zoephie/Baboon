@@ -158,3 +158,13 @@ pub(super) fn copy_chimp_jms_uvs(
     }
     Ok(())
 }
+
+/// A Campaign Evolved `.model`: one that names a skeleton model.
+pub(in crate::app::model_preview) fn is_campaign_evolved_model(tag: &TagFile) -> bool {
+    tag.header.group_tag.to_be_bytes() == *b"hlmt"
+        && tag
+            .root()
+            .read_tag_ref_with_group("skeleton model")
+            .map(|(_, reference)| !reference.trim().is_empty())
+            .unwrap_or(false)
+}

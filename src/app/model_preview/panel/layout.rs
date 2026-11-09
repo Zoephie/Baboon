@@ -65,7 +65,7 @@ pub(in crate::app) fn draw_model_preview_panel(
             return;
         }
 
-        let is_campaign_evolved = is_campaign_evolved_model(tag);
+        let is_campaign_evolved = super::super::campaign_evolved::is_campaign_evolved_model(tag);
 
         let Some(data_result) = state.data.take() else {
             ui.label(RichText::new("No preview loaded").color(subtle_dark()));
@@ -124,16 +124,6 @@ pub(in crate::app::model_preview) struct SetupRequests {
     pub(in crate::app::model_preview) mutation: bool,
     /// Refresh Model was pressed.
     pub(in crate::app::model_preview) reload: bool,
-}
-
-/// A Campaign Evolved `.model`: one that names a skeleton model.
-pub(in crate::app::model_preview) fn is_campaign_evolved_model(tag: &TagFile) -> bool {
-    tag.header.group_tag.to_be_bytes() == *b"hlmt"
-        && tag
-            .root()
-            .read_tag_ref_with_group("skeleton model")
-            .map(|(_, reference)| !reference.trim().is_empty())
-            .unwrap_or(false)
 }
 
 /// The wide layout: the Model Preview card and the Model Setup card side by
