@@ -1,7 +1,6 @@
 //! Halo 4's load rules.
 
 use super::super::common::image::ImageTexels;
-use super::super::gen3::effects::light_volumes::read_h4_definition;
 use super::super::gen3::rules::Gen3Rules;
 use super::super::load::GameRules;
 use super::super::particles::ParticleRules;
@@ -23,7 +22,7 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
     gen3: Gen3Rules {
         texels: Some(ImageTexels::of_halo4),
         luminance_as_red: true,
-        light_volume_reader: Some(read_h4_definition),
+        light_volume_reader: Some(super::effects::light_volumes::read_h4_definition),
         ..Gen3Rules::DEFAULT
     },
     ..GameRules::DEFAULT

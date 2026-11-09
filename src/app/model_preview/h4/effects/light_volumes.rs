@@ -7,7 +7,30 @@ use super::super::super::functions::FunctionValues;
 use super::super::super::gen3::effects::light_volumes::{
     Gen3LightVolumeAt, Gen3VolumeInput, VolumeLayout, percentile,
 };
+use super::super::super::gen3::effects::light_volumes::{
+    Gen3VolumeDefinition, read_material_definition,
+};
+use super::super::super::h4::materials::resolve_h4_effect_material;
+use super::super::super::load::TagReader;
 use super::particles::{f32_to_f16, pack_argb8};
+use blam_tags::TagStruct;
+
+/// `c_light_volume_definition::postprocess_block_proc` (MCC 0x1403ABF50):
+/// Reach's, through the `actual material`, and never precompiled, which MCC
+/// clears every time and could not draw ("not implemented for D3D11").
+pub(in crate::app::model_preview) fn read_h4_definition(
+    reader: &TagReader,
+    element: TagStruct<'_>,
+) -> Option<Gen3VolumeDefinition> {
+    let material =
+        blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
+    let resolved = resolve_h4_effect_material(reader, &material, "light_volume")
+        .map_err(|error| eprintln!("h4 light volume material: {error}"))
+        .ok()?;
+    let appearance = element.read_int_any("appearance flags").unwrap_or(0) as u32;
+    let sort_layer = i32::from(material.sort_layer).clamp(1, 3);
+    read_material_definition(element, sort_layer, (resolved, appearance))
+}
 
 /// `light_volume_state_input_enum`'s order, the order of
 /// `LightVolumeOverallState.inputs`; `allocate_random_seed` leaves nothing

@@ -7,7 +7,7 @@ use super::{
     EffectTimes, Gen3Bitmap, Gen3Blend, H3_EXPOSURE, H4EffectMaterial, MarkerFrame, Sampler,
     SamplerKind, elements, for_each_attached_part, has_flag, inline_real, part_frame,
     reach_alt_exposure, read_h3_bitmap, read_h3_definition, read_part_placement,
-    resolve_embedded_method, resolve_h4_effect_material,
+    resolve_embedded_method,
 };
 use blam_tags::TagStruct;
 use std::sync::Arc;
@@ -238,22 +238,16 @@ pub(super) fn read_definition(
     Some(volume)
 }
 
-/// Halo 4's `c_light_volume_definition::postprocess_block_proc` (MCC
-/// 0x1403ABF50): Reach's, through the `actual material`, and never
-/// precompiled, which MCC clears every time and could not draw ("not
-/// implemented for D3D11").
-pub(in crate::app::model_preview) fn read_h4_definition(
-    reader: &TagReader,
+/// A volume drawn through an effect material rather than a render method:
+/// Reach's terms with no precompiled rows, sorted in `sort_layer`. Halo 4's
+/// reader resolves the material.
+pub(in crate::app::model_preview) fn read_material_definition(
     element: TagStruct<'_>,
+    sort_layer: i32,
+    material: (H4EffectMaterial, u32),
 ) -> Option<Gen3VolumeDefinition> {
-    let material =
-        blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
-    let resolved = resolve_h4_effect_material(reader, &material, "light_volume")
-        .map_err(|error| eprintln!("h4 light volume material: {error}"))
-        .ok()?;
     let flagged = |wanted: &str| has_flag(element, "flags", wanted);
     let lod = ReachVolumeLod::read(element, flagged);
-    let appearance = element.read_int_any("appearance flags").unwrap_or(0) as u32;
     let properties = VolumeProperties::read(element)?;
     Some(
         properties.postprocessed(element, |properties| Gen3VolumeDefinition {
@@ -261,13 +255,13 @@ pub(in crate::app::model_preview) fn read_h4_definition(
             blend: Gen3Blend::Additive,
             sampler: None,
             bitmap: None,
-            sort_layer: i32::from(material.sort_layer).clamp(1, 3),
+            sort_layer,
             own_terms: true,
             circular: None,
             depth_fade: None,
             lod,
             precompiled: None,
-            effect_material: Some((resolved, appearance)),
+            effect_material: Some(material),
             ..properties
         }),
     )

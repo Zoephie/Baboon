@@ -13,7 +13,7 @@ use super::super::super::effects::{
 use super::super::super::functions::FunctionValues;
 use super::super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap, resolve_embedded_method};
 use super::super::super::gen3::pipeline::reach_alt_exposure;
-use super::super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
+use super::super::super::h4::materials::H4EffectMaterial;
 use super::super::super::particles::inline_real;
 use super::super::effects::strips::EPSILON;
 use super::super::pipeline::EXPOSURE as H3_EXPOSURE;
