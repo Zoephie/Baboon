@@ -4,8 +4,11 @@ use super::super::super::ce::shaders::{
     ce_camo_pass, ce_model_passes, ce_transparent_passes, read_ce_camo_settings,
 };
 use super::super::super::dx9::passes::{CeNumeric, Dx9DrawPass, Dx9Layer};
-use super::super::super::materials::*;
-use super::super::super::*;
+use super::super::super::materials::{
+    DetailComposition, DetailFunction, MaterialTextures, ResolveCaches, SlotBitmap, TextureSlot,
+    cached_bitmap, decode_image,
+};
+use super::super::super::{TagFile, TagReader};
 use crate::core::h2_pixel_shader::SamplerKind;
 use std::collections::HashMap;
 use std::sync::Arc;

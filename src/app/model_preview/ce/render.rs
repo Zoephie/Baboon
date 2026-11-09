@@ -6,7 +6,7 @@ use super::super::dx9::passes::Dx9Layer;
 use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
 use super::super::renderer::FrameCx;
-use super::super::*;
+use super::super::{ModelGpuFrame, RenderCore};
 use super::draw::{
     CE_EVENTS_RUNNING, CeEffectGl, advance_ce_effects, ce_groups, ce_has_groups,
     ce_sorts_transparents, draw_ce_group, draw_ce_transparents,

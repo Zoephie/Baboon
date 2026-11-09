@@ -1,6 +1,12 @@
 //! Light volume widgets: their frames, read and posed.
 
-use super::*;
+use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::{
+    AntennaQuad, Image, SamplerKind, ViewFrame, argb, ce_color_interpolate, ce_color_interpolation,
+    decode_image, dot, elements, function_slot_of, has_flag, object_block, posed_on,
+};
+use blam_tags::{TagFile, TagStruct};
+use std::sync::Arc;
 
 /// One of `frames`, as tool leaves it.
 #[derive(Debug, Clone, Copy)]

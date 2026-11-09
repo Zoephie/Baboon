@@ -1,6 +1,9 @@
 //! A shader's per-frame animation, which the dx9 pass carries and evaluates at draw: maps, colours, meters, plasma, and their readers.
 
-use super::*;
+use super::base::option_index;
+use super::periodic::{PERIODIC_ONE, PERIODIC_ZERO, periodic_evaluate};
+use super::{H2_TEXTURE_ROWS, PassAnimation};
+use blam_tags::TagStruct;
 
 /// One axis of a `shader_texture_animation`. The tag's zeros mean a default.
 #[derive(Debug, Clone, PartialEq)]

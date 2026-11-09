@@ -1,6 +1,7 @@
 //! Halo CE's periodic functions: the tables the game builds once and evaluates by name.
 
-use super::*;
+use super::{high16_times_inverse_65535, lcg_step};
+use std::sync::LazyLock;
 
 /// `periodic_functions_initialize`'s seed: every table comes out the same.
 const PERIODIC_SEED: u32 = 0x20F3_F660;

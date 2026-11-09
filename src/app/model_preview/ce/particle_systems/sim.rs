@@ -1,6 +1,17 @@
 //! Running particle systems: their types' states, emission and particles, a tick at a time.
 
-use super::*;
+use super::super::super::{frame_steps, resume_point};
+use super::draw::{CePctlQuad, system_quads};
+use super::read::{
+    ANIMATION, COLOR, CeParticleSystemAt, CePctlDef, CreationPhysics, MINIMUM, ParticleType,
+    ParticleVariables, RADIUS, RATE, ROTATION, SCALE, TypeVariables,
+};
+use super::{
+    CePointPhysics, CeRandom, CeSecondaryMap, CeSpriteSheet, FramebufferBlend, ViewFrame, cross,
+    posed_on,
+};
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 /// How long a system runs before the preview first shows it.
 const PRE_ROLL: f32 = 4.0;

@@ -4,7 +4,11 @@ use super::super::super::common::sprite_gl::SpriteGl;
 use super::super::super::dx9::draw::{gl_blend_equation, gl_blend_factor};
 use super::super::super::gl::buffer::slice_bytes;
 use super::super::super::gl::texture::upload_image;
-use super::*;
+use super::super::super::{
+    ModelGpuCamera, ModelGpuFrame, RenderModelPreview, ce_flare_clip, common,
+};
+use super::effect_gl::{CE_EFFECT_FLOATS, CeEffectGl, ce_effect_gl};
+use crate::app::model_preview::ce;
 use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -653,7 +657,9 @@ pub(in crate::app::model_preview) fn ce_sorts_transparents(frame: &ModelGpuFrame
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::super::common;
     use super::*;
+    use crate::app::model_preview::ce;
 
     /// An eye at the origin looking along +X.
     fn looking_along_x() -> common::view::ViewFrame {

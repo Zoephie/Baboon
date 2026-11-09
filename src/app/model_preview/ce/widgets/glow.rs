@@ -1,6 +1,13 @@
 //! Glow widgets: their markers, particles and field.
 
-use super::*;
+use super::super::super::{RenderModelPreviewMarker, TagReader, resume_point};
+use super::lightning::{CeLightningQuad, Lcg};
+use super::{
+    CeRandom, Image, SamplerKind, ViewFrame, argb, cross, decode_image, dot, elements,
+    function_slot, has_flag, nonzero_unit, object_block, posed_on,
+};
+use blam_tags::{TagFile, TagStruct};
+use std::sync::Arc;
 
 impl super::super::functions::ReadsOutputs for CeGlow {
     fn object(&self) -> u8 {

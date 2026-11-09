@@ -1,6 +1,20 @@
 //! The glass shader's passes: tint, reflection and diffuse.
 
-use super::*;
+use super::animation::{CeModelAnimation, nonzero};
+use super::base::{
+    AMBIENT, FIRST_LIGHT_COLOR, GLASS_BUMPED_FILE, GLASS_DIFFUSE_FILE, GLASS_FLAT_FILE,
+    GLASS_TINT_FILE, GREY, SECOND_LIGHT_COLOR, SECOND_LIGHT_DIRECTION, ShaderFlags, SimplePass,
+    WHITE, flat, flat_normal, normalization, option_index, plain_blend, read_shader_source,
+    texture,
+};
+use super::special::unseen_pass;
+use super::transparent::TRANSPARENT_DECAL_DEPTH_BIAS;
+use super::{
+    Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, H2_GLSL_VERSION, H2_TEXTURE_ROWS, Image,
+    SamplerKind, translate_fx,
+};
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 fn lit_rows(scale: [f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
     let vector = |[x, y, z]: [f32; 3]| [x, y, z, 0.0];

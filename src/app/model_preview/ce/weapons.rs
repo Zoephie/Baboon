@@ -11,7 +11,10 @@ use super::super::common::marker::MarkerFrame;
 use super::super::dx9::passes::{ChangeColors, read_change_colors};
 use super::super::load::build_render_preview;
 use super::super::load::merge_attached;
-use super::super::*;
+use super::super::{
+    PreviewAnimationEntry, RenderModelPreview, RenderModelPreviewMarker, TagReader,
+    loose_weapon_paths, object_reference, tag_path,
+};
 use super::functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
 use crate::core::source::TagSource;
 
@@ -377,6 +380,11 @@ mod tests {
     use super::super::super::common::marker::{attach_point, attach_vector};
     use super::super::super::common::math::{IDENTITY, axis_of, minus, place_of};
     use super::super::super::common::math::{matrix_of, rigid_inverse};
+    use super::super::super::{
+        PreviewAnimationEntry, RenderModelPreview, RenderModelPreviewBatch,
+        RenderModelPreviewMarker, RenderModelPreviewMaterial, RenderModelPreviewRegion,
+        RenderModelPreviewVertex, load_referenced_tag_from_source,
+    };
     use super::*;
     use crate::app::model_preview::common::math::{dot, unit_by_reciprocal};
     use crate::app::model_preview::harness::kit::kit_source;

@@ -1,6 +1,8 @@
 //! One effect particle's step: its frame sequence and its update.
 
-use super::*;
+use super::read::CeParticleDef;
+use super::sim::{CeParticle, Fate};
+use super::{CeRandom, dot};
 
 /// `particle_datum` flags.
 pub(super) const BACKWARDS: u8 = 1;

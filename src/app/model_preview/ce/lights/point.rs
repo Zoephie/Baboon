@@ -1,6 +1,10 @@
 //! Point lights, baked to the register rows the shader passes read.
 
-use super::*;
+use super::super::super::TagReader;
+use super::flare::read_flare;
+use super::light::CeLight;
+use super::{UNSET, argb, ce_color_interpolation, dot, has_flag};
+use std::sync::Arc;
 
 pub(crate) use super::super::super::dx9::stage::CE_POINT_LIGHT_ROWS;
 

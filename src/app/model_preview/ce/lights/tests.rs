@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 /// A view from 10 units down -y, looking along +y.
 pub(in crate::app::model_preview) const VIEW: ViewFrame = ViewFrame {

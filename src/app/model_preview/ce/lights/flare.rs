@@ -1,6 +1,12 @@
 //! A light's lens flare and how it is read.
 
-use super::*;
+use super::super::super::TagReader;
+use super::light::CeReflection;
+use super::{
+    Image, OcclusionOffset, SamplerKind, argb, ce_color_interpolation, decode_image, elements,
+    has_flag, has_flag_in_any,
+};
+use std::sync::Arc;
 
 /// A `lens_flare` tag.
 #[derive(Debug, Clone)]

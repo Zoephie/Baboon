@@ -1,6 +1,10 @@
 //! Where Halo CE effects hang on an object: its attachments' effects and those its events name.
 
-use super::*;
+use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::read::{CeEffectCache, CeEffectDef};
+use super::{elements, function_slot_of, object_block};
+use blam_tags::TagFile;
+use std::sync::Arc;
 
 /// Where a location sits on the model: one per marker of its name.
 #[derive(Debug, Clone, Copy)]

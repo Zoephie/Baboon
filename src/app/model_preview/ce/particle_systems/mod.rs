@@ -9,17 +9,11 @@
 //! `build_sprite_rotational`. What tool's postprocess (`sub_49BFC0`,
 //! `sub_49BFE0`) fills in for the game is filled in here.
 
-use std::collections::VecDeque;
-use std::sync::Arc;
-
-use blam_tags::{TagFieldData, TagFile, TagStruct};
-
 use super::super::ce::random::CeRandom;
 use super::super::common::fields::{
     elements, function_slot_of, has_flag, has_flag_after, object_block,
 };
 use super::super::common::view::{ViewFrame, posed_on};
-use super::super::*;
 use crate::app::model_preview::ce::blend::FramebufferBlend;
 use crate::app::model_preview::ce::sprite_sheet::{
     CeSecondaryDraw, CeSecondaryMap, CeSpriteSheet, read_secondary_map, read_sprite_sheet,

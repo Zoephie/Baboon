@@ -9,7 +9,6 @@ use super::super::common::image::Image;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_image;
-use super::super::*;
 use super::shaders::periodic_evaluate;
 use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use crate::app::model_preview::ce::transition::transition_evaluate;
@@ -21,6 +20,7 @@ use crate::core::h2_pixel_shader::SamplerKind;
 mod light;
 pub(in crate::app::model_preview) use light::*;
 mod flare;
+#[cfg(test)]
 pub(in crate::app::model_preview) use flare::*;
 mod point;
 pub(in crate::app::model_preview) use point::*;

@@ -1,6 +1,14 @@
 //! A Halo CE object's lights: their reflections, coronas and colours, read off the object and what it holds.
 
-use super::*;
+use super::super::super::{RenderModelPreview, RenderModelPreviewMarker, TagFile, TagReader};
+use super::flare::CeFlare;
+use super::point::read_light_tag;
+use super::{
+    FlareSprite, MarkerFrame, OcclusionOffset, ViewFrame, attached_marker_frame,
+    ce_color_interpolate, cross, dot, elements, function_slot_of, lerp, object_block,
+    periodic_evaluate, posed_on,
+};
+use std::sync::Arc;
 
 /// `object_get_marker_by_name` as a widget reads it: the marker, or, when the
 /// object has none by that name (or the name is empty), the object's origin,

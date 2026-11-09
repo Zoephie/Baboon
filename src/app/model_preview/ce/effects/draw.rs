@@ -1,6 +1,7 @@
 //! An effect particle's sprite quad and its basis.
 
-use super::*;
+use super::sim::rotate_about;
+use super::{CeSecondaryDraw, FramebufferBlend, ViewFrame, cross, dot, unit_or_unchanged};
 
 /// What a sprite draws: the effect and particle it came from, its corners
 /// with texture coordinates, and the vertex color the `effect` shader reads.

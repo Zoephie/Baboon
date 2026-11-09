@@ -7,9 +7,6 @@
 //! `default_object_lighting`, what the game falls back on with no level.
 
 use crate::app::model_preview::load::TagReader;
-use std::sync::{Arc, LazyLock};
-
-use blam_tags::{TagBlock, TagFieldData, TagStruct};
 
 use super::super::common::fields::{argb, has_flag, has_flag_in_any};
 use super::super::common::image::Image;
@@ -36,11 +33,9 @@ mod model;
 pub(in crate::app::model_preview) use model::*;
 mod transparent;
 pub(in crate::app::model_preview) use transparent::*;
-mod glass;
-use glass::*;
-mod special;
-use special::*;
 mod camo;
+mod glass;
+mod special;
 pub(in crate::app::model_preview) use camo::*;
 #[cfg(test)]
 mod tests;

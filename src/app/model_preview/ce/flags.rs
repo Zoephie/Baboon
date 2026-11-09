@@ -9,7 +9,11 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, object_block};
 use super::super::common::view::posed_on;
-use super::super::*;
+use super::super::{
+    ModelPreviewLayer, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMarker,
+    RenderModelPreviewMaterial, RenderModelPreviewRegion, RenderModelPreviewVertex, TagReader,
+    frame_steps, resume_point,
+};
 use crate::app::model_preview::common::point_physics::CePointPhysics;
 use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 

@@ -1,6 +1,13 @@
 //! Reading a Halo CE particle system (`pctl`): its particle types, states and physics, and where it hangs.
 
-use super::*;
+use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::sim::{CeParticleState, MOST_MARKERS, TypeState};
+use super::{
+    CePointPhysics, CeSpriteSheet, FramebufferBlend, elements, function_slot_of, has_flag,
+    has_flag_after, object_block, read_secondary_map, read_sprite_sheet,
+};
+use blam_tags::{TagFieldData, TagFile, TagStruct};
+use std::sync::Arc;
 
 /// A particle type's `flags`, by name. Each kind of state's
 /// `... forward/backward` shares its name with the other's, so each is the

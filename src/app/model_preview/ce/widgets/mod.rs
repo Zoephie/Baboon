@@ -3,10 +3,6 @@
 //! Read from the Xbox 360 build's symbols; what tool's postprocess
 //! (`sub_5251C0`) fills in for the game is filled in here.
 
-use std::sync::Arc;
-
-use blam_tags::{TagFile, TagStruct};
-
 use super::super::ce::random::CeRandom;
 use super::super::common::fields::{
     elements, function_slot, function_slot_of, has_flag, object_block,
@@ -15,7 +11,6 @@ use super::super::common::image::Image;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_image;
-use super::super::*;
 use crate::app::model_preview::ce::blend::FramebufferBlend;
 use crate::app::model_preview::common::fields::argb;
 use crate::app::model_preview::common::math::{cross, dot, nonzero_unit};

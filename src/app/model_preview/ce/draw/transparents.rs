@@ -4,7 +4,10 @@
 use super::super::super::common::sprite_gl::link_sprite_gl;
 use super::super::super::common::view::ce_flare_view;
 use super::super::super::dx9::passes::Dx9Layer;
-use super::*;
+use super::super::super::{ModelGpuFrame, RenderCore, common};
+use super::effect_gl::CeEffectGl;
+use super::sprites::{CeGroup, ce_groups, ce_has_groups, ce_z_sort, draw_ce_group};
+use crate::app::model_preview::ce;
 use eframe::glow::{self, HasContext as _};
 
 /// Halo CE's transparents as `rasterizer_transparent_geometry_draw` draws

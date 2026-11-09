@@ -1,6 +1,19 @@
 //! The meter, water and plasma shaders' passes, and the pass for a shader nothing draws.
 
-use super::*;
+use super::animation::{
+    CeMeter, CeModelAnimation, CePlasma, CePlasmaNoise, function_source, nonzero,
+};
+use super::base::{
+    METER_FILE, PLASMA_FILE, ShaderFlags, SimplePass, WATER_OPACITY_FILE, WATER_REFLECTION_FILE,
+    WHITE, flat, flat_normal, normalization, plain_blend, read_shader_source, texture,
+};
+use super::glass::bumped_rows;
+use super::{
+    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9DrawPass, Dx9VertexStage, H2_GLSL_VERSION,
+    H2_TEXTURE_ROWS, Image, SamplerKind, translate_fx,
+};
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 /// The `shader_transparent_meter` case of
 /// `rasterizer_transparent_geometry_group_draw`.

@@ -1,6 +1,15 @@
 //! Reading a Halo CE effect: its particle definitions, parts, events and their flags.
 
-use super::*;
+use super::super::super::TagReader;
+use super::events::Distribution;
+use super::sim::created_here;
+use super::{
+    CeEffectLightDef, CePctlDef, CePointPhysics, CeSecondaryMap, CeSpriteFrame, CeSpriteSheet,
+    FramebufferBlend, Image, argb, ce_color_interpolation, elements, has_flag, read_effect_light,
+    read_pctl_def, read_secondary_map, read_sprite_sheet,
+};
+use blam_tags::{TagFieldData, TagStruct};
+use std::sync::Arc;
 
 /// A `particle`'s `flags`, by name.
 #[derive(Debug, Clone, Copy)]

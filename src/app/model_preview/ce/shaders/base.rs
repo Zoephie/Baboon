@@ -1,6 +1,12 @@
 //! What every Halo CE shader pass builds from: the kit's shader files, the default lights, flags, plain maps and simple passes.
 
-use super::*;
+use super::{
+    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
+    Dx9DrawTexture, Dx9VertexStage, H2_TEXTURE_ROWS, Image, SamplerKind, TagReader, TagSource,
+    has_flag_in_any,
+};
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 pub(super) const COMMON_FILE: &str = "model_common.h";
 

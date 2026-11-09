@@ -1,7 +1,9 @@
+use super::glass::decal_bias;
 use super::*;
 use crate::app::export::load_referenced_tag_from_source;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
+use std::sync::Arc;
 
 const SINGLE_GROUPS: [(&str, &[u8; 4]); 4] = [
     ("shader_transparent_glass", b"sgla"),

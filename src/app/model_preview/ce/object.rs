@@ -2,7 +2,10 @@
 
 use super::super::load::{build_render_preview, feature, feature_into};
 use super::super::object_reference;
-use super::super::*;
+use super::super::{
+    ModelPreviewData, PreviewLoadSettings, RenderModelPreview, RenderModelPreviewMarker,
+    RenderModelPreviewMaterial, TagEntry, TagReader, model_preview_data, read_change_colors,
+};
 use blam_tags::TagFile;
 
 /// A Halo CE object's own lights, antennas, effects, contrails, light volumes,

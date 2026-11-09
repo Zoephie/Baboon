@@ -11,17 +11,12 @@
 //! it in. The preview has no level, and simulates as though the object stood
 //! in one.
 
-use std::sync::Arc;
-
-use blam_tags::{TagFieldData, TagFile, TagStruct};
-
 use super::super::ce::random::CeRandom;
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::super::common::image::Image;
 use super::super::common::point_physics::CePointPhysics;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
-use super::super::*;
 use super::lights::{CeEffectLightDef, CeLight, read_effect_light};
 use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, new_unattached, read_pctl_def,
@@ -45,9 +40,9 @@ mod events;
 pub(in crate::app::model_preview) use events::*;
 mod sim;
 pub(in crate::app::model_preview) use sim::*;
-mod particle;
-use particle::*;
 mod draw;
+mod particle;
+#[cfg(test)]
 pub(in crate::app::model_preview) use draw::*;
 #[cfg(test)]
 mod tests;

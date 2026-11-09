@@ -1,6 +1,8 @@
 //! A particle system's sprite quads.
 
-use super::*;
+use super::read::{COLOR, CePctlDef, SCALE};
+use super::sim::{CeParticleState, CeRunningSystem};
+use super::{CeRandom, CeSecondaryDraw, FramebufferBlend, ViewFrame, dot, unit_or_unchanged};
 
 /// `particle_system_render` for one system.
 #[allow(clippy::too_many_arguments)]

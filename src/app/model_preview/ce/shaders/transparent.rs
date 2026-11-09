@@ -1,6 +1,23 @@
 //! The transparent generic and chicago shaders' passes, with their stages, fades and maps.
 
-use super::*;
+use super::animation::{
+    CeColorAnimation, CeMapAnimation, CeModelAnimation, PERIODIC_FUNCTIONS, color_channel,
+    function_source, identity_map_rows, nonzero, read_map_animation,
+};
+use super::base::{
+    ALPHA_REFERENCE, CHICAGO_FILE, GENERIC_FILE, ShaderFlags, flat, option_index,
+    read_shader_source, shader_directory, texture,
+};
+use super::glass::{decal_bias, glass_passes};
+use super::model::LAYER_GROUPS;
+use super::special::{meter_pass, plasma_pass, water_passes};
+use super::{
+    CeNumeric, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass, Dx9DrawTexture, Dx9VertexStage,
+    FADE_MODES, FramebufferBlend, H2_GLSL_VERSION, Image, SamplerKind, TagReader, argb, has_flag,
+    translate_fx,
+};
+use blam_tags::{TagBlock, TagFieldData, TagStruct};
+use std::sync::Arc;
 
 /// `sub_859960` in MCC's tag_test: a stage's color function as the kit's
 /// chicago shader reads it.

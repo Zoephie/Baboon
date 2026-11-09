@@ -12,7 +12,7 @@ use super::super::common::fields::{elements, function_slot_of, has_flag, object_
 use super::super::common::image::Image;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::materials::decode_image;
-use super::super::*;
+use super::super::{RenderModelPreviewMarker, TagReader, frame_steps, resume_point};
 use super::random::CeRandom;
 use crate::app::model_preview::ce::blend::FramebufferBlend;
 use crate::app::model_preview::common::fields::argb;

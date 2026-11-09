@@ -1,6 +1,19 @@
 //! The running effects and their particle field: spawning parts and systems, generating particles, a tick at a time.
 
-use super::*;
+use super::super::super::{frame_steps, resume_point};
+use super::draw::{CeParticleQuad, sprite_basis};
+use super::events::{CeEventPlays, integral, set_event, update_effect};
+use super::particle::{BACKWARDS, MIRROR_U, MIRROR_V, next_sequence, update_particle};
+use super::place::{CeEffectAt, CeLocation, CeSpawn};
+use super::read::CeEffectDef;
+use super::{
+    CeLight, CePctlQuad, CeRandom, CeRunningSystem, CeTicks, FramebufferBlend,
+    MOST_SYSTEM_PARTICLES, PRE_ROLL, STEP, ViewFrame, ce_color_interpolate, cross, dot,
+    new_unattached, perpendicular, posed_on, unattached_quads, unit_or_unchanged,
+    update_unattached,
+};
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 /// `effect_update` runs at most this many events in a tick.
 pub(super) const MOST_EVENTS_A_TICK: usize = 8;

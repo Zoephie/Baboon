@@ -1,6 +1,13 @@
 //! Active camouflage: its settings and its pass.
 
-use super::*;
+use super::base::{
+    CAMO_FILE, SimplePass, plain_blend, read_shader_source, shader_directory, texture,
+};
+use super::{
+    Dx9BlendFactor, Dx9DrawPass, Dx9VertexStage, H2_GLSL_VERSION, H2_TEXTURE_ROWS, Image,
+    SamplerKind, TagReader, has_flag, translate_fx,
+};
+use std::sync::Arc;
 
 /// What `globals` gives every object's active camouflage.
 #[derive(Debug, Clone, PartialEq)]

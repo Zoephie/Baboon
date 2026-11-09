@@ -1,6 +1,19 @@
 //! The model shaders' passes (`soso`, `senv`).
 
-use super::*;
+use super::animation::{CeModelAnimation, DETAIL_FUNCTIONS, color_channel, read_model_animation};
+use super::base::{
+    ALPHA_REFERENCE, AMBIENT, COMMON_FILE, FIRST_LIGHT_COLOR, FIRST_LIGHT_DIRECTION, GREY,
+    REFLECTION_TINT, SECOND_LIGHT_COLOR, SECOND_LIGHT_DIRECTION, ShaderFlags, WHITE, flat,
+    option_index, read_shader_source, shader_directory, texture,
+};
+use super::transparent::MODEL_DECAL_DEPTH_BIAS;
+use super::{
+    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
+    Dx9VertexStage, H2_GLSL_VERSION, H2_TEXTURE_ROWS, Image, PassAnimation, SamplerKind, TagReader,
+    TranslatedFxShader, translate_fx,
+};
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 /// `model_common.h` translated, or `None` where the kit has no shaders.
 pub(in crate::app::model_preview) type CeModelCommon = Arc<TranslatedFxShader>;

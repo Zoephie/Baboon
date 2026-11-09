@@ -1,10 +1,10 @@
 //! Halo CE's sprite sheets and secondary maps, which effects, particle systems and contrails share.
 
+use super::super::TagReader;
 use super::super::common::fields::elements;
 use super::super::common::image::Image;
 use super::super::common::view::ViewFrame;
 use super::super::materials::decode_image;
-use super::super::*;
 use super::shaders::{CeMapAnimation, read_effect_map_animation};
 use crate::core::h2_pixel_shader::SamplerKind;
 use blam_tags::TagStruct;

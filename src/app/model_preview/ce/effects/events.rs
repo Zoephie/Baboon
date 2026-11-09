@@ -1,6 +1,13 @@
 //! An effect's event state machine: which event runs, for how long, and with what inputs.
 
-use super::*;
+use super::CeRandom;
+use super::place::CeEffectAt;
+use super::read::CeEffectDef;
+use super::sim::{
+    CeObjectInputs, MOST_EVENTS_A_TICK, Made, RunningEffect, generate_particles, generate_parts,
+    generate_systems, scaled,
+};
+use blam_tags::TagStruct;
 
 /// The panel's plays of the objects' event effects: how many times each of
 /// the preview's effects has been played, by index (zero for those that are

@@ -1,6 +1,9 @@
 //! The lights an effect brings.
 
-use super::*;
+use super::super::super::TagReader;
+use super::light::CeLight;
+use super::point::read_light_tag;
+use super::transition_evaluate;
 
 /// A light an effect's part makes with `light_new_unattached`: it lives for
 /// the tag's `duration`, fading by its `falloff function`.
