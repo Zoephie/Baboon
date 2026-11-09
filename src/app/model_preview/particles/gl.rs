@@ -10,7 +10,26 @@ use super::super::reach::lighting::reach_particle_light;
 const PARTICLE_VERTEX: &str = include_str!("shaders/particle.vert");
 
 fn particle_fragment() -> String {
-    fill(include_str!("shaders/particle.frag"), &[("view_depth", &VIEW_DEPTH)])
+    use particles::ParticleAlbedo;
+    // Each `u_albedo` the program tests, from the option it stands for.
+    fill(
+        include_str!("shaders/particle.frag"),
+        &[
+            ("view_depth", &VIEW_DEPTH),
+            ("albedo_diffuse_billboard_alpha", &(ParticleAlbedo::DiffuseBillboardAlpha as i32)),
+            ("albedo_diffuse_sprite_alpha", &(ParticleAlbedo::DiffuseSpriteAlpha as i32)),
+            ("albedo_palette", &(ParticleAlbedo::Palette as i32)),
+            ("albedo_palette_billboard_alpha", &(ParticleAlbedo::PaletteBillboardAlpha as i32)),
+            ("albedo_palette_sprite_alpha", &(ParticleAlbedo::PaletteSpriteAlpha as i32)),
+            ("albedo_diffuse_modulated", &(ParticleAlbedo::DiffuseModulated as i32)),
+            ("albedo_palette_glow", &(ParticleAlbedo::PaletteGlow as i32)),
+            ("albedo_palette_plasma", &(ParticleAlbedo::PalettePlasma as i32)),
+            ("albedo_h2_tint", &(ParticleAlbedo::H2Tint as i32)),
+            ("albedo_h2_multiply_add", &(ParticleAlbedo::H2MultiplyAdd as i32)),
+            ("albedo_h2_distortion", &(ParticleAlbedo::H2Distortion as i32)),
+            ("albedo_palette_2d_plasma", &(ParticleAlbedo::Palette2dPlasma as i32)),
+        ],
+    )
 }
 
 const PARTICLE_FLOATS: usize = 24;

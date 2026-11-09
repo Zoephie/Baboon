@@ -39,23 +39,23 @@ out vec4 out_color;
 ${view_depth}// `other` is the second sprite texcoord, which only Reach's plasmas read.
 vec4 albedo(vec2 sprite, vec2 other, float particle_alpha, float depth_fade) {
     float external_alpha = particle_alpha * depth_fade;
-    if (u_albedo == 6) {
+    if (u_albedo == ${albedo_diffuse_modulated}) {
         vec4 diffuse = texture(u_base, sprite);
         float brightness = dot(diffuse.rgb, diffuse.rgb) / sqrt(3.0);
         diffuse.rgb *= mix(u_tint, vec3(1.0), u_modulation.x * brightness);
         return diffuse;
     }
-    if (u_albedo == 7) {
+    if (u_albedo == ${albedo_palette_glow}) {
         float ramp = texture(u_base, sprite).g;
         float glow = v_extra.y * ramp;
         return vec4(clamp(u_tint * glow * pow(2.0, glow * 6.0), 0.0, 1.0), ramp);
     }
-    if (u_albedo == 8 || u_albedo == 12) {
+    if (u_albedo == ${albedo_palette_plasma} || u_albedo == ${albedo_palette_2d_plasma}) {
         vec2 second = u_plasma_second_sprite ? other : sprite;
         float noise_a = texture(u_base, sprite * u_base_xform.xy + u_base_xform.zw).r;
         float noise_b = texture(u_base2, second * u_base2_xform.xy + u_base2_xform.zw).r;
         float alpha = texture(u_alpha, v_billboard).a;
-        if (u_albedo == 12) {
+        if (u_albedo == ${albedo_palette_2d_plasma}) {
             // Reach's `palettized_2d_plasma`: no alpha term but the palette
             // shift's, and the depth fade picks the palette's row.
             float index = clamp(abs(noise_a - noise_b), 0.0, 1.0);
@@ -69,21 +69,21 @@ vec4 albedo(vec2 sprite, vec2 other, float particle_alpha, float depth_fade) {
     vec4 tone = base;
     float row = v_extra.y;
     // The palette options; Halo 2's tints read the base map alone.
-    if (u_albedo >= 3 && u_albedo <= 5) {
+    if (u_albedo >= ${albedo_palette} && u_albedo <= ${albedo_palette_sprite_alpha}) {
         // Reach's `palette_shift` moves the index by what has faded.
         float shifted = clamp(base.r + (1.0 - depth_fade * particle_alpha) * u_palette_shift, 0.0, 1.0);
         float index = u_palette_shift == 0.0 ? base.r : shifted;
         tone = texture(u_palette, vec2(index, row));
     }
-    if (u_albedo == 1 || u_albedo == 4) {
+    if (u_albedo == ${albedo_diffuse_billboard_alpha} || u_albedo == ${albedo_palette_billboard_alpha}) {
         tone.a = texture(u_alpha, v_billboard).a;
-    } else if (u_albedo == 2 || u_albedo == 5) {
+    } else if (u_albedo == ${albedo_diffuse_sprite_alpha} || u_albedo == ${albedo_palette_sprite_alpha}) {
         tone.a = texture(u_alpha, sprite).a;
     }
     return tone;
 }
 void main() {
-    if (u_albedo == 11) {
+    if (u_albedo == ${albedo_h2_distortion}) {
         // `effect_shader_alphablend_distortion_0.psh` (U is the decode's green,
         // V its red). MCC makes `v8u8` an `R8G8_SNORM` texture (`dword_EBC5B8`),
         // so the shader's unsigned-to-signed `bump - round(bump)` runs on bytes
@@ -138,13 +138,13 @@ void main() {
         }
         color.a = 1.0;
     }
-    if (u_albedo == 9) {
+    if (u_albedo == ${albedo_h2_tint}) {
         vec3 fourth = color.rgb * color.rgb;
         fourth *= fourth;
         vec3 toward = mix(fourth, color.rgb, v_color.rgb);
         color.rgb = mix(toward, color.rgb * v_color.rgb, u_modulation.x);
         color.a *= v_color.a;
-    } else if (u_albedo == 10) {
+    } else if (u_albedo == ${albedo_h2_multiply_add}) {
         color.rgb *= v_color.rgb * v_color.a;
         color.a *= v_color.a;
     } else {
@@ -173,7 +173,7 @@ void main() {
         color.rgb += u_add;
     }
     // `convert_to_render_target_premultiplied_alpha`.
-    if (u_premultiplied && u_albedo != 10) {
+    if (u_premultiplied && u_albedo != ${albedo_h2_multiply_add}) {
         color.rgb *= color.a;
     }
     out_color = color;
