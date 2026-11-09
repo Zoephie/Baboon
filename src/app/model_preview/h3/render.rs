@@ -12,6 +12,8 @@ use super::super::particles::particle_floats;
 use super::slot::H3Slot;
 use super::super::gen3::effects::screen::H3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
+use super::super::gen3::pipeline::PictureCopies;
+use super::super::frame::ModelGpuFrame;
 use super::bloom::H3Bloom;
 use super::super::gen3::shadow::h3_shadow_style;
 
@@ -23,7 +25,11 @@ pub(in crate::app::model_preview) struct H3Game {
     /// The final composite's program.
     pub(super) composite_program: Option<glow::NativeProgram>,
     /// Each of the renderer's slots' state.
-    slots: GameSlots<H3Slot>,
+    pub(super) slots: GameSlots<H3Slot>,
+    /// VISR's and the motion suck's programs, and VISR's mask.
+    pub(super) vision_program: Option<glow::NativeProgram>,
+    pub(super) suck_program: Option<glow::NativeProgram>,
+    pub(super) vision_mask: Option<glow::NativeTexture>,
 }
 
 impl Gen3Game for H3Game {
@@ -58,8 +64,16 @@ impl Gen3Game for H3Game {
         true
     }
 
-    fn vision_on_for(&mut self, slot: usize, uploads: u64, time: f32) -> f32 {
-        self.slots.of(slot, uploads).vision_on_for(time)
+    fn picture_effects(&self, frame: &ModelGpuFrame, screen: &H3ScreenSettings) -> bool {
+        Self::draws_picture_effects(frame, screen)
+    }
+
+    unsafe fn before_screen_shaders(&mut self, cx: &mut Gen3Cx<'_>, screen: &H3ScreenSettings, copies: &PictureCopies) {
+        unsafe { self.draw_picture_suck(cx, screen, copies) }
+    }
+
+    unsafe fn after_blur(&mut self, cx: &mut Gen3Cx<'_>, screen: &H3ScreenSettings, copies: &PictureCopies) {
+        unsafe { self.draw_picture_vision(cx, screen, copies) }
     }
 
     #[cfg(test)]

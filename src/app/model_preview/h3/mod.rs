@@ -11,6 +11,7 @@ pub(crate) mod lights;
 pub(in crate::app::model_preview) mod render;
 pub(in crate::app::model_preview) mod slot;
 pub(crate) mod vision;
+mod vision_pass;
 
 /// What only a Halo 3 or ODST object brings to its preview: its lights,
 /// shield override, leaves, VISR and motion blur.

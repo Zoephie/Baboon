@@ -63,6 +63,15 @@ pub(crate) struct H3ScreenSettings {
     suck_toward: [f32; 3],
 }
 
+#[cfg(test)]
+impl H3ScreenSettings {
+    /// The defaults, with VISR at `vision` and the view seeming to move by
+    /// `suck_toward`.
+    pub(crate) fn seeing(vision: f32, suck_toward: [f32; 3]) -> Self {
+        Self { vision, suck_toward, ..Self::default() }
+    }
+}
+
 impl Default for H3ScreenSettings {
     /// `set_defaults`.
     fn default() -> Self {

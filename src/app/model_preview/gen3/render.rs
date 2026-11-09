@@ -11,6 +11,7 @@ use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
 use super::effects::screen::H3ScreenSettings;
+use super::pipeline::PictureCopies;
 use super::shaders::H3Material;
 use super::sprites::{Gen3Sprite, Gen3Sprites};
 use super::state::Gen3State;
@@ -111,11 +112,17 @@ pub(in crate::app::model_preview) trait Gen3Game {
         false
     }
 
-    /// How long VISR has been on as of `time`, for `slot`'s `uploads`th
-    /// model. Only Halo 3 and ODST read a vision.
-    fn vision_on_for(&mut self, _slot: usize, _uploads: u64, _time: f32) -> f32 {
-        0.0
+    /// Whether the game draws over the finished picture, around its screen
+    /// shaders and blur (Halo 3's and ODST's VISR and motion suck).
+    fn picture_effects(&self, _frame: &ModelGpuFrame, _screen: &H3ScreenSettings) -> bool {
+        false
     }
+
+    /// Over the finished picture, before its screen shaders.
+    unsafe fn before_screen_shaders(&mut self, _cx: &mut Gen3Cx<'_>, _screen: &H3ScreenSettings, _copies: &PictureCopies) {}
+
+    /// Over the finished picture, after its blur.
+    unsafe fn after_blur(&mut self, _cx: &mut Gen3Cx<'_>, _screen: &H3ScreenSettings, _copies: &PictureCopies) {}
 
     /// Each simulation the game keeps for `slot` while it holds its
     /// `uploads`th model, by name.
