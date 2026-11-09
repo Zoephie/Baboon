@@ -1,6 +1,6 @@
-use super::super::super::super::gen3::pipeline::{reach_alt_exposure, reach_exposure};
+use super::super::super::super::gen3::pipeline::{stops_alt_exposure, stops_exposure};
 use super::super::super::super::{TagSource, load_referenced_tag_from_source};
-use super::super::super::pipeline::EXPOSURE as H3_EXPOSURE;
+use super::super::super::pipeline::EXPOSURE as FIXED_EXPOSURE;
 use super::super::super::shaders::Gen3Blend;
 use super::contrail::RunningContrail;
 use super::geometry::*;
@@ -354,17 +354,17 @@ fn a_reach_strip_is_exposed_by_its_blend_and_the_stops() {
     };
     let red = |look: &StripLook, stops: f32| exposed(look, [1.0, 0.0, 0.0], 1.0, 1.0, stops)[0];
     let additive = blended(Gen3Blend::Additive, true);
-    assert_eq!(red(&additive, 0.0), reach_alt_exposure(0.0)[1]);
-    assert_eq!(red(&additive, 1.0), reach_alt_exposure(1.0)[1]);
+    assert_eq!(red(&additive, 0.0), stops_alt_exposure(0.0)[1]);
+    assert_eq!(red(&additive, 1.0), stops_alt_exposure(1.0)[1]);
     assert_ne!(red(&additive, 1.0), red(&additive, 0.0));
     assert_eq!(
         red(&blended(Gen3Blend::AlphaBlend, true), 1.0),
-        reach_exposure(1.0)[0]
+        stops_exposure(1.0)[0]
     );
     assert_eq!(red(&blended(Gen3Blend::Multiply, true), 1.0), 1.0);
     assert_eq!(
         red(&blended(Gen3Blend::Additive, false), 1.0),
-        H3_EXPOSURE,
+        FIXED_EXPOSURE,
         "Halo 3's ignore the stops"
     );
 }

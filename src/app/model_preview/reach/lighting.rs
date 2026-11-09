@@ -6,8 +6,8 @@
 use super::super::common::camera::camera_light;
 use super::super::frame::ModelGpuFrame;
 use super::super::gen3::pipeline::{
-    DEFAULT_DUAL_VMF, DEFAULT_LIGHT_COLOR, DEFAULT_LIGHT_DIRECTION, reach_alt_exposure,
-    reach_exposure,
+    DEFAULT_DUAL_VMF, DEFAULT_LIGHT_COLOR, DEFAULT_LIGHT_DIRECTION, stops_alt_exposure,
+    stops_exposure,
 };
 use super::super::gen3::shaders::Gen3Value;
 use crate::app::model_preview::common::math::unit_or_unchanged;
@@ -216,8 +216,8 @@ pub(in crate::app::model_preview) fn reach_frame_value(
         // the cube maps' levels, and the object's cube map sample, at its
         // defaults, weighs the first map whole.
         "dynamic_environment_blend" => floats([0.0, 0.0, 0.0, 1.0]),
-        "g_exposure" => floats(reach_exposure(stops)),
-        "g_alt_exposure" => floats(reach_alt_exposure(stops)),
+        "g_exposure" => floats(stops_exposure(stops)),
+        "g_alt_exposure" => floats(stops_alt_exposure(stops)),
         "object_velocity" | "antialias_scalars" => floats([0.0; 4]),
         _ => None,
     }
@@ -225,7 +225,7 @@ pub(in crate::app::model_preview) fn reach_frame_value(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::gen3::pipeline::{reach_lightmap_tint, reach_particle_light};
+    use super::super::super::gen3::pipeline::{probe_lightmap_tint, probe_particle_light};
     use super::*;
 
     /// Foliage reads the vMF in its vertex stage; both stages name the same four.
@@ -320,7 +320,7 @@ mod tests {
     /// The numbers the default sample works out to by hand.
     #[test]
     fn a_lit_particle_takes_the_default_samples_bright_dark_and_ambient() {
-        let light = reach_particle_light();
+        let light = probe_particle_light();
         assert!(
             close(light.direction, DEFAULT_LIGHT_DIRECTION),
             "{:?}",
@@ -352,10 +352,10 @@ mod tests {
     /// as they were.
     #[test]
     fn a_lightmap_tint_keeps_its_exponent_in_255ths_and_its_colour_under_one() {
-        let tint = reach_lightmap_tint();
+        let tint = probe_lightmap_tint();
         assert!(close(tint, [1.064515, 0.893373, 0.896688]), "{tint:?}");
         assert!(
-            tint[0] < reach_particle_light().ambient[0],
+            tint[0] < probe_particle_light().ambient[0],
             "clamped before the exponent comes back"
         );
     }

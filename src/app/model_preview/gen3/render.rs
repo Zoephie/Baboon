@@ -11,7 +11,7 @@ use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
 use super::effects::screen::Gen3ScreenSettings;
-use super::pipeline::reach_exposure;
+use super::pipeline::stops_exposure;
 use super::pipeline::{FrameValues, Gen3PassHooks, NoPassHooks, PictureCopies, halo3_frame_values};
 use super::shaders::{Gen3Material, Gen3ShieldSettings, Gen3Texture};
 use super::sprites::{Gen3Sprite, Gen3Sprites, OwnSortPlace};
@@ -171,7 +171,7 @@ pub(in crate::app::model_preview) trait Gen3Game {
     /// ps_view_self_illum_exposure.y, alpha)`), at the frame's `stops`: the
     /// shared exposure, both alike.
     fn cheap_exposures(&self, stops: f32) -> [f32; 2] {
-        let exposure = reach_exposure(stops)[0];
+        let exposure = stops_exposure(stops)[0];
         [exposure, exposure]
     }
 

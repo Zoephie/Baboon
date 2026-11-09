@@ -5,7 +5,7 @@
 
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::pipeline::{REACH_EXPOSURE, REACH_HDR_DIVISOR};
+use super::super::gen3::pipeline::{DEFAULT_RENDER_EXPOSURE, HDR_DIVISOR};
 use super::super::gen3::pipeline::{set_value, view_projection};
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::screen_lights::screen_to_relative_world;
@@ -175,9 +175,9 @@ impl ReachGame {
                     // Tag lights come down by the HDR target's stops; cheap
                     // lights only by exposure (`render_cheap_screenspace_lights`).
                     let exposure = if light.cheap {
-                        REACH_EXPOSURE
+                        DEFAULT_RENDER_EXPOSURE
                     } else {
-                        REACH_EXPOSURE / REACH_HDR_DIVISOR
+                        DEFAULT_RENDER_EXPOSURE / HDR_DIVISOR
                     };
                     let [r, g, b] = light.color.map(|channel| channel * exposure * fade);
                     let to_light: [f32; 3] =

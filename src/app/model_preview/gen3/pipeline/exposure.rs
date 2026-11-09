@@ -1,6 +1,7 @@
-//! Reach's exposure model, which Halo 4's effects and the cheap particles
-//! share: the default light probe sample as effects light by it, and the
-//! render target's exposure, `g_exposure` and `g_alt_exposure`.
+//! The later engines' exposure model (Reach's, which Halo 4's effects and
+//! the cheap particles share): the default light probe sample as effects
+//! light by it, and the render target's exposure, `g_exposure` and
+//! `g_alt_exposure`.
 
 /// `c_geometry_sampler::m_default_lightprobe_sample` (MCC 0x14201E920, the
 /// 360's 0x8527C000, the same floats): its dual vMF, as
@@ -32,7 +33,7 @@ pub(in crate::app::model_preview) const DEFAULT_LIGHT_COLOR: [f32; 3] =
 /// Effects sample the probe, so the preview's turning of the object's light
 /// does not reach them [inferred: with no level, the default sample unturned].
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ReachParticleLight {
+pub(crate) struct ProbeParticleLight {
     /// `get_bright_direction` (0x8273F890): the analytical light's direction.
     pub(crate) direction: [f32; 3],
     /// `get_bright_color` (0x8273F8C0): `(c1·c1.w + c3 + c2.w²·L) / π`.
@@ -43,13 +44,13 @@ pub(crate) struct ReachParticleLight {
     pub(crate) ambient: [f32; 3],
 }
 
-/// The default sample's [`ReachParticleLight`], from its dual vMF's colours
+/// The default sample's [`ProbeParticleLight`], from its dual vMF's colours
 /// (`c1`, `c3`), their masks and the analytical light's colour `L`.
-pub(crate) fn reach_particle_light() -> ReachParticleLight {
+pub(crate) fn probe_particle_light() -> ProbeParticleLight {
     use std::f32::consts::PI;
     let [_, first, second, third] = DEFAULT_DUAL_VMF;
     let light = DEFAULT_LIGHT_COLOR;
-    ReachParticleLight {
+    ProbeParticleLight {
         direction: DEFAULT_LIGHT_DIRECTION,
         bright: std::array::from_fn(|at| {
             (first[at] * first[3] + third[at] + second[3] * second[3] * light[at]) / PI
@@ -66,8 +67,8 @@ pub(crate) fn reach_particle_light() -> ReachParticleLight {
 /// in `default_vs`: the ambient over its exponent in 255ths of a stop (of at
 /// most one), back up by it as `initial.rgb · exp2(initial.w)`. The colour
 /// goes out as an `argb_color`, so it holds at most 1 \[inferred\].
-pub(crate) fn reach_lightmap_tint() -> [f32; 3] {
-    let ambient = reach_particle_light().ambient;
+pub(crate) fn probe_lightmap_tint() -> [f32; 3] {
+    let ambient = probe_particle_light().ambient;
     let brightest = ambient[0].max(ambient[1]).max(ambient[2]).max(1e-4);
     let exponent = (brightest.log2().clamp(0.0, 1.0) * 255.0).floor() / 255.0;
     ambient.map(|channel| (channel * 2f32.powf(-exponent)).min(1.0) * 2f32.powf(exponent))
@@ -78,12 +79,12 @@ pub(crate) fn reach_lightmap_tint() -> [f32; 3] {
 const HDR_TARGET_STOPS: f32 = 3.0;
 
 /// What the stops bring light down by: `2^HDR_TARGET_STOPS`.
-pub(in crate::app::model_preview) const REACH_HDR_DIVISOR: f32 = 8.0;
+pub(in crate::app::model_preview) const HDR_DIVISOR: f32 = 8.0;
 
 /// `get_render_exposure` at the default `camera_fx_settings`' 0 stops and a
 /// white point of 1 (the 360's 0x8272B0F8; MCC's not located).
-pub(in crate::app::model_preview) const REACH_EXPOSURE: f32 = 1.0;
-use REACH_EXPOSURE as EXPOSURE;
+pub(in crate::app::model_preview) const DEFAULT_RENDER_EXPOSURE: f32 = 1.0;
+use DEFAULT_RENDER_EXPOSURE as EXPOSURE;
 
 /// `globals\defaults\default.camera_fx_settings`' `self illum preferred` and
 /// `self illum scale`, both fixed.
@@ -110,7 +111,7 @@ fn illum_render_scale(stops: f32) -> f32 {
 /// `g_exposure`, and the vertex shaders' `v_exposure` alike. Exposure brought
 /// down by the target's stops, the stops' factor, exposure, alpha. `stops`
 /// is what the area screen effects come to; 0 without one.
-pub(crate) fn reach_exposure(stops: f32) -> [f32; 4] {
+pub(crate) fn stops_exposure(stops: f32) -> [f32; 4] {
     let dark = 2f32.powf(HDR_TARGET_STOPS);
     let exposure = render_exposure(stops);
     [exposure / dark, dark, exposure, 1.0]
@@ -119,7 +120,7 @@ pub(crate) fn reach_exposure(stops: f32) -> [f32; 4] {
 /// The same's `g_alt_exposure` and `v_alt_exposure`: self-illumination's
 /// scale, and it under the same. That `.x` is the illum scale itself is
 /// lighting.md's reading of 0x82666F08, not re-read with stops on.
-pub(crate) fn reach_alt_exposure(stops: f32) -> [f32; 4] {
+pub(crate) fn stops_alt_exposure(stops: f32) -> [f32; 4] {
     let dark = 2f32.powf(HDR_TARGET_STOPS);
     let (illum, exposure) = (illum_render_scale(stops), render_exposure(stops));
     [illum, illum * exposure / dark, exposure, 0.0]
@@ -135,15 +136,15 @@ mod tests {
     /// `2^(0.3s)`; at none, as before.
     #[test]
     fn reach_exposure_moves_by_the_stops_and_illumination_by_less() {
-        assert_eq!(reach_exposure(0.0), [1.0 / 8.0, 8.0, 1.0, 1.0]);
-        assert_eq!(reach_alt_exposure(0.0), [1.0, 1.0 / 8.0, 1.0, 0.0]);
-        assert_eq!(reach_exposure(1.0), [2.0 / 8.0, 8.0, 2.0, 1.0]);
-        let alt = reach_alt_exposure(1.0);
+        assert_eq!(stops_exposure(0.0), [1.0 / 8.0, 8.0, 1.0, 1.0]);
+        assert_eq!(stops_alt_exposure(0.0), [1.0, 1.0 / 8.0, 1.0, 0.0]);
+        assert_eq!(stops_exposure(1.0), [2.0 / 8.0, 8.0, 2.0, 1.0]);
+        let alt = stops_alt_exposure(1.0);
         assert!((alt[0] - 2f32.powf(-0.7)).abs() < 1e-6, "{alt:?}");
         assert!((alt[1] - 2f32.powf(0.3) / 8.0).abs() < 1e-6, "{alt:?}");
         assert_eq!(alt[2], 2.0);
         assert!(
-            reach_alt_exposure(-2.0)[1] < reach_alt_exposure(0.0)[1],
+            stops_alt_exposure(-2.0)[1] < stops_alt_exposure(0.0)[1],
             "a deboost darkens"
         );
     }

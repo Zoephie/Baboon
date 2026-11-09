@@ -8,9 +8,9 @@ use super::GameId;
 use super::look::{AlbedoConstants, ParticleAlbedo, ParticleLighting};
 use super::rules::ParticleRules;
 use super::{
-    Gen3Bitmap, Gen3Blend, H3_EXPOSURE, Sampler, SamplerKind, dot, elements, reach_alt_exposure,
-    reach_exposure, read_gen3_bitmap, read_h3_definition, read_resolved_map,
-    resolve_embedded_method, tag_function_at,
+    FIXED_EXPOSURE, Gen3Bitmap, Gen3Blend, Sampler, SamplerKind, dot, elements, read_gen3_bitmap,
+    read_h3_definition, read_resolved_map, resolve_embedded_method, stops_alt_exposure,
+    stops_exposure, tag_function_at,
 };
 use blam_tags::render_method::{
     BitmapAddressMode, BitmapFilterMode, ParameterSource, ResolvedRenderMethod, ResolvedValue,
@@ -105,7 +105,7 @@ impl SpriteShader {
     /// exposure `stops` where it is Reach's.
     pub(crate) fn add(&self, stops: f32) -> [f32; 3] {
         let exposure = if self.add_at_illum {
-            reach_alt_exposure(stops)[1]
+            stops_alt_exposure(stops)[1]
         } else {
             1.0
         };
@@ -448,11 +448,11 @@ pub(in crate::app::model_preview) fn particle_exposure(
     if blend == Gen3Blend::Multiply || !exposed {
         1.0
     } else if !reach_exposure_stops {
-        H3_EXPOSURE
+        FIXED_EXPOSURE
     } else if matches!(blend, Gen3Blend::Additive | Gen3Blend::AddSrcTimesSrcAlpha) {
-        reach_alt_exposure(stops)[1]
+        stops_alt_exposure(stops)[1]
     } else {
-        reach_exposure(stops)[0]
+        stops_exposure(stops)[0]
     }
 }
 

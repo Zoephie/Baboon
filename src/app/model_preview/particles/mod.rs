@@ -22,9 +22,9 @@ use super::gen3::effects::strips::{Gen3StripAt, read_carried_strips};
 use super::gen3::materials::{
     Gen3Bitmap, read_gen3_bitmap, read_resolved_map, resolve_embedded_method,
 };
-use super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
+use super::gen3::pipeline::EXPOSURE as FIXED_EXPOSURE;
 use super::gen3::pipeline::{
-    reach_alt_exposure, reach_exposure, reach_lightmap_tint, reach_particle_light,
+    probe_lightmap_tint, probe_particle_light, stops_alt_exposure, stops_exposure,
 };
 use super::gen3::shaders::{Gen3Blend, read_h3_definition};
 use super::materials::{TextureImage, decode_image};

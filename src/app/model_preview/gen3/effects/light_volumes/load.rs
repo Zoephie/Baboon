@@ -4,9 +4,10 @@ use super::super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::lod::{ReachVolumeLod, max_profile_count, precompiles};
 use super::property::{Gen3VolumeProperty, Gen3VolumeState, SEEDS, VolumeProperties, volume_seeds};
 use super::{
-    EffectTimes, Extension, Gen3Bitmap, Gen3Blend, H3_EXPOSURE, MarkerFrame, Sampler, SamplerKind,
-    elements, for_each_attached_part, has_flag, inline_real, part_frame, reach_alt_exposure,
+    EffectTimes, Extension, FIXED_EXPOSURE, Gen3Bitmap, Gen3Blend, MarkerFrame, Sampler,
+    SamplerKind, elements, for_each_attached_part, has_flag, inline_real, part_frame,
     read_gen3_bitmap, read_h3_definition, read_part_placement, resolve_embedded_method,
+    stops_alt_exposure,
 };
 use blam_tags::TagStruct;
 use std::sync::Arc;
@@ -94,14 +95,14 @@ impl Gen3VolumeDefinition {
                 .color(state)
                 .map(|channel| channel.clamp(0.0, 1.0));
             let intensity = self.intensity.scalar(state);
-            let [red, green, blue] = color.map(|channel| channel * intensity * H3_EXPOSURE);
+            let [red, green, blue] = color.map(|channel| channel * intensity * FIXED_EXPOSURE);
             let alpha = self.alpha.scalar(state).clamp(0.0, 1.0) * intensity;
             return [red, green, blue, alpha * ratio / overdraw];
         }
         let exposure = if self.blend == Gen3Blend::Multiply {
             1.0
         } else {
-            reach_alt_exposure(stops)[1]
+            stops_alt_exposure(stops)[1]
         };
         // TODO(reach-effects spec §3.4): Reach premultiplies and writes an
         // alpha of 1, which the flare program's `(rgb, a)` under SRC_ALPHA,

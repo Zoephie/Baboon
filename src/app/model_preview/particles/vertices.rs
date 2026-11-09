@@ -7,8 +7,8 @@ use super::shader::{ParticleCorner, frame_variant, particle_exposure};
 use super::sim::{RunningEmitter, emitter_frame, system_state};
 use super::system::ParticleSystem;
 use super::{
-    FunctionValues, ViewFrame, clamped_unit, cross, dot, minus, reach_lightmap_tint,
-    reach_particle_light,
+    FunctionValues, ViewFrame, clamped_unit, cross, dot, minus, probe_lightmap_tint,
+    probe_particle_light,
 };
 
 /// `billboard_basis`.
@@ -174,9 +174,9 @@ impl ParticleSystem {
         let initial = match (look.tint_from_lightmap, look.later_look) {
             (false, _) => [1.0; 3],
             (true, false) => lightmap_tint(lighting),
-            (true, true) => reach_lightmap_tint(),
+            (true, true) => probe_lightmap_tint(),
         };
-        let ambient = reach_particle_light().ambient;
+        let ambient = probe_particle_light().ambient;
         // `particle_render_fast.hlsl`: no aspect, no blur, no quarter turn.
         let style = if look.cheap {
             cheap_billboard(look.billboard)

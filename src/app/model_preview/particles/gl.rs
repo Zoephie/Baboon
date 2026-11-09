@@ -1,6 +1,6 @@
 //! The particle program H2 and the gen3 games draw their particles with: its GLSL, vertex floats and sprite maps.
 
-use super::super::gen3::pipeline::reach_particle_light;
+use super::super::gen3::pipeline::probe_particle_light;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
@@ -200,7 +200,7 @@ impl ParticleGl {
             let contrast = look.smooth_contrast();
             gl.uniform_1_i32(self.smooth.as_ref(), i32::from(contrast.is_some()));
             if let Some([scale, offset]) = contrast {
-                let light = reach_particle_light();
+                let light = probe_particle_light();
                 let rows = [light.direction, light.bright, light.dark];
                 gl.uniform_3_f32_slice(self.own_light.as_ref(), rows.as_flattened());
                 gl.uniform_2_f32(self.contrast.as_ref(), scale, offset);

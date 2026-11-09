@@ -296,20 +296,20 @@ fn a_profile_colour_takes_intensity_on_alpha_and_each_games_exposure() {
     // What a scalar function makes of a colour, at intensity 2.
     let lit = reach.color.color(&state)[0] * 2.0;
     let [red, _, _, alpha] = reach.profile_color(&state, None, [1.0, 2.0], 0.0);
-    assert_eq!(red, lit * reach_alt_exposure(0.0)[1]);
+    assert_eq!(red, lit * stops_alt_exposure(0.0)[1]);
     assert_eq!(alpha, 0.5 * 2.0 / 2.0);
     let [brighter, ..] = reach.profile_color(&state, None, [1.0, 2.0], 1.0);
-    assert_eq!(brighter, lit * reach_alt_exposure(1.0)[1]);
+    assert_eq!(brighter, lit * stops_alt_exposure(1.0)[1]);
     assert_ne!(brighter, red, "the stops reach it");
     let [red, _, _, alpha] = halo3.profile_color(&state, None, [1.0, 2.0], 1.0);
-    assert_eq!(red, lit * H3_EXPOSURE);
+    assert_eq!(red, lit * FIXED_EXPOSURE);
     assert_eq!(
         alpha,
         0.5 * 2.0 / 2.0,
         "Halo 3's float4 colour scales alpha by intensity too"
     );
     let [red, _, _, alpha] = reach.profile_color(&state, Some([3.0, 0.0, 0.0]), [1.0, 2.0], 0.0);
-    assert_eq!(red, 3.0 * reach_alt_exposure(0.0)[1], "unclamped");
+    assert_eq!(red, 3.0 * stops_alt_exposure(0.0)[1], "unclamped");
     assert_eq!(
         alpha, 0.5,
         "a baked row's alpha is the ratio over the overdraw"

@@ -9,7 +9,7 @@ use super::super::cloth::{SharedWind, away_from_pole, turned_about};
 use super::super::common::fields::{elements, object_block};
 use super::super::effects::marker_name;
 use super::super::gen3::materials::read_gen3_bitmap;
-use super::super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
+use super::super::gen3::pipeline::EXPOSURE as FIXED_EXPOSURE;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::particles::{ParticleCorner, SpriteShader};
 use super::super::{RenderModelPreviewMarker, TagReader, frame_steps, resume_point};
@@ -592,7 +592,7 @@ impl H3LeafField {
             return vertices;
         };
         let [red, green, blue] =
-            [0, 1, 2].map(|channel| lighting[0][channel] * PROBE_CONSTANT * H3_EXPOSURE);
+            [0, 1, 2].map(|channel| lighting[0][channel] * PROBE_CONSTANT * FIXED_EXPOSURE);
         for (at, leaf) in running.leaves.iter().enumerate() {
             let Some(leaf) = leaf else {
                 continue;

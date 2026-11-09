@@ -1161,20 +1161,20 @@ fn reach_and_halo_4_lerp_opposite_accelerations_on_the_card() {
 fn reach_exposes_a_particle_by_its_blend() {
     assert_eq!(
         particle_exposure(Gen3Blend::Additive, true, true, 0.0),
-        reach_alt_exposure(0.0)[1]
+        stops_alt_exposure(0.0)[1]
     );
     assert_eq!(
         particle_exposure(Gen3Blend::AddSrcTimesSrcAlpha, true, true, 0.0),
-        reach_alt_exposure(0.0)[1]
+        stops_alt_exposure(0.0)[1]
     );
     assert_eq!(
         particle_exposure(Gen3Blend::AlphaBlend, true, true, 0.0),
-        reach_exposure(0.0)[0]
+        stops_exposure(0.0)[0]
     );
     assert_eq!(particle_exposure(Gen3Blend::Multiply, true, true, 0.0), 1.0);
     assert_eq!(
         particle_exposure(Gen3Blend::Additive, true, false, 0.0),
-        H3_EXPOSURE
+        FIXED_EXPOSURE
     );
     assert_eq!(
         particle_exposure(Gen3Blend::Additive, false, false, 0.0),
@@ -1189,23 +1189,23 @@ fn reach_exposes_a_particle_by_its_blend() {
 fn the_stops_move_reachs_particle_exposure_alone() {
     assert_eq!(
         particle_exposure(Gen3Blend::Additive, true, true, 1.0),
-        reach_alt_exposure(1.0)[1]
+        stops_alt_exposure(1.0)[1]
     );
-    assert_ne!(reach_alt_exposure(1.0)[1], reach_alt_exposure(0.0)[1]);
+    assert_ne!(stops_alt_exposure(1.0)[1], stops_alt_exposure(0.0)[1]);
     assert_eq!(
         particle_exposure(Gen3Blend::AlphaBlend, true, true, -1.0),
-        reach_exposure(-1.0)[0]
+        stops_exposure(-1.0)[0]
     );
     assert_eq!(
         particle_exposure(Gen3Blend::Additive, true, false, 1.0),
-        H3_EXPOSURE
+        FIXED_EXPOSURE
     );
     let mut shader = SpriteShader::blank();
     shader.add = [1.0; 3];
     assert_eq!(shader.add(1.0), [1.0; 3], "Halo 3's add as authored");
     shader.add_at_illum = true;
-    assert_eq!(shader.add(0.0), [reach_alt_exposure(0.0)[1]; 3]);
-    assert_eq!(shader.add(1.0), [reach_alt_exposure(1.0)[1]; 3]);
+    assert_eq!(shader.add(0.0), [stops_alt_exposure(0.0)[1]; 3]);
+    assert_eq!(shader.add(1.0), [stops_alt_exposure(1.0)[1]; 3]);
 }
 
 #[test]
