@@ -62,21 +62,19 @@ pub(in crate::app::model_preview) fn shader_input_names(
         .filter_map(|texture| texture.h3.as_ref())
         .flat_map(|material| &material.animations);
     let h3 = h3.flat_map(|animation| [animation.input.as_str(), animation.range.as_str()]);
-    let h4 = owned
+    let extensions = owned
         .iter()
         .filter_map(|texture| texture.h3.as_ref())
-        .filter_map(|material| material.h4());
-    // A hologram's screen materials read its object's functions too.
-    let post = h4.clone().filter_map(|submit| submit.post());
-    let post = post.flat_map(|post| {
-        post.combine
-            .submit
-            .inputs()
-            .chain(post.composite.submit.inputs())
-    });
+        .filter_map(|material| material.extension());
+    // What draws after a material reads its object's functions too, as a
+    // hologram's screen materials do.
+    let after: Vec<&str> = extensions
+        .clone()
+        .flat_map(|extension| extension.after_inputs())
+        .collect();
     let materials: Vec<&str> = h3
-        .chain(h4.flat_map(|submit| submit.inputs()))
-        .chain(post)
+        .chain(extensions.flat_map(|extension| extension.inputs()))
+        .chain(after)
         .filter(|name| !name.is_empty())
         .collect();
     let mut sourced: Vec<String> = Vec::new();
@@ -223,7 +221,9 @@ pub(in crate::app::model_preview) fn object_moves(
                         .animations
                         .iter()
                         .any(|animation| animation.moves())
-                        || material.h4().is_some_and(|submit| submit.moves())
+                        || material
+                            .extension()
+                            .is_some_and(|extension| extension.moves())
                         || (material.shield.is_some()
                             && gen3::pipeline::gen3_shield_showing(function_values))
                 })

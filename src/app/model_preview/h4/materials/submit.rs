@@ -9,7 +9,9 @@ use blam_tags::material::{
 
 use std::sync::Arc;
 
-use super::super::super::gen3::shaders::{Gen3Pass, Gen3Texture, Gen3Value, Gen3Values};
+use super::super::super::gen3::shaders::{
+    Gen3Material, Gen3MaterialExtension, Gen3Pass, Gen3Texture, Gen3Value, Gen3Values,
+};
 
 /// `e_material_extern`s 35 to 41: a hologram's key, fill and rim light
 /// directions (odd) and the scalars beside them (even).
@@ -434,6 +436,68 @@ pub(crate) fn hologram_rows(
     }
     rows[3][0] = clip;
     rows
+}
+
+impl Gen3MaterialExtension for H4Submit {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    /// The sampler's frame-index function, on the object's values.
+    fn frame(
+        &self,
+        uniform: &str,
+        values: Option<&super::super::super::functions::FunctionValues>,
+        time: f32,
+        owner: u8,
+    ) -> Option<usize> {
+        H4Submit::frame(
+            self,
+            uniform,
+            &DrawnObject {
+                values,
+                time,
+                owner,
+            },
+        )
+    }
+
+    fn moves(&self) -> bool {
+        H4Submit::moves(self)
+    }
+
+    fn inputs(&self) -> Vec<&str> {
+        H4Submit::inputs(self).collect()
+    }
+
+    /// A hologram's screen materials read its object's functions too.
+    fn after_inputs(&self) -> Vec<&str> {
+        self.post()
+            .into_iter()
+            .flat_map(|post| {
+                post.combine
+                    .submit
+                    .inputs()
+                    .chain(post.composite.submit.inputs())
+            })
+            .collect()
+    }
+}
+
+impl Gen3Material {
+    /// Halo 4's per-draw functions and hologram rig.
+    pub(crate) fn h4(&self) -> Option<&H4Submit> {
+        self.extension()?.as_any().downcast_ref()
+    }
+
+    /// Halo 4's, while the material is still its reader's alone.
+    pub(crate) fn h4_mut(&mut self) -> Option<&mut H4Submit> {
+        self.extension_mut()?.as_any_mut().downcast_mut()
+    }
 }
 
 #[cfg(test)]

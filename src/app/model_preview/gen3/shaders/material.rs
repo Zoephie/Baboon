@@ -66,12 +66,36 @@ pub(crate) struct Gen3Material {
 }
 
 /// A material's dialect, with what only Halo 4's carry: its per-draw
-/// functions and hologram rig.
+/// functions and hologram rig, as the game's own extension.
 #[derive(Debug)]
 pub(crate) enum Gen3MaterialDialect {
     Halo3,
     Reach,
-    Halo4(Arc<super::super::super::h4::materials::submit::H4Submit>),
+    Halo4(Arc<dyn Gen3MaterialExtension>),
+}
+
+/// What a game's materials carry past the shared ones, as the shared
+/// pipeline reads it.
+pub(crate) trait Gen3MaterialExtension:
+    std::fmt::Debug + Send + Sync + std::any::Any
+{
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    /// Which of `uniform`'s images draws for an object at `values` and
+    /// `time`, owned by its object `owner`, if the extension picks it.
+    fn frame(
+        &self,
+        uniform: &str,
+        values: Option<&super::super::super::functions::FunctionValues>,
+        time: f32,
+        owner: u8,
+    ) -> Option<usize>;
+    /// Whether it changes on the clock alone.
+    fn moves(&self) -> bool;
+    /// Every object function its own draws read.
+    fn inputs(&self) -> Vec<&str>;
+    /// Every object function what draws after it reads.
+    fn after_inputs(&self) -> Vec<&str>;
 }
 
 impl From<RenderMethodDialect> for Gen3MaterialDialect {
@@ -93,19 +117,19 @@ impl Gen3Material {
         }
     }
 
-    /// Halo 4's per-draw functions and hologram rig.
-    pub(crate) fn h4(&self) -> Option<&Arc<super::super::super::h4::materials::submit::H4Submit>> {
+    /// The game's own extension, if its materials carry one.
+    pub(crate) fn extension(&self) -> Option<&dyn Gen3MaterialExtension> {
         match &self.dialect {
-            Gen3MaterialDialect::Halo4(submit) => Some(submit),
+            Gen3MaterialDialect::Halo4(extension) => Some(&**extension),
             Gen3MaterialDialect::Halo3 | Gen3MaterialDialect::Reach => None,
         }
     }
 
-    pub(crate) fn h4_mut(
-        &mut self,
-    ) -> Option<&mut Arc<super::super::super::h4::materials::submit::H4Submit>> {
+    /// The extension to fill in, while the material is still its reader's
+    /// alone.
+    pub(crate) fn extension_mut(&mut self) -> Option<&mut dyn Gen3MaterialExtension> {
         match &mut self.dialect {
-            Gen3MaterialDialect::Halo4(submit) => Some(submit),
+            Gen3MaterialDialect::Halo4(extension) => Arc::get_mut(extension),
             Gen3MaterialDialect::Halo3 | Gen3MaterialDialect::Reach => None,
         }
     }

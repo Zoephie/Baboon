@@ -363,7 +363,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(
                 });
             }
             // Still this material's alone, so the submit takes them in place.
-            if let Some(submit) = h3.h4_mut().and_then(Arc::get_mut) {
+            if let Some(submit) = h3.h4_mut() {
                 for (uniform, function, count) in submit_frames {
                     submit.add_frames(uniform, function, count);
                 }

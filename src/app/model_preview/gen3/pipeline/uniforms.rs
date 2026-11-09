@@ -329,16 +329,12 @@ impl Gen3State {
             .materials
             .get(object)
             .map_or(0, |material| material.object);
-        // Halo 4: the sampler's frame-index function, on the object's values.
-        if let Some(submit) = material.h4().filter(|_| count > 0) {
-            let drawn = super::super::super::h4::materials::submit::DrawnObject {
-                values: frame.function_values_of(object),
-                time: frame.time,
-                owner,
-            };
-            if let Some(index) = submit.frame(uniform, &drawn) {
-                return frame_key(uniform, index);
-            }
+        // A game's own pick of the image, as Halo 4's samplers make it.
+        if let Some(extension) = material.extension().filter(|_| count > 0)
+            && let Some(index) =
+                extension.frame(uniform, frame.function_values_of(object), frame.time, owner)
+        {
+            return frame_key(uniform, index);
         }
         let animation = material.animations.iter().find(|animation| {
             animation.writes == Gen3Animated::Frame && animation.uniform == uniform
