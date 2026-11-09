@@ -2,7 +2,7 @@
 
 use super::super::common::marker::own_marker_frame;
 use super::super::load::{LoadCx, feature_into};
-use super::super::*;
+use super::super::{ModelPreviewData, RenderModelPreviewMarker, TagReader};
 use blam_tags::TagFile;
 
 /// A Halo 4 object's `bounding offset` and `bounding radius`

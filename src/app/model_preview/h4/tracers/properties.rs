@@ -1,6 +1,7 @@
 //! A tracer's constants, states and animated properties.
 
-use super::*;
+use super::{read_ends, slerped, tag_function_at};
+use blam_tags::{TagFunction, TagStruct};
 
 /// `TracerGpu::k_maxProfilesPerInstance`.
 pub(super) const MOST_PROFILES: usize = 128;

@@ -1,6 +1,8 @@
+use super::super::super::TagSource;
 use super::*;
 use crate::app::model_preview::harness::kit::kit_source;
 use crate::core::game::GameId;
+use std::sync::Arc;
 
 fn sniper_eye(source: &TagSource) -> H4FlareAt {
     let flare = read_h4_lens_flare(

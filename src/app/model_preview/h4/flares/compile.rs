@@ -1,6 +1,7 @@
 //! The lens flare pass, compiled from the kit's shader.
 
-use super::*;
+use super::super::super::TagReader;
+use super::elements;
 
 /// `rasterizer_globals`' explicit shader 46, `lens_flare`, whose one
 /// technique's `screen` pass draws every reflection.

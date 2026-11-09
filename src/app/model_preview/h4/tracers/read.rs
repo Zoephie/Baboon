@@ -1,6 +1,12 @@
 //! A Halo 4 tracer on an object, and reading the tracers an object carries.
 
-use super::*;
+use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::definition::{H4TracerDefinition, TracerLod, TracerPath, read_tracer};
+use super::{
+    EffectTimes, MarkerFrame, elements, for_each_attached_part, has_flag, high24_over_2_24,
+    lcg_step, part_frame, read_part_placement,
+};
+use std::sync::Arc;
 
 /// A tracer at a marker of the object it is attached to.
 #[derive(Debug, Clone)]

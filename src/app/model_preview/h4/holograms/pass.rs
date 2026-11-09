@@ -1,8 +1,20 @@
 //! The hologram pass: the screen maps uploaded and the hologram drawn.
 
+use super::super::super::{ModelGpuFrame, RenderCore, RenderModelPreviewBatch, ce_flare_clip};
 use super::super::lighting::h4_frame_values;
-use super::*;
+use super::screen::{
+    H4Holograms, HologramPicture, IDENTITY_CURVE, hologram_screen, hologram_sphere,
+    set_alpha_blend_max,
+};
+use super::{
+    DrawnObject, Gen3Material, Gen3Pass, Gen3State, Gen3Value, H4BloomSettings, H4Draw, H4Game,
+    H4HologramPost, H4ScreenMaterial, ce_flare_view, gen3_set_cull, set_value, upload_image_linear,
+};
 use crate::app::model_preview::gl::blit::blit_depth;
+use eframe::glow;
+use eframe::glow::HasContext as _;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 impl H4Game {
     /// `RenderHolograms`' generate pass, after the albedo (`c_player_view::render`

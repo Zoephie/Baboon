@@ -1,6 +1,12 @@
 //! A tracer definition: its shape, level of detail and path, as read off the tag.
 
-use super::*;
+use super::super::super::TagReader;
+use super::properties::{
+    ANGLE_FADED, EDGE_FADED, ORIGIN_FADED, PROPERTY_NAMES, RADIANS, SORT_BIAS_STEP, TracerProperty,
+    UPLOADED_STATES,
+};
+use super::{H4EffectMaterial, has_flag, resolve_h4_effect_material};
+use blam_tags::TagStruct;
 
 /// One of a `tracer_system`'s `tracers` as `PostprocessBlockCallback`
 /// (X 0x831FC270) leaves it, but for its material.

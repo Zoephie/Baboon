@@ -1,7 +1,14 @@
+use super::super::super::load_referenced_tag_from_source;
+use super::properties::{
+    INVALID, MOST_PROFILES, ORIGIN_FADED, PROFILE_RANDOM, TRACER_RANDOM, TRACER_SEED_1,
+    TRACER_SEED_2, TracerProperty, TracerState, state_named,
+};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
+use blam_tags::TagFunction;
 use blam_tags::tag_function::{FunctionEncoding, FunctionType, H2Function};
+use std::sync::Arc;
 
 fn function(kind: FunctionType, low: f32, high: f32) -> TagFunction {
     let mut function = H2Function::new(kind);

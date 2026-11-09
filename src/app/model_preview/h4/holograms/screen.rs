@@ -1,6 +1,11 @@
 //! A hologram's targets and its screen: bounds, sphere and picture.
 
-use super::*;
+use super::super::super::ModelGpuFrame;
+use super::{Gen3Material, H4HologramPost, Made, Sampling, Texels};
+use eframe::glow;
+use eframe::glow::HasContext as _;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// `g_hologramBoundsScale` and `g_hologramBoundsExpand`'s defaults.
 const BOUNDS_SCALE: f32 = 1.0;

@@ -1,6 +1,13 @@
 //! A Halo 4 shader's entry points, blend and sampler options, as read off the tag.
 
-use super::*;
+use super::super::super::{ResolveCaches, TagReader};
+use super::{
+    Gen3Blend, Gen3Pass, H4_DEFINES, H4ShaderSource, Program, Stage, elements, translate_pass,
+};
+use blam_tags::material::MaterialShader;
+use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Entry points (`entry_point_enum`) the passes are taken from.
 pub(super) const ENTRY_DEFAULT: usize = 0;

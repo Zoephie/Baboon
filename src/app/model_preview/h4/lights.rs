@@ -18,7 +18,7 @@ use super::super::common::view::posed_on;
 use super::super::effects::part_markers;
 use super::super::functions::FunctionValues;
 use super::super::reach::lights::object_value;
-use super::super::*;
+use super::super::{RenderModelPreviewMarker, TagReader};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 use crate::app::model_preview::common::marker::MarkerFrame;

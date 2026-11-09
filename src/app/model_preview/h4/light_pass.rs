@@ -13,7 +13,7 @@ use super::super::gen3::screen_lights::screen_to_relative_world;
 use super::super::gen3::shaders::Gen3Pass;
 use super::super::gen3::shaders::Gen3Value;
 use super::super::gen3::state::Gen3State;
-use super::super::*;
+use super::super::{RenderModelPreview, TagReader};
 use super::lights::{H4LightBlend, H4LitLight};
 use super::pass_hooks::h4_matrix;
 use super::render::H4Game;

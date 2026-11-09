@@ -1,6 +1,15 @@
 //! An effect's material: its shader resolved for the effect passes.
 
-use super::*;
+use super::super::super::gen3::materials::gen3_image;
+use super::super::super::{ResolveCaches, TagReader};
+use super::options::{ENTRY_DEFAULT, bitmap_kind, h4_address, h4_filter, read_shader};
+use super::resolve::texture_uniform;
+use super::{
+    Gen3Pass, Gen3Texture, H4Submit, Sampler, SamplerKind, Stage, TextureKind, elements,
+    translate_pass,
+};
+use blam_tags::material::{Material, bake};
+use std::sync::Arc;
 
 /// An effect's `material` (a particle's, tracer's or light volume's embedded
 /// one), baked as any material is, its vertex shader the system's own pass

@@ -1,6 +1,11 @@
 //! Running tracers and their trails, stepped a tick at a time.
 
-use super::*;
+use super::definition::TracerDefinition;
+use super::draw::TracerFrame;
+use super::profile::{H4TracerDraw, ProfileState, pack_profile, percentile_step};
+use super::properties::{MOST_PROFILES, TracerState};
+use super::read::H4TracerAt;
+use super::{EffectOnsets, FunctionValues, attached, high16_over_65535, lcg_step, length};
 
 /// `TracerGpu::k_profilesPerRow`.
 const PROFILES_PER_ROW: usize = 16;

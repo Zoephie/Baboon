@@ -8,10 +8,6 @@
 //! `TracerGpu::Render` skips one profile or fewer); those are not built.
 //! See `docs/h4-preview-research/tracers.md`.
 
-use std::sync::Arc;
-
-use blam_tags::{TagFunction, TagStruct};
-
 use super::super::common::fields::{elements, has_flag};
 use super::super::common::named_function::tag_function_at;
 use super::super::common::view::posed_on;
@@ -21,7 +17,6 @@ use super::super::effects::{
 use super::super::functions::FunctionValues;
 use super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::particles::{read_ends, slerped};
-use super::super::*;
 use super::effects::particles::{pack_argb8, pack_half2, pack_ushort2n};
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::marker::MarkerFrame;
@@ -30,14 +25,13 @@ use crate::app::model_preview::common::random::{high16_over_65535, high24_over_2
 
 mod read;
 pub(in crate::app::model_preview) use read::*;
-mod properties;
-use properties::*;
 mod definition;
+mod properties;
+#[cfg(test)]
 pub(in crate::app::model_preview) use definition::*;
 mod profile;
 pub(in crate::app::model_preview) use profile::*;
 mod draw;
-use draw::*;
 mod trail;
 pub(in crate::app::model_preview) use trail::*;
 #[cfg(test)]

@@ -13,7 +13,7 @@ use super::super::super::gen3::shaders::{Gen3Pass, Gen3Value, Gen3Values};
 use super::super::super::gl::buffer::slice_bytes;
 use super::super::super::gl::program::Linked;
 use super::super::super::h4::materials::H4EffectMaterial;
-use super::super::super::*;
+use super::super::super::{ModelGpuFrame, TextureImage};
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 
 /// What a Halo 4 effect pass (a tracer, a light volume, a particle system)

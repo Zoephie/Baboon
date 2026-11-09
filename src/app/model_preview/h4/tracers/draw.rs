@@ -1,6 +1,10 @@
 //! A tracer evaluated for a frame.
 
-use super::*;
+use super::definition::TracerPath;
+use super::profile::{H4TracerDraw, ProfileState, pack_profile, percentile_step, profile_count};
+use super::properties::{RANDOM_U_OFFSET, RANDOM_V_OFFSET, TracerState};
+use super::read::H4TracerAt;
+use super::{FunctionValues, length, posed_on};
 
 /// The per-tracer part of a frame: its states, and the seconds its system
 /// has run.

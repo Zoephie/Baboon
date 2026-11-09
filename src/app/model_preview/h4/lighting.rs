@@ -4,7 +4,7 @@
 //! MCC `sub_1408C3E60`), exposure, and the final composite.
 
 use super::super::gen3::shaders::Gen3Value;
-use super::super::*;
+use super::super::{ModelGpuFrame, TagReader};
 
 /// `s_dual_vmf_basis::SetDefaultLighting` (X360 0x82A3CF50, MCC
 /// `sub_1408E6B70`, the same immediates): two linear-SH lobes, the direct one

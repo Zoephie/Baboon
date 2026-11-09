@@ -1,6 +1,16 @@
 //! A flare's parameters for a frame: its view, occlusion and reflections.
 
-use super::*;
+use super::read::{
+    FEWEST_SAMPLES, H4FlareAt, H4FlareDraw, H4FlareView, H4OcclusionPatch, H4Reflection,
+    H4ReflectionColor, MINIMUM_VISIBLE, OCCLUSION_PIXELS, SMALLEST, corona_rotation,
+};
+use super::{
+    FunctionValues, OcclusionOffset, dot, object_value, posed_on, unit_unless_under_micro,
+};
+use blam_tags::TagFunction;
+use blam_tags::tag_function::transition_function_evaluate;
+use std::f32::consts::PI;
+use std::sync::Arc;
 
 /// `LensFlareEvaluateParameters`' result (`s_lens_flare_render_parameters`).
 #[derive(Debug, Clone, PartialEq)]

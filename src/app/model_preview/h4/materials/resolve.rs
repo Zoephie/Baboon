@@ -1,6 +1,19 @@
 //! A Halo 4 material resolved for draw, with the screen and hologram materials.
 
-use super::*;
+use super::super::super::gen3::materials::gen3_image;
+use super::super::super::materials::{SlotBitmap, cached_bitmap};
+use super::super::super::{MaterialTextures, ResolveCaches, TagFile, TagReader, TextureSlot};
+use super::options::{
+    ENTRY_ALBEDO, ENTRY_DEFAULT, ENTRY_SINGLE_PASS_SINGLE_PROBE, ENTRY_STATIC_PROBE, H4Shader,
+    bitmap_kind, h4_address, h4_blend, h4_filter, read_shader,
+};
+use super::{
+    Gen3Blend, Gen3Material, Gen3MaterialDialect, Gen3Pass, Gen3Texture, H4HologramPost,
+    H4ScreenMaterial, H4Submit, Sampler, SamplerKind, Stage, TextureKind, elements, translate_pass,
+};
+use blam_tags::material::{Material, bake, shader_flags};
+use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
+use std::sync::Arc;
 
 /// A full-screen triangle for an explicit shader's pass, its texcoord running
 /// up the picture as GL's targets do: v is GL's t. The hologram's screen

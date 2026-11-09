@@ -1,6 +1,8 @@
 //! A tracer's packed profile states and its draw.
 
-use super::*;
+use super::definition::TracerDefinition;
+use super::properties::{MOST_PROFILES, STATE_COUNT, TracerState};
+use super::{pack_argb8, pack_half2, pack_ushort2n};
 
 /// `TracerProfileState`, as the card holds it between frames.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

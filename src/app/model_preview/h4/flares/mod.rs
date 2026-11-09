@@ -4,12 +4,6 @@
 //! `rasterizer_globals`' explicit shader 46 `lens_flare` (`lens_flare_render_internal`,
 //! X360 0x83AE8330, MCC 0x1408CF390). See `docs/h4-preview-research/lights.md` §4.
 
-use std::f32::consts::PI;
-use std::sync::Arc;
-
-use blam_tags::tag_function::transition_function_evaluate;
-use blam_tags::{TagFile, TagFunction, TagStruct};
-
 use super::super::common::fields::{elements, has_flag};
 use super::super::common::image::Image;
 use super::super::common::named_function::tag_function_at;
@@ -19,7 +13,6 @@ use super::super::functions::FunctionValues;
 use super::super::gen3::effects::flares::{OcclusionOffset, rotation_function};
 use super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
 use super::super::reach::lights::object_value;
-use super::super::*;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::attached::{ObjectAttachment, object_attachments};
 use crate::app::model_preview::common::marker::MarkerFrame;

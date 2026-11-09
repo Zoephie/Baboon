@@ -1,5 +1,6 @@
 use super::pass::*;
 use super::*;
+use std::sync::Arc;
 
 #[test]
 fn a_new_loads_post_uploads_again_but_the_same_post_does_not() {
