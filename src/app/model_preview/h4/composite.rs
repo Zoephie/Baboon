@@ -171,26 +171,6 @@ fn grading_is_current(held: Option<&Arc<H2Image>>, now: Option<&Arc<H2Image>>) -
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn image() -> Arc<H2Image> {
-        Arc::new(H2Image::Volume { width: 1, height: 1, depth: 1, rgba: vec![0; 4] })
-    }
-
-    #[test]
-    fn the_grading_lookup_uploads_again_for_a_new_load_but_not_for_the_same_image() {
-        let held = image();
-        assert!(grading_is_current(Some(&held), Some(&held.clone())));
-        assert!(grading_is_current(None, None));
-        // A later load reads an equal image into a new allocation.
-        assert!(!grading_is_current(Some(&held), Some(&image())));
-        assert!(!grading_is_current(None, Some(&held)));
-        assert!(!grading_is_current(Some(&held), None));
-    }
-}
-
 /// `final_composite` (`postprocess/final_composite_shared.fxh`), at the
 /// preview's camera fx: the HDR target brought back up (`× (8, 8, 8, 32)`)
 /// and the bloom added unscaled; hue, saturation and contrast are off (not
@@ -237,4 +217,24 @@ pub(in crate::app::model_preview) fn h4_grading_scale_offset(size: [usize; 3]) -
     let scale = size.map(|side| (side.max(1) as f32 - 1.0) / side.max(1) as f32);
     let offset = size.map(|side| 0.5 / side.max(1) as f32);
     (scale, offset)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image() -> Arc<H2Image> {
+        Arc::new(H2Image::Volume { width: 1, height: 1, depth: 1, rgba: vec![0; 4] })
+    }
+
+    #[test]
+    fn the_grading_lookup_uploads_again_for_a_new_load_but_not_for_the_same_image() {
+        let held = image();
+        assert!(grading_is_current(Some(&held), Some(&held.clone())));
+        assert!(grading_is_current(None, None));
+        // A later load reads an equal image into a new allocation.
+        assert!(!grading_is_current(Some(&held), Some(&image())));
+        assert!(!grading_is_current(None, Some(&held)));
+        assert!(!grading_is_current(Some(&held), None));
+    }
 }

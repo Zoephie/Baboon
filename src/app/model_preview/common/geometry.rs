@@ -49,6 +49,13 @@ impl VertexBase {
     }
 }
 
+pub(in crate::app::model_preview) fn expand_preview_bounds_local(min: &mut [f32; 3], max: &mut [f32; 3], point: [f32; 3]) {
+    for axis in 0..3 {
+        min[axis] = min[axis].min(point[axis]);
+        max[axis] = max[axis].max(point[axis]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,12 +83,5 @@ mod tests {
         assert_eq!(base.checked_offset(1), Some(u32::MAX));
         assert_eq!(base.checked_offset(2), None);
         assert_eq!(base.offset(1), u32::MAX);
-    }
-}
-
-pub(in crate::app::model_preview) fn expand_preview_bounds_local(min: &mut [f32; 3], max: &mut [f32; 3], point: [f32; 3]) {
-    for axis in 0..3 {
-        min[axis] = min[axis].min(point[axis]);
-        max[axis] = max[axis].max(point[axis]);
     }
 }
