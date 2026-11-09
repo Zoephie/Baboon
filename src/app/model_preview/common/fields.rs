@@ -172,3 +172,19 @@ pub(in crate::app::model_preview) fn field_name_matches(actual: &str, expected: 
         || clean_field_name(actual).eq_ignore_ascii_case(expected)
         || clean_field_name_basic(actual).eq_ignore_ascii_case(expected)
 }
+
+/// The elements of the block at the field path `name` under `holder`.
+pub(in crate::app::model_preview) fn path_elements<'a>(
+    holder: TagStruct<'a>,
+    name: &str,
+) -> impl Iterator<Item = TagStruct<'a>> {
+    let block = holder.field_path(name).and_then(|field| field.as_block());
+    (0..block.as_ref().map_or(0, |block| block.len()))
+        .filter_map(move |index| block.as_ref()?.element(index))
+}
+
+/// An `rgb` field's three channels.
+pub(in crate::app::model_preview) fn rgb(parameter: TagStruct<'_>, name: &str) -> [f32; 3] {
+    let color = parameter.read_rgb(name);
+    [color.red, color.green, color.blue]
+}

@@ -27,7 +27,5 @@ mod numeric;
 pub(in crate::app::model_preview) use numeric::*;
 mod globals;
 pub(in crate::app::model_preview) use globals::*;
-mod change_colors;
-pub(in crate::app::model_preview) use change_colors::*;
 #[cfg(test)]
 mod tests;

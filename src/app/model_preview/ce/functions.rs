@@ -8,8 +8,10 @@
 
 use blam_tags::{TagFieldData, TagFile, TagStruct};
 
+use super::super::common::color::hsv_interpolate;
 use super::super::common::fields::has_flag;
 use super::super::common::time::TICKS_PER_SECOND;
+use super::super::functions::{ChangeColors, ChangePermutation};
 use super::shaders::{option_index, periodic_evaluate};
 
 const INPUTS: [&str; 4] = ["A in", "B in", "C in", "D in"];
@@ -432,6 +434,35 @@ pub(in crate::app) fn read_ce_object_functions(object: &TagFile) -> Option<CeObj
     })
 }
 
+/// `object_choose_random_change_colors` for an object at the world's origin,
+/// where its hash of the position leaves only the channel. White with no
+/// permutation, as an unplaced object has.
+pub(in crate::app::model_preview) fn ce_change_color(
+    permutations: &[ChangePermutation],
+    channel: usize,
+) -> [f32; 3] {
+    let pick = (channel as f32 * 431.12894).rem_euclid(1.0);
+    let u = (channel as f32 * 0.71211).rem_euclid(1.0);
+    // Tool bakes the weights to a running share of the whole, shared out
+    // evenly where a block has none.
+    let unweighted = permutations.iter().all(|entry| entry.weight <= 0.0);
+    let weight = |entry: &ChangePermutation| if unweighted { 1.0 } else { entry.weight };
+    let total: f32 = permutations.iter().map(weight).sum();
+    let mut running = 0.0;
+    for entry in permutations {
+        running += weight(entry) / total;
+        if pick <= running {
+            return hsv_interpolate(entry.lower, entry.upper, u, false)
+                .map(|value| value.clamp(0.0, 1.0));
+        }
+    }
+    [1.0; 3]
+}
+
+pub(in crate::app::model_preview) fn ce_change_colors(colors: &ChangeColors) -> [[f32; 3]; 4] {
+    std::array::from_fn(|channel| ce_change_color(&colors[channel], channel))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,5 +763,30 @@ mod tests {
             ..Default::default()
         };
         assert!(objects.move_at_rest());
+    }
+
+    fn permutation(weight: f32, lower: [f32; 3], upper: [f32; 3]) -> ChangePermutation {
+        ChangePermutation {
+            weight,
+            lower,
+            upper,
+            variant: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_ce_object_at_the_origin_picks_by_channel() {
+        let red = [1.0, 0.0, 0.0];
+        let blue = [0.0, 0.0, 1.0];
+        let list = [permutation(0.3, red, red), permutation(0.7, blue, blue)];
+        // Channel 0 hashes to 0, and 1 to 0.129: both inside the first share.
+        assert_eq!(ce_change_color(&list, 0), red);
+        assert_eq!(ce_change_color(&list, 1), red);
+        // Channel 3 hashes to 0.387, into the second.
+        assert_eq!(ce_change_color(&list, 3), blue);
+        assert_eq!(ce_change_color(&[], 3), [1.0; 3]);
+        // No weights shares evenly: 0.387 is the first of two.
+        let even = [permutation(0.0, red, red), permutation(0.0, blue, blue)];
+        assert_eq!(ce_change_color(&even, 3), red);
     }
 }

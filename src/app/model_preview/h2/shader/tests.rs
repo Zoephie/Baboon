@@ -1,6 +1,8 @@
+use super::super::super::common::fields::path_elements;
 use super::super::super::dx9::passes::{
-    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9Layer, animated_vector, elements, read_change_colors,
+    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9Layer, animated_vector,
 };
+use super::super::super::functions::read_change_colors;
 use super::template::{Dx9ParameterValue, Dx9Pass, Dx9PassTexture, Dx9VertexConstant};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
@@ -339,7 +341,7 @@ fn a_depth_prepass_writes_no_color() {
     )
     .unwrap();
     let root = pass.root();
-    let implementation = elements(root, "implementations").next().unwrap();
+    let implementation = path_elements(root, "implementations").next().unwrap();
     assert_eq!(read_custom_channels(implementation), Some([false; 4]));
 }
 

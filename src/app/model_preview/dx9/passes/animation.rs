@@ -246,16 +246,5 @@ impl H2AnimatedRow {
     }
 }
 
-pub(in crate::app::model_preview) fn elements<'a>(
-    holder: TagStruct<'a>,
-    name: &str,
-) -> impl Iterator<Item = TagStruct<'a>> {
-    let block = holder.field_path(name).and_then(|field| field.as_block());
-    (0..block.as_ref().map_or(0, |block| block.len()))
-        .filter_map(move |index| block.as_ref()?.element(index))
-}
-
-pub(in crate::app::model_preview) fn rgb(parameter: TagStruct<'_>, name: &str) -> [f32; 3] {
-    let color = parameter.read_rgb(name);
-    [color.red, color.green, color.blue]
-}
+/// Animations of a tint, with the components they write.
+pub(in crate::app::model_preview) type H2AnimatedTint = ([bool; 4], Vec<H2Animation>);

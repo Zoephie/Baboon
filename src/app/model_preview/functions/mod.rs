@@ -13,6 +13,8 @@ use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
 
 mod read;
 pub(in crate::app::model_preview) use read::*;
+mod change_colors;
+pub(in crate::app::model_preview) use change_colors::*;
 mod controls;
 mod evaluate;
 pub(in crate::app::model_preview) use controls::*;

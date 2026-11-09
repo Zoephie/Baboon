@@ -107,61 +107,6 @@ fn only_a_non_constant_function_moves() {
 }
 
 #[test]
-fn change_colors_filter_by_variant_and_fall_back_to_white() {
-    let entry = |weight, value: f32, variant: &str| ChangePermutation {
-        weight,
-        lower: [value; 3],
-        upper: [value + 0.25; 3],
-        variant: variant.to_owned(),
-    };
-    let list = [
-        entry(1.0, 0.25, "minor"),
-        entry(1.0, 0.5, "major"),
-        entry(0.0, 0.75, ""),
-    ];
-    assert_eq!(change_color_for(&list, "minor"), [0.375; 3]);
-    assert_eq!(change_color_for(&list, "major"), [0.625; 3]);
-    assert_eq!(
-        change_color_for(&list, "ultra"),
-        [1.0; 3],
-        "nothing allowed"
-    );
-    assert_eq!(change_color_for(&[], "minor"), [1.0; 3]);
-    let shared = [
-        entry(1.0, 0.0, ""),
-        entry(2.0, 0.5, ""),
-        entry(1.0, 0.75, ""),
-    ];
-    assert_eq!(
-        change_color_for(&shared, "any"),
-        [0.625; 3],
-        "the middle of the weights"
-    );
-}
-
-#[test]
-fn a_block_with_no_weights_shares_them_evenly() {
-    let entry = |value: f32, variant: &str| ChangePermutation {
-        weight: 0.0,
-        lower: [value; 3],
-        upper: [value; 3],
-        variant: variant.to_owned(),
-    };
-    let list = [
-        entry(0.25, "minor"),
-        entry(0.5, "major"),
-        entry(0.75, "major"),
-    ];
-    assert_eq!(change_color_for(&list, "minor"), [0.25; 3]);
-    assert_eq!(change_color_for(&list, "major"), [0.5; 3]);
-    assert_eq!(
-        change_color_for(&list, "ultra"),
-        [1.0; 3],
-        "no entry for this variant"
-    );
-}
-
-#[test]
 fn normalization_faces_hold_their_own_direction() {
     let center = |face: usize, size: usize| -> [u8; 3] {
         let rgba = normalization_face(face, size);
@@ -172,54 +117,6 @@ fn normalization_faces_hold_their_own_direction() {
     assert!(center(3, 33)[1] < 5, "-Y");
     assert!(center(4, 33)[2] > 250, "+Z");
     assert!(center(5, 33)[2] < 5, "-Z");
-}
-
-fn permutation(weight: f32, lower: [f32; 3], upper: [f32; 3]) -> ChangePermutation {
-    ChangePermutation {
-        weight,
-        lower,
-        upper,
-        variant: String::new(),
-    }
-}
-
-#[test]
-fn a_ce_object_at_the_origin_picks_by_channel() {
-    let red = [1.0, 0.0, 0.0];
-    let blue = [0.0, 0.0, 1.0];
-    let list = [permutation(0.3, red, red), permutation(0.7, blue, blue)];
-    // Channel 0 hashes to 0, and 1 to 0.129: both inside the first share.
-    assert_eq!(ce_change_color(&list, 0), red);
-    assert_eq!(ce_change_color(&list, 1), red);
-    // Channel 3 hashes to 0.387, into the second.
-    assert_eq!(ce_change_color(&list, 3), blue);
-    assert_eq!(ce_change_color(&[], 3), [1.0; 3]);
-    // No weights shares evenly: 0.387 is the first of two.
-    let even = [permutation(0.0, red, red), permutation(0.0, blue, blue)];
-    assert_eq!(ce_change_color(&even, 3), red);
-}
-
-#[test]
-fn ce_colors_blend_the_short_way_round_the_hue() {
-    // Red and a red just shy of the wrap meet near red, not across cyan.
-    let mixed = hsv_interpolate([1.0, 0.0, 0.0], [1.0, 0.0, 0.2], 0.5, false);
-    assert!(mixed[0] > 0.99 && mixed[1] < 0.01, "{mixed:?}");
-    // Unlike an RGB blend, yellow keeps its brightness between red and green.
-    let middle = hsv_interpolate([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5, false);
-    assert!(
-        (middle[0] - 1.0).abs() < 1e-5 && (middle[1] - 1.0).abs() < 1e-5,
-        "{middle:?}"
-    );
-    // The long way from red to green goes through blue.
-    let long = hsv_interpolate([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5, true);
-    assert!(long[2] > 0.99 && long[1] < 0.01, "{long:?}");
-    // A color survives the trip.
-    let color = [0.34, 0.4, 0.15];
-    let back = hsv_to_rgb(rgb_to_hsv(color));
-    assert!(
-        color.iter().zip(back).all(|(a, b)| (a - b).abs() < 1e-5),
-        "{back:?}"
-    );
 }
 
 /// The dx9 pipeline is neutral: Halo CE's shaders hook into it through

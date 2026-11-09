@@ -8,7 +8,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::animation::ik::weapon::{attached_marker_frame, weapon_ik};
 use super::super::common::marker::MarkerFrame;
-use super::super::dx9::passes::{ChangeColors, read_change_colors};
+use super::super::functions::{ChangeColors, read_change_colors};
 use super::super::load::build_render_preview;
 use super::super::load::merge_attached;
 use super::super::{

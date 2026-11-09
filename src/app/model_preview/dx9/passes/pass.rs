@@ -1,7 +1,7 @@
 //! A dx9 pass: its blend, depth, cull, textures and constants, and the pass as drawn.
 
+use super::animation::H2AnimatedTint;
 use super::animation::{H2AnimatedRow, H2Animation, H2Clock, PassAnimation, animated_vector};
-use super::change_colors::H2AnimatedTint;
 use super::globals::fill_components;
 use super::numeric::CeNumeric;
 use super::{DX9_TEXTURE_ROWS, Dx9VertexStage, Image, SamplerKind};

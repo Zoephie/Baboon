@@ -12,11 +12,11 @@
 //! in one.
 
 use super::super::ce::random::CeRandom;
+use super::super::common::color::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::fields::{elements, function_slot_of, has_flag, object_block};
 use super::super::common::image::Image;
 use super::super::common::point_physics::CePointPhysics;
 use super::super::common::view::{ViewFrame, posed_on};
-use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::lights::{CeEffectLightDef, CeLight, read_effect_light};
 use super::particle_systems::{
     CePctlDef, CePctlQuad, CeRunningSystem, MOST_SYSTEM_PARTICLES, new_unattached, read_pctl_def,

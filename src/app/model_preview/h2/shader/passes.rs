@@ -1,8 +1,9 @@
 //! Reading a Halo 2 shader template's passes: their externs, parameter levels, blend, depth and alpha test.
 
+use super::super::super::common::fields::{path_elements, rgb};
 use super::super::super::dx9::passes::{
     Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Depth, H2Animation, H2AnimationKind,
-    animation_function, elements, rgb,
+    animation_function,
 };
 use super::constants::read_custom_channels;
 use super::template::{Dx9ParameterValue, Dx9Pass, Dx9PassTexture, Dx9VertexConstant};
@@ -43,7 +44,7 @@ const NO_EXTERN: &str = "none";
 /// The animations of a parameter. The game reads these and never the
 /// parameter's constant, so an input a preview has no value for still counts.
 fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
-    elements(parameter, "animation properties")
+    path_elements(parameter, "animation properties")
         .filter_map(|property| {
             let held_input = property
                 .read_string_id("input name")
@@ -142,7 +143,7 @@ fn insert_level(
 pub(super) fn shader_parameters(shader: TagStruct<'_>) -> Parameters {
     let mut parameters = Parameters::new();
     let mut hidden = false;
-    for parameter in elements(shader, "parameters") {
+    for parameter in path_elements(shader, "parameters") {
         insert_level(
             &mut parameters,
             parameter,
@@ -151,7 +152,7 @@ pub(super) fn shader_parameters(shader: TagStruct<'_>) -> Parameters {
             "const color",
         );
         // Only a player has an emblem, which a preview's object is not.
-        if elements(parameter, "animation properties").any(|animation| {
+        if path_elements(parameter, "animation properties").any(|animation| {
             animation.read_string_id("input name").as_deref() == Some(EMBLEM_INPUT)
         }) && let Some(level) = parameter
             .read_string_id("name")
@@ -178,8 +179,8 @@ pub(super) fn shader_parameters(shader: TagStruct<'_>) -> Parameters {
 
 fn template_parameters(template: TagStruct<'_>) -> Parameters {
     let mut parameters = Parameters::new();
-    for category in elements(template, "categories") {
-        for parameter in elements(category, "parameters") {
+    for category in path_elements(template, "categories") {
+        for parameter in path_elements(category, "parameters") {
             insert_level(
                 &mut parameters,
                 parameter,
@@ -335,7 +336,7 @@ pub(super) fn read_pass(
 
     let mut own = Parameters::new();
     let mut externs: HashMap<String, String> = HashMap::new();
-    for parameter in elements(pass, "parameters") {
+    for parameter in path_elements(pass, "parameters") {
         insert_level(
             &mut own,
             parameter,
@@ -375,7 +376,7 @@ pub(super) fn read_pass(
         })
         .collect();
 
-    let textures = elements(implementation, "textures")
+    let textures = path_elements(implementation, "textures")
         .map(|texture| {
             let parameter = texture
                 .read_string_id("source parameter")
@@ -412,7 +413,7 @@ pub(super) fn read_pass(
         textures,
         parameters,
         animations,
-        vertex_constants: elements(implementation, "vs constants")
+        vertex_constants: path_elements(implementation, "vs constants")
             .map(|constant| Dx9VertexConstant {
                 parameter: constant
                     .read_string_id("source parameter")
@@ -480,7 +481,7 @@ pub(in crate::app) fn resolve_h2_layer_passes<T: std::borrow::Borrow<TagFile>>(
     let template_levels = template_parameters(template_root);
 
     let mut passes = Vec::new();
-    for entry in elements(template_root, "LODs[0]/pass") {
+    for entry in path_elements(template_root, "LODs[0]/pass") {
         if entry.read_enum_option("layer").as_deref() != Some(layer) {
             continue;
         }

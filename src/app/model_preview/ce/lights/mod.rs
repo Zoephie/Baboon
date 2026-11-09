@@ -1,13 +1,13 @@
 //! Halo CE's lens flares: what `attachments_new` hangs on an object as a
 //! `light`, and the sprites `rasterizer_lens_flares_draw` makes of one.
 
+use super::super::common::color::{ce_color_interpolate, ce_color_interpolation};
 use super::super::common::fields::{
     elements, function_slot_of, has_flag, has_flag_in_any, object_block,
 };
 use super::super::common::flares::{FlareSprite, OcclusionOffset};
 use super::super::common::image::Image;
 use super::super::common::view::{ViewFrame, posed_on};
-use super::super::dx9::passes::{ce_color_interpolate, ce_color_interpolation};
 use super::super::materials::decode_image;
 use super::shaders::periodic_evaluate;
 use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;

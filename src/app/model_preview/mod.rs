@@ -75,7 +75,7 @@ use common::camera::{
 };
 use common::clock::{frame_steps, resume_point};
 pub(in crate::app) use common::palette::material_color;
-use dx9::passes::{ChangeColors, read_change_colors};
+use functions::{ChangeColors, read_change_colors};
 pub(in crate::app) use panel::{
     ModelPreviewSectionPart, draw_model_preview_panel, draw_model_preview_section_with_header_wrap,
     draw_model_viewport_size_input, draw_standalone_mesh_preview, preview_panel_title,

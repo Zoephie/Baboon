@@ -3,7 +3,7 @@
 
 use super::super::super::GameId;
 use super::super::common::fields::{elements, has_flag};
-use super::super::dx9::passes::{change_colors_for, read_change_colors};
+use super::super::functions::{change_colors_for, read_change_colors};
 use super::super::h3::attached::read_h3_attached_features;
 use super::super::h4::attached::read_h4_attached_features;
 use super::super::load::LoadCx;

@@ -1,12 +1,11 @@
 //! What one paint of a preview draws: the frame snapshot the panel builds
 //! from its state, the visibility it derives and the function values.
 
-use super::dx9::passes::{
-    Dx9Layer, change_colors_for, h2_object_light_direction, h2_prt_object_lights,
-};
+use super::dx9::passes::{Dx9Layer, h2_object_light_direction, h2_prt_object_lights};
+use super::functions::change_colors_for;
 use super::{
     MaterialTextures, ModelGpuCamera, ModelPreviewData, ModelPreviewState, ModelRenderMode,
-    PreviewCamera, RenderModelPreview, animation_skinning_rows, camera_light, ce, common, dx9,
+    PreviewCamera, RenderModelPreview, animation_skinning_rows, camera_light, ce, common,
 };
 use eframe::egui;
 use eframe::egui::Ui;
@@ -215,7 +214,7 @@ pub(in crate::app::model_preview) fn object_states(
         CeObjectState {
             outputs,
             active,
-            change_colors: dx9::passes::ce_change_colors(colors),
+            change_colors: ce::functions::ce_change_colors(colors),
         }
     };
     let mut states = vec![state(
