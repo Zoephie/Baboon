@@ -12,6 +12,7 @@ pub(in crate::app::model_preview) mod effects;
 mod features;
 pub(super) mod flares;
 pub(in crate::app::model_preview) mod holograms;
+pub(in crate::app::model_preview) mod ik;
 pub(in crate::app::model_preview) mod light_pass;
 pub(super) mod lighting;
 pub(super) mod lights;

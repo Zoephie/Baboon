@@ -107,21 +107,16 @@ pub(in crate::app::model_preview) fn animation_skinning_rows(
     apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
     // `biped_postprocess_node_matrices` (X360 0x84B1A738): the IK set, then
     // the chains.
-    super::super::animation::ik::h4::apply_h4_ik_set(
-        &pose.h4_ik_set,
-        &data.preview.gen3.ik_markers,
-        nodes,
-        &inverse_binds,
-        &mut matrices,
-    );
-    super::super::animation::ik::reach::apply_reach_ik(
-        &pose.reach_ik,
-        &data.preview.gen3.ik_markers,
-        nodes,
-        &inverse_binds,
-        &mut matrices,
-        sampled_frames(playback, pose.frames.len()),
-    );
+    let frames = sampled_frames(playback, pose.frames.len());
+    for solver in &pose.solvers {
+        solver.solve(
+            &data.preview.gen3.ik_markers,
+            nodes,
+            &inverse_binds,
+            &mut matrices,
+            frames,
+        );
+    }
     let mut rows: Vec<[f32; 4]> = Vec::with_capacity(nodes.len() * 3);
     for (matrix, inverse_bind) in matrices.iter().zip(&inverse_binds) {
         let skin = *matrix * *inverse_bind;
@@ -241,21 +236,9 @@ pub(in crate::app::model_preview) fn armature_node_positions(
         if let Some(pose) = state.animation.pose.as_ref() {
             let frames = self::sampled_frames(&state.animation, pose.frames.len());
             let markers = &data.preview.gen3.ik_markers;
-            super::super::animation::ik::h4::apply_h4_ik_set(
-                &pose.h4_ik_set,
-                markers,
-                nodes,
-                &inverse_binds,
-                &mut matrices,
-            );
-            super::super::animation::ik::reach::apply_reach_ik(
-                &pose.reach_ik,
-                markers,
-                nodes,
-                &inverse_binds,
-                &mut matrices,
-                frames,
-            );
+            for solver in &pose.solvers {
+                solver.solve(markers, nodes, &inverse_binds, &mut matrices, frames);
+            }
         }
     }
     matrices.iter().map(Matrix4::translation).collect()

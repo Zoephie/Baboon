@@ -52,10 +52,8 @@ pub(crate) struct DecodedAnimationPose {
     pub frames: Vec<Vec<PreviewNodeTransform>>,
     /// The animation's `loop frame index`.
     pub loop_frame: usize,
-    /// Reach: what its IK chains reach for, frame by frame.
-    pub reach_ik: Vec<super::super::animation::ik::reach::ReachIkTrack>,
-    /// Halo 4: the clip's IK set, solved before the chains.
-    pub h4_ik_set: Vec<super::super::animation::ik::h4::H4IkPoint>,
+    /// What the clip solves after its sampled pose, in order.
+    pub solvers: Vec<std::sync::Arc<dyn super::super::animation::ik::solve::PoseSolver>>,
 }
 
 impl DecodedAnimationPose {
@@ -66,8 +64,7 @@ impl DecodedAnimationPose {
     ) -> Self {
         Self {
             loop_frame,
-            reach_ik: Vec::new(),
-            h4_ik_set: Vec::new(),
+            solvers: Vec::new(),
             skeleton_names: skeleton
                 .nodes
                 .iter()
@@ -101,10 +98,8 @@ pub(crate) struct PreviewAnimationPose {
     pub reach: f32,
     /// The frame looping playback continues from after the last; 0 restarts.
     pub loop_frame: usize,
-    /// Reach's IK chain targets, solved after each sampled pose.
-    pub reach_ik: std::sync::Arc<Vec<super::super::animation::ik::reach::ReachIkTrack>>,
-    /// Halo 4's IK set for the clip, solved before the chains.
-    pub h4_ik_set: std::sync::Arc<Vec<super::super::animation::ik::h4::H4IkPoint>>,
+    /// What the clip solves after each sampled pose, in order.
+    pub solvers: Vec<std::sync::Arc<dyn super::super::animation::ik::solve::PoseSolver>>,
 }
 
 impl PreviewAnimationPose {
@@ -115,8 +110,7 @@ impl PreviewAnimationPose {
             frames,
             reach,
             loop_frame: 0,
-            reach_ik: std::sync::Arc::default(),
-            h4_ik_set: std::sync::Arc::default(),
+            solvers: Vec::new(),
         }
     }
 }
@@ -186,21 +180,13 @@ pub(in crate::app::model_preview) fn pose_for_shot(
     data.animations = Some(std::sync::Arc::new(list));
     state.animation.selected = Some(index);
     // The one frame held is the clip's `at`th; its IK reads that frame.
-    let reach_ik = decoded
-        .reach_ik
-        .into_iter()
-        .map(|track| super::super::animation::ik::reach::ReachIkTrack {
-            effector_frames: track.effector_frames.get(at).copied().into_iter().collect(),
-            weights: track.weights.get(at).copied().into_iter().collect(),
-            poles: track
-                .poles
-                .map(|poles| poles.get(at).copied().into_iter().collect()),
-            ..track
-        })
+    let solvers = decoded
+        .solvers
+        .iter()
+        .map(|solver| solver.held_at(at))
         .collect();
     state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
-        reach_ik: std::sync::Arc::new(reach_ik),
-        h4_ik_set: std::sync::Arc::new(decoded.h4_ik_set),
+        solvers,
         ..PreviewAnimationPose::new(index, vec![frame])
     }));
 }

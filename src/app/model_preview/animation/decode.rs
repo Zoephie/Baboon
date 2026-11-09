@@ -179,10 +179,7 @@ pub(super) fn decode_held_animation(
     let loop_frame = usize::try_from(group.loop_frame_index).unwrap_or(0);
     let graphs: Vec<&TagFile> = chain[graph..].iter().collect();
     Ok(DecodedAnimationPose {
-        reach_ik: super::super::animation::ik::reach::read_reach_ik_tracks(&graphs, group),
-        h4_ik_set: graphs.first().map_or_else(Vec::new, |graph| {
-            super::super::animation::ik::h4::read_h4_ik_set(graph, group.index)
-        }),
+        solvers: super::super::load::read_pose_solvers(&graphs, group),
         ..DecodedAnimationPose::new(&skeleton, &pose, loop_frame)
     })
 }

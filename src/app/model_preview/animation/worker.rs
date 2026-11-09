@@ -327,8 +327,7 @@ impl Baboon {
                     .collect();
                 state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
                     loop_frame: decoded.loop_frame,
-                    reach_ik: std::sync::Arc::new(decoded.reach_ik),
-                    h4_ik_set: std::sync::Arc::new(decoded.h4_ik_set),
+                    solvers: decoded.solvers,
                     ..PreviewAnimationPose::new(animation_index, frames)
                 }));
                 state.animation.time = 0.0;

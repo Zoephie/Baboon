@@ -60,12 +60,12 @@ pub(in crate::app::model_preview) fn attach_weapon(
                 attach_point(&parent, &child, frame.position),
             )
         };
-        let holder = super::super::animation::ik::reach::IkHolder::Weapon(owner);
+        let holder = super::super::animation::ik::solve::IkHolder::Weapon(owner);
         let node = Some(parent.node.max(0) as usize);
         preview
             .gen3
             .ik_markers
-            .extend(super::super::animation::ik::reach::reach_ik_markers(
+            .extend(super::super::animation::ik::solve::ik_markers(
                 &attached, holder, place, node,
             ));
     }

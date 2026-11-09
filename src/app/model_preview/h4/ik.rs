@@ -5,12 +5,15 @@
 //! This is how a Spartan's left hand holds a rifle. See
 //! `docs/h4-preview-research/objects.md` §3.6.
 
+use std::sync::Arc;
+
+use blam_tags::animation::AnimationGroup;
 use blam_tags::math::Matrix4;
 use blam_tags::{TagFile, TagStruct};
 
-use super::super::super::RenderModelPreviewNode;
-use super::super::super::common::fields::elements;
-use super::reach::{IkHolder, IkMarker, two_bone_ik};
+use super::super::RenderModelPreviewNode;
+use super::super::animation::ik::solve::{IkHolder, IkMarker, PoseSolver, two_bone_ik};
+use super::super::common::fields::elements;
 use crate::app::model_preview::common::fields::holder_of;
 use crate::app::model_preview::common::math::rigid_inverse;
 
@@ -171,9 +174,49 @@ pub(crate) fn apply_h4_ik_set(
     }
 }
 
+/// A clip's IK set, solved before its chains.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct H4IkSet(pub(crate) Vec<H4IkPoint>);
+
+/// The IK set of the clip `group` of `graphs[0]`, if it names one with
+/// points.
+pub(in crate::app::model_preview) fn read_h4_ik_set_solver(
+    graphs: &[&TagFile],
+    group: &AnimationGroup<'_>,
+) -> Option<Arc<dyn PoseSolver>> {
+    let points = read_h4_ik_set(graphs.first()?, group.index);
+    (!points.is_empty()).then(|| Arc::new(H4IkSet(points)) as Arc<dyn PoseSolver>)
+}
+
+impl PoseSolver for H4IkSet {
+    fn solve(
+        &self,
+        markers: &[IkMarker],
+        nodes: &[RenderModelPreviewNode],
+        inverse_binds: &[Matrix4],
+        worlds: &mut [Matrix4],
+        _frames: (usize, usize, f32),
+    ) {
+        apply_h4_ik_set(&self.0, markers, nodes, inverse_binds, worlds);
+    }
+
+    /// The set holds through the clip.
+    #[cfg(test)]
+    fn held_at(&self, _at: usize) -> Arc<dyn PoseSolver> {
+        Arc::new(self.clone())
+    }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::H4IkSet;
     use crate::app::model_preview::harness::kit::kit_root;
+    use crate::app::model_preview::reach::ik::ReachIkChains;
     use crate::app::model_preview::*;
     use crate::core::format::TagNameIndex;
     use crate::core::game::GameId;
@@ -220,6 +263,15 @@ mod tests {
         (data, state)
     }
 
+    /// The posed clip's IK set's points.
+    fn ik_set(state: &ModelPreviewState) -> Vec<super::H4IkPoint> {
+        let pose = state.animation.pose.as_ref().unwrap();
+        pose.solvers
+            .iter()
+            .find_map(|solver| solver.as_any().downcast_ref::<H4IkSet>())
+            .map_or_else(Vec::new, |set| set.0.clone())
+    }
+
     /// With `BLAM_TEST_H4EK` (the kit's tags): the Chief holding the AR in
     /// `combat:rifle:idle` puts each IK set point's marker on the weapon's, the
     /// left hand on `left_hand_spartan`, within a millimetre.
@@ -229,10 +281,10 @@ mod tests {
             return;
         };
         let (data, mut state) = h4_chief_with_rifle(&root, "combat:rifle:idle");
-        let points = state.animation.pose.as_ref().unwrap().h4_ik_set.clone();
+        let points = ik_set(&state);
         assert!(!points.is_empty(), "the clip's IK set");
         let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
-        let posed = |marker: &crate::app::model_preview::animation::ik::reach::IkMarker| {
+        let posed = |marker: &crate::app::model_preview::animation::ik::solve::IkMarker| {
             let skin = &rows[marker.node * 3..marker.node * 3 + 3];
             let at = [
                 marker.bind.m[0][3],
@@ -253,7 +305,7 @@ mod tests {
         for point in points.iter() {
             let (Some(source), Some(destination)) = (
                 find(
-                    crate::app::model_preview::animation::ik::reach::IkHolder::Unit,
+                    crate::app::model_preview::animation::ik::solve::IkHolder::Unit,
                     &point.source,
                 ),
                 find(point.holder, &point.destination),
@@ -281,10 +333,11 @@ mod tests {
         assert!(solved > 0, "no point found both markers: {points:?}");
         // Without the set the animation alone leaves the hand off the grip.
         let mut pose = (**state.animation.pose.as_ref().unwrap()).clone();
-        pose.h4_ik_set = Arc::default();
+        pose.solvers
+            .retain(|solver| solver.as_any().downcast_ref::<H4IkSet>().is_none());
         state.animation.pose = Some(Arc::new(pose));
         let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
-        let posed = |marker: &crate::app::model_preview::animation::ik::reach::IkMarker| {
+        let posed = |marker: &crate::app::model_preview::animation::ik::solve::IkMarker| {
             let skin = &rows[marker.node * 3..marker.node * 3 + 3];
             let at = [
                 marker.bind.m[0][3],
@@ -299,7 +352,7 @@ mod tests {
         let (from, to) = (
             posed(
                 find(
-                    crate::app::model_preview::animation::ik::reach::IkHolder::Unit,
+                    crate::app::model_preview::animation::ik::solve::IkHolder::Unit,
                     &point.source,
                 )
                 .unwrap(),
@@ -326,9 +379,13 @@ mod tests {
         };
         let (data, state) = h4_chief_with_rifle(&root, "combat:rifle:ar:reload_1");
         let pose = state.animation.pose.as_ref().unwrap();
-        assert!(!pose.reach_ik.is_empty(), "the reload's chains");
-        assert!(pose.reach_ik.iter().any(|track| track.holder
-            == crate::app::model_preview::animation::ik::reach::IkHolder::Weapon(1)));
+        let chains = pose
+            .solvers
+            .iter()
+            .find_map(|solver| solver.as_any().downcast_ref::<ReachIkChains>())
+            .expect("the reload's chains");
+        assert!(chains.0.iter().any(|track| track.holder
+            == crate::app::model_preview::animation::ik::solve::IkHolder::Weapon(1)));
         let rows = animation::animation_skinning_rows(&data, &state).expect("a posed frame");
         assert!(rows.iter().flatten().all(|lane| lane.is_finite()));
     }

@@ -9,6 +9,7 @@ pub(super) mod camo;
 pub(in crate::app::model_preview) mod cloth;
 pub(in crate::app::model_preview) mod composite;
 mod features;
+pub(in crate::app::model_preview) mod ik;
 pub(in crate::app::model_preview) mod light_pass;
 pub(in crate::app::model_preview) mod lighting;
 pub(super) mod lights;

@@ -53,9 +53,9 @@ pub(in crate::app::model_preview) fn read_h4_object_features(
     let own = |frame: &crate::app::model_preview::common::marker::MarkerFrame| {
         (frame.axes, frame.position)
     };
-    preview.gen3.ik_markers = super::super::animation::ik::reach::reach_ik_markers(
+    preview.gen3.ik_markers = super::super::animation::ik::solve::ik_markers(
         preview,
-        super::super::animation::ik::reach::IkHolder::Unit,
+        super::super::animation::ik::solve::IkHolder::Unit,
         own,
         None,
     );

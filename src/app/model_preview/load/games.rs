@@ -209,6 +209,24 @@ pub(in crate::app::model_preview) fn decode_own_animation(
         .then(|| super::super::ce::animation::decode_ce_animation(source, model, animation_index))
 }
 
+/// What the clip `group` of `graphs[0]` solves after its sampled pose, in
+/// the order it solves: Halo 4's IK set, then Reach's IK chains (which Halo
+/// 4's graphs carry too). Every graph is read for each, as each reads only
+/// the blocks that name it.
+pub(in crate::app::model_preview) fn read_pose_solvers(
+    graphs: &[&TagFile],
+    group: &blam_tags::animation::AnimationGroup<'_>,
+) -> Vec<std::sync::Arc<dyn super::super::animation::ik::solve::PoseSolver>> {
+    const READERS: [super::super::animation::ik::solve::PoseSolverReader; 2] = [
+        super::super::h4::ik::read_h4_ik_set_solver,
+        super::super::reach::ik::read_reach_ik_chains,
+    ];
+    READERS
+        .iter()
+        .filter_map(|read| read(graphs, group))
+        .collect()
+}
+
 /// Once the clips are listed after a weapon change, the clip to play where
 /// the game picks it its own way: a Halo CE unit's, taking the `waiting`
 /// one. `None` for any other model, or with no clip waiting.
