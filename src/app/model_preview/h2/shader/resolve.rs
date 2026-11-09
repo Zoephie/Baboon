@@ -5,8 +5,11 @@ use super::super::super::common::fields::has_flag;
 use super::super::super::dx9::passes::{
     Dx9DrawPass, Dx9Layer, Dx9ParameterValue, animation_function,
 };
-use super::super::super::materials::*;
-use super::super::super::*;
+use super::super::super::materials::{
+    DetailComposition, DetailFunction, MaterialTextures, ResolveCaches, SLOT_PARAMETERS,
+    SlotBitmap, TextureSlot, cached_bitmap, decode_image,
+};
+use super::super::super::{TagFile, TagReader, TagSource, TagStruct, tag_path};
 use super::super::shader::{
     h2_pass_needs_frame_texture, prepare_draw_pass, resolve_h2_layer_passes,
 };

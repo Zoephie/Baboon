@@ -13,7 +13,7 @@ use super::super::effects::marker_name;
 use super::super::functions::FunctionValues;
 use super::super::gen3::shaders::Gen3Blend;
 use super::super::materials::decode_image;
-use super::super::*;
+use super::super::{RenderModelPreviewMarker, TagReader, frame_steps, resume_point};
 use super::lights::attachment_value;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::marker::MarkerFrame;

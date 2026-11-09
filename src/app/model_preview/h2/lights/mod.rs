@@ -3,10 +3,6 @@
 //! [`super::super::ce::lights`], but the sums are not: brightness, color and rotation
 //! animate, occlusion comes in two sizes, and the pixel shader adds a highlight.
 
-use std::sync::Arc;
-
-use blam_tags::{TagFile, TagFunction, TagStruct};
-
 use super::super::common::fields::{
     elements, function_slot_of, has_flag, has_flag_in_any, object_block,
 };
@@ -18,7 +14,6 @@ use super::super::effects::{for_each_attached_part, part_markers};
 use super::super::functions::FunctionValues;
 use super::super::functions::object_input;
 use super::super::materials::decode_image;
-use super::super::*;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::flares::FlareSprite;
 use crate::app::model_preview::common::flares::OcclusionOffset;
@@ -28,7 +23,6 @@ use crate::app::model_preview::common::random::lcg_step;
 use crate::app::model_preview::dx9::passes::ce_color_interpolation;
 use crate::app::model_preview::h2::effect_part::{H2EffectLight, H2EffectPart};
 use crate::core::h2_pixel_shader::SamplerKind;
-use blam_tags::tag_function::h2::transition_evaluate;
 
 mod place;
 pub(in crate::app::model_preview) use place::*;

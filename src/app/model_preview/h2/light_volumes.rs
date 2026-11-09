@@ -13,7 +13,7 @@ use super::super::effects::marker_name;
 use super::super::effects::{for_each_attached_part, part_markers};
 use super::super::functions::FunctionValues;
 use super::super::materials::decode_image;
-use super::super::*;
+use super::super::{RenderModelPreviewMarker, TagReader};
 use super::effect_part::H2EffectPart;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::marker::MarkerFrame;
@@ -690,6 +690,7 @@ attached!(H2LightVolume);
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::{TagSource, load_referenced_tag_from_source};
     use super::*;
     use crate::app::model_preview::common::attached::Attached;
     use crate::app::model_preview::harness::kit::kit_root;

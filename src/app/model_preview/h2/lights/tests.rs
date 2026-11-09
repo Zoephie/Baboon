@@ -1,5 +1,6 @@
 use super::super::super::effects::EffectTimes;
 use super::*;
+use std::sync::Arc;
 
 /// What every kind of attachment reads for its `scale by`: full with no
 /// name, the object's value, and with none an idle object's input.

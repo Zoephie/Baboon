@@ -1,6 +1,14 @@
 //! Placing Halo 2's flares and lights on an object's markers, and the function values that scale them.
 
-use super::*;
+use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::flares::{H2Flare, H2FlareAt, H2FlareEffect, read_h2_flare};
+use super::light::{H2GelLight, H2Light, H2PointLight, read_h2_light};
+use super::{
+    FunctionValues, H2EffectLight, H2EffectPart, MarkerFrame, elements, for_each_attached_part,
+    function_slot_of, object_block, object_input, part_markers, tag_function_at,
+};
+use blam_tags::{TagFile, TagFunction, TagStruct};
+use std::sync::Arc;
 
 /// `sub_946960`'s divisor for the near plane's edge, `dword_EB9D38`.
 pub(super) const NEAR_EDGE_DIVISOR: f32 = 40.0;

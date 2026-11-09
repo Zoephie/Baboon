@@ -3,12 +3,17 @@
 
 use blam_tags::{TagFile, TagStruct};
 
+use super::super::TagReader;
 use super::super::common::fields::{elements, has_flag};
 use super::super::gen3::materials::read_h3_bitmap;
 use super::super::gen3::shaders::Gen3Blend;
-use super::super::particles::*;
-use super::super::*;
+use super::super::particles::{
+    AlbedoConstants, Billboard, EmissionShape, Emitter, MOST_FRAMES, ParticleAlbedo, ParticleAxis,
+    ParticleController, ParticleLook, ParticleProperty, ParticleTrigger, ParticleUpdate,
+    SeedAllocator, SpriteShader, read_collider_of, read_movement, sprite_corner,
+};
 use crate::core::h2_pixel_shader::SamplerKind;
+use std::sync::Arc;
 
 /// Halo 2 tool's particle system postprocess (`sub_80D2A0`): out and its
 /// feather default to 30 and 10, and only a system shown in any camera mode
@@ -393,6 +398,7 @@ pub(in crate::app::model_preview) fn read_h2_emitter(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::particles::lod_amount;
     use super::*;
 
     #[test]

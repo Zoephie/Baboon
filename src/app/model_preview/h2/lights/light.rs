@@ -1,6 +1,17 @@
 //! Halo 2's sphere and frustum (gel) lights: read, and lit for a frame.
 
-use super::*;
+use super::super::super::TagReader;
+use super::flares::{H2Flare, H2FlareAt, read_h2_flare};
+use super::place::{
+    BRIGHTEST, FIELD_OF_VIEW, NEAR_EDGE_BIAS, NEAR_EDGE_DIVISOR, light_value, scale_function,
+    second_field_int,
+};
+use super::{
+    Dx9Layer, FunctionValues, H2DefaultLight, H2EffectLight, Image, SamplerKind, UNSET, attached,
+    ce_color_interpolate, ce_color_interpolation, cross, decode_image, has_flag, posed_on,
+};
+use blam_tags::{TagFunction, TagStruct};
+use std::sync::Arc;
 
 /// What `sub_8ED2A0` works a `light` out from, for the flare it submits.
 #[derive(Debug, Clone)]

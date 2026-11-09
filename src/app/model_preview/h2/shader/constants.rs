@@ -1,6 +1,20 @@
 //! Preparing a pass for draw: its externs, masks, and the pixel and vertex constants it uploads.
 
-use super::*;
+use super::super::super::dx9::passes::{
+    DEFAULT_AMBIENT, DEFAULT_DIRECT_COLOR, DEFAULT_DIRECT_VECTOR, DEFAULT_INDIRECT_COLOR,
+    DEFAULT_INDIRECT_VECTOR, Dx9Cull, Dx9DrawPass, Dx9DrawTexture, Dx9ParameterValue, Dx9Pass,
+    H2_GLSL_VERSION, H2AnimatedRow, H2Animation, H2RowForm, fill_components, identity_rows,
+};
+use super::passes::{
+    ACTIVE_CAMO_AMOUNT, ACTIVE_CAMO_BUMP, CAMERA_FEEDS, FRAME_COPY, LIGHT_FALLOFF, LIGHT_GEL,
+    TEXACCUM_TARGET, VECTOR_NORMALIZATION, WATER_REFRACTION, change_color_channel,
+};
+use super::{
+    ConstantBinding, Dx9VertexStage, H2_TEXTURE_ROWS, Image, PixelShaderOptions, SamplerBinding,
+    SamplerKind, TextureImage, has_flag, translate,
+};
+use blam_tags::TagStruct;
+use std::collections::HashMap;
 
 /// Vertex registers holding a lightmap pass's light vectors.
 const LIGHT_DIRECT_REGISTER: i32 = 8;

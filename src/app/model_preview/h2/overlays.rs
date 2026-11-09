@@ -1,7 +1,7 @@
 //! The shaders a Halo 2 `.model` draws again over its render model.
 
 use super::super::dx9::passes::Dx9Layer;
-use super::super::*;
+use super::super::{RenderModelPreview, RenderModelPreviewMaterial};
 use blam_tags::TagFile;
 
 /// The shaders a `.model` lays over its render model: its hologram shader

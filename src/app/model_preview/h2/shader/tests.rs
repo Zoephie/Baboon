@@ -1,6 +1,11 @@
+use super::super::super::dx9::passes::{
+    Dx9BlendFactor, Dx9Compare, Dx9Depth, Dx9Layer, Dx9ParameterValue, Dx9Pass, Dx9PassTexture,
+    Dx9VertexConstant, animated_vector, elements, read_change_colors,
+};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
+use std::collections::HashMap;
 
 #[test]
 fn object_env_brightness_is_the_luminance_of_the_lighting() {

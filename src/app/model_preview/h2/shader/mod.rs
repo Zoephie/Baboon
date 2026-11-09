@@ -9,7 +9,6 @@
 //! chooses them for something with no lightmap of its own.
 
 use super::super::common::image::Image;
-use super::super::dx9::passes::*;
 use super::super::dx9::stage::{Dx9VertexStage, H2_TEXTURE_ROWS};
 use super::super::functions::object_input;
 use super::super::materials::TextureImage;
@@ -18,9 +17,6 @@ use crate::core::h2_pixel_shader::{
     AlphaCompare, AlphaTest, ConstantBinding, PixelShaderOptions, SamplerBinding, SamplerKind,
     translate,
 };
-use blam_tags::{TagFieldData, TagFile, TagStruct};
-use std::collections::HashMap;
-use std::sync::Arc;
 
 mod passes;
 pub(in crate::app::model_preview) mod resolve;

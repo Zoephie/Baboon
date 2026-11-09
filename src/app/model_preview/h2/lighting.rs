@@ -5,7 +5,7 @@ use eframe::glow::{self, HasContext as _};
 
 use super::super::common::features::paths;
 use super::super::dx9::passes::{Dx9Layer, H2DefaultLight};
-use super::super::*;
+use super::super::{ModelGpuFrame, RenderCore};
 
 /// Draw the object's sphere lights over `order`, each over its diffuse and
 /// specular layers.

@@ -1,6 +1,16 @@
 //! Halo 2's lens flares: their reflections, how they are read, and the sprites and occlusion they draw.
 
-use super::*;
+use super::super::super::TagReader;
+use super::light::H2Light;
+use super::place::{INNER_SCALES, attachment_value, scale_function};
+use super::{
+    FlareSprite, FunctionValues, H2EffectLight, H2EffectPart, Image, OcclusionOffset, SamplerKind,
+    ViewFrame, cross, decode_image, dot, elements, has_flag, has_flag_in_any, lcg_step, lerp,
+    posed_on,
+};
+use blam_tags::TagFunction;
+use blam_tags::tag_function::h2::transition_evaluate;
+use std::sync::Arc;
 
 /// A `lens_flare`'s `flags`, by name.
 #[derive(Debug, Clone, Copy, Default)]
