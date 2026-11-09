@@ -17,7 +17,7 @@ impl GameRender for PlainRender {
         let frame = cx.frame;
         unsafe {
             cx.core.draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| {
-                (frame.game_shaders && core.h3_material(frame, material).is_some())
+                (frame.game_shaders && core.gen3_material(frame, material).is_some())
                     || core.h2_replaces_slots(frame, material)
             })
         }

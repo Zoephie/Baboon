@@ -4,7 +4,7 @@ use super::*;
 
 /// Which part of a constant an animation writes, as `update_constants` does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H3Animated {
+pub(crate) enum Gen3Animated {
     First,
     Second,
     ScaleUniform,
@@ -17,21 +17,21 @@ pub(crate) enum H3Animated {
 
 /// One of a shader's `animated parameters`.
 #[derive(Debug)]
-pub(crate) struct H3Animation {
+pub(crate) struct Gen3Animation {
     pub(crate) uniform: String,
-    pub(crate) writes: H3Animated,
+    pub(crate) writes: Gen3Animated,
     pub(crate) function: blam_tags::TagFunction,
     pub(crate) input: String,
     pub(crate) range: String,
     pub(crate) period: f32,
     /// Which input names run on the clock, by game and shader.
-    pub(crate) clock: H3Clock,
+    pub(crate) clock: Gen3Clock,
 }
 
 /// How `evaluate_function` reads an animated parameter's input when it names
 /// the clock rather than an object function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum H3Clock {
+pub(crate) enum Gen3Clock {
     /// Halo 3 (`evaluate_function`, March 2007 build): `unique_id` is time
     /// shifted by the object's index, so like objects run out of step.
     #[default]
@@ -48,7 +48,7 @@ pub(crate) enum H3Clock {
     Reach,
 }
 
-impl H3Clock {
+impl Gen3Clock {
     /// Seconds `unique_id` runs ahead for the object of `owner`, or none if
     /// `input` is not a clock here. The game uses the object's datum index;
     /// the preview's owner (0 the opened object) stands in for it.
@@ -63,7 +63,7 @@ impl H3Clock {
     }
 }
 
-impl H3Animation {
+impl Gen3Animation {
     /// `evaluate_function`: an object's named values, or else time around a
     /// period, which only a periodic function runs past 1.
     pub(super) fn sample(&self, time: f32, owner: u8, values: Option<&FunctionValues>) -> (f32, f32) {
@@ -81,7 +81,7 @@ impl H3Animation {
         }
         let periodic = self.function.function_type() == FunctionType::Periodic;
         let input = match (self.clock, phase) {
-            (H3Clock::Reach, Some(phase)) if self.input == "unique_id" && !periodic => phase,
+            (Gen3Clock::Reach, Some(phase)) if self.input == "unique_id" && !periodic => phase,
             _ => (time + phase.unwrap_or(0.0)) / self.period,
         };
         if periodic { (input, 0.0) } else { (input.rem_euclid(1.0), 0.0) }
@@ -90,17 +90,17 @@ impl H3Animation {
     /// Write this into `value`, the constant as it stands.
     pub(crate) fn apply(&self, value: &mut [f32; 4], time: f32, owner: u8, values: Option<&FunctionValues>) {
         let (input, range) = self.sample(time, owner, values);
-        if self.writes == H3Animated::Color {
+        if self.writes == Gen3Animated::Color {
             let color = self.function.evaluate_color(input, range);
             value[..3].copy_from_slice(&[color.red, color.green, color.blue]);
             return;
         }
         let output = self.function.evaluate(input, range);
         match self.writes {
-            H3Animated::ScaleUniform => value[..2].fill(output),
-            H3Animated::First => value[0] = output,
-            H3Animated::Second => value[1] = output,
-            H3Animated::Third => value[2] = output,
+            Gen3Animated::ScaleUniform => value[..2].fill(output),
+            Gen3Animated::First => value[0] = output,
+            Gen3Animated::Second => value[1] = output,
+            Gen3Animated::Third => value[2] = output,
             _ => value[3] = output,
         }
     }

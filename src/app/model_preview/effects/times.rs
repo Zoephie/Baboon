@@ -29,12 +29,12 @@ const PARALLEL: &str = "run events in parallel";
 /// When an event's delay and duration run, in seconds. A bound the game rolls
 /// takes its middle, so that a preview holds still from one load to the next.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct H3EventTime {
+pub(super) struct EventTime {
     delay: f32,
     pub(super) duration: f32,
 }
 
-impl H3EventTime {
+impl EventTime {
     fn read(event: TagStruct<'_>, baked: bool) -> Self {
         let delay = event.read_real_bounds("delay bounds");
         let duration = event.read_real_bounds("duration bounds");
@@ -81,7 +81,7 @@ impl H3EventTime {
 /// An effect's events, as `effect_new_looping` runs them: always looping.
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::app::model_preview) struct EffectTimes {
-    pub(super) events: Vec<H3EventTime>,
+    pub(super) events: Vec<EventTime>,
     pub(super) loop_start: usize,
     pub(super) parallel: bool,
     /// Over after one run, as an event's effect is.
@@ -95,7 +95,7 @@ impl EffectTimes {
         // as authored.
         let baked = effect.field("looping sounds").is_none();
         Self {
-            events: elements(effect, "events").iter().map(|event| H3EventTime::read(*event, baked)).collect(),
+            events: elements(effect, "events").iter().map(|event| EventTime::read(*event, baked)).collect(),
             loop_start: usize::try_from(effect.read_block_index("loop start event")).unwrap_or(0),
             parallel: has_flag(effect, "flags", PARALLEL),
             once: false,
@@ -157,7 +157,7 @@ impl EffectTimes {
     /// A run that never ends of itself, for what something else times.
     pub(in crate::app::model_preview) fn lasting() -> Self {
         Self {
-            events: vec![H3EventTime { delay: 0.0, duration: f32::MAX }],
+            events: vec![EventTime { delay: 0.0, duration: f32::MAX }],
             loop_start: 0,
             parallel: false,
             once: false,
@@ -169,7 +169,7 @@ impl EffectTimes {
     #[cfg(test)]
     pub(in crate::app::model_preview) fn of_events(events: &[([f32; 2], [f32; 2])], reach: bool) -> Self {
         let time = |&(delay, duration): &([f32; 2], [f32; 2])| {
-            if reach { H3EventTime::unbaked(delay, duration) } else { H3EventTime::of(delay, duration) }
+            if reach { EventTime::unbaked(delay, duration) } else { EventTime::of(delay, duration) }
         };
         Self { events: events.iter().map(time).collect(), loop_start: 0, parallel: false, once: false }
     }
@@ -177,7 +177,7 @@ impl EffectTimes {
     #[cfg(test)]
     pub(in crate::app::model_preview) fn read_nothing() -> Self {
         Self {
-            events: vec![H3EventTime::of([0.0, 0.0], [100.0, 100.0])],
+            events: vec![EventTime::of([0.0, 0.0], [100.0, 100.0])],
             loop_start: 0,
             parallel: false,
             once: false,

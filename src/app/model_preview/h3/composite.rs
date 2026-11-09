@@ -3,7 +3,7 @@
 
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::effects::screen::H3ScreenSettings;
+use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
 use crate::app::model_preview::gl::screen::screen_program;
@@ -58,7 +58,7 @@ impl H3Game {
         cx: &mut Gen3Cx<'_>,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
-        screen: H3ScreenSettings,
+        screen: Gen3ScreenSettings,
     ) {
         let (gl, core) = (cx.gl, &mut *cx.core);
         let state = &mut *cx.state;

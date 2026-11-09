@@ -1,9 +1,9 @@
 //! Halo 4's full camo, drawn after the composite.
 
 use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::shaders::H3Material;
+use super::super::gen3::shaders::Gen3Material;
 use super::super::RenderModelPreviewBatch;
-use super::super::gen3::pipeline::h3_set_cull;
+use super::super::gen3::pipeline::gen3_set_cull;
 use eframe::glow::{self, HasContext};
 use std::sync::Arc;
 use super::render::H4Game;
@@ -23,7 +23,7 @@ impl H4Game {
     pub(super) unsafe fn draw_camo(
         &mut self,
         cx: &mut Gen3Cx<'_>,
-        batches: &[(RenderModelPreviewBatch, Arc<H3Material>)],
+        batches: &[(RenderModelPreviewBatch, Arc<Gen3Material>)],
         draw: super::camo::H4CamoDraw,
         size: [i32; 2],
     ) {
@@ -60,7 +60,7 @@ impl H4Game {
             }
             gl.bind_texture(glow::TEXTURE_2D, None);
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
-            h3_set_cull(gl, frame);
+            gen3_set_cull(gl, frame);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             let mut camo = |this: &mut RenderCore| {

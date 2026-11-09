@@ -17,8 +17,8 @@ use super::super::common::view::ViewFrame;
 use super::super::super::effects::EffectOnsets;
 use super::super::particles::ParticleField;
 use super::super::gl::pass_state::PassState;
-use super::pipeline::{h3_lighting_constants, h3_set_blend};
-use crate::app::model_preview::common::sprites::h3_layered_distance;
+use super::pipeline::{gen3_lighting_constants, gen3_set_blend};
+use crate::app::model_preview::common::sprites::layered_distance;
 use super::super::reach::lighting::reach_exposure;
 use super::render::Gen3Game;
 
@@ -240,7 +240,7 @@ impl SpritePass<'_> {
         let eye_distance = |origin: [f32; 3]| {
             (0..3).map(|axis| (origin[axis] - view.eye[axis]) * view.forward[axis]).sum::<f32>()
         };
-        let layered = h3_layered_distance;
+        let layered = layered_distance;
         let volumes = frame.preview.gen3.light_volumes.iter().enumerate();
         let volumes = volumes
             .filter(|_| !matches!(stage, SpriteStage::Distortions))
@@ -319,7 +319,7 @@ impl SpritePass<'_> {
             gl.bind_vertex_array(Some(flares.vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
             gl.active_texture(glow::TEXTURE0);
-            h3_set_blend(gl, at.blend());
+            gen3_set_blend(gl, at.blend());
             gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder));
             let [center, falloff] = circular.unwrap_or([0.0; 2]);
             gl.uniform_2_f32(flares.circular.as_ref(), center, falloff);
@@ -382,7 +382,7 @@ impl SpritePass<'_> {
         };
         let values = frame.function_values_of_object(strip.object);
         let onset = uploaded.simulations.effect_onsets.of(strip.object, strip.scale_name(), values, frame.time);
-        let lighting = h3_lighting_constants(frame);
+        let lighting = gen3_lighting_constants(frame);
         let drawn = uploaded.simulations.h3_strips.vertices(index, strip, values, self.bones, &self.view, &lighting, frame.time, onset, stops);
         if drawn.is_empty() {
             return;
@@ -421,7 +421,7 @@ impl SpritePass<'_> {
                 // ps_view_self_illum_exposure.y, alpha)`.
                 let exposures = if first.library().halo4() {
                     let channel = |name: &str, at: usize| match h4::lighting::h4_frame_value(name) {
-                        Some(gen3::shaders::H3Value::Floats(value)) => value[at],
+                        Some(gen3::shaders::Gen3Value::Floats(value)) => value[at],
                         _ => 1.0,
                     };
                     [channel("ps_view_exposure", 0), channel("ps_view_self_illum_exposure", 1)]

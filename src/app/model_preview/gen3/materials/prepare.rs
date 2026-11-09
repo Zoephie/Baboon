@@ -9,10 +9,10 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
     reader: &TagReader,
     values: &Values<'_>,
     caches: &mut ResolveCaches,
-) -> Result<H3Material, String> {
+) -> Result<Gen3Material, String> {
     let method = values.method;
     let compiled = compile_passes(reader, method, caches)?;
-    let mut material = H3Material {
+    let mut material = Gen3Material {
         dialect: compiled.dialect.into(),
         albedo: compiled.albedo,
         lit: compiled.lit,
@@ -33,8 +33,8 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
         shield: None,
         fringe: None,
     };
-    if compiled.blend == H3Blend::Opaque {
-        material.shield = h3_shield(reader, caches);
+    if compiled.blend == Gen3Blend::Opaque {
+        material.shield = gen3_shield(reader, caches);
     }
     let passes = material_passes(&material);
     let clock = animation_clock(reader, compiled.screen);
@@ -53,18 +53,18 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
 /// passes, and the flags its blend and family set.
 struct CompiledPasses {
     dialect: RenderMethodDialect,
-    blend: H3Blend,
+    blend: Gen3Blend,
     decal: bool,
     decal_modulates_specular: bool,
     after_lighting: bool,
     /// Whether the definition is `screen`'s, which its clock follows.
     screen: bool,
-    lit: Arc<H3Pass>,
-    albedo: Option<Arc<H3Pass>>,
-    camo: Option<Arc<H3Pass>>,
-    shadow_generate: Option<Arc<H3Pass>>,
-    dynamic_light: Option<Arc<H3Pass>>,
-    prt: [Option<Arc<H3Pass>>; 3],
+    lit: Arc<Gen3Pass>,
+    albedo: Option<Arc<Gen3Pass>>,
+    camo: Option<Arc<Gen3Pass>>,
+    shadow_generate: Option<Arc<Gen3Pass>>,
+    dynamic_light: Option<Arc<Gen3Pass>>,
+    prt: [Option<Arc<Gen3Pass>>; 3],
 }
 
 /// The method's definition read, and each entry point it draws through
@@ -74,7 +74,7 @@ fn compile_passes(
     method: &RenderMethod,
     caches: &mut ResolveCaches,
 ) -> Result<CompiledPasses, String> {
-    let sources = caches.h3_sources.get_or_insert_with(|| H3Sources::new(&reader.source));
+    let sources = caches.h3_sources.get_or_insert_with(|| Gen3Sources::new(&reader.source));
     let definition = sources
         .definition(&method.definition_path)
         .ok_or_else(|| format!("{} did not read", method.definition_path))?;
@@ -87,7 +87,7 @@ fn compile_passes(
         .chain(&["albedo"])
         .find(|entry| definition.entry_points.iter().any(|known| known == *entry))
         .ok_or("no lit entry point")?;
-    let opaque = blend == H3Blend::Opaque;
+    let opaque = blend == Gen3Blend::Opaque;
     let dialect = sources.dialect();
     let has = |entry: &str| definition.entry_points.iter().any(|known| known == entry);
     // Reach's `select_mesh_entry_point_for_pass` (MCC `sub_14084C910`) lights
@@ -162,7 +162,7 @@ fn screen_maps(method: &RenderMethod) -> Vec<String> {
 }
 
 /// Every pass the material draws through, the lit pass last.
-fn material_passes(material: &H3Material) -> Vec<Arc<H3Pass>> {
+fn material_passes(material: &Gen3Material) -> Vec<Arc<Gen3Pass>> {
     material
         .albedo
         .iter()
@@ -176,17 +176,17 @@ fn material_passes(material: &H3Material) -> Vec<Arc<H3Pass>> {
 }
 
 /// Which clock the material's animated parameters run by.
-fn animation_clock(reader: &TagReader, screen: bool) -> H3Clock {
+fn animation_clock(reader: &TagReader, screen: bool) -> Gen3Clock {
     match (reader.source.game(), screen) {
-        (Some(GameId::Halo3Odst), true) => H3Clock::OdstScreen,
-        (Some(GameId::Halo3Odst), false) => H3Clock::Odst,
-        (Some(GameId::HaloReach), _) => H3Clock::Reach,
-        _ => H3Clock::Halo3,
+        (Some(GameId::Halo3Odst), true) => Gen3Clock::OdstScreen,
+        (Some(GameId::Halo3Odst), false) => Gen3Clock::Odst,
+        (Some(GameId::HaloReach), _) => Gen3Clock::Reach,
+        _ => Gen3Clock::Halo3,
     }
 }
 
 /// Each animated parameter that moves, as the uniform it writes.
-fn parameter_animations(method: &RenderMethod, clock: H3Clock) -> Vec<H3Animation> {
+fn parameter_animations(method: &RenderMethod, clock: Gen3Clock) -> Vec<Gen3Animation> {
     let mut animations = Vec::new();
     for parameter in &method.parameters {
         let uniform = match parameter.parameter_type.map(|kind| kind.get()) {
@@ -200,25 +200,25 @@ fn parameter_animations(method: &RenderMethod, clock: H3Clock) -> Vec<H3Animatio
                 continue;
             };
             let writes = match kind.get() {
-                RenderMethodAnimatedParameterType::Color => H3Animated::Color,
-                RenderMethodAnimatedParameterType::ScaleUniform => H3Animated::ScaleUniform,
+                RenderMethodAnimatedParameterType::Color => Gen3Animated::Color,
+                RenderMethodAnimatedParameterType::ScaleUniform => Gen3Animated::ScaleUniform,
                 RenderMethodAnimatedParameterType::Value | RenderMethodAnimatedParameterType::ScaleX => {
-                    H3Animated::First
+                    Gen3Animated::First
                 }
-                RenderMethodAnimatedParameterType::ScaleY => H3Animated::Second,
-                RenderMethodAnimatedParameterType::TranslationX => H3Animated::Third,
+                RenderMethodAnimatedParameterType::ScaleY => Gen3Animated::Second,
+                RenderMethodAnimatedParameterType::TranslationX => Gen3Animated::Third,
                 RenderMethodAnimatedParameterType::TranslationY
-                | RenderMethodAnimatedParameterType::Alpha => H3Animated::Fourth,
-                RenderMethodAnimatedParameterType::FrameIndex => H3Animated::Frame,
+                | RenderMethodAnimatedParameterType::Alpha => Gen3Animated::Fourth,
+                RenderMethodAnimatedParameterType::FrameIndex => Gen3Animated::Frame,
             };
             if function.as_constant().is_some() && animated.input_name.is_empty() {
                 continue;
             }
             let uniform = match writes {
-                H3Animated::Frame => format!("UserParameterTexture_{}", parameter.parameter_name),
+                Gen3Animated::Frame => format!("UserParameterTexture_{}", parameter.parameter_name),
                 _ => uniform.clone(),
             };
-            animations.push(H3Animation {
+            animations.push(Gen3Animation {
                 uniform,
                 writes,
                 function: function.clone(),
@@ -239,7 +239,7 @@ fn parameter_animations(method: &RenderMethod, clock: H3Clock) -> Vec<H3Animatio
 
 /// The values `pass`'s user parameters take: an extern's change color or
 /// debug tint, a bitmap's transform, or the parameter's own value.
-fn bind_pass_values(values: &Values<'_>, pass: &H3Pass, material: &mut H3Material) {
+fn bind_pass_values(values: &Values<'_>, pass: &Gen3Pass, material: &mut Gen3Material) {
     for (uniform, _) in &pass.uniforms {
         let Some(name) = uniform.strip_prefix("UserParameter_") else {
             continue;
@@ -248,16 +248,16 @@ fn bind_pass_values(values: &Values<'_>, pass: &H3Pass, material: &mut H3Materia
             values.resolved.and_then(|resolved| resolved.find(name)).map(|found| &found.source)
         {
             let source: &'static str = source.into();
-            if let Some(channel) = h3_extern_change_color(source) {
+            if let Some(channel) = gen3_extern_change_color(source) {
                 material.change_colors.push((uniform.clone(), channel));
             } else if source == "debug tint" {
-                material.values.insert(uniform.clone(), H3Value::Floats([1.0, 1.0, 1.0, 0.0]));
+                material.values.insert(uniform.clone(), Gen3Value::Floats([1.0, 1.0, 1.0, 0.0]));
             }
             continue;
         }
         let value = match name.strip_suffix("_xform") {
-            Some(map) => Some(H3Value::Floats(h3_xform(values, map))),
-            None => h3_parameter_value(values, name),
+            Some(map) => Some(Gen3Value::Floats(gen3_xform(values, map))),
+            None => gen3_parameter_value(values, name),
         };
         if let Some(value) = value {
             material.values.insert(uniform.clone(), value);
@@ -270,8 +270,8 @@ fn bind_pass_values(values: &Values<'_>, pass: &H3Pass, material: &mut H3Materia
 fn bind_pass_textures(
     reader: &TagReader,
     values: &Values<'_>,
-    pass: &H3Pass,
-    material: &mut H3Material,
+    pass: &Gen3Pass,
+    material: &mut Gen3Material,
     caches: &mut ResolveCaches,
 ) {
     for (uniform, kind) in &pass.textures {
@@ -294,7 +294,7 @@ fn bind_pass_textures(
                 }),
             ),
             Some(ParameterSource::Extern(extern_source)) => {
-                match h3_extern_bitmap(extern_source.into()) {
+                match gen3_extern_bitmap(extern_source.into()) {
                     Some(path) => (path.to_owned(), 0, None),
                     None => continue,
                 }
@@ -306,22 +306,22 @@ fn bind_pass_textures(
             TextureKind::Volume => SamplerKind::Volume,
             _ => SamplerKind::Texture2D,
         };
-        let Some((image, texels, mips)) = h3_image(reader, &path, index, kind, caches) else {
+        let Some((image, texels, mips)) = gen3_image(reader, &path, index, kind, caches) else {
             continue;
         };
         let animated = material.animations.iter().any(|animation| {
-            animation.writes == H3Animated::Frame && animation.uniform == *uniform
+            animation.writes == Gen3Animated::Frame && animation.uniform == *uniform
         });
         let frames = if animated {
             let tag = reader.load(&path, "bitmap", b"bitm").ok();
             let count = tag.as_ref().map_or(0, |tag| elements(tag.root(), "bitmaps*").len());
             (0..count)
-                .filter_map(|at| h3_image(reader, &path, at as i16, kind, caches))
+                .filter_map(|at| gen3_image(reader, &path, at as i16, kind, caches))
                 .map(|(image, _, _)| image)
                 .collect()
         } else {
             Vec::new()
         };
-        material.textures.push(H3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
+        material.textures.push(Gen3Texture { uniform: uniform.clone(), image, texels, mips, sampler, frames });
     }
 }

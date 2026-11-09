@@ -19,13 +19,13 @@ pub(in crate::app::model_preview) const PRT_ATTRIBUTES: [u32; 3] = [11, 12, 13];
 const PRT_NAMES: [&str; 3] = ["a_BLENDWEIGHT1", "a_BLENDWEIGHT2", "a_BLENDWEIGHT3"];
 
 /// A linked pass and where its uniforms landed.
-pub(in crate::app::model_preview) struct H3Program {
+pub(in crate::app::model_preview) struct Gen3Program {
     /// Held so its address, the program's key, stays its own.
-    _pass: Arc<H3Pass>,
+    _pass: Arc<Gen3Pass>,
     linked: Linked,
 }
 
-impl std::ops::Deref for H3Program {
+impl std::ops::Deref for Gen3Program {
     type Target = Linked;
 
     fn deref(&self) -> &Linked {
@@ -42,8 +42,8 @@ impl Gen3State {
         &mut self,
         core: &mut RenderCore,
         gl: &glow::Context,
-        pass: &Arc<H3Pass>,
-        draw: impl FnOnce(&mut Self, &mut RenderCore, &H3Program) -> R,
+        pass: &Arc<Gen3Pass>,
+        draw: impl FnOnce(&mut Self, &mut RenderCore, &Gen3Program) -> R,
     ) -> Option<R> {
         let program = unsafe { self.program(core, gl, pass) }?;
         Some(draw(self, core, &program))
@@ -51,7 +51,7 @@ impl Gen3State {
 
     /// `pass`'s program, linked the first time it is asked for. It stays in
     /// the cache while lent, so a pass drawn inside another's draw finds it.
-    unsafe fn program(&mut self, core: &mut RenderCore, gl: &glow::Context, pass: &Arc<H3Pass>) -> Option<Rc<H3Program>> {
+    unsafe fn program(&mut self, core: &mut RenderCore, gl: &glow::Context, pass: &Arc<Gen3Pass>) -> Option<Rc<Gen3Program>> {
         let key = Arc::as_ptr(pass) as usize;
         match self.programs.get(&key) {
             Some(Ok(program)) => return Some(Rc::clone(program)),
@@ -69,7 +69,7 @@ impl Gen3State {
             attributes.extend(PRT_ATTRIBUTES.into_iter().zip(PRT_NAMES));
             match super::super::super::gl::link::link(gl, &stages, &attributes) {
                 Ok(program) => {
-                    let program = Rc::new(H3Program { _pass: Arc::clone(pass), linked: Linked::new(program) });
+                    let program = Rc::new(Gen3Program { _pass: Arc::clone(pass), linked: Linked::new(program) });
                     self.programs.insert(key, Ok(Rc::clone(&program)));
                     Some(program)
                 }

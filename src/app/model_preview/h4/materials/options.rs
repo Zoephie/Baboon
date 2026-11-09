@@ -16,32 +16,32 @@ pub(in crate::app::model_preview) struct H4Shader {
     pub(super) shader: MaterialShader,
     pub(super) program: Program,
     /// Translated passes by technique, kept for every material of the shader.
-    passes: HashMap<&'static str, Option<Arc<H3Pass>>>,
+    passes: HashMap<&'static str, Option<Arc<Gen3Pass>>>,
 }
 
 /// `alpha_blend_mode_enum` as the preview's blend states. Kit objects use
 /// opaque, alpha_blend, additive, opaque_alpha_blend, pre_multiplied_alpha,
 /// add_src_times_srcalpha, multiply, inv_alpha_blend, alpha_blend_max and
 /// maximum (`materials.md` §2.3).
-pub(in crate::app::model_preview) fn h4_blend(mode: u8) -> H3Blend {
+pub(in crate::app::model_preview) fn h4_blend(mode: u8) -> Gen3Blend {
     match mode {
-        1 | 24 => H3Blend::Additive,
-        2 => H3Blend::Multiply,
+        1 | 24 => Gen3Blend::Additive,
+        2 => Gen3Blend::Multiply,
         // `alpha_blend_max` differs only in its alpha's MAX, which the preview
         // reads as coverage. One kit material uses it.
-        3 | 14 | 22 => H3Blend::AlphaBlend,
-        4 => H3Blend::DoubleMultiply,
-        5 => H3Blend::PreMultiplied,
-        6 => H3Blend::Maximum,
-        7 => H3Blend::MultiplyAdd,
-        8 => H3Blend::AddSrcTimesDstAlpha,
-        9 => H3Blend::AddSrcTimesSrcAlpha,
-        10 => H3Blend::InvAlphaBlend,
-        11 => H3Blend::MotionBlurStatic,
-        12 => H3Blend::MotionBlurInhibit,
+        3 | 14 | 22 => Gen3Blend::AlphaBlend,
+        4 => Gen3Blend::DoubleMultiply,
+        5 => Gen3Blend::PreMultiplied,
+        6 => Gen3Blend::Maximum,
+        7 => Gen3Blend::MultiplyAdd,
+        8 => Gen3Blend::AddSrcTimesDstAlpha,
+        9 => Gen3Blend::AddSrcTimesSrcAlpha,
+        10 => Gen3Blend::InvAlphaBlend,
+        11 => Gen3Blend::MotionBlurStatic,
+        12 => Gen3Blend::MotionBlurInhibit,
         // `opaque_alpha_blend` counts as opaque (`GetIsOpaque`, X360
         // 0x82A9EA18); the rest are screen and shadow-mask modes no object uses.
-        _ => H3Blend::Opaque,
+        _ => Gen3Blend::Opaque,
     }
 }
 
@@ -81,7 +81,7 @@ pub(super) fn read_shader(reader: &TagReader, path: &str) -> Result<H4Shader, St
 
 impl H4Shader {
     /// A technique drawn on the preview's skinned vertices.
-    pub(super) fn pass(&mut self, technique: &'static str) -> Option<Arc<H3Pass>> {
+    pub(super) fn pass(&mut self, technique: &'static str) -> Option<Arc<Gen3Pass>> {
         let program = &self.program;
         self.passes
             .entry(technique)

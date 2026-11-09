@@ -4,7 +4,7 @@ use super::*;
 
 /// What a volume's frame lays out before its profiles.
 pub(in crate::app::model_preview) struct VolumeLayout {
-    pub(in crate::app::model_preview) state: H3VolumeState,
+    pub(in crate::app::model_preview) state: Gen3VolumeState,
     pub(in crate::app::model_preview) origin: [f32; 3],
     pub(in crate::app::model_preview) direction: [f32; 3],
     pub(in crate::app::model_preview) count: i32,
@@ -36,7 +36,7 @@ pub(super) fn overdraw(profiles: f32, profile_length: f32, spacing: f32) -> f32 
     if spacing > 0.0 { profiles.min(profile_length / spacing) } else { profiles }.max(1e-6)
 }
 
-impl H3LightVolumeAt {
+impl Gen3LightVolumeAt {
     /// The functions it reads off its object.
     pub(crate) fn scale_names(&self) -> [&str; 2] {
         [&self.scale_by, &self.secondary_by]
@@ -54,7 +54,7 @@ impl H3LightVolumeAt {
             &volume.thickness, &volume.color, &volume.alpha, &volume.intensity,
         ];
         self.times.moves()
-            || reads_time.iter().any(|property| property.inputs().any(|input| input == H3VolumeInput::GameTime))
+            || reads_time.iter().any(|property| property.inputs().any(|input| input == Gen3VolumeInput::GameTime))
     }
 
     /// Its sort position: `submit` hands the transparents its location.
@@ -66,7 +66,7 @@ impl H3LightVolumeAt {
         self.definition.sampler
     }
 
-    pub(crate) fn bitmap(&self) -> Option<&H3Bitmap> {
+    pub(crate) fn bitmap(&self) -> Option<&Gen3Bitmap> {
         self.definition.bitmap.as_ref()
     }
 
@@ -84,12 +84,12 @@ impl H3LightVolumeAt {
         self.definition.sort_layer
     }
 
-    pub(crate) fn blend(&self) -> H3Blend {
+    pub(crate) fn blend(&self) -> Gen3Blend {
         self.definition.blend
     }
 
     /// The states this frame, or none while its event is not running.
-    fn state(&self, values: Option<&FunctionValues>, time: f32, onset: f32) -> Option<H3VolumeState> {
+    fn state(&self, values: Option<&FunctionValues>, time: f32, onset: f32) -> Option<Gen3VolumeState> {
         let read = |name: &str, none: f32| {
             if name.is_empty() {
                 return none;
@@ -101,7 +101,7 @@ impl H3LightVolumeAt {
         if effect_a <= 0.0 {
             return None;
         }
-        Some(H3VolumeState {
+        Some(Gen3VolumeState {
             percentile: 0.0,
             game_time: time.rem_euclid(1.0),
             age: self.times.age(self.event, time - onset)?,
@@ -208,4 +208,4 @@ impl H3LightVolumeAt {
     }
 }
 
-attached!(H3LightVolumeAt);
+attached!(Gen3LightVolumeAt);

@@ -12,19 +12,19 @@ pub(super) const DEFAULT_LOD_OUT: f32 = 20.0;
 
 /// One of a `light_volume_system`'s `light_volumes`.
 #[derive(Debug)]
-pub(crate) struct H3VolumeDefinition {
-    pub(super) length: H3VolumeProperty,
-    pub(super) offset: H3VolumeProperty,
-    pub(super) density: H3VolumeProperty,
-    pub(super) profile_length: H3VolumeProperty,
-    pub(in crate::app::model_preview) thickness: H3VolumeProperty,
-    pub(in crate::app::model_preview) color: H3VolumeProperty,
-    pub(in crate::app::model_preview) alpha: H3VolumeProperty,
-    pub(in crate::app::model_preview) intensity: H3VolumeProperty,
+pub(crate) struct Gen3VolumeDefinition {
+    pub(super) length: Gen3VolumeProperty,
+    pub(super) offset: Gen3VolumeProperty,
+    pub(super) density: Gen3VolumeProperty,
+    pub(super) profile_length: Gen3VolumeProperty,
+    pub(in crate::app::model_preview) thickness: Gen3VolumeProperty,
+    pub(in crate::app::model_preview) color: Gen3VolumeProperty,
+    pub(in crate::app::model_preview) alpha: Gen3VolumeProperty,
+    pub(in crate::app::model_preview) intensity: Gen3VolumeProperty,
     pub(in crate::app::model_preview) brightness_ratio: f32,
-    pub(super) blend: H3Blend,
+    pub(super) blend: Gen3Blend,
     /// None for Reach's `circular`, which samples no map.
-    pub(super) bitmap: Option<H3Bitmap>,
+    pub(super) bitmap: Option<Gen3Bitmap>,
     pub(super) sampler: Option<Sampler>,
     pub(super) sort_layer: i32,
     /// Reach's: its own colour, exposure and level of detail.
@@ -43,14 +43,14 @@ pub(crate) struct H3VolumeDefinition {
     pub(in crate::app::model_preview) h4: Option<(H4EffectMaterial, u32)>,
 }
 
-impl H3VolumeDefinition {
+impl Gen3VolumeDefinition {
     /// The baked rows: profile `i` at `i / (max − 0.5)` with every other
     /// state 0 (a fresh `c_light_volume_states`), unclamped.
     pub(super) fn bake(&self, most: usize) -> Vec<([f32; 3], f32)> {
         let place = |index: usize| index as f32 / ((most as f32 + 0.5) - 1.0);
         (0..most)
             .map(|index| {
-                let state = H3VolumeState { percentile: place(index), ..Default::default() };
+                let state = Gen3VolumeState { percentile: place(index), ..Default::default() };
                 let intensity = self.intensity.scalar(&state);
                 let factor = intensity * intensity * self.alpha.scalar(&state);
                 (self.color.color(&state).map(|channel| channel * factor), self.thickness.scalar(&state))
@@ -66,7 +66,7 @@ impl H3VolumeDefinition {
     /// brightness `ratio` over the `overdraw`.
     pub(super) fn profile_color(
         &self,
-        state: &H3VolumeState,
+        state: &Gen3VolumeState,
         baked: Option<[f32; 3]>,
         [ratio, overdraw]: [f32; 2],
         stops: f32,
@@ -80,7 +80,7 @@ impl H3VolumeDefinition {
             let alpha = self.alpha.scalar(state).clamp(0.0, 1.0) * intensity;
             return [red, green, blue, alpha * ratio / overdraw];
         }
-        let exposure = if self.blend == H3Blend::Multiply { 1.0 } else { reach_alt_exposure(stops)[1] };
+        let exposure = if self.blend == Gen3Blend::Multiply { 1.0 } else { reach_alt_exposure(stops)[1] };
         // TODO(reach-effects spec §3.4): Reach premultiplies and writes an
         // alpha of 1, which the flare program's `(rgb, a)` under SRC_ALPHA,
         // ONE matches; an alpha-blended volume (none in the kit) would not.
@@ -98,7 +98,7 @@ impl H3VolumeDefinition {
 
 /// A volume at a marker of the object it is attached to.
 #[derive(Debug, Clone)]
-pub(crate) struct H3LightVolumeAt {
+pub(crate) struct Gen3LightVolumeAt {
     pub(crate) object: u8,
     pub(super) node: usize,
     pub(super) position: [f32; 3],
@@ -112,10 +112,10 @@ pub(crate) struct H3LightVolumeAt {
     pub(super) seeds: [f32; SEEDS],
     pub(super) times: Arc<EffectTimes>,
     pub(super) event: usize,
-    pub(crate) definition: Arc<H3VolumeDefinition>,
+    pub(crate) definition: Arc<Gen3VolumeDefinition>,
 }
 
-pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<H3VolumeDefinition> {
+pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<Gen3VolumeDefinition> {
     if reader.source.game() == Some(GameId::Halo4) {
         return read_h4_definition(reader, element);
     }
@@ -152,7 +152,7 @@ pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Opt
     let blend = definition.blend(&options);
     // `depth_fade_on.render_method_option`'s range. `biased`'s option tag is
     // not in the kit, and no volume uses it.
-    let depth_fade = (reach && chosen("depth_fade") == "on" && blend != H3Blend::Opaque)
+    let depth_fade = (reach && chosen("depth_fade") == "on" && blend != Gen3Blend::Opaque)
         .then(|| resolved_real("depth_fade_range", 0.1).max(1e-4));
     let flagged = |wanted: &str| has_flag(element, "flags", wanted);
     let lod = if reach { ReachVolumeLod::read(element, flagged) } else { None };
@@ -161,11 +161,11 @@ pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Opt
     // per-volume four's inputs.
     let most = max_profile_count(&properties.density, &properties.length);
     let precompiled = reach && precompiles(flagged, &properties.all(), most);
-    let mut volume = properties.postprocessed(element, |properties| H3VolumeDefinition {
+    let mut volume = properties.postprocessed(element, |properties| Gen3VolumeDefinition {
         blend,
         sampler,
         bitmap,
-        sort_layer: super::super::super::super::particles::h3_sort_layer(shader),
+        sort_layer: super::super::super::super::particles::gen3_sort_layer(shader),
         reach,
         circular,
         depth_fade,
@@ -184,7 +184,7 @@ pub(super) fn read_definition(reader: &TagReader, element: TagStruct<'_>) -> Opt
 /// 0x1403ABF50): Reach's, through the `actual material`, and never
 /// precompiled, which MCC clears every time and could not draw ("not
 /// implemented for D3D11").
-fn read_h4_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<H3VolumeDefinition> {
+fn read_h4_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<Gen3VolumeDefinition> {
     let material = blam_tags::material::Material::from_struct(&element.descend("actual material?")?);
     let resolved = resolve_h4_effect_material(reader, &material, "light_volume")
         .map_err(|error| eprintln!("h4 light volume material: {error}"))
@@ -193,9 +193,9 @@ fn read_h4_definition(reader: &TagReader, element: TagStruct<'_>) -> Option<H3Vo
     let lod = ReachVolumeLod::read(element, flagged);
     let appearance = element.read_int_any("appearance flags").unwrap_or(0) as u32;
     let properties = VolumeProperties::read(element)?;
-    Some(properties.postprocessed(element, |properties| H3VolumeDefinition {
+    Some(properties.postprocessed(element, |properties| Gen3VolumeDefinition {
         // The material blends; this only sorts.
-        blend: H3Blend::Additive,
+        blend: Gen3Blend::Additive,
         sampler: None,
         bitmap: None,
         sort_layer: i32::from(material.sort_layer).clamp(1, 3),
@@ -217,7 +217,7 @@ pub(in crate::app::model_preview) fn read_h3_light_volumes(
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-) -> Vec<H3LightVolumeAt> {
+) -> Vec<Gen3LightVolumeAt> {
     let mut volumes = Vec::new();
     let volume_group = u32::from_be_bytes(*b"ltvl");
     for_each_attached_part(reader, object, |part| {
@@ -236,7 +236,7 @@ pub(in crate::app::model_preview) fn read_h3_light_volumes(
                 let (place, node) = frame(marker);
                 let (place, node) = part.placed(place, node);
                 let place = part_frame(&place, offset, yaw, pitch);
-                volumes.push(H3LightVolumeAt {
+                volumes.push(Gen3LightVolumeAt {
                     object: owner,
                     node,
                     position: place.position,

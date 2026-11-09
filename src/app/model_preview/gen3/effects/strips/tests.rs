@@ -2,7 +2,7 @@ use super::*;
 use super::geometry::*;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
-use super::super::super::shaders::H3Blend;
+use super::super::super::shaders::Gen3Blend;
 use super::super::super::pipeline::EXPOSURE as H3_EXPOSURE;
 use super::super::super::super::reach::lighting::{reach_alt_exposure, reach_exposure};
 
@@ -63,7 +63,7 @@ fn look(origin_fade: Option<[f32; 2]>) -> StripLook {
         angle_fade: None,
         sort_bias: 0.0,
         reach: false,
-        shader: Arc::new(H3SpriteShader::blank()),
+        shader: Arc::new(SpriteShader::blank()),
     }
 }
 
@@ -156,8 +156,8 @@ fn a_fade_gets_profiles_at_both_its_ends() {
     assert_eq!(lengths, [0.25, 0.75, 1.0]);
 }
 
-fn carried_strip() -> Arc<H3StripAt> {
-    Arc::new(H3StripAt {
+fn carried_strip() -> Arc<Gen3StripAt> {
+    Arc::new(Gen3StripAt {
         object: 0,
         node: 0,
         position: [0.0; 3],
@@ -180,12 +180,12 @@ fn carried_strip() -> Arc<H3StripAt> {
 fn a_carried_contrail_trails_its_particle_and_fades_after_it_dies() {
     let strip = carried_strip();
     let strips = [Arc::clone(&strip)];
-    let mut field = H3StripField::default();
+    let mut field = Gen3StripField::default();
     let mut onsets = EffectOnsets::default();
     let view = ViewFrame { eye: [0.0, -5.0, 0.0], forward: [0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0] };
     let lighting = [[0.0; 4]; 10];
-    let mut advance = |field: &mut H3StripField, place: Option<[f32; 3]>, time: f32| {
-        let tracks = |_: &Arc<H3StripAt>| place.map(|place| (7, place)).into_iter().collect();
+    let mut advance = |field: &mut Gen3StripField, place: Option<[f32; 3]>, time: f32| {
+        let tracks = |_: &Arc<Gen3StripAt>| place.map(|place| (7, place)).into_iter().collect();
         field.advance(&strips, |_| None, &mut onsets, tracks, None, time);
     };
     advance(&mut field, Some([0.0; 3]), 0.0);
@@ -256,19 +256,19 @@ fn a_reach_beam_fades_its_sides_seen_edge_on() {
 /// `particle_exposure`'s rule, at the stops: Halo 3's at its own.
 #[test]
 fn a_reach_strip_is_exposed_by_its_blend_and_the_stops() {
-    let blended = |blend: H3Blend, reach: bool| {
-        let mut shader = H3SpriteShader::blank();
+    let blended = |blend: Gen3Blend, reach: bool| {
+        let mut shader = SpriteShader::blank();
         shader.blend = blend;
         StripLook { reach, shader: Arc::new(shader), ..look(None) }
     };
     let red = |look: &StripLook, stops: f32| exposed(look, [1.0, 0.0, 0.0], 1.0, 1.0, stops)[0];
-    let additive = blended(H3Blend::Additive, true);
+    let additive = blended(Gen3Blend::Additive, true);
     assert_eq!(red(&additive, 0.0), reach_alt_exposure(0.0)[1]);
     assert_eq!(red(&additive, 1.0), reach_alt_exposure(1.0)[1]);
     assert_ne!(red(&additive, 1.0), red(&additive, 0.0));
-    assert_eq!(red(&blended(H3Blend::AlphaBlend, true), 1.0), reach_exposure(1.0)[0]);
-    assert_eq!(red(&blended(H3Blend::Multiply, true), 1.0), 1.0);
-    assert_eq!(red(&blended(H3Blend::Additive, false), 1.0), H3_EXPOSURE, "Halo 3's ignore the stops");
+    assert_eq!(red(&blended(Gen3Blend::AlphaBlend, true), 1.0), reach_exposure(1.0)[0]);
+    assert_eq!(red(&blended(Gen3Blend::Multiply, true), 1.0), 1.0);
+    assert_eq!(red(&blended(Gen3Blend::Additive, false), 1.0), H3_EXPOSURE, "Halo 3's ignore the stops");
 }
 
 /// Reach's beams scroll on a minute's clock and its contrails on 131

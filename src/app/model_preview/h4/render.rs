@@ -9,11 +9,11 @@ use super::super::common::slots::GameSlots;
 use super::effects::gl::H4EffectCx;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
-use super::super::gen3::effects::screen::H3ScreenSettings;
+use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::frame::ModelGpuFrame;
 use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::pipeline::h3_set_cull;
-use crate::app::model_preview::common::sprites::h3_layered_distance;
+use super::super::gen3::pipeline::gen3_set_cull;
+use crate::app::model_preview::common::sprites::layered_distance;
 use super::holograms::{HologramPicture, draws_as_hologram};
 use super::camo::H4CamoDraw;
 
@@ -118,7 +118,7 @@ impl Gen3Game for H4Game {
         unsafe {
             self.draw_lights(cx, accumulation);
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
-            h3_set_cull(cx.gl, cx.frame);
+            gen3_set_cull(cx.gl, cx.frame);
             cx.gl.depth_func(glow::LEQUAL);
             cx.gl.depth_mask(false);
             cx.gl.blend_func(glow::ONE, glow::ONE);
@@ -128,7 +128,7 @@ impl Gen3Game for H4Game {
     /// `QueueHologramApply`: the holograms' composite is one more
     /// transparent, at their sphere.
     unsafe fn blended(&mut self, cx: &mut Gen3Cx<'_>, nearer_than: f32, size: [i32; 2]) {
-        if let Some(picture) = self.hologram.take_if(|picture| h3_layered_distance(2, picture.distance) > nearer_than) {
+        if let Some(picture) = self.hologram.take_if(|picture| layered_distance(2, picture.distance) > nearer_than) {
             unsafe { self.composite_holograms(cx.core, cx.state, cx.gl, cx.frame, cx.slot, &picture, size) }
         }
     }
@@ -172,7 +172,7 @@ impl Gen3Game for H4Game {
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
-        screen: H3ScreenSettings,
+        screen: Gen3ScreenSettings,
         size: [i32; 2],
     ) {
         unsafe {

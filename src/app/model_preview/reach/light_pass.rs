@@ -17,15 +17,15 @@ use super::render::ReachGame;
 use std::sync::Arc;
 use super::super::{RenderModelPreview, TagReader};
 
-use super::super::gen3::shaders::{H3Pass, H3Sources, SCREEN_VERTEX, VERTEX_SKINNED, base_defines, pass_of};
+use super::super::gen3::shaders::{Gen3Pass, Gen3Sources, SCREEN_VERTEX, VERTEX_SKINNED, base_defines, pass_of};
 use crate::core::hlsl::emit::{Stage, Translated};
 
-impl H3Sources {
+impl Gen3Sources {
     /// One of Reach's `light_apply` explicit shaders (`lights\\<file>`): its
     /// pixel stage only, over a triangle that covers the picture. The game
     /// draws it over the light's volume behind a stencil; outside a light's
     /// reach its falloff is 0, so the whole picture serves.
-    pub(crate) fn reach_light_pass(&mut self, file: &str) -> Result<Arc<H3Pass>, String> {
+    pub(crate) fn reach_light_pass(&mut self, file: &str) -> Result<Arc<Gen3Pass>, String> {
         let main = format!("#include \"lights\\{file}.hlsl\"\n");
         let defines = base_defines(self.dialect(), VERTEX_SKINNED, Stage::Pixel);
         let pixel = self.compile(&defines, &main, "default_ps", Stage::Pixel)?;
@@ -43,7 +43,7 @@ impl H3Sources {
 pub(in crate::app::model_preview) fn read_reach_light_passes(reader: &TagReader, preview: &mut RenderModelPreview) {
     let lit = !(preview.reach.lights.is_empty() && preview.reach.cheap_lights.is_empty());
     if lit && preview.reach.light_passes.is_empty() {
-        let mut sources = H3Sources::new(&reader.source);
+        let mut sources = Gen3Sources::new(&reader.source);
         let files = ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"];
         preview.reach.light_passes = files.iter().map(|file| sources.reach_light_pass(file).ok()).collect();
     }

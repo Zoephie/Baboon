@@ -5,7 +5,7 @@
 use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
 use super::super::*;
-use super::shaders::{H3Material, H3Pass};
+use super::shaders::{Gen3Material, Gen3Pass};
 use super::super::dx9::shadow::ShadowStyle;
 
 /// Where Halo 3's and ODST's shadow apply reads the albedo pass's normals.
@@ -34,13 +34,13 @@ pub(in crate::app::model_preview) fn h3_shadow_style(frame: &ModelGpuFrame) -> S
 }
 
 /// A batch that casts, its material, and that material's `shadow_generate`.
-pub(in crate::app::model_preview) type ShadowCaster<'a> = (&'a RenderModelPreviewBatch, &'a Arc<H3Material>, Arc<H3Pass>);
+pub(in crate::app::model_preview) type ShadowCaster<'a> = (&'a RenderModelPreviewBatch, &'a Arc<Gen3Material>, Arc<Gen3Pass>);
 
 /// The batches that cast: opaque, no decal, and with a `shadow_generate`.
-pub(in crate::app::model_preview) fn shadow_casters(batches: &[(RenderModelPreviewBatch, Arc<H3Material>)]) -> Vec<ShadowCaster<'_>> {
+pub(in crate::app::model_preview) fn shadow_casters(batches: &[(RenderModelPreviewBatch, Arc<Gen3Material>)]) -> Vec<ShadowCaster<'_>> {
     batches
         .iter()
-        .filter(|(_, material)| material.blend == gen3::shaders::H3Blend::Opaque && !material.decal)
+        .filter(|(_, material)| material.blend == gen3::shaders::Gen3Blend::Opaque && !material.decal)
         .filter_map(|(batch, material)| Some((batch, material, Arc::clone(material.shadow_generate.as_ref()?))))
         .collect()
 }
@@ -75,7 +75,7 @@ impl Gen3State {
             gl.clear(glow::DEPTH_BUFFER_BIT);
             gl.enable(glow::POLYGON_OFFSET_FILL);
             gl.polygon_offset(slope, depth * (1 << 24) as f32);
-            super::pipeline::h3_set_cull(gl, frame);
+            super::pipeline::gen3_set_cull(gl, frame);
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             self.shadow_view_projection = Some(view_projection);
             for (batch, material, pass) in casters {

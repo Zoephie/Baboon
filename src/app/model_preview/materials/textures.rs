@@ -81,7 +81,7 @@ pub(crate) struct MaterialTextures {
     /// for other games and outside a loose kit, whose `.psh` sources they need.
     pub h2_layers: [Vec<Dx9DrawPass>; H2_LAYER_COUNT],
     /// Halo 3's own shader, translated from the kit's source.
-    pub h3: Option<Arc<H3Material>>,
+    pub h3: Option<Arc<Gen3Material>>,
     /// Reach's `only render for shields`: `render_model_postprocess` (the
     /// 360's) makes its parts a shield's, which no ordinary pass draws.
     pub shield_only: bool,

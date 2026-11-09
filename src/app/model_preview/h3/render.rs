@@ -6,18 +6,18 @@
 use eframe::glow::{self, HasContext};
 
 use super::super::common::slots::GameSlots;
-use super::super::gen3::pipeline::h3_lighting_constants;
+use super::super::gen3::pipeline::gen3_lighting_constants;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
 use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
 use super::super::particles::particle_floats;
 use super::slot::H3Slot;
-use super::super::gen3::effects::screen::H3ScreenSettings;
+use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::PictureCopies;
 use super::super::frame::ModelGpuFrame;
 use super::bloom::H3Bloom;
 use super::super::gen3::shadow::h3_shadow_style;
-use super::super::gen3::pipeline::h3_set_cull;
+use super::super::gen3::pipeline::gen3_set_cull;
 use super::super::dx9::passes::Dx9Layer;
 use super::light_pass::draw_dynamic_lights;
 
@@ -57,7 +57,7 @@ impl Gen3Game for H3Game {
             return true;
         };
         let h3 = self.slots.of(cx.slot, cx.uploads);
-        let lighting = h3_lighting_constants(frame);
+        let lighting = gen3_lighting_constants(frame);
         let drawn = h3.leaves.vertices(index, leaves, &lighting);
         if drawn.is_empty() {
             return true;
@@ -70,15 +70,15 @@ impl Gen3Game for H3Game {
         true
     }
 
-    fn picture_effects(&self, frame: &ModelGpuFrame, screen: &H3ScreenSettings) -> bool {
+    fn picture_effects(&self, frame: &ModelGpuFrame, screen: &Gen3ScreenSettings) -> bool {
         Self::draws_picture_effects(frame, screen)
     }
 
-    unsafe fn before_screen_shaders(&mut self, cx: &mut Gen3Cx<'_>, screen: &H3ScreenSettings, copies: &PictureCopies) {
+    unsafe fn before_screen_shaders(&mut self, cx: &mut Gen3Cx<'_>, screen: &Gen3ScreenSettings, copies: &PictureCopies) {
         unsafe { self.draw_picture_suck(cx, screen, copies) }
     }
 
-    unsafe fn after_blur(&mut self, cx: &mut Gen3Cx<'_>, screen: &H3ScreenSettings, copies: &PictureCopies) {
+    unsafe fn after_blur(&mut self, cx: &mut Gen3Cx<'_>, screen: &Gen3ScreenSettings, copies: &PictureCopies) {
         unsafe { self.draw_picture_vision(cx, screen, copies) }
     }
 
@@ -118,7 +118,7 @@ impl Gen3Game for H3Game {
             gl.bind_vertex_array(Some(cx.core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
-            h3_set_cull(gl, frame);
+            gen3_set_cull(gl, frame);
         }
     }
 
@@ -148,7 +148,7 @@ impl Gen3Game for H3Game {
         _framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
-        screen: H3ScreenSettings,
+        screen: Gen3ScreenSettings,
         _size: [i32; 2],
     ) {
         unsafe { self.draw_composite(cx, accumulation, bloom, screen) }

@@ -8,7 +8,7 @@
 use eframe::glow::{self, HasContext};
 use std::collections::HashMap;
 
-use super::super::super::gen3::shaders::{H3Pass, H3Value, H3Values};
+use super::super::super::gen3::shaders::{Gen3Pass, Gen3Value, Gen3Values};
 use super::super::super::h4::materials::H4EffectMaterial;
 use super::super::super::gl::buffer::slice_bytes;
 use super::super::super::*;
@@ -55,8 +55,8 @@ impl H4EffectGl {
         }
     }
 
-    unsafe fn program(&mut self, gl: &glow::Context, pass: &H3Pass) -> Option<glow::NativeProgram> {
-        let key = pass as *const H3Pass as usize;
+    unsafe fn program(&mut self, gl: &glow::Context, pass: &Gen3Pass) -> Option<glow::NativeProgram> {
+        let key = pass as *const Gen3Pass as usize;
         if let Some(known) = self.programs.get(&key) {
             return known.as_ref().map(|linked| linked.program);
         }
@@ -73,7 +73,7 @@ impl H4EffectGl {
     pub(in crate::app::model_preview) unsafe fn set_floats(
         &mut self,
         gl: &glow::Context,
-        pass: &H3Pass,
+        pass: &Gen3Pass,
         name: &str,
         value: &[f32],
     ) {
@@ -91,10 +91,10 @@ impl H4EffectGl {
     pub(in crate::app::model_preview) unsafe fn location(
         &mut self,
         gl: &glow::Context,
-        pass: &H3Pass,
+        pass: &Gen3Pass,
         name: &str,
     ) -> Option<glow::NativeUniformLocation> {
-        let key = pass as *const H3Pass as usize;
+        let key = pass as *const Gen3Pass as usize;
         unsafe { self.programs.get(&key)?.as_ref()?.location(gl, name) }
     }
 
@@ -247,7 +247,7 @@ impl H4EffectGl {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         material: &H4EffectMaterial,
-        functions: &H3Values,
+        functions: &Gen3Values,
         name: &str,
         ty: &Type,
         size: [i32; 2],
@@ -268,7 +268,7 @@ impl H4EffectGl {
             // A float the game hands a `uint` register is not one of ours.
             if !matches!(
                 (ty, &value),
-                (Type::Vector(Scalar::Uint, _), H3Value::Floats(_))
+                (Type::Vector(Scalar::Uint, _), Gen3Value::Floats(_))
             ) {
                 super::super::super::gen3::pipeline::set_value(gl, location.as_ref(), ty, &value);
             }
@@ -292,7 +292,7 @@ pub(in crate::app::model_preview) fn material_functions(
     frame: &ModelGpuFrame,
     material: &H4EffectMaterial,
     object: u8,
-) -> H3Values {
+) -> Gen3Values {
     let drawn = super::super::materials::submit::DrawnObject {
         values: frame.function_values_of_object(object),
         time: frame.time,
@@ -312,11 +312,11 @@ pub(in crate::app::model_preview) fn material_functions(
 fn shared_value(
     frame: &ModelGpuFrame,
     material: &H4EffectMaterial,
-    functions: &H3Values,
+    functions: &Gen3Values,
     name: &str,
     size: [i32; 2],
-) -> Option<H3Value> {
-    let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+) -> Option<Gen3Value> {
+    let floats = |value: [f32; 4]| Some(Gen3Value::Floats(value));
     let camera = &frame.camera;
     let eye = if camera.perspective > 0.0 {
         1.0 / camera.perspective
@@ -327,7 +327,7 @@ fn shared_value(
     match name {
         "vs_hiddenFromCompilerNaN" => floats([f32::NAN, 0.0, 0.0, f32::NAN]),
         // No level: no atmosphere, no fog.
-        "s_atmosphere_fog_enable" | "s_atmosphere_fog_light_enable" => Some(H3Value::Integer(0)),
+        "s_atmosphere_fog_enable" | "s_atmosphere_fog_light_enable" => Some(Gen3Value::Integer(0)),
         name if name.starts_with("s_atmosphere_constant_") => floats([0.0; 4]),
         "vs_material_blend_constant" => floats(blend_constant(mode)),
         "vs_bungie_exposure" => super::super::lighting::h4_frame_value("ps_view_exposure"),
@@ -412,7 +412,7 @@ unsafe fn upload_array(
             glow::LINEAR as i32,
         );
         if let Some(sampler) = sampler {
-            crate::app::model_preview::gl::texture::h3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
+            crate::app::model_preview::gl::texture::gen3_apply_sampler(gl, glow::TEXTURE_2D_ARRAY, sampler);
         }
         gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
         Some(texture)

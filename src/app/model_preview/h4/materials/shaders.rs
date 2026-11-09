@@ -16,7 +16,7 @@ use super::super::super::common::fields::elements;
 use crate::core::hlsl::emit::{Stage, Translated, translate_with};
 use crate::core::hlsl::parse::{Program, parse};
 use crate::core::hlsl::pre::{Preprocessor, Token};
-use super::super::super::gen3::shaders::H3Pass;
+use super::super::super::gen3::shaders::Gen3Pass;
 use crate::core::hlsl::parse::{Scalar, Type};
 use crate::app::model_preview::h4::shield::{DEPTH_DECODE, WORLD_SCALE};
 
@@ -159,7 +159,7 @@ pub(crate) fn translate_technique(program: &Program, index: usize, pass: &str, s
 /// `ComputeDepthFade`'s decode of the game's reversed depth through
 /// `psDepthConstants`, made to read the preview's window depth back as world
 /// distance from the eye through [`DEPTH_DECODE`] and [`WORLD_SCALE`].
-pub(crate) fn rewire_depth_fade(pass: &mut H3Pass) -> Result<(), String> {
+pub(crate) fn rewire_depth_fade(pass: &mut Gen3Pass) -> Result<(), String> {
     const DECODE: &str =
         "float l_sceneDepth = (1.0 / ((psDepthConstants.x + psDepthConstants.y) - (psDepthConstants.y * l_depthValue.x)));";
     if !pass.pixel.contains(DECODE) {

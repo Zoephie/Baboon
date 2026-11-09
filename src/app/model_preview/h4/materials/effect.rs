@@ -7,12 +7,12 @@ use super::*;
 /// of the shader's `_default` technique (`particle_techniques.fxh`).
 #[derive(Debug)]
 pub(crate) struct H4EffectMaterial {
-    pub(crate) pass: Arc<H3Pass>,
+    pub(crate) pass: Arc<Gen3Pass>,
     pub(crate) submit: H4Submit,
-    pub(crate) values: crate::app::model_preview::gen3::shaders::H3Values,
+    pub(crate) values: crate::app::model_preview::gen3::shaders::Gen3Values,
     /// Each sampler's bitmap; a texture array's carries every image in
     /// `frames`, its layers in order.
-    pub(crate) textures: Vec<H3Texture>,
+    pub(crate) textures: Vec<Gen3Texture>,
     /// `alpha_blend_mode_enum`.
     pub(crate) blend_mode: u8,
     /// The first bitmap in postprocess order, which the particle reads its
@@ -66,7 +66,7 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
         reals.insert(name.clone(), parameter.real);
         bools.insert(name, parameter.int_bool != 0);
     }
-    let mut textures: Vec<H3Texture> = Vec::new();
+    let mut textures: Vec<Gen3Texture> = Vec::new();
     for texture in &baked.textures {
         let Some((uniform, kind)) = texture_uniform(&pass.textures, &texture.parameter) else { continue };
         if textures.iter().any(|known| known.uniform == uniform) {
@@ -77,20 +77,20 @@ pub(in crate::app::model_preview) fn resolve_h4_effect_material(
             TextureKind::Volume => SamplerKind::Volume,
             _ => SamplerKind::Texture2D,
         };
-        let Some((image, texels, mips)) = h3_image(reader, &texture.bitmap, 0, sampler_kind, caches) else { continue };
+        let Some((image, texels, mips)) = gen3_image(reader, &texture.bitmap, 0, sampler_kind, caches) else { continue };
         // A texture array holds the bitmap's images as its layers.
         let frames = if *kind == TextureKind::FlatArray {
             let tag = reader.load(&texture.bitmap, "bitmap", b"bitm").ok();
             let count = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len().max(1));
             (0..count)
-                .filter_map(|at| h3_image(reader, &texture.bitmap, at as i16, SamplerKind::Texture2D, caches))
+                .filter_map(|at| gen3_image(reader, &texture.bitmap, at as i16, SamplerKind::Texture2D, caches))
                 .map(|(image, ..)| image)
                 .collect()
         } else {
             Vec::new()
         };
         let sampler = Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
-        textures.push(H3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames });
+        textures.push(Gen3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames });
     }
     let first_bitmap = baked.textures.first().map(|texture| texture.bitmap.clone()).filter(|path| !path.is_empty());
     let blend_mode = baked.alpha_blend_mode;

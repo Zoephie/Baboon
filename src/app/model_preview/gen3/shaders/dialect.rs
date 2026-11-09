@@ -5,11 +5,11 @@ use super::*;
 /// Whose frame a material is lit and drawn in: Halo 3's (and ODST's),
 /// Reach's or Halo 4's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H3Dialect {
+pub(crate) enum Gen3Dialect {
     Halo3,
     Reach,
     /// Halo 4's materials: translated from their own sources
-    /// (`h4::materials::shaders`), never through `H3Sources`.
+    /// (`h4::materials::shaders`), never through `Gen3Sources`.
     Halo4,
 }
 
@@ -31,7 +31,7 @@ impl RenderMethodDialect {
     }
 }
 
-impl From<RenderMethodDialect> for H3Dialect {
+impl From<RenderMethodDialect> for Gen3Dialect {
     fn from(dialect: RenderMethodDialect) -> Self {
         match dialect {
             RenderMethodDialect::Halo3 => Self::Halo3,

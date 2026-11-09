@@ -4,7 +4,7 @@ use super::*;
 
 /// `c_particle_definition`'s billboard styles, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum H3Billboard {
+pub(in crate::app::model_preview) enum Billboard {
     ScreenFacing,
     CameraFacing,
     ScreenParallel,
@@ -17,7 +17,7 @@ pub(in crate::app::model_preview) enum H3Billboard {
     VelocityHorizontal,
 }
 
-impl H3Billboard {
+impl Billboard {
     pub(in crate::app::model_preview) fn named(name: &str) -> Self {
         match name {
             "camera facing" => Self::CameraFacing,
@@ -64,7 +64,7 @@ pub(crate) enum ParticleAlbedo {
 
 /// What ODST's three new albedo options read.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct H3AlbedoConstants {
+pub(crate) struct AlbedoConstants {
     pub(crate) tint: [f32; 3],
     pub(crate) modulation: f32,
     pub(crate) alpha_modulation: f32,
@@ -108,7 +108,7 @@ pub(crate) struct ParticleLook {
     pub(in crate::app::model_preview) dies_at_rest: bool,
     /// Whether a speed of none is nudged to a little.
     pub(in crate::app::model_preview) still_moves: bool,
-    pub(in crate::app::model_preview) billboard: H3Billboard,
+    pub(in crate::app::model_preview) billboard: Billboard,
     pub(in crate::app::model_preview) flip_u: bool,
     pub(in crate::app::model_preview) flip_v: bool,
     pub(in crate::app::model_preview) random_rotation: bool,
@@ -153,7 +153,7 @@ pub(crate) struct ParticleLook {
     pub(in crate::app::model_preview) frame: ParticleProperty,
     pub(in crate::app::model_preview) rate: ParticleProperty,
     pub(in crate::app::model_preview) palette: ParticleProperty,
-    pub(crate) shader: Arc<H3SpriteShader>,
+    pub(crate) shader: Arc<SpriteShader>,
     /// Halo 4's: drawn through its material from packed state, not as quads.
     pub(crate) h4: Option<Arc<dyn ParticleMaterial>>,
     /// Halo 3's colours are light, and Halo 2's are what shows.
@@ -322,7 +322,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
         Some(shader) => read_frames(reader, shader, first, [offset.x, offset.y], start, one_shot),
         None => (vec![[0.0, 0.0, 1.0, 1.0]], [0.0, 0.0, 1.0, 1.0]),
     };
-    let billboard = H3Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
+    let billboard = Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
     let cheap = rules.cheap_shader && has_flag(root, "main flags", "uses cheap shader");
     const PROPERTIES: [&str; 7] =
         ["aspect ratio", "color", "intensity", "alpha", "frame index", "animation rate", "palette animation"];
@@ -339,7 +339,7 @@ pub(super) fn read_look(reader: &TagReader, path: &str) -> Option<ParticleLook> 
     let [aspect, color, intensity, alpha, frame, rate, palette] = properties;
     let mut sprite_shader = match shader.filter(|_| rules.read_material.is_none()) {
         Some(shader) => read_sprite_shader(reader, shader)?,
-        None => H3SpriteShader::plain(H3Blend::Additive),
+        None => SpriteShader::plain(Gen3Blend::Additive),
     };
     // `default_vs`: Reach's constant self-illumination is at `V_ILLUM_EXPOSURE`.
     sprite_shader.add_at_illum = rules.adds_at_illum;

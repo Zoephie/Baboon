@@ -9,7 +9,7 @@ use eframe::glow::{self, HasContext};
 use super::super::render::H4Game;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 
-use super::super::super::gen3::shaders::H3Value;
+use super::super::super::gen3::shaders::Gen3Value;
 
 use crate::app::model_preview::common::image::Sampler;
 use super::super::flares::{H4FlareDraw, H4FlareView};
@@ -234,13 +234,13 @@ impl H4Game {
                             if location.is_none() {
                                 continue;
                             }
-                            let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+                            let floats = |value: [f32; 4]| Some(Gen3Value::Floats(value));
                             let value = match name.as_str() {
                                 "centerRotation" => floats(draw.center_rotation),
                                 "flareScale" => floats(draw.scale),
                                 "flareOrigin_offsetBounds" => floats(draw.origin_bounds),
                                 "transformedAxes" => floats(draw.axes),
-                                "mirrorReflectionAcrossFlare" => Some(H3Value::Integer(0)),
+                                "mirrorReflectionAcrossFlare" => Some(Gen3Value::Integer(0)),
                                 "modulationFactor" => floats(draw.modulation),
                                 "tintColor" => floats(draw.tint),
                                 // `c_surface::get_alpha_multiplier`: 1 here.

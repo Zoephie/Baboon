@@ -142,7 +142,7 @@ pub(super) fn beam_profiles(capped: f32, density: f32) -> usize {
     (capped * density).ceil().clamp(FEWEST_PROFILES, MOST_PROFILES as f32) as usize
 }
 
-impl H3StripAt {
+impl Gen3StripAt {
     pub(crate) fn scale_names(&self) -> [&str; 2] {
         [&self.scale_by, &self.secondary_by]
     }
@@ -152,7 +152,7 @@ impl H3StripAt {
         &self.scale_by
     }
 
-    pub(crate) fn shader(&self) -> &H3SpriteShader {
+    pub(crate) fn shader(&self) -> &SpriteShader {
         &self.look.shader
     }
 

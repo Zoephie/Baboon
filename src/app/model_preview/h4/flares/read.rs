@@ -142,7 +142,7 @@ pub(crate) struct H4LensFlare {
     pub(super) age_color: Option<H4FlareCurve>,
     pub(super) reflections: Vec<H4Reflection>,
     /// Each reflection's bitmap image, by `image`.
-    pub(crate) images: Vec<H3Bitmap>,
+    pub(crate) images: Vec<Gen3Bitmap>,
 }
 
 fn aspect_of(image: &Image) -> [f32; 2] {
@@ -172,7 +172,7 @@ pub(crate) fn read_h4_lens_flare(reader: &TagReader, path: &str) -> Option<H4Len
     let bitmap = root
         .read_tag_ref_path("bitmap")
         .filter(|path| !path.is_empty());
-    let mut images: Vec<(String, i16, H3Bitmap)> = Vec::new();
+    let mut images: Vec<(String, i16, Gen3Bitmap)> = Vec::new();
     let mut reflections = Vec::new();
     for reflection in elements(root, "reflections") {
         let curve = |name: &str| {

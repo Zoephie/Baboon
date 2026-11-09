@@ -4,7 +4,7 @@ use super::*;
 
 /// `billboard_basis`.
 fn billboard(
-    style: H3Billboard,
+    style: Billboard,
     place: [f32; 3],
     velocity: [f32; 3],
     local: [[f32; 3]; 3],
@@ -12,31 +12,31 @@ fn billboard(
 ) -> [[f32; 3]; 2] {
     let eye: [f32; 3] = std::array::from_fn(|axis| place[axis] - view.eye[axis]);
     match style {
-        H3Billboard::ScreenFacing => [view.right, view.up],
-        H3Billboard::CameraFacing => {
+        Billboard::ScreenFacing => [view.right, view.up],
+        Billboard::CameraFacing => {
             let eye = clamped_unit(eye);
             let other = if eye[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
             let across = clamped_unit(cross(eye, other));
             [across, clamped_unit(cross(across, eye))]
         }
-        H3Billboard::ScreenParallel => {
+        Billboard::ScreenParallel => {
             let along = clamped_unit(velocity);
             [along, clamped_unit(cross(along, eye))]
         }
-        H3Billboard::ScreenPerpendicular => {
+        Billboard::ScreenPerpendicular => {
             let motion = clamped_unit(velocity);
             let other = if motion[2].abs() < 0.99 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
             let across = clamped_unit(cross(motion, other));
             [across, cross(motion, across)]
         }
-        H3Billboard::ScreenVertical => {
+        Billboard::ScreenVertical => {
             let up = [0.0, 0.0, 1.0];
             [up, clamped_unit(cross(up, eye))]
         }
-        H3Billboard::LocalVertical => [local[2], clamped_unit(cross(local[2], eye))],
-        H3Billboard::LocalHorizontal => [local[0], local[1]],
-        H3Billboard::ScreenHorizontal | H3Billboard::World => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-        H3Billboard::VelocityHorizontal => {
+        Billboard::LocalVertical => [local[2], clamped_unit(cross(local[2], eye))],
+        Billboard::LocalHorizontal => [local[0], local[1]],
+        Billboard::ScreenHorizontal | Billboard::World => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        Billboard::VelocityHorizontal => {
             let along = clamped_unit(velocity);
             let other = if along[0].abs() < 0.99 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
             [along, clamped_unit(cross(other, along))]
@@ -46,10 +46,10 @@ fn billboard(
 
 /// `particle_render_fast.hlsl`'s `billboard_basis(…, limited = true)`: only
 /// screen and camera facing, and every other style lies flat in the world.
-pub(super) fn cheap_billboard(style: H3Billboard) -> H3Billboard {
+pub(super) fn cheap_billboard(style: Billboard) -> Billboard {
     match style {
-        H3Billboard::ScreenFacing | H3Billboard::CameraFacing => style,
-        _ => H3Billboard::World,
+        Billboard::ScreenFacing | Billboard::CameraFacing => style,
+        _ => Billboard::World,
     }
 }
 

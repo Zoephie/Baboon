@@ -15,7 +15,7 @@ void main() {
 
 /// What a pass names, whichever stage reads it.
 #[derive(Debug)]
-pub(crate) struct H3Pass {
+pub(crate) struct Gen3Pass {
     /// Over the whole picture, with no geometry: a `shader_screen`.
     pub(crate) fullscreen: bool,
     pub(crate) vertex: String,
@@ -62,7 +62,7 @@ fn widen_varyings(vertex: &str, pixel: &str) -> String {
     source
 }
 
-pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
+pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
     let mut uniforms = vertex.uniforms;
     // Halo 4 calls them `vs_model_skinning_matrices`, the same shape.
     let nodes = uniforms.iter_mut().find_map(|(name, ty)| match ty {
@@ -161,12 +161,12 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> H3Pass {
         "vec3 l_true_scene_color = l_ldr_color.xyz;",
         "vec3 l_true_scene_color = 2.0 * sin(asin(clamp(l_ldr_color.xyz, 0.0, 1.0)) / 3.0);",
     );
-    H3Pass { fullscreen: false, vertex: source, pixel: pixel_source, uniforms, textures }
+    Gen3Pass { fullscreen: false, vertex: source, pixel: pixel_source, uniforms, textures }
 }
 
 /// `global_render_method`'s `blend_mode`, in its option order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H3Blend {
+pub(crate) enum Gen3Blend {
     Opaque,
     Additive,
     Multiply,
@@ -183,7 +183,7 @@ pub(crate) enum H3Blend {
     AddSrcTimesSrcAlphaAccumAlpha,
 }
 
-impl H3Blend {
+impl Gen3Blend {
     /// In `BLEND_MODES`' order.
     pub(super) const ALL: [Self; BLEND_MODES.len()] = [
         Self::Opaque,

@@ -10,7 +10,7 @@ use super::super::RenderModelPreviewBatch;
 use super::super::frame::ModelGpuFrame;
 use super::super::gen3::pipeline::{Gen3PassHooks, camera_to_world, view_projection};
 use super::super::gen3::state::Gen3State;
-use super::super::gen3::shaders::{H3Dialect, H3Material, H3Pass, H3Value, H3Values};
+use super::super::gen3::shaders::{Gen3Dialect, Gen3Material, Gen3Pass, Gen3Value, Gen3Values};
 use super::materials::submit::{DrawnObject, H4Draw, object_parameters};
 
 /// Halo 4's pass hooks, and what its stages set for them.
@@ -37,9 +37,9 @@ impl Gen3PassHooks for H4PassHooks {
         &self,
         frame: &ModelGpuFrame,
         batch: &RenderModelPreviewBatch,
-        material: &H3Material,
-        pass: &Arc<H3Pass>,
-    ) -> Option<H3Values> {
+        material: &Gen3Material,
+        pass: &Arc<Gen3Pass>,
+    ) -> Option<Gen3Values> {
         material.h4().map(|submit| {
             let object = batch.material_index as usize;
             let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
@@ -57,7 +57,7 @@ impl Gen3PassHooks for H4PassHooks {
             // objects bring geometry alone.
             let count = if owner == 0 { frame.preview.h4.change_color_count } else { 0 };
             let colors = object_parameters(frame.change_colors_of(object), count);
-            values.insert("ps_material_object_parameters".to_owned(), H3Value::FloatArray(colors));
+            values.insert("ps_material_object_parameters".to_owned(), Gen3Value::FloatArray(colors));
             values
         })
     }
@@ -67,20 +67,20 @@ impl Gen3PassHooks for H4PassHooks {
         gl: &glow::Context,
         location: Option<&glow::NativeUniformLocation>,
         frame: &ModelGpuFrame,
-        material: &H3Material,
+        material: &Gen3Material,
         name: &str,
         shadow_view_projection: Option<[f32; 16]>,
     ) -> bool {
         unsafe {
             // The shadow's generate draws from the light.
-            if material.dialect() == H3Dialect::Halo4
+            if material.dialect() == Gen3Dialect::Halo4
                 && name == "vs_view_view_projection_matrix"
                 && let Some(matrix) = shadow_view_projection
             {
                 gl.uniform_matrix_4_f32_slice(location, false, &matrix);
                 return true;
             }
-            if material.dialect() == H3Dialect::Halo4
+            if material.dialect() == Gen3Dialect::Halo4
                 && let Some(matrix) = h4_matrix(frame, name)
             {
                 match matrix.len() {

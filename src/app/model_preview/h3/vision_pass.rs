@@ -6,7 +6,7 @@ use eframe::glow::{self, HasContext as _};
 
 use super::super::common::view::ce_flare_view;
 use super::super::frame::ModelGpuFrame;
-use super::super::gen3::effects::screen::H3ScreenSettings;
+use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::gen3::pipeline::{PictureCopies, view_projection};
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
@@ -110,14 +110,14 @@ void main() {
 
 impl H3Game {
     /// Whether the frame draws VISR or the suck over its picture.
-    pub(super) fn draws_picture_effects(frame: &ModelGpuFrame, screen: &H3ScreenSettings) -> bool {
+    pub(super) fn draws_picture_effects(frame: &ModelGpuFrame, screen: &Gen3ScreenSettings) -> bool {
         let vision = frame.preview.h3.vision.is_some() && screen.vision() > 0.0;
         let suck = frame.preview.h3.motion_blur.is_some() && screen.suck().is_some();
         vision || suck
     }
 
     /// `distortion_apply` comes before everything else over the picture.
-    pub(super) unsafe fn draw_picture_suck(&mut self, cx: &mut Gen3Cx<'_>, screen: &H3ScreenSettings, copies: &PictureCopies) {
+    pub(super) unsafe fn draw_picture_suck(&mut self, cx: &mut Gen3Cx<'_>, screen: &Gen3ScreenSettings, copies: &PictureCopies) {
         let Some((blur, moved)) = cx.frame.preview.h3.motion_blur.zip(screen.suck()) else {
             return;
         };
@@ -129,7 +129,7 @@ impl H3Game {
     }
 
     /// VISR, after the blur.
-    pub(super) unsafe fn draw_picture_vision(&mut self, cx: &mut Gen3Cx<'_>, screen: &H3ScreenSettings, copies: &PictureCopies) {
+    pub(super) unsafe fn draw_picture_vision(&mut self, cx: &mut Gen3Cx<'_>, screen: &Gen3ScreenSettings, copies: &PictureCopies) {
         let Some(vision) = cx.frame.preview.h3.vision.clone().filter(|_| screen.vision() > 0.0) else {
             return;
         };
@@ -263,8 +263,8 @@ mod tests {
     fn only_halo_3s_hooks_draw_the_motion_suck_over_the_picture() {
         let blur = H3MotionBlur { most_pixels: 4.0, step: 0.5, center_falloff: [1.0, 1.0] };
         let (with, without) = (frame_with(Some(blur)), frame_with(None));
-        let moving = H3ScreenSettings::seeing(0.0, [0.0, 0.0, 1.0]);
-        let still = H3ScreenSettings::default();
+        let moving = Gen3ScreenSettings::seeing(0.0, [0.0, 0.0, 1.0]);
+        let still = Gen3ScreenSettings::default();
         let h3 = H3Game::default();
         assert!(Gen3Game::picture_effects(&h3, &with, &moving));
         assert!(!Gen3Game::picture_effects(&h3, &with, &still), "the view does not move");

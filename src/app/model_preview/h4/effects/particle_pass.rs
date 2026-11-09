@@ -7,7 +7,7 @@
 
 use eframe::glow::{self, HasContext};
 use super::super::super::particles::H4EmitterDraw;
-use super::super::super::gen3::shaders::{H3Pass, H3Value};
+use super::super::super::gen3::shaders::{Gen3Pass, Gen3Value};
 use super::super::effects::gl::{H4EffectCx, H4EffectGl, material_functions};
 use super::super::effects::particles::{H4ParticleRender, custom_vert_registers};
 use crate::core::hlsl::parse::Type;
@@ -39,7 +39,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
         if state.begin(gl, material).is_none() {
             return;
         }
-        let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+        let floats = |value: [f32; 4]| Some(Gen3Value::Floats(value));
         let bools = render.pixel_bools();
         let lit = |index: usize| {
             let [r, g, b] = DEFAULT_LIGHTING[index];
@@ -105,9 +105,9 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
                 }
                 let value = match name.as_str() {
                     "vs_sprite_offset_and_scale" => floats(render.sprite),
-                    "vs_mesh_position_compression_scale" => model.map(|model| H3Value::Floats(model.position[0])),
-                    "vs_mesh_position_compression_offset" => model.map(|model| H3Value::Floats(model.position[1])),
-                    "vs_mesh_uv_compression_scale_offset" => model.map(|model| H3Value::Floats(model.texcoord)),
+                    "vs_mesh_position_compression_scale" => model.map(|model| Gen3Value::Floats(model.position[0])),
+                    "vs_mesh_position_compression_offset" => model.map(|model| Gen3Value::Floats(model.position[1])),
+                    "vs_mesh_uv_compression_scale_offset" => model.map(|model| Gen3Value::Floats(model.texcoord)),
                     "vs_cameraVelocity" => floats([0.0; 4]),
                     "vs_sprite_list_count_and_max" => floats([render.sprite_count, 0.0, 0.0, 0.0]),
                     "vsLightingBrightDirection" | "psLightingBrightDirection" => floats(lit(0)),
@@ -115,12 +115,12 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
                     "vsLightingDarkColor" | "psLightingDarkColor" => floats(lit(2)),
                     "vsLightingAmbient" | "psLightingAmbient" => floats(lit(3)),
                     "psDepthFadeEnabled" => {
-                        Some(H3Value::Integer(i32::from(bools[0] && depth.is_some())))
+                        Some(Gen3Value::Integer(i32::from(bools[0] && depth.is_some())))
                     }
-                    "psSphereWarpEnabled" => Some(H3Value::Integer(i32::from(bools[1]))),
-                    "psNewSchoolFrameIndex" => Some(H3Value::Integer(i32::from(bools[2]))),
+                    "psSphereWarpEnabled" => Some(Gen3Value::Integer(i32::from(bools[1]))),
+                    "psNewSchoolFrameIndex" => Some(Gen3Value::Integer(i32::from(bools[2]))),
                     "psBlackOrWhitePointEnabled" => {
-                        Some(H3Value::Integer(i32::from(draw.black_or_white)))
+                        Some(Gen3Value::Integer(i32::from(draw.black_or_white)))
                     }
                     "psTintFactor" => floats([render.tint_factor, 0.0, 0.0, 0.0]),
                     _ => None,
@@ -143,7 +143,7 @@ pub(in crate::app::model_preview) unsafe fn draw_h4_particles(
 unsafe fn set_render_state(
     gl: &glow::Context,
     state: &mut H4EffectGl,
-    pass: &H3Pass,
+    pass: &Gen3Pass,
     render: &H4ParticleRender,
     draw: &H4EmitterDraw,
     time: f32,

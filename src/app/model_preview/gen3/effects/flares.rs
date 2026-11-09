@@ -20,7 +20,7 @@ use blam_tags::tag_function::transition_function_evaluate;
 use super::super::super::common::image::Image;
 use super::super::super::common::named_function::tag_function_at;
 use super::super::pipeline::EXPOSURE;
-use super::super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
+use super::super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
 use super::super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};
@@ -30,7 +30,7 @@ use super::super::super::h3::lights::{H3Light, SMALLEST};
 
 /// A `lens_flare`'s first reflection, the only one H3 draws.
 #[derive(Debug, Clone)]
-pub(crate) struct H3Flare {
+pub(crate) struct Gen3Flare {
     cones: [f32; 2],
     near_fade: [f32; 2],
     far_fade: [f32; 2],
@@ -54,8 +54,8 @@ pub(crate) struct H3Flare {
     age_brightness: Option<Arc<TagFunction>>,
     time_rotation: Option<Arc<TagFunction>>,
     age_rotation: Option<Arc<TagFunction>>,
-    time_color: Option<H3FlareColor>,
-    age_color: Option<H3FlareColor>,
+    time_color: Option<Gen3FlareColor>,
+    age_color: Option<Gen3FlareColor>,
     /// `lens_flares_evaluate_corona_rotation_function`'s, and its scale in radians.
     rotation_function: i128,
     rotation_scale: f32,
@@ -64,7 +64,7 @@ pub(crate) struct H3Flare {
     radius_by_occlusion: bool,
     /// `ignore external color`: a light's color does not tint it.
     ignores_external_color: bool,
-    bitmap: H3Bitmap,
+    bitmap: Gen3Bitmap,
 }
 
 /// How much of a flare its occlusion patch covers.
@@ -107,12 +107,12 @@ struct ReachFlareCurves {
 
 /// `s_editing_function`: a color curve, and what can drive it off the object.
 #[derive(Debug, Clone)]
-struct H3FlareColor {
+struct Gen3FlareColor {
     function: Arc<TagFunction>,
     input: String,
 }
 
-impl H3FlareColor {
+impl Gen3FlareColor {
     fn read(root: TagStruct<'_>, block: &str) -> Option<Self> {
         let first = elements(root, block).into_iter().next()?;
         Some(Self {
@@ -146,7 +146,7 @@ fn corona_rotation(function: i128, scale: f32, position: [f32; 3], forward: [f32
 
 /// A flare at a marker of the object it is attached to.
 #[derive(Debug, Clone)]
-pub(crate) struct H3FlareAt {
+pub(crate) struct Gen3FlareAt {
     pub(crate) object: u8,
     node: usize,
     position: [f32; 3],
@@ -156,17 +156,17 @@ pub(crate) struct H3FlareAt {
     /// Reach's attachment `secondary scale`, which multiplies the primary.
     secondary_by: String,
     /// Set for a flare an attached effect draws.
-    by_effect: Option<H3EffectScale>,
+    by_effect: Option<Gen3EffectScale>,
     /// When its effect's event runs, for a flare an attached effect draws.
     event: Option<(Arc<EffectTimes>, usize)>,
-    flare: Arc<H3Flare>,
+    flare: Arc<Gen3Flare>,
     /// A light's own flare: the light, whose state colors and scales it.
     light: Option<Arc<H3Light>>,
 }
 
 /// `effect_generate_lens_flares`' use of the attachment's scale.
 #[derive(Debug, Clone, Copy)]
-pub(in crate::app::model_preview) struct H3EffectScale {
+pub(in crate::app::model_preview) struct Gen3EffectScale {
     /// The part's `A scales values` takes in its type's scale, as otherwise the
     /// flare burns at full while the effect runs.
     pub(in crate::app::model_preview) scaled: bool,
@@ -209,7 +209,7 @@ fn block_function(root: TagStruct<'_>, block: &str) -> Option<Arc<TagFunction>> 
     tag_function_at(&first, "function").map(Arc::new)
 }
 
-pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &str) -> Option<H3Flare> {
+pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &str) -> Option<Gen3Flare> {
     let tag = reader.load(path, "lens_flare", b"lens").ok()?;
     let root = tag.root();
     if has_flag(root, "flags", "only render in first person") {
@@ -245,7 +245,7 @@ pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &st
     };
     let color = reflection.read_rgb("color");
     let fade = |name: &str| root.read_real(name).unwrap_or(0.0);
-    Some(H3Flare {
+    Some(Gen3Flare {
         cones: [fade("falloff angle"), fade("cutoff angle")],
         near_fade: [fade("near fade begin distance"), fade("near fade end distance")],
         far_fade: [fade("near fade distance"), fade("far fade distance")],
@@ -266,8 +266,8 @@ pub(in crate::app::model_preview) fn read_h3_flare(reader: &TagReader, path: &st
         age_brightness: block_function(root, "age brightness"),
         time_rotation: block_function(root, "time rotation"),
         age_rotation: block_function(root, "age rotation"),
-        time_color: H3FlareColor::read(root, "time color"),
-        age_color: H3FlareColor::read(root, "age color"),
+        time_color: Gen3FlareColor::read(root, "time color"),
+        age_color: Gen3FlareColor::read(root, "age color"),
         rotation_function: rotation_function(root),
         rotation_scale: root.read_real("rotation function scale").unwrap_or(0.0),
         rotates_from_center: reflected("rotate from center of screen"),
@@ -285,7 +285,7 @@ pub(in crate::app::model_preview) fn read_h3_flares(
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-) -> Vec<H3FlareAt> {
+) -> Vec<Gen3FlareAt> {
     let mut flares = Vec::new();
     let Some(block) = object_block(object, "attachments") else {
         return flares;
@@ -295,7 +295,7 @@ pub(in crate::app::model_preview) fn read_h3_flares(
                            found: Vec<RenderModelPreviewMarker>,
                            scale_by: String,
                            secondary_by: String,
-                           by_effect: Option<H3EffectScale>,
+                           by_effect: Option<Gen3EffectScale>,
                            event: Option<(Arc<EffectTimes>, usize)>,
                            placed: &dyn Fn(MarkerFrame, usize) -> (MarkerFrame, usize)| {
         let Some(flare) = read_h3_flare(reader, path).map(Arc::new) else {
@@ -304,7 +304,7 @@ pub(in crate::app::model_preview) fn read_h3_flares(
         for marker in &found {
             let (place, node) = frame(marker);
             let (place, node) = placed(place, node);
-            flares.push(H3FlareAt {
+            flares.push(Gen3FlareAt {
                 object: owner,
                 node,
                 position: place.position,
@@ -333,7 +333,7 @@ pub(in crate::app::model_preview) fn read_h3_flares(
     }
     for_each_attached_part(reader, object, |part| {
         if part.group == flare_group {
-            let by_effect = Some(H3EffectScale { scaled: part.scaled });
+            let by_effect = Some(Gen3EffectScale { scaled: part.scaled });
             let event = Some((Arc::clone(&part.times), part.event));
             let placed = |place, node| part.placed(place, node);
             let scale_by = part.effect.scale_by.clone();
@@ -347,9 +347,9 @@ pub(in crate::app::model_preview) fn read_h3_flares(
 /// `light_submit_lens_flares`: each light with a `Lens Flare` draws it where
 /// the light is, by the light's color and scale. Take `lights` once they are
 /// final, renamed for what they hang on.
-pub(in crate::app::model_preview) fn light_flares(lights: &[H3Light]) -> Vec<H3FlareAt> {
+pub(in crate::app::model_preview) fn light_flares(lights: &[H3Light]) -> Vec<Gen3FlareAt> {
     let flare_of = |light: &H3Light| {
-        Some(H3FlareAt {
+        Some(Gen3FlareAt {
             object: light.object,
             node: light.node,
             position: light.position,
@@ -378,7 +378,7 @@ fn occlusion_fraction(falloff: u8, tested: bool, visible: f32) -> f32 {
     transition_function_evaluate(falloff, visible)
 }
 
-impl H3EffectScale {
+impl Gen3EffectScale {
     /// `attachments_update` runs the effect only while the function is on.
     pub(in crate::app::model_preview) fn of(self, value: f32) -> f32 {
         match (value > 0.0, self.scaled) {
@@ -389,7 +389,7 @@ impl H3EffectScale {
     }
 }
 
-impl H3FlareAt {
+impl Gen3FlareAt {
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
@@ -421,7 +421,7 @@ impl H3FlareAt {
         if self.event.is_some() { time - onset } else { time }
     }
 
-    pub(crate) fn bitmap(&self) -> &H3Bitmap {
+    pub(crate) fn bitmap(&self) -> &Gen3Bitmap {
         &self.flare.bitmap
     }
 
@@ -608,7 +608,7 @@ impl H3FlareAt {
     }
 }
 
-attached!(H3FlareAt);
+attached!(Gen3FlareAt);
 
 #[cfg(test)]
 mod tests {
@@ -701,10 +701,10 @@ mod tests {
 
     #[test]
     fn an_effects_flare_burns_whole_while_its_function_is_on() {
-        let whole = H3EffectScale { scaled: false };
+        let whole = Gen3EffectScale { scaled: false };
         assert_eq!(whole.of(0.0), 0.0);
         assert_eq!(whole.of(0.25), 1.0);
-        let scaled = H3EffectScale { scaled: true };
+        let scaled = Gen3EffectScale { scaled: true };
         assert_eq!(scaled.of(0.0), 0.0);
         assert_eq!(scaled.of(0.25), 0.25);
     }

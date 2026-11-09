@@ -5,13 +5,13 @@
 use super::render::{Gen3Batch, Gen3Cx, Gen3Game};
 use super::sprites::SpriteStage;
 use super::super::gl::screen::screen_program;
-use super::super::common::sprites::h3_layered_distance;
+use super::super::common::sprites::layered_distance;
 use super::super::gl::pass_state::PassState;
 use super::super::gl::program::Linked;
 use super::super::gl::target::{Made, Sampling, Texels};
-use super::prt::{H3PrtKind, second_order_rotation};
+use super::prt::{Gen3PrtKind, second_order_rotation};
 
-use super::shaders::{H3Animated, H3Blend, H3Dialect, H3Material, H3Pass, H3Shield, H3Value};
+use super::shaders::{Gen3Animated, Gen3Blend, Gen3Dialect, Gen3Material, Gen3Pass, Gen3Shield, Gen3Value};
 
 use crate::app::model_preview::common::image::ImageTexels;
 use eframe::glow::{self, HasContext as _};

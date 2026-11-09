@@ -11,7 +11,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, has_flag};
 use super::super::functions::FunctionValues;
-use super::super::gen3::shaders::H3Texture;
+use super::super::gen3::shaders::Gen3Texture;
 use crate::app::model_preview::common::image::ImageTexels;
 use super::super::materials::decode_image;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -21,8 +21,8 @@ use eframe::glow::{self, HasContext as _};
 use super::super::RenderModelPreviewBatch;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::RenderCore;
-use super::pipeline::h3_set_cull;
-use super::shaders::{H3Material, H3Pass};
+use super::pipeline::gen3_set_cull;
+use super::shaders::{Gen3Material, Gen3Pass};
 use super::state::Gen3State;
 
 /// `shield_impact` `flags`.
@@ -136,7 +136,7 @@ pub(crate) struct ReachShieldSettings {
     plasma_edge: Option<(ShieldChannel, ShieldChannel)>,
     extrusion: Option<ShieldChannel>,
     oscillation_amplitude: Option<ShieldChannel>,
-    pub(crate) textures: Vec<H3Texture>,
+    pub(crate) textures: Vec<Gen3Texture>,
 }
 
 /// The edge radii as `postprocess` turns them into scales and offsets: each
@@ -179,7 +179,7 @@ impl ReachShieldSettings {
             let Some(image) = decode_image(reader, &bitmap, SamplerKind::Texture2D, 0) else {
                 continue;
             };
-            textures.push(H3Texture {
+            textures.push(Gen3Texture {
                 uniform: uniform.to_owned(),
                 image: Arc::new(image),
                 texels: ImageTexels::Linear,
@@ -303,14 +303,14 @@ pub(crate) fn draws_shield(shield_only: bool, never_shield: bool, decal: bool) -
 pub(in crate::app::model_preview) fn shield_parts(
     core: &RenderCore,
     frame: &ModelGpuFrame,
-) -> Vec<(RenderModelPreviewBatch, Arc<H3Material>)> {
+) -> Vec<(RenderModelPreviewBatch, Arc<Gen3Material>)> {
     frame
         .shield_batches
         .iter()
         .filter_map(|&index| frame.preview.batches.get(index))
         .filter_map(|batch| {
             let index = batch.material_index as usize;
-            let material = core.h3_material(frame, index)?;
+            let material = core.gen3_material(frame, index)?;
             let textures = frame.textures.as_ref()?.get(index)?;
             draws_shield(textures.shield_only, textures.never_shield, material.decal)
                 .then(|| (batch.clone(), Arc::clone(material)))
@@ -329,8 +329,8 @@ impl Gen3State {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
-        parts: &[(RenderModelPreviewBatch, Arc<H3Material>)],
-        pass: &Arc<H3Pass>,
+        parts: &[(RenderModelPreviewBatch, Arc<Gen3Material>)],
+        pass: &Arc<Gen3Pass>,
         mut values: HashMap<&'static str, [f32; 4]>,
     ) {
         let camera = &frame.camera;
@@ -358,7 +358,7 @@ impl Gen3State {
                 self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
             }
             self.pass_values = None;
-            h3_set_cull(gl, frame);
+            gen3_set_cull(gl, frame);
         }
     }
 }

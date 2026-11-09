@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-use super::super::gen3::shaders::{H3Pass, H3Sources};
+use super::super::gen3::shaders::{Gen3Pass, Gen3Sources};
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
 use super::super::gen3::shield::{DEPTH_DECODE, OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 
@@ -17,19 +17,19 @@ use super::super::gen3::shield::{DEPTH_DECODE, OSCILLATION, PLASMA, ReachShieldS
 pub(crate) struct ReachShield {
     pub(crate) settings: ReachShieldSettings,
     /// Explicit shader 61, `shield_impact`.
-    pass: Arc<H3Pass>,
+    pass: Arc<Gen3Pass>,
     /// 119, `shield_impact_procedural_uv`.
-    procedural: Option<Arc<H3Pass>>,
+    procedural: Option<Arc<Gen3Pass>>,
 }
 
 impl ReachShield {
-    pub(crate) fn pass(&self) -> &Arc<H3Pass> {
+    pub(crate) fn pass(&self) -> &Arc<Gen3Pass> {
         self.procedural.as_ref().filter(|_| self.settings.procedural).unwrap_or(&self.pass)
     }
 
     /// 61, then 119 if it translated.
     #[cfg(test)]
-    pub(crate) fn passes(&self) -> impl Iterator<Item = &Arc<H3Pass>> {
+    pub(crate) fn passes(&self) -> impl Iterator<Item = &Arc<Gen3Pass>> {
         std::iter::once(&self.pass).chain(&self.procedural)
     }
 }
@@ -38,7 +38,7 @@ impl ReachShield {
 pub(crate) fn read_reach_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<ReachShield>> {
     let path = shield_impact_path(model)?;
     let settings = ReachShieldSettings::read(reader, &path)?;
-    let mut sources = H3Sources::new(&reader.source);
+    let mut sources = Gen3Sources::new(&reader.source);
     let pass = Arc::new(shield_pass(&*sources.explicit_pass("shield_impact").ok()?));
     let procedural = sources.explicit_pass("shield_impact_procedural_uv").ok().map(|pass| Arc::new(shield_pass(&pass)));
     Some(Arc::new(ReachShield { settings, pass, procedural }))
@@ -46,7 +46,7 @@ pub(crate) fn read_reach_shield(reader: &TagReader, model: &TagFile) -> Option<A
 
 /// The translated pass, made to read the preview's depth and to give its
 /// vertex stage the oscillation textures.
-fn shield_pass(pass: &H3Pass) -> H3Pass {
+fn shield_pass(pass: &Gen3Pass) -> Gen3Pass {
     let mut vertex = pass.vertex.clone();
     for (plasma, oscillation) in PLASMA.iter().zip(OSCILLATION) {
         vertex = vertex.replace(plasma, oscillation);
@@ -71,5 +71,5 @@ float l_scene_depth = ((l_window_ndc - {DEPTH_DECODE}.y) / ({DEPTH_DECODE}.x - l
     uniforms.push(("reach_shield_world_scale".to_owned(), Type::Scalar(Scalar::Float)));
     let mut textures = pass.textures.clone();
     textures.extend(OSCILLATION.iter().map(|name| ((*name).to_owned(), TextureKind::Flat)));
-    H3Pass { fullscreen: false, vertex, pixel, uniforms, textures }
+    Gen3Pass { fullscreen: false, vertex, pixel, uniforms, textures }
 }

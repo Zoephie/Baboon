@@ -3,7 +3,7 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum H3Value {
+pub(crate) enum Gen3Value {
     Floats([f32; 4]),
     Integer(i32),
     /// A `float4[n]` uniform, as Halo 4's `ps_material_shader_transforms`.
@@ -11,7 +11,7 @@ pub(crate) enum H3Value {
 }
 
 #[derive(Debug)]
-pub(crate) struct H3Texture {
+pub(crate) struct Gen3Texture {
     pub(crate) uniform: String,
     pub(crate) image: Arc<Image>,
     pub(crate) texels: ImageTexels,
@@ -26,15 +26,15 @@ pub(crate) struct H3Texture {
 
 /// A shader's passes and everything they read.
 #[derive(Debug)]
-pub(crate) struct H3Material {
+pub(crate) struct Gen3Material {
     /// Whose frame lights it, with Halo 4's per-draw functions and hologram
-    /// rig: read through [`H3Material::dialect`] and [`H3Material::h4`].
-    pub(crate) dialect: H3MaterialDialect,
-    pub(crate) albedo: Option<Arc<H3Pass>>,
-    pub(crate) lit: Arc<H3Pass>,
+    /// rig: read through [`Gen3Material::dialect`] and [`Gen3Material::h4`].
+    pub(crate) dialect: Gen3MaterialDialect,
+    pub(crate) albedo: Option<Arc<Gen3Pass>>,
+    pub(crate) lit: Arc<Gen3Pass>,
     /// Halo 4's `opaque_alpha_blend` draws twice: `lit` with the opaque
     /// objects, then this, blended among the transparents.
-    pub(crate) fringe: Option<Arc<H3Pass>>,
+    pub(crate) fringe: Option<Arc<Gen3Pass>>,
     /// ODST's maps bound to the picture itself, by extern mode.
     pub(crate) screen_maps: Vec<String>,
     /// A decal family: `lit` is its `default`, drawn into the albedo target
@@ -47,30 +47,30 @@ pub(crate) struct H3Material {
     /// `sort layer`, for what blends.
     pub(crate) sort_layer: i32,
     /// `static_prt_ambient`, `_linear` and `_quadratic`.
-    pub(crate) prt: [Option<Arc<H3Pass>>; 3],
-    pub(crate) camo: Option<Arc<H3Pass>>,
+    pub(crate) prt: [Option<Arc<Gen3Pass>>; 3],
+    pub(crate) camo: Option<Arc<Gen3Pass>>,
     /// Reach's `shadow_generate`, for its own shadow map.
-    pub(crate) shadow_generate: Option<Arc<H3Pass>>,
-    pub(crate) dynamic_light: Option<Arc<H3Pass>>,
-    pub(crate) blend: H3Blend,
-    pub(crate) values: H3Values,
-    pub(crate) textures: Vec<H3Texture>,
+    pub(crate) shadow_generate: Option<Arc<Gen3Pass>>,
+    pub(crate) dynamic_light: Option<Arc<Gen3Pass>>,
+    pub(crate) blend: Gen3Blend,
+    pub(crate) values: Gen3Values,
+    pub(crate) textures: Vec<Gen3Texture>,
     /// Uniforms holding the object's change colors, and which channel.
     pub(crate) change_colors: Vec<(String, usize)>,
-    pub(crate) animations: Vec<H3Animation>,
-    pub(crate) shield: Option<Arc<H3Shield>>,
+    pub(crate) animations: Vec<Gen3Animation>,
+    pub(crate) shield: Option<Arc<Gen3Shield>>,
 }
 
 /// A material's dialect, with what only Halo 4's carry: its per-draw
 /// functions and hologram rig.
 #[derive(Debug)]
-pub(crate) enum H3MaterialDialect {
+pub(crate) enum Gen3MaterialDialect {
     Halo3,
     Reach,
     Halo4(Arc<super::super::super::h4::materials::submit::H4Submit>),
 }
 
-impl From<RenderMethodDialect> for H3MaterialDialect {
+impl From<RenderMethodDialect> for Gen3MaterialDialect {
     fn from(dialect: RenderMethodDialect) -> Self {
         match dialect {
             RenderMethodDialect::Halo3 => Self::Halo3,
@@ -79,51 +79,51 @@ impl From<RenderMethodDialect> for H3MaterialDialect {
     }
 }
 
-impl H3Material {
+impl Gen3Material {
     /// Whose frame lights it.
-    pub(crate) fn dialect(&self) -> H3Dialect {
+    pub(crate) fn dialect(&self) -> Gen3Dialect {
         match self.dialect {
-            H3MaterialDialect::Halo3 => H3Dialect::Halo3,
-            H3MaterialDialect::Reach => H3Dialect::Reach,
-            H3MaterialDialect::Halo4(_) => H3Dialect::Halo4,
+            Gen3MaterialDialect::Halo3 => Gen3Dialect::Halo3,
+            Gen3MaterialDialect::Reach => Gen3Dialect::Reach,
+            Gen3MaterialDialect::Halo4(_) => Gen3Dialect::Halo4,
         }
     }
 
     /// Halo 4's per-draw functions and hologram rig.
     pub(crate) fn h4(&self) -> Option<&Arc<super::super::super::h4::materials::submit::H4Submit>> {
         match &self.dialect {
-            H3MaterialDialect::Halo4(submit) => Some(submit),
-            H3MaterialDialect::Halo3 | H3MaterialDialect::Reach => None,
+            Gen3MaterialDialect::Halo4(submit) => Some(submit),
+            Gen3MaterialDialect::Halo3 | Gen3MaterialDialect::Reach => None,
         }
     }
 
     pub(crate) fn h4_mut(&mut self) -> Option<&mut Arc<super::super::super::h4::materials::submit::H4Submit>> {
         match &mut self.dialect {
-            H3MaterialDialect::Halo4(submit) => Some(submit),
-            H3MaterialDialect::Halo3 | H3MaterialDialect::Reach => None,
+            Gen3MaterialDialect::Halo4(submit) => Some(submit),
+            Gen3MaterialDialect::Halo3 | Gen3MaterialDialect::Reach => None,
         }
     }
 }
 
 /// Uniform values by name. Ordered only so the loader's snapshot prints them
 /// the same every run; everything here looks them up.
-pub(crate) type H3Values = std::collections::BTreeMap<String, H3Value>;
+pub(crate) type Gen3Values = std::collections::BTreeMap<String, Gen3Value>;
 
 /// `shield_impact.hlsl` and the settings it runs on.
 #[derive(Debug)]
-pub(crate) struct H3Shield {
-    pub(crate) pass: Arc<H3Pass>,
+pub(crate) struct Gen3Shield {
+    pub(crate) pass: Arc<Gen3Pass>,
     /// ODST's `shield_impact_procedural_uv`, for settings that ask for it.
-    pub(crate) procedural: Option<Arc<H3Pass>>,
-    pub(crate) settings: Arc<H3ShieldSettings>,
+    pub(crate) procedural: Option<Arc<Gen3Pass>>,
+    pub(crate) settings: Arc<Gen3ShieldSettings>,
 }
 
 /// A `shield_impact` tag, as constants and its two noise maps by uniform suffix.
 #[derive(Debug)]
-pub(crate) struct H3ShieldSettings {
+pub(crate) struct Gen3ShieldSettings {
     pub(crate) procedural: bool,
-    pub(crate) values: H3Values,
-    pub(crate) textures: Vec<H3Texture>,
+    pub(crate) values: Gen3Values,
+    pub(crate) textures: Vec<Gen3Texture>,
 }
 
 #[cfg(test)]
@@ -131,15 +131,15 @@ mod texel_tests {
     use super::super::*;
     use blam_tags::bitmap::BitmapFormat;
 
-    fn animation(input: &str, range: &str) -> H3Animation {
-        H3Animation {
+    fn animation(input: &str, range: &str) -> Gen3Animation {
+        Gen3Animation {
             uniform: String::new(),
-            writes: H3Animated::First,
+            writes: Gen3Animated::First,
             function: blam_tags::TagFunction::parse(&[0; 32]).unwrap(),
             input: input.to_owned(),
             range: range.to_owned(),
             period: 1.0,
-            clock: H3Clock::Halo3,
+            clock: Gen3Clock::Halo3,
         }
     }
 
@@ -158,9 +158,9 @@ mod texel_tests {
         let values = FunctionValues::new();
         let mut timed = animation("render_time", "");
         assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.0, 1.0), "an object function, and none is set");
-        timed.clock = H3Clock::Odst;
+        timed.clock = Gen3Clock::Odst;
         assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.0, 1.0));
-        timed.clock = H3Clock::OdstScreen;
+        timed.clock = Gen3Clock::OdstScreen;
         assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.25, 0.0));
     }
 
@@ -170,7 +170,7 @@ mod texel_tests {
         unique.period = 4.0;
         assert_eq!(unique.sample(1.0, 0, None), (0.25, 0.0));
         assert_eq!(unique.sample(1.0, 2, None), (0.75, 0.0), "Halo 3: time plus the object's index");
-        unique.clock = H3Clock::Odst;
+        unique.clock = Gen3Clock::Odst;
         assert_eq!(unique.sample(1.0, 2, None).0, (1.0 + 2.0 * 1.37317) / 4.0);
     }
 
@@ -178,11 +178,11 @@ mod texel_tests {
     fn reachs_unique_id_holds_still_unless_the_function_is_periodic() {
         let mut unique = animation("unique_id", "");
         unique.period = 4.0;
-        unique.clock = H3Clock::Reach;
+        unique.clock = Gen3Clock::Reach;
         let held = (2.0f32 * 1.37317).rem_euclid(1.0);
         assert_eq!(unique.sample(1.0, 2, None), (held, 0.0));
         assert_eq!(unique.sample(3.0, 2, None), (held, 0.0), "no time in it");
-        unique.clock = H3Clock::Odst;
+        unique.clock = Gen3Clock::Odst;
         assert_ne!(unique.sample(1.0, 2, None), unique.sample(3.0, 2, None), "ODST's runs on");
     }
 

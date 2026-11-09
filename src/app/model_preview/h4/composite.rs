@@ -77,7 +77,7 @@ impl H4Game {
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
         depth: Option<glow::NativeTexture>,
-        screen: super::super::gen3::effects::screen::H3ScreenSettings,
+        screen: super::super::gen3::effects::screen::Gen3ScreenSettings,
     ) {
         use super::lighting::H4_DARK_MULTIPLIER;
         let (gl, frame, core) = (cx.gl, cx.frame, &mut *cx.core);

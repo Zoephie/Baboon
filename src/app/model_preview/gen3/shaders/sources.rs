@@ -21,16 +21,16 @@ fn include_tag(dialect: RenderMethodDialect, name: &str) -> String {
 }
 
 /// A kit's sources, read once.
-pub(crate) struct H3Sources {
+pub(crate) struct Gen3Sources {
     /// Its own reader: the definitions and files below keep what it reads.
     reader: TagReader,
     dialect: RenderMethodDialect,
-    definitions: HashMap<String, Option<Arc<H3Definition>>>,
+    definitions: HashMap<String, Option<Arc<Gen3Definition>>>,
     files: HashMap<String, Option<Arc<str>>>,
-    passes: HashMap<(String, [Vec<Option<usize>>; 2], String, bool), Arc<H3Pass>>,
+    passes: HashMap<(String, [Vec<Option<usize>>; 2], String, bool), Arc<Gen3Pass>>,
 }
 
-impl H3Sources {
+impl Gen3Sources {
     pub(crate) fn new(source: &TagSource) -> Self {
         let dialect = RenderMethodDialect::of(source);
         let reader = TagReader::new(source);
@@ -41,7 +41,7 @@ impl H3Sources {
         self.dialect
     }
 
-    pub(crate) fn definition(&mut self, path: &str) -> Option<Arc<H3Definition>> {
+    pub(crate) fn definition(&mut self, path: &str) -> Option<Arc<Gen3Definition>> {
         let reader = &self.reader;
         self.definitions
             .entry(path.to_owned())
@@ -64,7 +64,7 @@ impl H3Sources {
     /// `sub_140C587A0`'s defines, then the family's file for one stage.
     fn stage(
         &mut self,
-        definition: &H3Definition,
+        definition: &Gen3Definition,
         options: &[usize],
         entry: &str,
         vertex_type: usize,
@@ -98,7 +98,7 @@ impl H3Sources {
     }
 
     /// One of the engine's own `.hlsl` passes, on a skinned vertex.
-    pub(crate) fn explicit_pass(&mut self, file: &str) -> Result<Arc<H3Pass>, String> {
+    pub(crate) fn explicit_pass(&mut self, file: &str) -> Result<Arc<Gen3Pass>, String> {
         // Reach keeps its explicit shaders in `shaders\explicit`.
         let main = match self.dialect {
             RenderMethodDialect::Halo3 => format!("#include \"{file}.hlsl\"\n"),
@@ -113,7 +113,7 @@ impl H3Sources {
 
     /// A `shader_screen`'s pixel shader, fed by a triangle over the picture
     /// rather than the world vertices its family's `default_vs` reads.
-    pub(crate) fn screen_pass(&mut self, definition: &H3Definition, options: &[usize]) -> Result<Arc<H3Pass>, String> {
+    pub(crate) fn screen_pass(&mut self, definition: &Gen3Definition, options: &[usize]) -> Result<Arc<Gen3Pass>, String> {
         let (vertex, pixel) = self.stages(definition, options, "default", VERTEX_SKINNED, false)?;
         let mut pass = pass_of(vertex, pixel);
         pass.vertex = SCREEN_VERTEX.to_owned();
@@ -125,18 +125,18 @@ impl H3Sources {
     #[cfg(test)]
     pub(crate) fn translate_entry(
         &mut self,
-        definition: &H3Definition,
+        definition: &Gen3Definition,
         options: &[usize],
         entry: &str,
         vertex_type: usize,
-    ) -> Result<H3Pass, String> {
+    ) -> Result<Gen3Pass, String> {
         let (vertex, pixel) = self.stages(definition, options, entry, vertex_type, false)?;
         Ok(pass_of(vertex, pixel))
     }
 
     fn stages(
         &mut self,
-        definition: &H3Definition,
+        definition: &Gen3Definition,
         options: &[usize],
         entry: &str,
         vertex_type: usize,
@@ -149,15 +149,15 @@ impl H3Sources {
     }
 }
 
-impl H3Sources {
+impl Gen3Sources {
     /// An entry point's pass, kept for the next material of its template.
     pub(crate) fn pass(
         &mut self,
-        definition: &H3Definition,
+        definition: &Gen3Definition,
         options: &[usize],
         entry: &str,
         own_albedo: bool,
-    ) -> Result<Arc<H3Pass>, String> {
+    ) -> Result<Arc<Gen3Pass>, String> {
         // Reach materials that differ only where a shared stage looks away
         // compile the same pass.
         let options_of = |stage| definition.stage_options(options, entry, stage);

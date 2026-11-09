@@ -19,15 +19,15 @@ pub(in crate::app::model_preview) mod state;
 /// Halo 3's, ODST's, Reach's and Halo 4's, each field naming those it is for.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Gen3Features {
-    pub prt: Option<super::gen3::prt::H3Prt>,
+    pub prt: Option<super::gen3::prt::Gen3Prt>,
     /// Reach's and Halo 4's cheap particle emitters, on their attached
     /// effects' parts.
     pub cheap_emitters: Vec<super::particles::cheap::CheapEmitterAt>,
     /// The markers a Reach or Halo 4 unit's IK chains can reach for: its own
     /// and its held weapons', in bind space on the nodes they ride.
     pub ik_markers: Vec<super::animation::ik::reach::ReachIkMarker>,
-    pub flares: Vec<super::gen3::effects::flares::H3FlareAt>,
-    pub light_volumes: Vec<super::gen3::effects::light_volumes::H3LightVolumeAt>,
-    pub strips: Vec<std::sync::Arc<super::gen3::effects::strips::H3StripAt>>,
-    pub screen_effects: Vec<super::gen3::effects::screen::H3ScreenEffectAt>,
+    pub flares: Vec<super::gen3::effects::flares::Gen3FlareAt>,
+    pub light_volumes: Vec<super::gen3::effects::light_volumes::Gen3LightVolumeAt>,
+    pub strips: Vec<std::sync::Arc<super::gen3::effects::strips::Gen3StripAt>>,
+    pub screen_effects: Vec<super::gen3::effects::screen::Gen3ScreenEffectAt>,
 }

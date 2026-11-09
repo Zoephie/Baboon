@@ -21,7 +21,7 @@ pub(crate) struct ParticleSystem {
     pub(super) times: Arc<EffectTimes>,
     pub(super) event: usize,
     pub(crate) look: Arc<ParticleLook>,
-    pub(super) emitters: Vec<Arc<H3Emitter>>,
+    pub(super) emitters: Vec<Arc<Emitter>>,
     /// What its particles start: how far along the list each system lies.
     pub(super) attached: Vec<(ParticleTrigger, usize)>,
     /// Started by a particle, at the particle: nothing of its own runs it.
@@ -29,7 +29,7 @@ pub(crate) struct ParticleSystem {
     /// `use parent position but world orientation`: its axes do not turn.
     pub(super) world_oriented: bool,
     /// Contrails its particles start, each following the particle.
-    pub(super) carried: Vec<Arc<H3StripAt>>,
+    pub(super) carried: Vec<Arc<Gen3StripAt>>,
     pub(super) hidden: bool,
     pub(super) die_with_effect: bool,
     pub(super) lod: Option<[f32; 4]>,
@@ -37,7 +37,7 @@ pub(crate) struct ParticleSystem {
 
 /// What a tag's `particle system` holds, wherever it ends up.
 #[derive(Clone)]
-pub(super) struct H3SystemParts {
+pub(super) struct ParticleSystemParts {
     /// `don't render system`: it still runs, for what its particles start.
     hidden: bool,
     /// `particles die when effect ends`.
@@ -48,7 +48,7 @@ pub(super) struct H3SystemParts {
     near_range: f32,
     near_cutoff: f32,
     look: Arc<ParticleLook>,
-    pub(super) emitters: Vec<Arc<H3Emitter>>,
+    pub(super) emitters: Vec<Arc<Emitter>>,
 }
 
 /// A system's `lod always 1.0`, and what older layouts label it.
@@ -57,7 +57,7 @@ const LOD_ALWAYS_ONE: [&str; 3] = ["lod always 1.0", "ignore lod (render always)
 /// A system's `particles die when effect ends`, and its older label.
 const DIE_WITH_EFFECT: [&str; 2] = ["particles die when effect ends", "die when orphaned"];
 
-pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Option<H3SystemParts> {
+pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Option<ParticleSystemParts> {
     let flagged = |wanted: &str| has_flag(system, "flags", wanted);
     if !part_runs_by(system, "environment", "disposition") {
         return None;
@@ -78,7 +78,7 @@ pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Op
     }
     let real = |field: &str| system.read_real(field).unwrap_or(0.0);
     let cutoff = if flagged("override near fade (use with caution)") { real("near fade override") } else { real("near fade cutoff") };
-    Some(H3SystemParts {
+    Some(ParticleSystemParts {
         hidden: flagged("don't render system"),
         die_with_effect: has_flag_labelled(system, "flags", &DIE_WITH_EFFECT),
         lod: {
@@ -111,7 +111,7 @@ pub(super) fn read_system_parts(reader: &TagReader, system: TagStruct<'_>) -> Op
 fn read_attached_parts(
     reader: &TagReader,
     look: &ParticleLook,
-) -> Vec<(ParticleTrigger, H3SystemParts, Arc<EffectTimes>, usize)> {
+) -> Vec<(ParticleTrigger, ParticleSystemParts, Arc<EffectTimes>, usize)> {
     let mut parts = Vec::new();
     for (trigger, path) in &look.attachments {
         let Ok(effect) = reader.load(path, "effect", b"effe") else {
@@ -140,8 +140,8 @@ fn read_attached_parts(
 
 /// The contrails these systems' particles start, each once: a system at many
 /// markers shares its own.
-pub(in crate::app::model_preview) fn carried_strips(systems: &[Arc<ParticleSystem>]) -> Vec<Arc<H3StripAt>> {
-    let mut strips: Vec<Arc<H3StripAt>> = Vec::new();
+pub(in crate::app::model_preview) fn carried_strips(systems: &[Arc<ParticleSystem>]) -> Vec<Arc<Gen3StripAt>> {
+    let mut strips: Vec<Arc<Gen3StripAt>> = Vec::new();
     for strip in systems.iter().flat_map(|system| &system.carried) {
         if !strips.iter().any(|known| Arc::ptr_eq(known, strip)) {
             strips.push(Arc::clone(strip));

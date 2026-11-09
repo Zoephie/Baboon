@@ -3,7 +3,7 @@
 //! each game's pipeline keeps on its state.
 
 use super::*;
-use super::super::shaders::H3Values;
+use super::super::shaders::Gen3Values;
 
 /// Where a game's passes differ inside [`Gen3State::draw_pass`]. Each
 /// default is Halo 3's and ODST's: nothing of their own.
@@ -18,15 +18,15 @@ pub(in crate::app::model_preview) trait Gen3PassHooks: std::any::Any {
         &self,
         _frame: &ModelGpuFrame,
         _batch: &RenderModelPreviewBatch,
-        _material: &H3Material,
-        _pass: &Arc<H3Pass>,
-    ) -> Option<H3Values> {
+        _material: &Gen3Material,
+        _pass: &Arc<Gen3Pass>,
+    ) -> Option<Gen3Values> {
         None
     }
 
     /// `simple_lights` while no light of the pipeline's draws: the frame's
     /// inline rows, if the game's pass reads them.
-    fn inline_simple_lights<'a>(&self, _material: &H3Material, _inline: &'a [[[f32; 4]; 5]]) -> Option<&'a [f32]> {
+    fn inline_simple_lights<'a>(&self, _material: &Gen3Material, _inline: &'a [[[f32; 4]; 5]]) -> Option<&'a [f32]> {
         None
     }
 
@@ -38,7 +38,7 @@ pub(in crate::app::model_preview) trait Gen3PassHooks: std::any::Any {
         _gl: &glow::Context,
         _location: Option<&glow::NativeUniformLocation>,
         _frame: &ModelGpuFrame,
-        _material: &H3Material,
+        _material: &Gen3Material,
         _name: &str,
         _shadow_view_projection: Option<[f32; 16]>,
     ) -> bool {
@@ -47,7 +47,7 @@ pub(in crate::app::model_preview) trait Gen3PassHooks: std::any::Any {
 
     /// A value of the game's lights for `name`, ahead of the engine's
     /// globals.
-    fn light_value(&self, _material: &H3Material, _name: &str, _inline: &[[[f32; 4]; 5]]) -> Option<H3Value> {
+    fn light_value(&self, _material: &Gen3Material, _name: &str, _inline: &[[[f32; 4]; 5]]) -> Option<Gen3Value> {
         None
     }
 
@@ -59,7 +59,7 @@ pub(in crate::app::model_preview) trait Gen3PassHooks: std::any::Any {
 
     /// Whether `pass` of `material`, of shader group `group`, draws both
     /// faces.
-    fn two_sided(&self, _material: &H3Material, _pass: &Arc<H3Pass>, _group: Option<u32>) -> bool {
+    fn two_sided(&self, _material: &Gen3Material, _pass: &Arc<Gen3Pass>, _group: Option<u32>) -> bool {
         false
     }
 }

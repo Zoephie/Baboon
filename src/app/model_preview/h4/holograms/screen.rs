@@ -189,7 +189,7 @@ pub(in crate::app::model_preview) struct HologramPicture {
 
 /// A hologram's material is drawn by `RenderHolograms` when its screen
 /// materials were read.
-pub(in crate::app::model_preview) fn draws_as_hologram(material: &H3Material) -> bool {
+pub(in crate::app::model_preview) fn draws_as_hologram(material: &Gen3Material) -> bool {
     material.h4().is_some_and(|submit| submit.is_hologram() && submit.post().is_some())
 }
 

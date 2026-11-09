@@ -32,18 +32,18 @@ fn a_ratio_nothing_gave_comes_from_how_far_a_function_peaks() {
         let mut function = H2Function::new(FunctionType::Identity);
         function.set_clamp_range(low, high).unwrap();
         let function = TagFunction::parse_encoded(FunctionEncoding::H2, &function.to_bytes()).unwrap();
-        H3VolumeProperty { function: Arc::new(function), ..property(H3VolumeInput::Percentile, H3VolumeInput::Percentile) }
+        Gen3VolumeProperty { function: Arc::new(function), ..property(Gen3VolumeInput::Percentile, Gen3VolumeInput::Percentile) }
     };
     assert_eq!(ranged(0.5, 0.5).peak_over_mean(), 1.0);
     assert_eq!(ranged(0.0, 1.0).peak_over_mean(), 2.0);
 }
 
-fn property(input: H3VolumeInput, range: H3VolumeInput) -> H3VolumeProperty {
-    H3VolumeProperty {
+fn property(input: Gen3VolumeInput, range: Gen3VolumeInput) -> Gen3VolumeProperty {
+    Gen3VolumeProperty {
         input,
         range,
         adds: None,
-        modifier_input: H3VolumeInput::Percentile,
+        modifier_input: Gen3VolumeInput::Percentile,
         // A curve, for what allocates seeds only past a constant.
         function: Arc::new(TagFunction::parse(&[3; 32]).unwrap_or_else(|_| TagFunction::parse(&[0; 32]).unwrap())),
     }
@@ -51,39 +51,39 @@ fn property(input: H3VolumeInput, range: H3VolumeInput) -> H3VolumeProperty {
 
 #[test]
 fn inputs_read_by_their_names() {
-    let state = H3VolumeState { age: 0.3, effect_a: 0.7, effect_b: 0.2, seeds: [0.4, 0.6], ..Default::default() };
-    assert_eq!(H3VolumeInput::named("effect a scale").of(&state), 0.7);
-    assert_eq!(H3VolumeInput::named("effect b scale").of(&state), 0.2);
-    assert_eq!(H3VolumeInput::named("light volume age").of(&state), 0.3);
-    assert_eq!(H3VolumeInput::named("light volume correlation 2").of(&state), 0.6);
+    let state = Gen3VolumeState { age: 0.3, effect_a: 0.7, effect_b: 0.2, seeds: [0.4, 0.6], ..Default::default() };
+    assert_eq!(Gen3VolumeInput::named("effect a scale").of(&state), 0.7);
+    assert_eq!(Gen3VolumeInput::named("effect b scale").of(&state), 0.2);
+    assert_eq!(Gen3VolumeInput::named("light volume age").of(&state), 0.3);
+    assert_eq!(Gen3VolumeInput::named("light volume correlation 2").of(&state), 0.6);
 }
 
 #[test]
 fn a_name_no_longer_in_the_game_reads_as_invalid() {
-    let state = H3VolumeState { age: 0.3, ..Default::default() };
-    assert_eq!(H3VolumeInput::named("light volume lifespan"), H3VolumeInput::Invalid);
-    assert_eq!(H3VolumeInput::Invalid.of(&state), 0.0);
+    let state = Gen3VolumeState { age: 0.3, ..Default::default() };
+    assert_eq!(Gen3VolumeInput::named("light volume lifespan"), Gen3VolumeInput::Invalid);
+    assert_eq!(Gen3VolumeInput::Invalid.of(&state), 0.0);
 }
 
 #[test]
 fn what_runs_once_per_volume_cannot_read_a_profile_or_a_random() {
-    assert_eq!(H3VolumeInput::Percentile.per_volume(), H3VolumeInput::Invalid);
-    assert_eq!(H3VolumeInput::Random.per_volume(), H3VolumeInput::Invalid);
-    assert_eq!(H3VolumeInput::Age.per_volume(), H3VolumeInput::Age);
-    assert_eq!(H3VolumeInput::Seed(1).per_volume(), H3VolumeInput::Seed(1));
+    assert_eq!(Gen3VolumeInput::Percentile.per_volume(), Gen3VolumeInput::Invalid);
+    assert_eq!(Gen3VolumeInput::Random.per_volume(), Gen3VolumeInput::Invalid);
+    assert_eq!(Gen3VolumeInput::Age.per_volume(), Gen3VolumeInput::Age);
+    assert_eq!(Gen3VolumeInput::Seed(1).per_volume(), Gen3VolumeInput::Seed(1));
 }
 
 #[test]
 fn randoms_take_seeds_in_turn_after_any_a_tag_named() {
-    let (mut input, mut next) = (H3VolumeInput::Random, 1);
+    let (mut input, mut next) = (Gen3VolumeInput::Random, 1);
     allocate_seed(&mut input, &mut next);
-    assert_eq!(input, H3VolumeInput::Seed(1));
-    let mut wrapped = H3VolumeInput::Random;
+    assert_eq!(input, Gen3VolumeInput::Seed(1));
+    let mut wrapped = Gen3VolumeInput::Random;
     allocate_seed(&mut wrapped, &mut next);
-    assert_eq!(wrapped, H3VolumeInput::Seed(0), "two seeds, then round again");
-    let named = property(H3VolumeInput::Seed(0), H3VolumeInput::Age);
+    assert_eq!(wrapped, Gen3VolumeInput::Seed(0), "two seeds, then round again");
+    let named = property(Gen3VolumeInput::Seed(0), Gen3VolumeInput::Age);
     assert_eq!(first_free_seed(&[&named]), 1);
-    assert_eq!(first_free_seed(&[&property(H3VolumeInput::Age, H3VolumeInput::Age)]), 0);
+    assert_eq!(first_free_seed(&[&property(Gen3VolumeInput::Age, Gen3VolumeInput::Age)]), 0);
 }
 
 fn h2_function(kind: blam_tags::tag_function::FunctionType, low: f32, high: f32) -> Arc<TagFunction> {
@@ -94,21 +94,21 @@ fn h2_function(kind: blam_tags::tag_function::FunctionType, low: f32, high: f32)
 }
 
 /// A constant, which reads nothing.
-fn fixed(value: f32) -> H3VolumeProperty {
+fn fixed(value: f32) -> Gen3VolumeProperty {
     use blam_tags::tag_function::FunctionType;
     let function = h2_function(FunctionType::Constant, value, value);
-    H3VolumeProperty { function, ..property(H3VolumeInput::Invalid, H3VolumeInput::Invalid) }
+    Gen3VolumeProperty { function, ..property(Gen3VolumeInput::Invalid, Gen3VolumeInput::Invalid) }
 }
 
 /// Its input, from `low` to `high`.
-fn reading(input: H3VolumeInput, low: f32, high: f32) -> H3VolumeProperty {
+fn reading(input: Gen3VolumeInput, low: f32, high: f32) -> Gen3VolumeProperty {
     use blam_tags::tag_function::FunctionType;
-    H3VolumeProperty { function: h2_function(FunctionType::Identity, low, high), ..property(input, H3VolumeInput::Invalid) }
+    Gen3VolumeProperty { function: h2_function(FunctionType::Identity, low, high), ..property(input, Gen3VolumeInput::Invalid) }
 }
 
 /// A row of 4 profiles a unit apart, white, alpha by `alpha`.
-fn definition(reach: bool, alpha: H3VolumeProperty) -> H3VolumeDefinition {
-    H3VolumeDefinition {
+fn definition(reach: bool, alpha: Gen3VolumeProperty) -> Gen3VolumeDefinition {
+    Gen3VolumeDefinition {
         length: fixed(4.0),
         offset: fixed(0.0),
         density: fixed(1.0),
@@ -118,7 +118,7 @@ fn definition(reach: bool, alpha: H3VolumeProperty) -> H3VolumeDefinition {
         alpha,
         intensity: fixed(2.0),
         brightness_ratio: 1.0,
-        blend: H3Blend::AddSrcTimesSrcAlpha,
+        blend: Gen3Blend::AddSrcTimesSrcAlpha,
         bitmap: None,
         sampler: None,
         sort_layer: 2,
@@ -131,8 +131,8 @@ fn definition(reach: bool, alpha: H3VolumeProperty) -> H3VolumeDefinition {
     }
 }
 
-fn at(definition: H3VolumeDefinition) -> H3LightVolumeAt {
-    H3LightVolumeAt {
+fn at(definition: Gen3VolumeDefinition) -> Gen3LightVolumeAt {
+    Gen3LightVolumeAt {
         object: 0,
         node: 0,
         position: [0.0; 3],
@@ -157,10 +157,10 @@ fn view(distance: f32) -> ViewFrame {
 /// 3's reads 0.
 #[test]
 fn reachs_lod_input_reads_the_amount_and_halo_3s_none() {
-    let state = H3VolumeState { lod: 0.7, ..Default::default() };
-    assert_eq!(H3VolumeInput::Lod.of(&state), 0.7);
+    let state = Gen3VolumeState { lod: 0.7, ..Default::default() };
+    assert_eq!(Gen3VolumeInput::Lod.of(&state), 0.7);
     let alpha_of = |reach: bool| {
-        let volume = at(definition(reach, reading(H3VolumeInput::Lod, 0.0, 1.0)));
+        let volume = at(definition(reach, reading(Gen3VolumeInput::Lod, 0.0, 1.0)));
         volume.quads(None, None, &view(10.0), 0.5, 0.0, 0.0).first().map(|quad| quad.color[3])
     };
     assert!(alpha_of(true).is_some_and(|alpha| alpha > 0.0), "{:?}", alpha_of(true));
@@ -180,7 +180,7 @@ fn a_reach_volume_fades_in_and_out_by_its_lod_distances() {
     let quirk = ReachVolumeLod { always_one: true, ..lod };
     assert_eq!(lod_amount(Some(&quirk), 50.0), 0.0, "enabled and always 1 draws nothing");
     let gated = |lod: Option<ReachVolumeLod>, reach: bool, distance: f32| {
-        let volume = at(H3VolumeDefinition { lod, ..definition(reach, fixed(1.0)) });
+        let volume = at(Gen3VolumeDefinition { lod, ..definition(reach, fixed(1.0)) });
         volume.quads(None, None, &view(distance), 0.5, 0.0, 0.0).len()
     };
     assert_eq!(gated(Some(lod), true, 10.0), 0, "nearer than its in distance");
@@ -205,7 +205,7 @@ fn reachs_postprocess_fills_in_lod_distances_and_inverses() {
 /// own. Halo 3's is as it was.
 #[test]
 fn a_profile_colour_takes_intensity_on_alpha_and_each_games_exposure() {
-    let state = H3VolumeState::default();
+    let state = Gen3VolumeState::default();
     let reach = definition(true, fixed(0.5));
     let halo3 = definition(false, fixed(0.5));
     // What a scalar function makes of a colour, at intensity 2.
@@ -222,7 +222,7 @@ fn a_profile_colour_takes_intensity_on_alpha_and_each_games_exposure() {
     let [red, _, _, alpha] = reach.profile_color(&state, Some([3.0, 0.0, 0.0]), [1.0, 2.0], 0.0);
     assert_eq!(red, 3.0 * reach_alt_exposure(0.0)[1], "unclamped");
     assert_eq!(alpha, 0.5, "a baked row's alpha is the ratio over the overdraw");
-    let multiply = H3VolumeDefinition { blend: H3Blend::Multiply, ..definition(true, fixed(0.5)) };
+    let multiply = Gen3VolumeDefinition { blend: Gen3Blend::Multiply, ..definition(true, fixed(0.5)) };
     assert_eq!(multiply.profile_color(&state, None, [1.0, 1.0], 1.0)[0], lit, "a multiply is not exposed");
 }
 
@@ -231,13 +231,13 @@ fn a_profile_colour_takes_intensity_on_alpha_and_each_games_exposure() {
 #[test]
 fn what_a_property_reads_besides_its_place() {
     assert!(!fixed(1.0).reads_more_than_its_place());
-    assert!(!reading(H3VolumeInput::Percentile, 0.0, 1.0).reads_more_than_its_place());
-    assert!(reading(H3VolumeInput::Age, 0.0, 1.0).reads_more_than_its_place());
-    let unranged = H3VolumeProperty { range: H3VolumeInput::Age, ..reading(H3VolumeInput::Percentile, 0.0, 1.0) };
+    assert!(!reading(Gen3VolumeInput::Percentile, 0.0, 1.0).reads_more_than_its_place());
+    assert!(reading(Gen3VolumeInput::Age, 0.0, 1.0).reads_more_than_its_place());
+    let unranged = Gen3VolumeProperty { range: Gen3VolumeInput::Age, ..reading(Gen3VolumeInput::Percentile, 0.0, 1.0) };
     assert!(!unranged.reads_more_than_its_place(), "an unranged function never reads its range");
-    let modified = H3VolumeProperty { adds: Some(true), modifier_input: H3VolumeInput::EffectA, ..unranged.clone() };
+    let modified = Gen3VolumeProperty { adds: Some(true), modifier_input: Gen3VolumeInput::EffectA, ..unranged.clone() };
     assert!(modified.reads_more_than_its_place());
-    let unmodified = H3VolumeProperty { adds: None, ..modified };
+    let unmodified = Gen3VolumeProperty { adds: None, ..modified };
     assert!(!unmodified.reads_more_than_its_place());
 }
 
@@ -247,17 +247,17 @@ fn what_a_property_reads_besides_its_place() {
 #[test]
 fn a_reach_volume_reading_only_its_place_precompiles_up_to_its_max() {
     assert_eq!(max_profile_count(&fixed(2.0), &fixed(3.5)), 7);
-    assert_eq!(max_profile_count(&reading(H3VolumeInput::Age, 1.0, 4.0), &fixed(3.0)), 12, "a curve's high end");
+    assert_eq!(max_profile_count(&reading(Gen3VolumeInput::Age, 1.0, 4.0), &fixed(3.0)), 12, "a curve's high end");
     assert_eq!(max_profile_count(&fixed(100.0), &fixed(100.0)), MOST_PROFILES as usize);
     assert_eq!(max_profile_count(&fixed(-1.0), &fixed(3.0)), 0);
-    let place = reading(H3VolumeInput::Percentile, 0.0, 1.0);
+    let place = reading(Gen3VolumeInput::Percentile, 0.0, 1.0);
     let constant = fixed(1.0);
     let only_place = [&constant, &constant, &constant, &constant, &place, &place, &place, &place];
     let none = |_: &str| false;
     assert!(precompiles(none, &only_place, 4));
     assert!(!precompiles(none, &only_place, 0), "no rows to bake");
     assert!(!precompiles(|flag: &str| flag == "disable precompiled profiles", &only_place, 4));
-    let age = reading(H3VolumeInput::Age, 0.0, 1.0);
+    let age = reading(Gen3VolumeInput::Age, 0.0, 1.0);
     let live = [&constant, &constant, &constant, &constant, &place, &place, &age, &place];
     assert!(!precompiles(none, &live, 4));
     assert!(precompiles(|flag: &str| flag == "force precompile profiles", &live, 4));
@@ -267,12 +267,12 @@ fn a_reach_volume_reading_only_its_place_precompiles_up_to_its_max() {
 /// squared by alpha, and draw `max` of them on the live spacing.
 #[test]
 fn a_baked_row_is_placed_by_its_max_and_draws_that_many() {
-    let mut volume = definition(true, reading(H3VolumeInput::Percentile, 0.0, 1.0));
+    let mut volume = definition(true, reading(Gen3VolumeInput::Percentile, 0.0, 1.0));
     let rows = volume.bake(3);
     assert_eq!(rows.len(), 3);
     let alpha = |index: f32| index / 2.5;
     // Intensity 2, squared.
-    let white = volume.color.color(&H3VolumeState::default())[0] * 4.0;
+    let white = volume.color.color(&Gen3VolumeState::default())[0] * 4.0;
     for (index, (color, thickness)) in rows.iter().enumerate() {
         assert!((color[0] - white * alpha(index as f32)).abs() < 1e-5, "{index}: {color:?}");
         assert_eq!(*thickness, 0.5);
@@ -322,8 +322,8 @@ fn kit_halo_3_volumes_keep_their_map() {
 /// whole product of length and density, the LOD amount in state 6.
 #[test]
 fn a_halo_4_frame_places_its_profiles_and_fills_its_inputs() {
-    let color = reading(H3VolumeInput::Percentile, 0.0, 1.0);
-    let base = H3VolumeDefinition {
+    let color = reading(Gen3VolumeInput::Percentile, 0.0, 1.0);
+    let base = Gen3VolumeDefinition {
         length: fixed(3.5),
         offset: fixed(0.5),
         density: fixed(2.0),

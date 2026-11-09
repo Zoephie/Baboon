@@ -251,7 +251,7 @@ pub(super) struct StripLook {
     pub(super) sort_bias: f32,
     /// Reach's: its own exposure, scroll clocks, emission limit and fades.
     pub(super) reach: bool,
-    pub(super) shader: Arc<H3SpriteShader>,
+    pub(super) shader: Arc<SpriteShader>,
 }
 
 /// HLSL's `saturate`, which takes a NaN to 0 where Rust's `clamp` passes it
@@ -420,7 +420,7 @@ pub(super) enum StripKind {
 
 /// A beam or a contrail at a marker of the object it is attached to.
 #[derive(Debug)]
-pub(crate) struct H3StripAt {
+pub(crate) struct Gen3StripAt {
     pub(crate) object: u8,
     pub(super) node: usize,
     pub(super) position: [f32; 3],
@@ -457,7 +457,7 @@ pub(in crate::app::model_preview) fn read_h3_strips(
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-) -> Vec<H3StripAt> {
+) -> Vec<Gen3StripAt> {
     let mut strips = Vec::new();
     let beam_group = u32::from_be_bytes(*b"beam");
     let contrail_group = u32::from_be_bytes(*b"cntl");
@@ -489,7 +489,7 @@ pub(in crate::app::model_preview) fn read_h3_strips(
                     let (far, node) = frame(far);
                     Some((node, far.position))
                 });
-                strips.push(H3StripAt {
+                strips.push(Gen3StripAt {
                     object: owner,
                     node,
                     position: place.position,
@@ -513,7 +513,7 @@ pub(in crate::app::model_preview) fn read_h3_strips(
 }
 
 /// The contrails an effect holds, as a particle starts them.
-pub(in crate::app::model_preview) fn read_carried_strips(reader: &TagReader, path: &str) -> Vec<H3StripAt> {
+pub(in crate::app::model_preview) fn read_carried_strips(reader: &TagReader, path: &str) -> Vec<Gen3StripAt> {
     let mut strips = Vec::new();
     let Ok(effect) = reader.load(path, "effect", b"effe") else {
         return strips;
@@ -535,7 +535,7 @@ pub(in crate::app::model_preview) fn read_carried_strips(reader: &TagReader, pat
                 let (Some(look), Some(contrail)) = (read_strip_look(reader, element, false), read_contrail(element)) else {
                     continue;
                 };
-                strips.push(H3StripAt {
+                strips.push(Gen3StripAt {
                     object: 0,
                     node: 0,
                     position: [0.0; 3],

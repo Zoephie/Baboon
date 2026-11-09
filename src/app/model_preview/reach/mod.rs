@@ -27,7 +27,7 @@ pub(crate) struct ReachFeatures {
     pub cheap_lights: Vec<super::reach::lights::CheapLight>,
     /// `light_apply`, `_frustum`, `_specular` and `_frustum_specular`, by
     /// `combo` (frustum 1, specular 2), for its screen-space lights.
-    pub light_passes: Vec<Option<std::sync::Arc<super::gen3::shaders::H3Pass>>>,
+    pub light_passes: Vec<Option<std::sync::Arc<super::gen3::shaders::Gen3Pass>>>,
     /// Reach's shield impact, as its damage sections choose it.
     pub shield: Option<std::sync::Arc<super::reach::shield::ReachShield>>,
     /// `globals`' active camo curves, for a Reach object.
@@ -36,5 +36,5 @@ pub(crate) struct ReachFeatures {
     pub shadow_caster: Option<super::reach::shadow::ReachShadowCaster>,
     /// Reach's final composite noise map, for an object with an area screen
     /// effect that adds bright or dark noise.
-    pub screen_noise: Option<super::gen3::materials::H3Bitmap>,
+    pub screen_noise: Option<super::gen3::materials::Gen3Bitmap>,
 }

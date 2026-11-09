@@ -6,7 +6,7 @@ use super::*;
 /// technique's `screen` pass draws every reflection.
 const LENS_FLARE: usize = 46;
 
-pub(crate) fn h4_flare_pass(reader: &TagReader) -> Result<super::super::super::gen3::shaders::H3Pass, String> {
+pub(crate) fn h4_flare_pass(reader: &TagReader) -> Result<super::super::super::gen3::shaders::Gen3Pass, String> {
     use crate::core::hlsl::emit::Stage;
     let globals = reader.load("globals\\rasterizer_globals",
         "rasterizer_globals",

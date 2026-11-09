@@ -16,7 +16,7 @@ impl H4Game {
         gl: &glow::Context,
         frame: &ModelGpuFrame,
         slot: usize,
-        holograms: &[(RenderModelPreviewBatch, Arc<H3Material>)],
+        holograms: &[(RenderModelPreviewBatch, Arc<Gen3Material>)],
         scene: glow::NativeFramebuffer,
         size: [i32; 2],
     ) -> Option<HologramPicture> {
@@ -72,14 +72,14 @@ impl H4Game {
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             // `handle_object_part`: what sorts after the bloom (layer 3)
             // waits for it.
-            let post_bloom = |material: &H3Material| material.sort_layer == 3;
+            let post_bloom = |material: &Gen3Material| material.sort_layer == 3;
             // Pass 0, "hologram opaque": depth written, back faces culled,
             // no blending.
             gl.disable(glow::BLEND);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
-            h3_set_cull(gl, frame);
+            gen3_set_cull(gl, frame);
             super::super::pass_hooks::h4_pass_hooks(state).submit_draw = Some(H4Draw::HologramOpaque);
             for (batch, material) in holograms.iter().filter(|(_, material)| !post_bloom(material)) {
                 state.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
@@ -114,10 +114,10 @@ impl H4Game {
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             gl.enable(glow::DEPTH_TEST);
             for (batch, material) in holograms.iter().filter(|(_, material)| post_bloom(material)) {
-                let blends = material.blend != super::super::super::gen3::shaders::H3Blend::Opaque;
+                let blends = material.blend != super::super::super::gen3::shaders::Gen3Blend::Opaque;
                 if blends {
                     gl.enable(glow::BLEND);
-                    super::super::super::gen3::pipeline::h3_set_blend(gl, material.blend);
+                    super::super::super::gen3::pipeline::gen3_set_blend(gl, material.blend);
                 } else {
                     gl.disable(glow::BLEND);
                 }
@@ -135,9 +135,9 @@ impl H4Game {
             let window_constants = [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32];
             let generic = vec![screen.coverage, screen.texcoords, [0.0; 4], [0.0; 4]];
             let engine = [
-                ("ps_player_window_constants", H3Value::Floats(window_constants)),
-                ("ps_material_generic_parameters", H3Value::FloatArray(generic)),
-                ("ps_filmic_tone_curve_params", H3Value::FloatArray(IDENTITY_CURVE.map(|value| [value; 4]).to_vec())),
+                ("ps_player_window_constants", Gen3Value::Floats(window_constants)),
+                ("ps_material_generic_parameters", Gen3Value::FloatArray(generic)),
+                ("ps_filmic_tone_curve_params", Gen3Value::FloatArray(IDENTITY_CURVE.map(|value| [value; 4]).to_vec())),
             ];
             let textures = [("ps_surface_sampler_texture", Some(color)), ("ps_bloom_sampler_texture", bloom.or(core.black_flat))];
             self.screen_pass(core, state, gl, frame, &post, &post.combine, owner, &engine, &textures, size);
@@ -180,8 +180,8 @@ impl H4Game {
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
             gl.color_mask(true, true, true, true);
             let engine = [
-                ("ps_filmic_tone_curve_params", H3Value::FloatArray(view_inverse.map(|value| [value; 4]).to_vec())),
-                ("ps_material_blend_constant", H3Value::Floats([0.0; 4])),
+                ("ps_filmic_tone_curve_params", Gen3Value::FloatArray(view_inverse.map(|value| [value; 4]).to_vec())),
+                ("ps_material_blend_constant", Gen3Value::Floats([0.0; 4])),
             ];
             let textures = [("source_samplerTexture", Some(combined))];
             let post = Arc::clone(&picture.post);
@@ -205,7 +205,7 @@ impl H4Game {
         post: &Arc<H4HologramPost>,
         material: &H4ScreenMaterial,
         owner: u8,
-        engine: &[(&str, H3Value)],
+        engine: &[(&str, Gen3Value)],
         targets: &[(&str, Option<glow::NativeTexture>)],
         size: [i32; 2],
     ) {
@@ -226,7 +226,7 @@ impl H4Game {
                 holograms.uploaded = Some((post.clone(), map));
             }
             let uploaded = holograms.uploaded.as_ref().map(|(_, map)| map.clone()).unwrap_or_default();
-            let pass: &Arc<H3Pass> = &material.pass;
+            let pass: &Arc<Gen3Pass> = &material.pass;
             state.with_program(core, gl, pass, |state, this, program| {
                 gl.use_program(Some(program.program));
                 let drawn = DrawnObject { values: frame.function_values_of_object(owner), time: frame.time, owner };

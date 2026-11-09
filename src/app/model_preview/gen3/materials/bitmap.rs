@@ -3,13 +3,13 @@
 use super::*;
 
 /// A bitmap for a pass, and whether `curve` has the card decode it.
-pub(in crate::app::model_preview) fn h3_image(
+pub(in crate::app::model_preview) fn gen3_image(
     reader: &TagReader,
     path: &str,
     index: i16,
     kind: SamplerKind,
     caches: &mut ResolveCaches,
-) -> Option<H3Bitmap> {
+) -> Option<Gen3Bitmap> {
     let key = (path.to_owned(), index, kind as usize);
     if let Some(found) = caches.h3_images.get(&key) {
         return found.clone();
@@ -20,11 +20,11 @@ pub(in crate::app::model_preview) fn h3_image(
 }
 
 /// One image of a bitmap, what its texels mean, and its stored mips.
-pub(in crate::app::model_preview) type H3Bitmap = (Arc<Image>, ImageTexels, Arc<Vec<Image>>);
+pub(in crate::app::model_preview) type Gen3Bitmap = (Arc<Image>, ImageTexels, Arc<Vec<Image>>);
 
 /// Levels past the top, as the tag stores them. None when `image` was not
 /// decoded at the tag's own size, since these would not continue it.
-fn h3_stored_mips(tag: &TagFile, index: usize, image: &Image) -> Option<Vec<Image>> {
+fn gen3_stored_mips(tag: &TagFile, index: usize, image: &Image) -> Option<Vec<Image>> {
     let bitmap = blam_tags::bitmap::Bitmap::new(tag).ok()?;
     let stored = bitmap.image(index)?;
     let (width, height) = (stored.width(), stored.height());
@@ -95,7 +95,7 @@ fn red_only(image: &mut Image) {
     }
 }
 
-pub(in crate::app::model_preview) fn read_h3_bitmap(reader: &TagReader, path: &str, index: i16, kind: SamplerKind) -> Option<H3Bitmap> {
+pub(in crate::app::model_preview) fn read_h3_bitmap(reader: &TagReader, path: &str, index: i16, kind: SamplerKind) -> Option<Gen3Bitmap> {
     let tag = reader.load(path, "bitmap", b"bitm").ok();
     // `render_method_submit`: an index past the last image takes the last.
     let images = tag.as_ref().map_or(1, |tag| elements(tag.root(), "bitmaps*").len());
@@ -121,7 +121,7 @@ pub(in crate::app::model_preview) fn read_h3_bitmap(reader: &TagReader, path: &s
             };
             ImageTexels::of(format, srgb)
         });
-        let mut mips = tag.as_ref().and_then(|tag| h3_stored_mips(tag, index.max(0) as usize, &image)).unwrap_or_default();
+        let mut mips = tag.as_ref().and_then(|tag| gen3_stored_mips(tag, index.max(0) as usize, &image)).unwrap_or_default();
         if format == Some(blam_tags::bitmap::BitmapFormat::A8) {
             std::iter::once(&mut image).chain(&mut mips).for_each(alpha_only);
         }

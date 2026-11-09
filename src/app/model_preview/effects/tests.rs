@@ -10,7 +10,7 @@ fn location() -> MarkerFrame {
 }
 
 fn times(events: &[([f32; 2], [f32; 2])], loop_start: usize, parallel: bool) -> EffectTimes {
-    let events = events.iter().map(|(delay, duration)| H3EventTime::of(*delay, *duration)).collect();
+    let events = events.iter().map(|(delay, duration)| EventTime::of(*delay, *duration)).collect();
     EffectTimes { events, loop_start, parallel, once: false }
 }
 
@@ -221,9 +221,9 @@ fn only_reach_effects_keep_their_durations() {
 
 #[test]
 fn reach_rolls_a_duration_that_can_be_zero_as_authored() {
-    assert_eq!(H3EventTime::unbaked([0.0; 2], [0.0, 3.0]).duration, 1.5);
-    assert_eq!(H3EventTime::unbaked([0.0; 2], [0.0, 0.0]).duration, ONE_TICK, "an instant is an update");
-    assert_eq!(H3EventTime::of([0.0; 2], [0.0, 3.0]).duration, ONE_TICK, "Halo 3 bakes it");
+    assert_eq!(EventTime::unbaked([0.0; 2], [0.0, 3.0]).duration, 1.5);
+    assert_eq!(EventTime::unbaked([0.0; 2], [0.0, 0.0]).duration, ONE_TICK, "an instant is an update");
+    assert_eq!(EventTime::of([0.0; 2], [0.0, 3.0]).duration, ONE_TICK, "Halo 3 bakes it");
 }
 
 #[test]
@@ -234,8 +234,8 @@ fn a_duration_that_can_be_zero_bakes_to_a_tick_and_stays_at_age_zero() {
         assert_eq!(effect.age(0, time), Some(0.0));
     }
     assert!(!effect.moves());
-    assert_eq!(H3EventTime::of([0.0; 2], [0.0, 3.0]).duration, ONE_TICK);
-    assert_eq!(H3EventTime::of([0.0; 2], [1.0, 3.0]).duration, 2.0);
+    assert_eq!(EventTime::of([0.0; 2], [0.0, 3.0]).duration, ONE_TICK);
+    assert_eq!(EventTime::of([0.0; 2], [1.0, 3.0]).duration, 2.0);
 }
 
 #[test]

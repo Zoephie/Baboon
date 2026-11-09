@@ -8,7 +8,7 @@ use crate::app::model_preview::load::TagReader;
 use blam_tags::TagFunction;
 
 use super::super::common::named_function::tag_function_at;
-use super::super::gen3::shaders::H3Pass;
+use super::super::gen3::shaders::Gen3Pass;
 use super::composite::REACH_DARK_MULTIPLIER;
 
 /// `active camo[0]`'s third person curves.
@@ -63,7 +63,7 @@ fn draw_of(distortion: f32, transparency: f32) -> ReachCamoDraw {
 /// The camo pass, made to write what it samples back as the light it was.
 /// The game copies its HDR target and writes it straight back; the preview's
 /// copy is of the finished picture, which the composite took the root of.
-pub(crate) fn camo_pass(pass: &H3Pass) -> Option<H3Pass> {
+pub(crate) fn camo_pass(pass: &Gen3Pass) -> Option<Gen3Pass> {
     const RETURN: &str = "return vec4(l_color.rgb, g_k_ps_active_camo_factor.x);";
     if !pass.pixel.contains(RETURN) {
         return None;
@@ -75,7 +75,7 @@ pub(crate) fn camo_pass(pass: &H3Pass) -> Option<H3Pass> {
 return vec4(l_camo_encoded * l_camo_encoded / {REACH_DARK_MULTIPLIER:?}, g_k_ps_active_camo_factor.x);"
         ),
     );
-    Some(H3Pass {
+    Some(Gen3Pass {
         fullscreen: pass.fullscreen,
         vertex: pass.vertex.clone(),
         pixel,

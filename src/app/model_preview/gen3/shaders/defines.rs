@@ -33,7 +33,7 @@ pub(in crate::app::model_preview) fn base_defines(
 /// `sub_140C589E0`: each category's function, as its option's. Reach's
 /// `build_options_macro` (0x141171D10) also takes no option at all, which
 /// writes no function and no choice but still names every option.
-pub(super) fn option_defines(definition: &H3Definition, options: &[Option<usize>]) -> Vec<(String, String)> {
+pub(super) fn option_defines(definition: &Gen3Definition, options: &[Option<usize>]) -> Vec<(String, String)> {
     let mut defines = Vec::new();
     for (index, category) in definition.categories.iter().enumerate() {
         let chosen = options.get(index).copied().unwrap_or(Some(0));

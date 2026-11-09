@@ -5,7 +5,7 @@
 use super::lighting::h4_frame_values;
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::shaders::H3Value;
+use super::super::gen3::shaders::Gen3Value;
 use super::super::gen3::screen_lights::screen_to_relative_world;
 use super::super::gen3::pipeline::{set_value, view_projection};
 use super::pass_hooks::h4_matrix;
@@ -18,7 +18,7 @@ use super::render::H4Game;
 use std::collections::HashMap;
 use std::sync::Arc;
 use super::super::common::fields::elements;
-use super::super::gen3::shaders::H3Pass;
+use super::super::gen3::shaders::Gen3Pass;
 use super::super::*;
 use crate::core::hlsl::emit::Stage;
 use crate::app::model_preview::h4::lights::{GOBO_SPECULAR, H4LightKind, POINT_PHYSICALLY_CORRECT, SMALLEST, TECHNIQUE_SPECULAR, TECHNIQUE_SPOT};
@@ -77,7 +77,7 @@ impl H4Game {
         let eye = eye_position(&frame.camera);
         let view_projection = view_projection(&frame.camera);
         let exposure = match super::lighting::h4_frame_value("ps_view_exposure") {
-            Some(H3Value::Floats(exposure)) => exposure[0],
+            Some(Gen3Value::Floats(exposure)) => exposure[0],
             _ => return,
         };
         let depth_copy_framebuffer = targets.depth_copy_framebuffer;
@@ -124,7 +124,7 @@ impl H4Game {
                         }
                         // Its blend state is additive (1).
                         let value = if name == "ps_material_blend_constant" {
-                            Some(H3Value::Floats(
+                            Some(Gen3Value::Floats(
                                 super::materials::submit::blend_constant(1),
                             ))
                         } else {
@@ -219,10 +219,10 @@ pub(crate) fn h4_light_program(
 pub(crate) fn h4_light_pass(
     program: &crate::core::hlsl::parse::Program,
     technique: usize,
-) -> Result<H3Pass, String> {
+) -> Result<Gen3Pass, String> {
     let pixel =
         super::materials::shaders::translate_technique(program, technique, "tiny_position", Stage::Pixel)?;
-    Ok(H3Pass {
+    Ok(Gen3Pass {
         fullscreen: true,
         vertex: super::super::h4::materials::h4_screen_vertex().to_owned(),
         pixel: pixel.source,

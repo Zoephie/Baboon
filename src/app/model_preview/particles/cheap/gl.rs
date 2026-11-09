@@ -2,7 +2,7 @@
 
 use super::super::*;
 use super::super::super::gl::buffer::slice_bytes;
-use super::super::super::gen3::shaders::H3Blend;
+use super::super::super::gen3::shaders::Gen3Blend;
 use eframe::glow::{self, HasContext as _};
 
 /// The cheap particle program: the quads as built, the render texture's
@@ -73,7 +73,7 @@ impl CheapGl {
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(false);
-            gen3::pipeline::h3_set_blend(gl, H3Blend::PreMultiplied);
+            gen3::pipeline::gen3_set_blend(gl, Gen3Blend::PreMultiplied);
             gl.draw_arrays(glow::TRIANGLES, 0, vertices.len() as i32);
             gl.bind_texture(glow::TEXTURE_2D_ARRAY, None);
             gl.color_mask(true, true, true, false);

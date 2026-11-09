@@ -9,14 +9,14 @@ use super::super::RenderModelPreviewBatch;
 use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
-use super::effects::screen::H3ScreenSettings;
+use super::effects::screen::Gen3ScreenSettings;
 use super::pipeline::{FrameValues, Gen3PassHooks, NoPassHooks, PictureCopies, halo3_frame_values};
-use super::shaders::H3Material;
+use super::shaders::Gen3Material;
 use super::sprites::{Gen3Sprite, Gen3Sprites};
 use super::state::Gen3State;
 
 /// A batch the gen3 pipeline draws, with its material.
-pub(in crate::app::model_preview) type Gen3Batch = (RenderModelPreviewBatch, Arc<H3Material>);
+pub(in crate::app::model_preview) type Gen3Batch = (RenderModelPreviewBatch, Arc<Gen3Material>);
 
 /// What a gen3 hook draws with: the frame's `FrameCx` and the gen3
 /// pipeline's own state.
@@ -46,7 +46,7 @@ pub(in crate::app::model_preview) trait Gen3Game {
     }
 
     /// The exposure stops the scene draws at, from the screen effects.
-    fn stops(&self, _screen: &H3ScreenSettings) -> f32 {
+    fn stops(&self, _screen: &Gen3ScreenSettings) -> f32 {
         0.0
     }
 
@@ -114,7 +114,7 @@ pub(in crate::app::model_preview) trait Gen3Game {
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
-        screen: H3ScreenSettings,
+        screen: Gen3ScreenSettings,
         size: [i32; 2],
     );
 
@@ -130,15 +130,15 @@ pub(in crate::app::model_preview) trait Gen3Game {
 
     /// Whether the game draws over the finished picture, around its screen
     /// shaders and blur (Halo 3's and ODST's VISR and motion suck).
-    fn picture_effects(&self, _frame: &ModelGpuFrame, _screen: &H3ScreenSettings) -> bool {
+    fn picture_effects(&self, _frame: &ModelGpuFrame, _screen: &Gen3ScreenSettings) -> bool {
         false
     }
 
     /// Over the finished picture, before its screen shaders.
-    unsafe fn before_screen_shaders(&mut self, _cx: &mut Gen3Cx<'_>, _screen: &H3ScreenSettings, _copies: &PictureCopies) {}
+    unsafe fn before_screen_shaders(&mut self, _cx: &mut Gen3Cx<'_>, _screen: &Gen3ScreenSettings, _copies: &PictureCopies) {}
 
     /// Over the finished picture, after its blur.
-    unsafe fn after_blur(&mut self, _cx: &mut Gen3Cx<'_>, _screen: &H3ScreenSettings, _copies: &PictureCopies) {}
+    unsafe fn after_blur(&mut self, _cx: &mut Gen3Cx<'_>, _screen: &Gen3ScreenSettings, _copies: &PictureCopies) {}
 
     /// Each simulation the game keeps for `slot` while it holds its
     /// `uploads`th model, by name.
@@ -181,7 +181,7 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
     /// With no gen3 shading to draw (game shaders off, a mode without maps, a
     /// context short of GLSL 4.10), the plain draw.
     unsafe fn shade(&mut self, cx: &mut FrameCx<'_>) {
-        if !cx.core.h3_draws(cx.frame) {
+        if !cx.core.gen3_draws(cx.frame) {
             return unsafe { PlainRender.shade(cx) };
         }
         self.state.frame_values = self.game.frame_values();
@@ -191,7 +191,7 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
             // A material with translated passes draws through them; the rest
             // carry only the shadow passes, which replace nothing.
             let frame = cx.frame;
-            cx.core.draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| core.h3_material(frame, material).is_some());
+            cx.core.draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| core.gen3_material(frame, material).is_some());
             let order = cx.frame.visible_batches.clone();
             let (state, game) = self.parts();
             state.draw(cx.core, game, cx.gl, cx.frame, cx.slot, &order);
@@ -199,7 +199,7 @@ impl<G: Gen3Game> GameRender for Gen3Pipeline<G> {
     }
 
     unsafe fn finish(&mut self, cx: &mut FrameCx<'_>) {
-        if !cx.core.h3_draws(cx.frame) {
+        if !cx.core.gen3_draws(cx.frame) {
             unsafe {
                 if cx.core.draws_object_sprites(cx.frame) {
                     use super::sprites::SpriteStage;

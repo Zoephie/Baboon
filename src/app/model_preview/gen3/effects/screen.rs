@@ -35,7 +35,7 @@ type Matrix = [[f32; 4]; 4];
 
 /// `s_screen_effect_settings`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct H3ScreenSettings {
+pub(crate) struct Gen3ScreenSettings {
     exposure_boost: f32,
     /// Reach's `exposure deboost`, stops taken off as `boost` adds them.
     exposure_deboost: f32,
@@ -64,7 +64,7 @@ pub(crate) struct H3ScreenSettings {
 }
 
 #[cfg(test)]
-impl H3ScreenSettings {
+impl Gen3ScreenSettings {
     /// The defaults, with VISR at `vision` and the view seeming to move by
     /// `suck_toward`.
     pub(crate) fn seeing(vision: f32, suck_toward: [f32; 3]) -> Self {
@@ -72,7 +72,7 @@ impl H3ScreenSettings {
     }
 }
 
-impl Default for H3ScreenSettings {
+impl Default for Gen3ScreenSettings {
     /// `set_defaults`.
     fn default() -> Self {
         Self {
@@ -98,7 +98,7 @@ impl Default for H3ScreenSettings {
     }
 }
 
-impl H3ScreenSettings {
+impl Gen3ScreenSettings {
     /// `accumulate_settings`: the strongest of each, not their sum.
     fn accumulate(&mut self, other: &Self, falloff: f32, toward: [f32; 3]) {
         let falloff = falloff.clamp(0.0, 1.0);
@@ -263,8 +263,8 @@ fn hue_matrix(hue: f32) -> Matrix {
 
 /// `s_single_screen_effect_definition`.
 #[derive(Debug)]
-struct H3ScreenDefinition {
-    settings: H3ScreenSettings,
+struct Gen3ScreenDefinition {
+    settings: Gen3ScreenSettings,
     radius: f32,
     /// ODST's. `postprocess` has it follow the last when they play in turn.
     delay: f32,
@@ -277,7 +277,7 @@ struct H3ScreenDefinition {
     distance_falloff: Option<TagFunction>,
     time_falloff: Option<TagFunction>,
     angle_falloff: Option<TagFunction>,
-    object_falloff: Option<H3ObjectFalloff>,
+    object_falloff: Option<Gen3ObjectFalloff>,
     /// Its tag was last saved before `object falloff` existed.
     predates_object_falloff: bool,
     /// ODST's `shader effect`, with its `render layer` and `sort order`.
@@ -310,14 +310,14 @@ impl ScreenLayer {
 
 /// A `shader_screen` to draw this frame, at this much of its effect.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct H3ScreenShader {
+pub(crate) struct Gen3ScreenShader {
     pub(crate) path: String,
     pub(crate) alpha: f32,
     layer: ScreenLayer,
     order: i32,
 }
 
-impl H3ScreenShader {
+impl Gen3ScreenShader {
     /// Drawn at the end of the frame. Nothing the preview loads uses Reach's
     /// pre-transparents layer (only night vision and the sniper's zoom, from
     /// a unit's or weapon's `screen effects`), so it has no pass of its own
@@ -329,7 +329,7 @@ impl H3ScreenShader {
 
 /// `s_screen_effect_shader_sample_result::accumulate_settings`: ahead of the
 /// first that sorts at or past it, and no more than the game keeps.
-fn insert_shader(shaders: &mut Vec<H3ScreenShader>, shader: H3ScreenShader) {
+fn insert_shader(shaders: &mut Vec<Gen3ScreenShader>, shader: Gen3ScreenShader) {
     if shaders.len() >= MOST_SCREEN_SHADERS {
         return;
     }
@@ -339,13 +339,13 @@ fn insert_shader(shaders: &mut Vec<H3ScreenShader>, shader: H3ScreenShader) {
 
 /// ODST's `screen_effect_scalar_object_function_struct`.
 #[derive(Debug)]
-struct H3ObjectFalloff {
+struct Gen3ObjectFalloff {
     input: String,
     range: String,
     mapping: TagFunction,
 }
 
-impl H3ScreenDefinition {
+impl Gen3ScreenDefinition {
     /// `screen_effect_is_active`, for a viewer of what it hangs on.
     /// Reach's (`is_visible`, the 360's 0x83033AB0) is strict on the delay
     /// with no exception for none.
@@ -413,7 +413,7 @@ fn read_screen_shader(reader: &TagReader, element: TagStruct<'_>) -> Option<(Str
     Some((path, layer, order))
 }
 
-fn read_definition(reader: &TagReader, element: TagStruct<'_>, delay: f32) -> Option<H3ScreenDefinition> {
+fn read_definition(reader: &TagReader, element: TagStruct<'_>, delay: f32) -> Option<Gen3ScreenDefinition> {
     let flagged = |labels: &[&str]| has_flag_labelled(element, "flags", labels);
     let reach = reader.source.game() == Some(GameId::HaloReach);
     // The preview's camera is a third person's, on nothing.
@@ -429,14 +429,14 @@ fn read_definition(reader: &TagReader, element: TagStruct<'_>, delay: f32) -> Op
     };
     let falloff = |name: &str| element.descend(name).and_then(|holder| tag_function_at(&holder, "Mapping"));
     let object_falloff = element.descend("object falloff").and_then(|holder| {
-        Some(H3ObjectFalloff {
+        Some(Gen3ObjectFalloff {
             input: holder.read_string_id("Input Variable").unwrap_or_default(),
             range: holder.read_string_id("Range Variable").unwrap_or_default(),
             mapping: tag_function_at(&holder, "Mapping")?,
         })
     });
-    Some(H3ScreenDefinition {
-        settings: H3ScreenSettings {
+    Some(Gen3ScreenDefinition {
+        settings: Gen3ScreenSettings {
             exposure_boost: real("exposure boost"),
             exposure_deboost: reach_real("exposure deboost"),
             hue_left: real("hue left"),
@@ -473,7 +473,7 @@ fn read_definition(reader: &TagReader, element: TagStruct<'_>, delay: f32) -> Op
 
 /// `s_area_screen_effect_definition::postprocess`: played in turn, each starts
 /// as the last ends, whatever its own `delay` says.
-fn read_definitions(reader: &TagReader, root: TagStruct<'_>) -> Vec<H3ScreenDefinition> {
+fn read_definitions(reader: &TagReader, root: TagStruct<'_>) -> Vec<Gen3ScreenDefinition> {
     let in_turn = has_flag(root, "global flags", "play sequentially - ignore delay settings");
     let mut start = 0.0;
     let mut definitions = Vec::new();
@@ -496,17 +496,17 @@ fn shows_on_object(odst: bool, predates_object_falloff: bool, unattached: bool) 
 
 /// An `area_screen_effect` on an effect of an object.
 #[derive(Debug, Clone)]
-pub(crate) struct H3ScreenEffectAt {
+pub(crate) struct Gen3ScreenEffectAt {
     pub(crate) object: u8,
     node: usize,
     position: [f32; 3],
     scale_by: String,
     times: Arc<EffectTimes>,
     event: usize,
-    definitions: Arc<Vec<H3ScreenDefinition>>,
+    definitions: Arc<Vec<Gen3ScreenDefinition>>,
 }
 
-impl H3ScreenEffectAt {
+impl Gen3ScreenEffectAt {
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
     }
@@ -537,7 +537,7 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
     owner: u8,
     markers: &[RenderModelPreviewMarker],
     frame: impl Fn(&RenderModelPreviewMarker) -> (MarkerFrame, usize),
-) -> Vec<H3ScreenEffectAt> {
+) -> Vec<Gen3ScreenEffectAt> {
     let mut effects = Vec::new();
     let group = u32::from_be_bytes(*b"sefc");
     for_each_attached_part(reader, object, |part| {
@@ -558,7 +558,7 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
         }
         for marker in &part.effect.locations(markers, &part.marker, &frame) {
             let (place, node) = frame(marker);
-            effects.push(H3ScreenEffectAt {
+            effects.push(Gen3ScreenEffectAt {
                 object: owner,
                 node,
                 position: place.position,
@@ -574,7 +574,7 @@ pub(in crate::app::model_preview) fn read_h3_screen_effects(
 
 /// `rasterizer_globals`' default bitmap that Reach's final composite reads
 /// its bright and dark noise from (sampler 7 of MCC `sub_140841DE0`).
-pub(in crate::app::model_preview) fn read_reach_screen_noise(reader: &TagReader) -> Option<super::super::super::gen3::materials::H3Bitmap> {
+pub(in crate::app::model_preview) fn read_reach_screen_noise(reader: &TagReader) -> Option<super::super::super::gen3::materials::Gen3Bitmap> {
     let globals =
         reader.load("globals\\rasterizer_globals", "rasterizer_globals", b"rasg").ok()?;
     let defaults = elements(globals.root(), "default bitmaps");
@@ -602,15 +602,15 @@ pub(in crate::app::model_preview) fn add_screen_shader_materials(preview: &mut R
 }
 
 /// `screen_effect_sample`: what every running effect comes to from this camera.
-pub(crate) fn h3_screen_settings<'a>(
-    effects: &[H3ScreenEffectAt],
+pub(crate) fn gen3_screen_settings<'a>(
+    effects: &[Gen3ScreenEffectAt],
     values: impl Fn(u8) -> Option<&'a FunctionValues>,
     onsets: &mut EffectOnsets,
     bones: Option<&[[f32; 4]]>,
     view: &ViewFrame,
     time: f32,
-) -> (H3ScreenSettings, Vec<H3ScreenShader>) {
-    let mut settings = H3ScreenSettings::default();
+) -> (Gen3ScreenSettings, Vec<Gen3ScreenShader>) {
+    let mut settings = Gen3ScreenSettings::default();
     let mut shaders = Vec::new();
     for effect in effects {
         let scope = values(effect.object);
@@ -632,7 +632,7 @@ pub(crate) fn h3_screen_settings<'a>(
                 if falloff > 0.0 {
                     settings.accumulate(&definition.settings, falloff, to_effect);
                     if let Some((path, layer, order)) = &definition.shader {
-                        let shader = H3ScreenShader { path: path.clone(), alpha: falloff, layer: *layer, order: *order };
+                        let shader = Gen3ScreenShader { path: path.clone(), alpha: falloff, layer: *layer, order: *order };
                         insert_shader(&mut shaders, shader);
                     }
                 }
@@ -658,13 +658,13 @@ mod tests {
 
     #[test]
     fn motion_suck_adds_up_along_the_way_to_each_effect() {
-        let mut settings = H3ScreenSettings::default();
+        let mut settings = Gen3ScreenSettings::default();
         assert_eq!(settings.suck(), None, "nothing moved");
-        let sucks = H3ScreenSettings { suck: 0.5, ..Default::default() };
+        let sucks = Gen3ScreenSettings { suck: 0.5, ..Default::default() };
         settings.accumulate(&sucks, 0.5, [0.0, 0.0, 4.0]);
         settings.accumulate(&sucks, 1.0, [3.0, 0.0, 0.0]);
         assert_eq!(settings.suck(), Some([0.5, 0.0, 0.25]));
-        settings.accumulate(&H3ScreenSettings::default(), 1.0, [3.0, 0.0, 0.0]);
+        settings.accumulate(&Gen3ScreenSettings::default(), 1.0, [3.0, 0.0, 0.0]);
         assert_eq!(settings.suck(), Some([0.5, 0.0, 0.25]), "no suck adds none");
     }
 
@@ -677,9 +677,9 @@ mod tests {
         (0..3).all(|axis| (a[axis] - b[axis]).abs() < 1e-3)
     }
 
-    fn timed(delay: f32, lifetime: f32) -> H3ScreenDefinition {
-        H3ScreenDefinition {
-            settings: H3ScreenSettings::default(),
+    fn timed(delay: f32, lifetime: f32) -> Gen3ScreenDefinition {
+        Gen3ScreenDefinition {
+            settings: Gen3ScreenSettings::default(),
             radius: 1.0,
             delay,
             strict_delay: false,
@@ -697,29 +697,29 @@ mod tests {
 
     #[test]
     fn a_blur_spreads_by_axis_and_covers_by_the_stronger() {
-        assert_eq!(H3ScreenSettings::default().blur(), None);
-        let (spread, cover) = H3ScreenSettings { blur: [2.0, 0.0], ..Default::default() }.blur().unwrap();
+        assert_eq!(Gen3ScreenSettings::default().blur(), None);
+        let (spread, cover) = Gen3ScreenSettings { blur: [2.0, 0.0], ..Default::default() }.blur().unwrap();
         assert_eq!(spread, [1.5, BLUR_FLOOR]);
         assert_eq!(cover, 1.0);
-        let (_, cover) = H3ScreenSettings { blur: [0.0, 0.17], ..Default::default() }.blur().unwrap();
+        let (_, cover) = Gen3ScreenSettings { blur: [0.0, 0.17], ..Default::default() }.blur().unwrap();
         assert!((cover - 0.2).abs() < 1e-5);
     }
 
     #[test]
     fn the_view_widens_by_stops_up_to_its_limit() {
         let half = 30f32.to_radians();
-        assert_eq!(H3ScreenSettings::default().view_scale(half), 1.0);
-        let one_stop = H3ScreenSettings { fov: [0.0, 1.0], ..Default::default() }.view_scale(half);
+        assert_eq!(Gen3ScreenSettings::default().view_scale(half), 1.0);
+        let one_stop = Gen3ScreenSettings { fov: [0.0, 1.0], ..Default::default() }.view_scale(half);
         assert!((one_stop - 2.0).abs() < 1e-4, "{one_stop}");
-        let narrower = H3ScreenSettings { fov: [1.0, 0.0], ..Default::default() }.view_scale(half);
+        let narrower = Gen3ScreenSettings { fov: [1.0, 0.0], ..Default::default() }.view_scale(half);
         assert!((narrower - 0.5).abs() < 1e-4, "{narrower}");
-        let most = H3ScreenSettings { fov: [0.0, 9.0], ..Default::default() }.view_scale(half);
+        let most = Gen3ScreenSettings { fov: [0.0, 9.0], ..Default::default() }.view_scale(half);
         assert!((most - 75f32.to_radians().tan() / half.tan()).abs() < 1e-3, "{most}");
     }
 
     #[test]
     fn screen_shaders_sort_by_layer_then_order_and_stop_at_the_limit() {
-        let shader = |name: &str, layer, order| H3ScreenShader { path: name.to_owned(), alpha: 1.0, layer, order };
+        let shader = |name: &str, layer, order| Gen3ScreenShader { path: name.to_owned(), alpha: 1.0, layer, order };
         let mut shaders = Vec::new();
         insert_shader(&mut shaders, shader("post", ScreenLayer::PostUi, 0));
         insert_shader(&mut shaders, shader("b", ScreenLayer::PreUi, 5));
@@ -793,21 +793,21 @@ mod tests {
     /// Reach's `is_visible` waits past a delay of 0 too.
     #[test]
     fn a_reach_effect_is_strict_on_its_delay() {
-        let reach = H3ScreenDefinition { strict_delay: true, ..timed(0.0, 1.0) };
+        let reach = Gen3ScreenDefinition { strict_delay: true, ..timed(0.0, 1.0) };
         assert!(!reach.active(0.0));
         assert!(reach.active(0.01));
         assert!(timed(0.0, 1.0).active(0.0), "ODST's starts at once");
-        assert!(H3ScreenDefinition { strict_delay: true, ..timed(5.0, 0.0) }.active(0.0), "no lifetime ignores it");
+        assert!(Gen3ScreenDefinition { strict_delay: true, ..timed(5.0, 0.0) }.active(0.0), "no lifetime ignores it");
     }
 
     /// `c_player_view::render`'s stops: the strongest boost less the
     /// strongest deboost; the noises take the strongest too.
     #[test]
     fn reachs_stops_are_boost_less_deboost_and_noise_takes_the_strongest() {
-        let mut settings = H3ScreenSettings::default();
+        let mut settings = Gen3ScreenSettings::default();
         assert_eq!(settings.stops(), 0.0);
-        let boost = H3ScreenSettings { exposure_boost: 2.0, bright_noise: 0.4, ..Default::default() };
-        let deboost = H3ScreenSettings { exposure_deboost: 3.0, dark_noise: 0.8, bright_noise: 0.1, ..Default::default() };
+        let boost = Gen3ScreenSettings { exposure_boost: 2.0, bright_noise: 0.4, ..Default::default() };
+        let deboost = Gen3ScreenSettings { exposure_deboost: 3.0, dark_noise: 0.8, bright_noise: 0.1, ..Default::default() };
         settings.accumulate(&boost, 1.0, [0.0; 3]);
         settings.accumulate(&deboost, 0.5, [0.0; 3]);
         assert_eq!(settings.stops(), 2.0 - 1.5);
@@ -826,7 +826,7 @@ mod tests {
         ] {
             let tag = load_referenced_tag_from_source(&source, path, "shader_screen", b"rmss").expect(path);
             assert_eq!(ScreenLayer::read(tag.root()), layer, "{path}");
-            let shader = H3ScreenShader { path: path.to_owned(), alpha: 1.0, layer, order: 0 };
+            let shader = Gen3ScreenShader { path: path.to_owned(), alpha: 1.0, layer, order: 0 };
             assert_eq!(shader.at_frame_end(), layer != ScreenLayer::PreTransparents, "{path}");
         }
     }
@@ -846,7 +846,7 @@ mod tests {
 
     #[test]
     fn nothing_on_leaves_the_picture_alone() {
-        let settings = H3ScreenSettings::default();
+        let settings = Gen3ScreenSettings::default();
         assert_eq!(settings.color_matrix(), identity());
         assert_eq!(settings.gamma(), 1.0);
         assert_eq!(settings.exposure(), 1.0);
@@ -854,14 +854,14 @@ mod tests {
 
     #[test]
     fn full_desaturation_leaves_only_luminance() {
-        let settings = H3ScreenSettings { desaturate: 1.0, ..Default::default() };
+        let settings = Gen3ScreenSettings { desaturate: 1.0, ..Default::default() };
         let grey = apply(&settings.color_matrix(), [1.0, 0.0, 0.0]);
         assert!(close(grey, [LUMINANCE[0]; 3]), "{grey:?}");
     }
 
     #[test]
     fn a_turn_of_hue_keeps_grey_and_moves_red() {
-        let settings = H3ScreenSettings { hue_right: 120.0, ..Default::default() };
+        let settings = Gen3ScreenSettings { hue_right: 120.0, ..Default::default() };
         let matrix = settings.color_matrix();
         assert!(close(apply(&matrix, [0.5; 3]), [0.5; 3]));
         assert!(!close(apply(&matrix, [1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]));
@@ -874,10 +874,10 @@ mod tests {
 
     #[test]
     fn the_strongest_wins_and_a_filter_fades_out_with_its_falloff() {
-        let mut settings = H3ScreenSettings::default();
-        let strong = H3ScreenSettings { desaturate: 0.8, color_filter: [0.0, 1.0, 1.0], ..Default::default() };
+        let mut settings = Gen3ScreenSettings::default();
+        let strong = Gen3ScreenSettings { desaturate: 0.8, color_filter: [0.0, 1.0, 1.0], ..Default::default() };
         settings.accumulate(&strong, 0.5, [0.0; 3]);
-        settings.accumulate(&H3ScreenSettings { desaturate: 0.2, ..Default::default() }, 1.0, [0.0; 3]);
+        settings.accumulate(&Gen3ScreenSettings { desaturate: 0.2, ..Default::default() }, 1.0, [0.0; 3]);
         assert_eq!(settings.desaturate, 0.4);
         assert_eq!(settings.color_filter[0], 0.5);
         assert_eq!(settings.color_filter[1], 1.0);
@@ -885,15 +885,15 @@ mod tests {
 
     #[test]
     fn gamma_stays_within_its_limits() {
-        assert_eq!(H3ScreenSettings { gamma_reduce: 5.0, ..Default::default() }.gamma(), 0.01);
-        assert_eq!(H3ScreenSettings { gamma_enhance: 20.0, ..Default::default() }.gamma(), 10.0);
+        assert_eq!(Gen3ScreenSettings { gamma_reduce: 5.0, ..Default::default() }.gamma(), 0.01);
+        assert_eq!(Gen3ScreenSettings { gamma_enhance: 20.0, ..Default::default() }.gamma(), 10.0);
     }
 
     #[test]
     fn past_its_radius_an_effect_is_gone_unless_it_says_otherwise() {
-        let definition = H3ScreenDefinition { radius: 10.0, ..timed(0.0, 0.0) };
+        let definition = Gen3ScreenDefinition { radius: 10.0, ..timed(0.0, 0.0) };
         assert_eq!(definition.falloff(5.0, 0.0, 0.0, None), 1.0);
         assert_eq!(definition.falloff(11.0, 0.0, 0.0, None), 0.0);
-        assert_eq!(H3ScreenDefinition { outside_radius: true, ..definition }.falloff(11.0, 0.0, 0.0, None), 1.0);
+        assert_eq!(Gen3ScreenDefinition { outside_radius: true, ..definition }.falloff(11.0, 0.0, 0.0, None), 1.0);
     }
 }

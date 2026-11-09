@@ -14,7 +14,7 @@ use blam_tags::TagFile;
 
 use super::super::common::fields::elements;
 use super::super::functions::FunctionValues;
-use super::super::gen3::shaders::{H3Pass, H3Texture};
+use super::super::gen3::shaders::{Gen3Pass, Gen3Texture};
 use super::super::gen3::shield::{OSCILLATION, PLASMA, ReachShieldSettings, shield_impact_path};
 use crate::core::hlsl::emit::Stage;
 use crate::app::model_preview::h4::materials::shaders::rewire_depth_fade;
@@ -29,8 +29,8 @@ pub(crate) const WORLD_SCALE: &str = super::super::gen3::shield::WORLD_SCALE;
 #[derive(Debug)]
 pub(crate) struct H4Shield {
     pub(crate) settings: ReachShieldSettings,
-    pub(crate) textures: Vec<H3Texture>,
-    pub(crate) pass: Arc<H3Pass>,
+    pub(crate) textures: Vec<Gen3Texture>,
+    pub(crate) pass: Arc<Gen3Pass>,
 }
 
 impl H4Shield {
@@ -70,7 +70,7 @@ pub(crate) fn read_h4_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<
     let textures = settings
         .textures
         .iter()
-        .map(|texture| H3Texture {
+        .map(|texture| Gen3Texture {
             uniform: rename(&texture.uniform),
             image: Arc::clone(&texture.image),
             texels: texture.texels,
@@ -89,7 +89,7 @@ pub(crate) fn read_h4_shield(reader: &TagReader, model: &TagFile) -> Option<Arc<
 /// Explicit 61's `technique` on the preview's skinned vertices, made to read
 /// the preview's depth: `ComputeDepthFade`'s `psDepthConstants` decode is
 /// the game's reversed depth, here the preview's window depth to world units.
-pub(crate) fn h4_shield_pass(reader: &TagReader, technique: usize) -> Result<H3Pass, String> {
+pub(crate) fn h4_shield_pass(reader: &TagReader, technique: usize) -> Result<Gen3Pass, String> {
     let globals = reader.load("globals\\rasterizer_globals",
         "rasterizer_globals",
         b"rasg",

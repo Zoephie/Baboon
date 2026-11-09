@@ -26,7 +26,7 @@ pub(in crate::app::model_preview) struct SlotBitmap {
 /// Find a slot's bitmap: through the resolver when the definition loaded, and
 /// off the shader's own parameters when it did not.
 pub(super) fn slot_binding(values: &Values<'_>, parameter: &str) -> Option<SlotBitmap> {
-    let [x, y, ..] = h3_xform(values, parameter);
+    let [x, y, ..] = gen3_xform(values, parameter);
     let scale = [x, y];
     if let Some(resolved) = values.resolved {
         let found = resolved.find(parameter)?;

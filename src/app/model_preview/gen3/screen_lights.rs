@@ -4,8 +4,8 @@
 
 use eframe::glow::{self, HasContext as _};
 use super::state::Gen3State;
-use super::shaders::H3Pass;
-use super::pipeline::H3Program;
+use super::shaders::Gen3Pass;
+use super::pipeline::Gen3Program;
 
 impl Gen3State {
     /// Ready the screen lights over `accumulation`, `size` of it: its depth
@@ -38,8 +38,8 @@ impl Gen3State {
     /// and is left unset.
     pub(in crate::app::model_preview) unsafe fn bind_screen_light_textures(
         gl: &glow::Context,
-        pass: &H3Pass,
-        program: &H3Program,
+        pass: &Gen3Pass,
+        program: &Gen3Program,
         texture: impl Fn(&str) -> Option<Option<glow::NativeTexture>>,
     ) {
         for (unit, (name, _)) in pass.textures.iter().enumerate() {

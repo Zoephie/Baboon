@@ -7,9 +7,9 @@ use super::lighting::reach_frame_values;
 use eframe::glow::{self, HasContext};
 
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
-use super::super::gen3::effects::screen::H3ScreenSettings;
+use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
-use super::super::gen3::pipeline::h3_set_cull;
+use super::super::gen3::pipeline::gen3_set_cull;
 use super::lights::{ReachLitLight, inline_rows};
 
 /// Reach's hooks, and the self shadow mask from its making to the lit pass.
@@ -37,7 +37,7 @@ impl Gen3Game for ReachGame {
 
     /// `c_player_view::render` hands the screen effects' stops to
     /// `setup_camera_fx_parameters` before anything draws.
-    fn stops(&self, screen: &H3ScreenSettings) -> f32 {
+    fn stops(&self, screen: &Gen3ScreenSettings) -> f32 {
         screen.stops()
     }
 
@@ -81,7 +81,7 @@ impl Gen3Game for ReachGame {
         unsafe {
             self.draw_screen_lights(cx, &lit, accumulation);
             cx.core.bind_slot_vertices(cx.gl, cx.slot);
-            h3_set_cull(cx.gl, cx.frame);
+            gen3_set_cull(cx.gl, cx.frame);
             cx.gl.depth_func(glow::LEQUAL);
             cx.gl.depth_mask(false);
             cx.gl.blend_func(glow::ONE, glow::ONE);
@@ -123,7 +123,7 @@ impl Gen3Game for ReachGame {
         framebuffer: glow::NativeFramebuffer,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
-        screen: H3ScreenSettings,
+        screen: Gen3ScreenSettings,
         _size: [i32; 2],
     ) {
         unsafe {

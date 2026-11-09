@@ -5,7 +5,7 @@
 
 use eframe::glow::{self, HasContext as _};
 
-use super::super::particles::{ParticleGl, h3_particle_gl, particle_floats};
+use super::super::particles::{ParticleGl, gen3_particle_gl, particle_floats};
 
 use super::super::gl::buffer::slice_bytes;
 
@@ -30,13 +30,13 @@ impl RenderCore {
         slot: usize,
     ) -> Option<bool> {
         unsafe {
-            let h3 = self.h3_draws(frame);
+            let h3 = self.gen3_draws(frame);
             let flares = self.sprite_gl.get_or_insert_with(|| link_sprite_gl(gl, self.program)).as_ref()?;
             if !(frame.preview.particles.is_empty()
                 && frame.preview.gen3.strips.is_empty()
                 && frame.preview.h3.leaves.is_empty())
             {
-                self.particle_gl.get_or_insert_with(|| h3_particle_gl(gl, self.program));
+                self.particle_gl.get_or_insert_with(|| gen3_particle_gl(gl, self.program));
             }
             self.slots[slot].sync_sprite_textures(gl, frame);
             sprite_program_state(flares).apply(gl);
@@ -182,7 +182,7 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
     if !frame.preview.gen3.strips.is_empty() {
         let values = |object: u8| frame.function_values_of_object(object).cloned();
         let (systems, particles) = (&frame.preview.particles, &simulations.particles);
-        let tracks = |strip: &std::sync::Arc<gen3::effects::strips::H3StripAt>| -> Vec<(u64, [f32; 3])> {
+        let tracks = |strip: &std::sync::Arc<gen3::effects::strips::Gen3StripAt>| -> Vec<(u64, [f32; 3])> {
             particles.tracks_of(systems, strip).into_iter().map(|track| (track.id, track.place)).collect()
         };
         simulations.h3_strips.advance(&frame.preview.gen3.strips, values, &mut simulations.effect_onsets, tracks, bones, frame.time);
@@ -222,7 +222,7 @@ pub(in crate::app::model_preview) unsafe fn draw_antennas(
                 // brings up by `REACH_DARK_MULTIPLIER`; that it shows at
                 // eight times the tag's color follows the code, and is
                 // not checked against a capture. [inferred]
-                gen3::pipeline::h3_set_blend(gl, gen3::shaders::H3Blend::AlphaBlend);
+                gen3::pipeline::gen3_set_blend(gl, gen3::shaders::Gen3Blend::AlphaBlend);
             }
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             for quad in quads {
@@ -260,7 +260,7 @@ pub(in crate::app::model_preview) unsafe fn draw_particle_system(
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
         let camera = &frame.camera;
         let values = frame.function_values_of_object(system.object);
-        let lighting = gen3::pipeline::h3_lighting_constants(frame);
+        let lighting = gen3::pipeline::gen3_lighting_constants(frame);
         let onset = uploaded.simulations.effect_onsets.of(system.object, system.scale_name(), values, frame.time);
         let drawn = uploaded.simulations.particles.vertices(
             index,
@@ -314,7 +314,7 @@ pub(crate) struct AntennaQuad {
 }
 
 /// A distance to sort by, far first, that puts `sort layer` before it.
-pub(in crate::app::model_preview) fn h3_layered_distance(layer: i32, distance: f32) -> f32 {
+pub(in crate::app::model_preview) fn layered_distance(layer: i32, distance: f32) -> f32 {
     distance - layer as f32 * SORT_LAYER_SPAN
 }
 
@@ -323,14 +323,14 @@ const SORT_LAYER_SPAN: f32 = 1e6;
 
 #[cfg(test)]
 mod layer_tests {
-    use super::h3_layered_distance;
+    use super::layered_distance;
 
     #[test]
     fn a_later_layer_draws_after_however_far_it_lies() {
-        let far_post = h3_layered_distance(3, 500.0);
-        let near_normal = h3_layered_distance(2, 1.0);
+        let far_post = layered_distance(3, 500.0);
+        let near_normal = layered_distance(2, 1.0);
         assert!(far_post < near_normal);
-        assert!(h3_layered_distance(2, 5.0) > h3_layered_distance(2, 1.0));
+        assert!(layered_distance(2, 5.0) > layered_distance(2, 1.0));
     }
 }
 

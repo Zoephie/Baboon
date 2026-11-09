@@ -6,8 +6,8 @@ use super::super::common::slots::GameSlots;
 use super::super::common::sprites::draw_sprite_quad;
 use super::super::dx9::pipeline::Dx9Game;
 use super::super::dx9::sprites::Dx9Sprites;
-use super::super::gen3::pipeline::h3_set_blend;
-use super::super::gen3::shaders::H3Blend;
+use super::super::gen3::pipeline::gen3_set_blend;
+use super::super::gen3::shaders::Gen3Blend;
 use super::super::common::features::paths;
 use super::super::renderer::FrameCx;
 use crate::app::model_preview::common::sprite_gl::{ce_flare_occlusion, draw_flare_sprites};
@@ -89,7 +89,7 @@ impl Dx9Game for H2Game {
                         continue;
                     };
                     gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                    h3_set_blend(gl, if volume.fuzzy() { H3Blend::Additive } else { H3Blend::PreMultiplied });
+                    gen3_set_blend(gl, if volume.fuzzy() { Gen3Blend::Additive } else { Gen3Blend::PreMultiplied });
                     let colors = frame.change_colors_of_object(at.object);
                     for quad in at.quads(volume, values, &colors, bones, view, frame.time, onset) {
                         draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
@@ -107,7 +107,7 @@ impl Dx9Game for H2Game {
                         continue;
                     };
                     gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                    h3_set_blend(gl, H3Blend::PreMultiplied);
+                    gen3_set_blend(gl, Gen3Blend::PreMultiplied);
                     for quad in at.quads(arc, values, bones, view, frame.time) {
                         draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
                     }
@@ -122,7 +122,7 @@ impl Dx9Game for H2Game {
                     continue;
                 };
                 gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-                h3_set_blend(gl, at.blend());
+                gen3_set_blend(gl, at.blend());
                 for quad in h2.contrails.quads(index, at, view) {
                     draw_sprite_quad(gl, flares, camera, quad.corners, quad.color);
                 }

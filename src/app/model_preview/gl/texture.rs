@@ -220,7 +220,7 @@ pub(in crate::app::model_preview) unsafe fn upload_texture(gl: &glow::Context, i
 
 /// `d3d11_sampler_state_cache::get`: the border is transparent black, and
 /// anisotropic filters are trilinear with a limit.
-pub(in crate::app::model_preview) unsafe fn h3_apply_sampler(gl: &glow::Context, target: u32, sampler: Sampler) {
+pub(in crate::app::model_preview) unsafe fn gen3_apply_sampler(gl: &glow::Context, target: u32, sampler: Sampler) {
     const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
     let address = |mode| match mode {
         BitmapAddressMode::Clamp => glow::CLAMP_TO_EDGE,
@@ -319,7 +319,7 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                 gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, wrap(image.repeat_x));
                 gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, wrap(image.repeat_y));
                 if let Some(sampler) = sampler {
-                    h3_apply_sampler(gl, glow::TEXTURE_2D, sampler);
+                    gen3_apply_sampler(gl, glow::TEXTURE_2D, sampler);
                 }
             }
             Image::Cube { size, faces } => {
@@ -353,7 +353,7 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                     gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, glow::TEXTURE_MAX_LEVEL, mips.len() as i32);
                 }
                 if let Some(sampler) = sampler {
-                    h3_apply_sampler(gl, glow::TEXTURE_CUBE_MAP, sampler);
+                    gen3_apply_sampler(gl, glow::TEXTURE_CUBE_MAP, sampler);
                 }
             }
             Image::Volume { width, height, depth, rgba } => {
@@ -372,7 +372,7 @@ pub(in crate::app::model_preview) unsafe fn upload_image_linear(
                 );
                 finish(glow::TEXTURE_3D);
                 if let Some(sampler) = sampler {
-                    h3_apply_sampler(gl, glow::TEXTURE_3D, sampler);
+                    gen3_apply_sampler(gl, glow::TEXTURE_3D, sampler);
                 }
             }
         }

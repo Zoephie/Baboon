@@ -3,7 +3,7 @@
 use super::*;
 
 /// The targets a frame draws through.
-pub(in crate::app::model_preview) struct H3Targets {
+pub(in crate::app::model_preview) struct Gen3Targets {
     pub(in crate::app::model_preview) size: [i32; 2],
     pub(in crate::app::model_preview) albedo_framebuffer: glow::NativeFramebuffer,
     pub(in crate::app::model_preview) accumulation_framebuffer: glow::NativeFramebuffer,
@@ -27,7 +27,7 @@ pub(in crate::app::model_preview) struct H3Targets {
     pub(in crate::app::model_preview) scene_copy_framebuffer: glow::NativeFramebuffer,
 }
 
-impl H3Targets {
+impl Gen3Targets {
     pub(super) unsafe fn new(gl: &glow::Context, size: [i32; 2], depth: glow::NativeRenderbuffer) -> Option<Self> {
         let mut made = Made::new(gl);
         unsafe {

@@ -43,7 +43,7 @@ pub(in crate::app::model_preview) struct ParticleRules {
 }
 
 /// A system's look and its emitters.
-pub(in crate::app::model_preview) type SystemParts = (Arc<ParticleLook>, Vec<Arc<H3Emitter>>);
+pub(in crate::app::model_preview) type SystemParts = (Arc<ParticleLook>, Vec<Arc<Emitter>>);
 
 /// A game whose particle systems read their own way.
 #[derive(Debug, Clone, Copy)]
@@ -276,8 +276,8 @@ pub(super) fn starting_rotation(random_rotation: bool, halo4_vertical: bool, ran
 /// `initialize_particle`'s nudge to a speed of none, which what faces its
 /// velocity needs one to have. Halo 3 gives it to everything, ODST and Reach
 /// (the 360's 0x82EE3C98) only to those.
-pub(super) fn still_particles_move(game: Option<GameId>, billboard: H3Billboard) -> bool {
-    use H3Billboard::{ScreenParallel, ScreenPerpendicular, VelocityHorizontal};
+pub(super) fn still_particles_move(game: Option<GameId>, billboard: Billboard) -> bool {
+    use Billboard::{ScreenParallel, ScreenPerpendicular, VelocityHorizontal};
     let only_facing = matches!(game, Some(GameId::Halo3Odst | GameId::HaloReach));
     !only_facing || matches!(billboard, ScreenParallel | ScreenPerpendicular | VelocityHorizontal)
 }

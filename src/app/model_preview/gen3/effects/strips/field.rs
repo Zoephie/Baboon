@@ -4,7 +4,7 @@ use super::*;
 
 /// What a slot keeps of its contrails from frame to frame.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct H3StripField {
+pub(crate) struct Gen3StripField {
     time: Option<f32>,
     running: Vec<RunningContrail>,
     /// Per strip, one for each particle it follows, with when that began.
@@ -12,14 +12,14 @@ pub(crate) struct H3StripField {
     pub(super) carried: Vec<BTreeMap<u64, (f32, RunningContrail)>>,
 }
 
-impl H3StripField {
+impl Gen3StripField {
     /// Run contrails up to `time`, with their locations where `bones` has them.
     pub(crate) fn advance(
         &mut self,
-        strips: &[Arc<H3StripAt>],
+        strips: &[Arc<Gen3StripAt>],
         values: impl Fn(u8) -> Option<FunctionValues>,
         onsets: &mut EffectOnsets,
-        tracks: impl Fn(&Arc<H3StripAt>) -> Vec<(u64, [f32; 3])>,
+        tracks: impl Fn(&Arc<Gen3StripAt>) -> Vec<(u64, [f32; 3])>,
         bones: Option<&[[f32; 4]]>,
         time: f32,
     ) {
@@ -89,7 +89,7 @@ impl H3StripField {
     pub(crate) fn vertices(
         &self,
         index: usize,
-        strip: &H3StripAt,
+        strip: &Gen3StripAt,
         values: Option<&FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &ViewFrame,
@@ -118,4 +118,4 @@ impl H3StripField {
     }
 }
 
-attached!(H3StripAt);
+attached!(Gen3StripAt);

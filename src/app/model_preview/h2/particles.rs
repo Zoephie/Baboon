@@ -5,7 +5,7 @@ use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::fields::{elements, has_flag};
 use super::super::gen3::materials::read_h3_bitmap;
-use super::super::gen3::shaders::H3Blend;
+use super::super::gen3::shaders::Gen3Blend;
 use super::super::particles::*;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -81,17 +81,17 @@ fn read_h2_frames(tag: &TagFile, first: usize) -> (Vec<[f32; 4]>, [f32; 4]) {
 
 /// `effect_shader_*`'s pixel stage and blend, by the template that names the
 /// pass, by name alone: the distortion one lives under `particle\` too.
-fn h2_particle_pass(template: &str) -> Option<(ParticleAlbedo, H3Blend, bool)> {
+fn h2_particle_pass(template: &str) -> Option<(ParticleAlbedo, Gen3Blend, bool)> {
     use ParticleAlbedo::{Diffuse, H2Distortion, H2MultiplyAdd, H2Tint};
     Some(match template.rsplit(['\\', '/']).next().unwrap_or_default() {
-        "particle_additive" => (Diffuse, H3Blend::AddSrcTimesSrcAlpha, false),
-        "particle_additive_tint" => (H2Tint, H3Blend::AddSrcTimesSrcAlpha, false),
-        "particle_alpha_blend" => (Diffuse, H3Blend::AlphaBlend, false),
-        "particle_alpha_blend_tint" => (H2Tint, H3Blend::AlphaBlend, false),
-        "particle_alpha_multiply_add" => (H2MultiplyAdd, H3Blend::PreMultiplied, false),
+        "particle_additive" => (Diffuse, Gen3Blend::AddSrcTimesSrcAlpha, false),
+        "particle_additive_tint" => (H2Tint, Gen3Blend::AddSrcTimesSrcAlpha, false),
+        "particle_alpha_blend" => (Diffuse, Gen3Blend::AlphaBlend, false),
+        "particle_alpha_blend_tint" => (H2Tint, Gen3Blend::AlphaBlend, false),
+        "particle_alpha_multiply_add" => (H2MultiplyAdd, Gen3Blend::PreMultiplied, false),
         // Its alpha test passes anything above nothing, which the albedo does.
-        "particle_alpha_blend_distortion" => (H2Distortion, H3Blend::AlphaBlend, false),
-        "particle_alpha_test_no_lighting_fixed_for_glass" => (Diffuse, H3Blend::AlphaBlend, true),
+        "particle_alpha_blend_distortion" => (H2Distortion, Gen3Blend::AlphaBlend, false),
+        "particle_alpha_test_no_lighting_fixed_for_glass" => (Diffuse, Gen3Blend::AlphaBlend, true),
         _ => return None,
     })
 }
@@ -103,7 +103,7 @@ pub(in crate::app::model_preview) fn read_h2_system_parts(
     reader: &TagReader,
     system: TagStruct<'_>,
     path: &str,
-) -> Option<(Arc<ParticleLook>, Vec<Arc<H3Emitter>>)> {
+) -> Option<(Arc<ParticleLook>, Vec<Arc<Emitter>>)> {
     let flagged = |wanted: &str| has_flag(system, "flags", wanted);
     let (look, scale, rotation) = read_h2_look(reader, path)?;
     let read = |emitter: &TagStruct<'_>| read_h2_emitter(reader, *emitter, scale.clone(), rotation.clone(), &flagged);
@@ -144,16 +144,16 @@ pub(in crate::app::model_preview) fn read_h2_look(reader: &TagReader, path: &str
     } else {
         parameter("modulation_factor").and_then(|entry| entry.read_real("const value")).unwrap_or(0.0)
     };
-    let shader = H3SpriteShader {
+    let shader = SpriteShader {
         albedo,
         alpha_test,
         frame_blend: !flagged("disable frame blending"),
         base_map: Some(read_h3_bitmap(reader, &map, 0, SamplerKind::Texture2D)?),
-        constants: H3AlbedoConstants { modulation, ..Default::default() },
-        ..H3SpriteShader::plain(blend)
+        constants: AlbedoConstants { modulation, ..Default::default() },
+        ..SpriteShader::plain(blend)
     };
     let mut seeds = SeedAllocator::default();
-    let billboard = H3Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
+    let billboard = Billboard::named(&root.read_enum_option("particle billboard style").unwrap_or_default());
     let mut property = |name: &str| ParticleProperty::named(root, name, &mut seeds);
     let (color, alpha, scale, rotation, frame) =
         (property("color")?, property("alpha")?, property("scale")?, property("rotation")?, property("frame index")?);
@@ -219,9 +219,9 @@ pub(in crate::app::model_preview) fn read_h2_emitter(
     scale: ParticleProperty,
     rotation: ParticleProperty,
     flagged: &impl Fn(&str) -> bool,
-) -> Option<H3Emitter> {
+) -> Option<Emitter> {
     let mut seeds = SeedAllocator::default();
-    let shape = H3EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
+    let shape = EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
     let mut property = |name: &str| ParticleProperty::named(emitter, name, &mut seeds);
     let (radius, angle, rate, lifespan) = (
         property("emission radius")?,
@@ -256,7 +256,7 @@ pub(in crate::app::model_preview) fn read_h2_emitter(
             ParticleController::Flock => false,
         })
         .collect();
-    Some(H3Emitter {
+    Some(Emitter {
         h4: None,
         update: ParticleUpdate::Cpu,
         card_lerps: false,
@@ -306,10 +306,10 @@ mod tests {
     #[test]
     fn halo_2_passes_come_from_their_templates_and_distortion_has_none() {
         let pass = |name: &str| h2_particle_pass(&format!("shaders\\shader_templates\\transparent\\{name}"));
-        assert_eq!(pass("particle_additive"), Some((ParticleAlbedo::Diffuse, H3Blend::AddSrcTimesSrcAlpha, false)));
-        assert_eq!(pass("particle_alpha_blend_tint"), Some((ParticleAlbedo::H2Tint, H3Blend::AlphaBlend, false)));
-        assert_eq!(pass("particle_alpha_multiply_add"), Some((ParticleAlbedo::H2MultiplyAdd, H3Blend::PreMultiplied, false)));
-        assert_eq!(pass("particle_alpha_blend_distortion"), Some((ParticleAlbedo::H2Distortion, H3Blend::AlphaBlend, false)));
+        assert_eq!(pass("particle_additive"), Some((ParticleAlbedo::Diffuse, Gen3Blend::AddSrcTimesSrcAlpha, false)));
+        assert_eq!(pass("particle_alpha_blend_tint"), Some((ParticleAlbedo::H2Tint, Gen3Blend::AlphaBlend, false)));
+        assert_eq!(pass("particle_alpha_multiply_add"), Some((ParticleAlbedo::H2MultiplyAdd, Gen3Blend::PreMultiplied, false)));
+        assert_eq!(pass("particle_alpha_blend_distortion"), Some((ParticleAlbedo::H2Distortion, Gen3Blend::AlphaBlend, false)));
     }
 
     #[test]

@@ -24,18 +24,18 @@ const SHARED_PIXEL: [&str; 2] = ["shared pixel shader compilation", "shared entr
 const VERTEX_TYPE_OPTIONS: [&str; 3] = ["world", "rigid", "skinned"];
 
 #[derive(Debug, Clone)]
-pub(super) struct H3Option {
+pub(super) struct Gen3Option {
     pub(super) name: String,
     pub(super) vertex_function: Option<String>,
     pub(super) pixel_function: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct H3Category {
+pub(super) struct Gen3Category {
     pub(super) name: String,
     pub(super) vertex_function: Option<String>,
     pub(super) pixel_function: Option<String>,
-    pub(super) options: Vec<H3Option>,
+    pub(super) options: Vec<Gen3Option>,
 }
 
 /// What Reach's tool reads of an entry point's first pass to pick the
@@ -43,7 +43,7 @@ pub(super) struct H3Category {
 /// shaders; `get_compiled_vertex_shader` 0x14119A2A0 and
 /// `get_compiled_pixel_shader` 0x14119A170 choose among them).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct H3SharedStages {
+pub(super) struct Gen3SharedStages {
     /// Flag 0x1: the pixel shader is shared, not the material's own.
     shared_pixel: bool,
     /// Flag 0x2: the vertex shaders only tell the default option of their
@@ -55,7 +55,7 @@ pub(super) struct H3SharedStages {
 
 /// A `render_method_definition`, as far as compiling goes.
 #[derive(Debug, Clone)]
-pub(crate) struct H3Definition {
+pub(crate) struct Gen3Definition {
     /// The family: `shader`, `terrain`..
     pub(crate) name: String,
     dialect: RenderMethodDialect,
@@ -64,29 +64,29 @@ pub(crate) struct H3Definition {
     pub(super) source_file: String,
     /// `use automatic macros`: categories and options named as defines too.
     pub(super) automatic_macros: bool,
-    pub(super) categories: Vec<H3Category>,
+    pub(super) categories: Vec<Gen3Category>,
     pub(crate) entry_points: Vec<String>,
     /// Reach's shared-shader rules by entry point; Halo 3 has none, and
     /// compiles both stages with the material's options.
-    shared: std::collections::BTreeMap<String, H3SharedStages>,
+    shared: std::collections::BTreeMap<String, Gen3SharedStages>,
     /// The first `vertex_types` entry, which every pixel shader compiles with.
     pub(super) pixel_vertex_type: usize,
 }
 
-pub(crate) fn read_h3_definition(reader: &TagReader, path: &str) -> Option<H3Definition> {
+pub(crate) fn read_h3_definition(reader: &TagReader, path: &str) -> Option<Gen3Definition> {
     let dialect = RenderMethodDialect::of(&reader.source);
     let tag = reader.load(path, "render_method_definition", b"rmdf").ok()?;
     let root = tag.root();
     let function = |holder: TagStruct<'_>, name: &str| holder.read_string_id(name).filter(|name| !name.is_empty());
     let categories = elements(root, "categories")
         .into_iter()
-        .map(|category| H3Category {
+        .map(|category| Gen3Category {
             name: category.read_string_id("category name").unwrap_or_default(),
             vertex_function: function(category, "vertex function"),
             pixel_function: function(category, "pixel function"),
             options: elements(category, "options")
                 .into_iter()
-                .map(|option| H3Option {
+                .map(|option| Gen3Option {
                     name: option.read_string_id("option name").unwrap_or_default(),
                     vertex_function: function(option, "vertex function"),
                     pixel_function: function(option, "pixel function"),
@@ -114,7 +114,7 @@ pub(crate) fn read_h3_definition(reader: &TagReader, path: &str) -> Option<H3Def
                 elements(first, block).first().and_then(|dependency| dependency.read_int_any("category"))
                     .and_then(|category| usize::try_from(category).ok())
             };
-            shared.insert(name.clone(), H3SharedStages {
+            shared.insert(name.clone(), Gen3SharedStages {
                 shared_pixel: has_flag_labelled(first, "flags", &SHARED_PIXEL),
                 vertex_two_options: has_flag(first, "flags", "shared VS only care non-default option of depended category"),
                 vertex_category: category("shared VS category dependencies"),
@@ -138,10 +138,10 @@ pub(crate) fn read_h3_definition(reader: &TagReader, path: &str) -> Option<H3Def
         .and_then(|first| first.read_enum_option("vertex type"))
         .and_then(|kind| VERTEX_TYPE_OPTIONS.iter().position(|option| *option == kind))
         .unwrap_or(0);
-    Some(H3Definition { name, dialect, source_file, automatic_macros, categories, entry_points, shared, pixel_vertex_type })
+    Some(Gen3Definition { name, dialect, source_file, automatic_macros, categories, entry_points, shared, pixel_vertex_type })
 }
 
-impl H3Definition {
+impl Gen3Definition {
     pub(crate) fn is_decal(&self) -> bool {
         self.name == "decal"
     }
@@ -189,7 +189,7 @@ impl H3Definition {
     }
 
     /// The `blend_mode` category's choice, for a method held in another tag.
-    pub(crate) fn blend(&self, options: &[usize]) -> H3Blend {
+    pub(crate) fn blend(&self, options: &[usize]) -> Gen3Blend {
         self.blend_of(options, false)
     }
 
@@ -197,9 +197,9 @@ impl H3Definition {
     /// Halo 3's `blend_mode_from_string` ignoring case, Reach's
     /// `get_alpha_blend_mode_by_name` (0x141167210) minding it. Without the
     /// category Reach blends `shader_glass` and nothing else.
-    pub(crate) fn blend_of(&self, options: &[usize], glass: bool) -> H3Blend {
+    pub(crate) fn blend_of(&self, options: &[usize], glass: bool) -> Gen3Blend {
         let Some(name) = self.chosen("blend_mode", options) else {
-            return if glass && self.dialect == RenderMethodDialect::Reach { H3Blend::AlphaBlend } else { H3Blend::Opaque };
+            return if glass && self.dialect == RenderMethodDialect::Reach { Gen3Blend::AlphaBlend } else { Gen3Blend::Opaque };
         };
         let index = match self.dialect {
             RenderMethodDialect::Halo3 => {
@@ -210,7 +210,7 @@ impl H3Definition {
             // Reach definition offers them as options, so none reach here.
             RenderMethodDialect::Reach => REACH_BLEND_MODES[..13].iter().position(|mode| name.starts_with(mode)),
         };
-        H3Blend::ALL[index.unwrap_or(0)]
+        Gen3Blend::ALL[index.unwrap_or(0)]
     }
 }
 
@@ -251,13 +251,13 @@ pub(super) fn entry_functions(dialect: RenderMethodDialect, entry: &str) -> (Str
 mod stage_option_tests {
     use super::super::*;
 
-    fn category(name: &str, options: &[&str]) -> H3Category {
-        let option = |name: &&str| H3Option {
+    fn category(name: &str, options: &[&str]) -> Gen3Category {
+        let option = |name: &&str| Gen3Option {
             name: (*name).to_owned(),
             vertex_function: None,
             pixel_function: Some(format!("calc_{name}")),
         };
-        H3Category {
+        Gen3Category {
             name: name.to_owned(),
             vertex_function: None,
             pixel_function: Some(format!("calc_{name}_ps")),
@@ -265,8 +265,8 @@ mod stage_option_tests {
         }
     }
 
-    fn definition(automatic_macros: bool, shared: &[(&str, H3SharedStages)]) -> H3Definition {
-        H3Definition {
+    fn definition(automatic_macros: bool, shared: &[(&str, Gen3SharedStages)]) -> Gen3Definition {
+        Gen3Definition {
             name: "shader".to_owned(),
             dialect: RenderMethodDialect::Reach,
             source_file: "templated\\shader.fx".to_owned(),
@@ -296,17 +296,17 @@ mod stage_option_tests {
     fn reach_reads_blend_names_minding_case_and_blends_glass_without_a_category() {
         let mut reach = definition(false, &[]);
         reach.categories[1].options[1].name = "ADDITIVE".to_owned();
-        assert_eq!(reach.blend(&[0, 1]), H3Blend::Opaque, "Reach minds case");
-        assert_eq!(reach.blend(&[0, 3]), H3Blend::AlphaBlend);
+        assert_eq!(reach.blend(&[0, 1]), Gen3Blend::Opaque, "Reach minds case");
+        assert_eq!(reach.blend(&[0, 3]), Gen3Blend::AlphaBlend);
         reach.dialect = RenderMethodDialect::Halo3;
-        assert_eq!(reach.blend(&[0, 1]), H3Blend::Additive, "Halo 3 does not");
+        assert_eq!(reach.blend(&[0, 1]), Gen3Blend::Additive, "Halo 3 does not");
 
         let mut glass = definition(false, &[]);
         glass.categories.truncate(1);
-        assert_eq!(glass.blend_of(&[0], true), H3Blend::AlphaBlend);
-        assert_eq!(glass.blend_of(&[0], false), H3Blend::Opaque);
+        assert_eq!(glass.blend_of(&[0], true), Gen3Blend::AlphaBlend);
+        assert_eq!(glass.blend_of(&[0], false), Gen3Blend::Opaque);
         glass.dialect = RenderMethodDialect::Halo3;
-        assert_eq!(glass.blend_of(&[0], true), H3Blend::Opaque);
+        assert_eq!(glass.blend_of(&[0], true), Gen3Blend::Opaque);
     }
 
     #[test]
@@ -318,18 +318,18 @@ mod stage_option_tests {
 
     #[test]
     fn a_reach_vertex_shader_keeps_only_its_category_and_only_two_of_its_options() {
-        let rules = H3SharedStages { vertex_two_options: true, vertex_category: Some(1), ..Default::default() };
+        let rules = Gen3SharedStages { vertex_two_options: true, vertex_category: Some(1), ..Default::default() };
         let reach = definition(false, &[("static_sh", rules)]);
         assert_eq!(reach.stage_options(&[2, 3], "static_sh", Stage::Vertex), [Some(0), Some(1)], "alpha_blend shares additive's");
         assert_eq!(reach.stage_options(&[2, 0], "static_sh", Stage::Vertex), [Some(0), Some(0)]);
         assert_eq!(reach.stage_options(&[2, 3], "static_sh", Stage::Pixel), [Some(2), Some(3)], "the material's own pixel shader");
-        let uncapped = definition(false, &[("static_sh", H3SharedStages { vertex_two_options: false, ..rules })]);
+        let uncapped = definition(false, &[("static_sh", Gen3SharedStages { vertex_two_options: false, ..rules })]);
         assert_eq!(uncapped.stage_options(&[2, 3], "static_sh", Stage::Vertex), [Some(0), Some(3)]);
     }
 
     #[test]
     fn a_shared_pixel_shader_reads_only_its_category_and_automatic_macros_default_to_none() {
-        let rules = H3SharedStages { shared_pixel: true, pixel_category: Some(0), ..Default::default() };
+        let rules = Gen3SharedStages { shared_pixel: true, pixel_category: Some(0), ..Default::default() };
         let reach = definition(true, &[("shadow_generate", rules)]);
         assert_eq!(reach.stage_options(&[2, 3], "shadow_generate", Stage::Pixel), [Some(2), None]);
         assert_eq!(reach.stage_options(&[2, 3], "shadow_generate", Stage::Vertex), [None, None]);

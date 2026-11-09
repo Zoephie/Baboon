@@ -58,7 +58,7 @@ pub(in crate::app::model_preview) fn read_resolved_map(
     reader: &TagReader,
     resolved: &ResolvedRenderMethod,
     name: &str,
-) -> Option<(H3Bitmap, Sampler)> {
+) -> Option<(Gen3Bitmap, Sampler)> {
     let ParameterSource::Inline(ResolvedValue::Bitmap(binding)) = &resolved.find(name)?.source else {
         return None;
     };
@@ -73,7 +73,7 @@ pub(in crate::app::model_preview) fn read_resolved_map(
 /// Reach's cube maps are the rasterizer's own, not a shader's externs. With no
 /// level, `render_method_submit_dynamic_cubemap` (MCC `sub_140817F70`) binds
 /// `rasterizer_globals`' default bitmap 2 to both, clamped, trilinear.
-pub(super) fn reach_environment_maps(reader: &TagReader, pass: &H3Pass, material: &mut H3Material, caches: &mut ResolveCaches) {
+pub(super) fn reach_environment_maps(reader: &TagReader, pass: &Gen3Pass, material: &mut Gen3Material, caches: &mut ResolveCaches) {
     const DEFAULT_CUBE: &str = "shaders\\default_bitmaps\\bitmaps\\default_dynamic_cube_map";
     for (uniform, _) in &pass.textures {
         let wanted = matches!(
@@ -83,11 +83,11 @@ pub(super) fn reach_environment_maps(reader: &TagReader, pass: &H3Pass, material
         if !wanted || material.textures.iter().any(|known| known.uniform == *uniform) {
             continue;
         }
-        let Some((image, texels, mips)) = h3_image(reader, DEFAULT_CUBE, 0, SamplerKind::Cube, caches) else {
+        let Some((image, texels, mips)) = gen3_image(reader, DEFAULT_CUBE, 0, SamplerKind::Cube, caches) else {
             continue;
         };
         let sampler = Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Trilinear };
-        material.textures.push(H3Texture {
+        material.textures.push(Gen3Texture {
             uniform: uniform.clone(),
             image,
             texels,

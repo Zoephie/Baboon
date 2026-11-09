@@ -18,10 +18,10 @@ pub(in crate::app::model_preview) struct ResolveCaches {
     pub(in crate::app::model_preview) h4_hologram_post: Option<Option<Arc<crate::app::model_preview::h4::materials::submit::H4HologramPost>>>,
     /// `globals`' `camo distortion texture`, read once.
     pub(in crate::app::model_preview) h4_camo_texture: Option<Option<String>>,
-    pub(in crate::app::model_preview) h3_shield: Option<Option<Arc<H3Shield>>>,
-    pub(in crate::app::model_preview) h3_sources: Option<H3Sources>,
+    pub(in crate::app::model_preview) gen3_shield: Option<Option<Arc<Gen3Shield>>>,
+    pub(in crate::app::model_preview) h3_sources: Option<Gen3Sources>,
     /// Images decoded for Halo 3 passes, with whether each is sRGB.
-    pub(in crate::app::model_preview) h3_images: HashMap<(String, i16, usize), Option<H3Bitmap>>,
+    pub(in crate::app::model_preview) h3_images: HashMap<(String, i16, usize), Option<Gen3Bitmap>>,
     pub(in crate::app::model_preview) definitions: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
     pub(in crate::app::model_preview) options: HashMap<String, Option<Arc<RenderMethodOption>>>,
     /// Reach's reference shaders by path; Spartan armor shares a few.

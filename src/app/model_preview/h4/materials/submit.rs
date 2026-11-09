@@ -10,7 +10,7 @@ use blam_tags::material::{
 
 use std::sync::Arc;
 
-use super::super::super::gen3::shaders::{H3Pass, H3Texture, H3Value, H3Values};
+use super::super::super::gen3::shaders::{Gen3Pass, Gen3Texture, Gen3Value, Gen3Values};
 
 /// `e_material_extern`s 35 to 41: a hologram's key, fill and rim light
 /// directions (odd) and the scalars beside them (even).
@@ -94,10 +94,10 @@ pub(crate) struct H4Submit {
 /// screen pass, its per-draw state, and its bitmaps.
 #[derive(Debug)]
 pub(crate) struct H4ScreenMaterial {
-    pub(crate) pass: Arc<H3Pass>,
+    pub(crate) pass: Arc<Gen3Pass>,
     pub(crate) submit: H4Submit,
-    pub(crate) values: H3Values,
-    pub(crate) textures: Vec<H3Texture>,
+    pub(crate) values: Gen3Values,
+    pub(crate) textures: Vec<Gen3Texture>,
 }
 
 /// What a hologram's picture goes through (`RenderHolograms`, X360
@@ -205,21 +205,21 @@ impl H4Submit {
     }
 
     /// The bake's constants under the names the translated source reads.
-    pub(crate) fn baked_values(&self) -> H3Values {
+    pub(crate) fn baked_values(&self) -> Gen3Values {
         let baked = &self.baked;
-        let mut values = H3Values::new();
+        let mut values = Gen3Values::new();
         insert_registers(&mut values, "user_parameter", PIXEL_REGISTERS.0, &baked.real_vectors);
         insert_registers(&mut values, "user_vertex_parameter", VERTEX_REGISTERS.0, &baked.real_vertex_vectors);
-        values.insert("ps_material_shader_transforms".to_owned(), H3Value::FloatArray(transforms(baked)));
+        values.insert("ps_material_shader_transforms".to_owned(), Gen3Value::FloatArray(transforms(baked)));
         for bit in 0..32 {
             if baked.bools.used & (1 << bit) != 0 {
-                values.insert(format!("user_parameter_bool_{bit}"), H3Value::Integer(i32::from(baked.bools.values & (1 << bit) != 0)));
+                values.insert(format!("user_parameter_bool_{bit}"), Gen3Value::Integer(i32::from(baked.bools.values & (1 << bit) != 0)));
             }
         }
         for bit in 0..8 {
             if baked.vertex_bools.used & (1 << bit) != 0 {
                 let on = i32::from(baked.vertex_bools.values & (1 << bit) != 0);
-                values.insert(format!("user_parameter_vertex_bool_{}", 40 + bit), H3Value::Integer(on));
+                values.insert(format!("user_parameter_vertex_bool_{}", 40 + bit), Gen3Value::Integer(on));
             }
         }
         values
@@ -230,7 +230,7 @@ impl H4Submit {
     /// (MCC 0x1408CA980), each only when the bake queued functions of its
     /// kind, and a hologram's rig. `node` is the hologram's node matrix (see
     /// [`hologram_rows`]).
-    pub(crate) fn draw_values(&self, draw: H4Draw, object: &DrawnObject<'_>, node: [[f32; 4]; 3]) -> H3Values {
+    pub(crate) fn draw_values(&self, draw: H4Draw, object: &DrawnObject<'_>, node: [[f32; 4]; 3]) -> Gen3Values {
         /// `single_pass_single_probe`, the fringe's entry.
         pub(super) const ENTRY_SINGLE_PASS_SINGLE_PROBE: usize = 23;
         let baked = &self.baked;
@@ -241,8 +241,8 @@ impl H4Submit {
             H4Draw::HologramOpaque => (self.lit_phases, 0),
             H4Draw::HologramBlend => (self.lit_phases, 22),
         };
-        let mut values = H3Values::new();
-        values.insert("ps_material_blend_constant".to_owned(), H3Value::Floats(blend_constant(state)));
+        let mut values = Gen3Values::new();
+        values.insert("ps_material_blend_constant".to_owned(), Gen3Value::Floats(blend_constant(state)));
         let queued = |flag: u16| baked.flags & flag != 0;
         if queued(postprocess_flags::VERTEX_CONSTANT_FUNCTIONS) {
             let mut vertex = registers(&baked.real_vertex_vectors, VERTEX_REGISTERS.1);
@@ -257,7 +257,7 @@ impl H4Submit {
         if queued(postprocess_flags::TEXTURE_TRANSFORM_FUNCTIONS) {
             let mut xforms = transforms(baked);
             update_constants(baked, phases, TEXTURE_TRANSFORM_REGISTERS, &mut xforms, object);
-            values.insert("ps_material_shader_transforms".to_owned(), H3Value::FloatArray(xforms));
+            values.insert("ps_material_shader_transforms".to_owned(), Gen3Value::FloatArray(xforms));
         }
         if let Some(clip) = self.hologram {
             // `handle_object_part` sets the threshold in pass 0 alone.
@@ -268,7 +268,7 @@ impl H4Submit {
                 update_constants(baked, 0, PIXEL_REGISTERS, &mut pixel, object);
             }
             let rows = hologram_rows(&baked.externs, &pixel, node, clip);
-            values.insert("ps_material_generic_parameters".to_owned(), H3Value::FloatArray(rows.to_vec()));
+            values.insert("ps_material_generic_parameters".to_owned(), Gen3Value::FloatArray(rows.to_vec()));
         }
         values
     }
@@ -289,9 +289,9 @@ fn transforms(baked: &BakedMaterial) -> Vec<[f32; 4]> {
     transforms
 }
 
-fn insert_registers(values: &mut H3Values, prefix: &str, start: u8, registers: &[[f32; 4]]) {
+fn insert_registers(values: &mut Gen3Values, prefix: &str, start: u8, registers: &[[f32; 4]]) {
     for (index, vector) in registers.iter().enumerate() {
-        values.insert(format!("{prefix}_{}", usize::from(start) + index), H3Value::Floats(*vector));
+        values.insert(format!("{prefix}_{}", usize::from(start) + index), Gen3Value::Floats(*vector));
     }
 }
 
@@ -397,7 +397,7 @@ mod tests {
                 function.register_offset, drawn.get(&name)
             );
         }
-        let Some(H3Value::FloatArray(rows)) = drawn.get("ps_material_generic_parameters") else { panic!("no rig") };
+        let Some(Gen3Value::FloatArray(rows)) = drawn.get("ps_material_generic_parameters") else { panic!("no rig") };
         eprintln!("NOTE rig {rows:?}");
         let same = |a: [f32; 4], b: [f32; 4]| (0..3).all(|axis| (a[axis] - b[axis]).abs() < 1e-3);
         assert!(!same(rows[0], rows[1]) && !same(rows[0], rows[2]), "{rows:?}");

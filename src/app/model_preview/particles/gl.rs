@@ -3,7 +3,7 @@
 use super::*;
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::glsl_view_depth;
-use super::super::gen3::shaders::H3Blend;
+use super::super::gen3::shaders::Gen3Blend;
 use eframe::glow::{self, HasContext as _};
 use super::super::reach::lighting::reach_particle_light;
 
@@ -224,7 +224,7 @@ const PARTICLE_FLOATS: usize = 24;
 /// its own sampler.
 pub(in crate::app::model_preview) unsafe fn sprite_maps(
     gl: &glow::Context,
-    look: &particles::H3SpriteShader,
+    look: &particles::SpriteShader,
 ) -> [Option<glow::NativeTexture>; 4] {
     let [base, alpha, palette, second] = look.samplers;
     [(&look.base_map, base), (&look.alpha_map, alpha), (&look.palette_map, palette), (&look.second_map, second)].map(
@@ -291,7 +291,7 @@ impl ParticleGl {
     pub(in crate::app::model_preview) unsafe fn draw(
         &self,
         gl: &glow::Context,
-        look: &particles::H3SpriteShader,
+        look: &particles::SpriteShader,
         vertices: &[[f32; PARTICLE_FLOATS]],
         textures: [Option<glow::NativeTexture>; 4],
         no_map: Option<glow::NativeTexture>,
@@ -330,7 +330,7 @@ impl ParticleGl {
             gl.uniform_4_f32_slice(self.base_xform.as_ref(), &constants.base_xform);
             gl.uniform_4_f32_slice(self.second_xform.as_ref(), &constants.second_xform);
             gl.uniform_1_i32(self.black_point.as_ref(), i32::from(look.black_point));
-            let multiply = look.blend == H3Blend::Multiply;
+            let multiply = look.blend == Gen3Blend::Multiply;
             gl.uniform_1_i32(self.multiply.as_ref(), i32::from(multiply));
             gl.uniform_3_f32_slice(self.add.as_ref(), &look.add(stops));
             gl.uniform_1_f32(self.distortion.as_ref(), look.distortion.unwrap_or(0.0));
@@ -347,7 +347,7 @@ impl ParticleGl {
             gl.uniform_1_f32(self.palette_shift.as_ref(), look.palette_shift.unwrap_or(0.0));
             gl.uniform_1_i32(self.plasma_second_sprite.as_ref(), i32::from(look.plasma_second_sprite));
             gl.uniform_1_i32(self.unit_particle_alpha.as_ref(), i32::from(look.unit_particle_alpha));
-            let premultiplied = look.blend == H3Blend::PreMultiplied;
+            let premultiplied = look.blend == Gen3Blend::PreMultiplied;
             gl.uniform_1_i32(self.premultiplied.as_ref(), i32::from(premultiplied));
             gl.uniform_1_i32(self.alpha_test.as_ref(), i32::from(look.alpha_test));
             gl.depth_mask(look.alpha_test);
@@ -358,10 +358,10 @@ impl ParticleGl {
                 gl.blend_equation(glow::FUNC_ADD);
                 gl.blend_func(glow::ONE, glow::ONE);
             } else {
-                gen3::pipeline::h3_set_blend(gl, look.blend);
+                gen3::pipeline::gen3_set_blend(gl, look.blend);
             }
             // What covers the background has to say so, as an antenna does.
-            let covers = matches!(look.blend, H3Blend::AlphaBlend | H3Blend::PreMultiplied);
+            let covers = matches!(look.blend, Gen3Blend::AlphaBlend | Gen3Blend::PreMultiplied);
             gl.color_mask(true, true, true, covers);
             gl.draw_arrays(glow::TRIANGLES, 0, vertices.len() as i32);
             gl.depth_mask(false);
@@ -370,7 +370,7 @@ impl ParticleGl {
     }
 }
 
-pub(in crate::app::model_preview) unsafe fn h3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<ParticleGl> {
+pub(in crate::app::model_preview) unsafe fn gen3_particle_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<ParticleGl> {
     unsafe {
         let program = link_h2_program(gl, main, PARTICLE_VERTEX, PARTICLE_FRAGMENT)
             .map_err(|error| eprintln!("model preview: {error}"))

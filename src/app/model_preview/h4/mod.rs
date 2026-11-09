@@ -35,10 +35,10 @@ pub(crate) struct H4Features {
     pub cheap_lights: Vec<super::h4::lights::H4CheapLight>,
     /// Explicit 187 and 204's screen-space passes, by (physically correct,
     /// technique).
-    pub light_passes: std::collections::BTreeMap<(bool, usize), std::sync::Arc<super::gen3::shaders::H3Pass>>,
+    pub light_passes: std::collections::BTreeMap<(bool, usize), std::sync::Arc<super::gen3::shaders::Gen3Pass>>,
     /// Halo 4's attached `lens_flare`s, and explicit 46's pass that draws them.
     pub flares: Vec<super::h4::flares::H4FlareAt>,
-    pub flare_pass: Option<std::sync::Arc<super::gen3::shaders::H3Pass>>,
+    pub flare_pass: Option<std::sync::Arc<super::gen3::shaders::Gen3Pass>>,
     /// `globals`' active camo, for a Halo 4 object.
     pub camo: Option<std::sync::Arc<super::h4::camo::H4Camo>>,
     /// A Halo 4 object's shield impact.
@@ -49,7 +49,7 @@ pub(crate) struct H4Features {
     pub tracers: Vec<super::h4::tracers::H4TracerAt>,
     /// Halo 4's final composite colour grading: the default camera fx
     /// settings' 16-cube lookup.
-    pub color_grading: Option<super::gen3::materials::H3Bitmap>,
+    pub color_grading: Option<super::gen3::materials::Gen3Bitmap>,
     /// A Halo 4 object's `bounding offset` (in its node 0's frame) and
     /// `bounding radius`, which its holograms frame their screen effects by.
     pub bounding_sphere: Option<([f32; 3], f32)>,

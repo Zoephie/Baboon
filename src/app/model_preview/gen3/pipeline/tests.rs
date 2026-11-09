@@ -2,10 +2,10 @@ use super::*;
 
 #[test]
 fn a_shadow_fades_as_the_probe_grows_even() {
-    assert_eq!(h3_shadow_alpha(2.0), 0.0);
-    assert_eq!(h3_shadow_alpha(1.0), 0.0);
-    assert_eq!(h3_shadow_alpha(5.0), 0.5);
-    assert_eq!(h3_shadow_alpha(10.0), 1.0);
+    assert_eq!(gen3_shadow_alpha(2.0), 0.0);
+    assert_eq!(gen3_shadow_alpha(1.0), 0.0);
+    assert_eq!(gen3_shadow_alpha(5.0), 0.5);
+    assert_eq!(gen3_shadow_alpha(10.0), 1.0);
     let mut even = DEFAULT_PROBE;
     even.iter_mut().for_each(|channel| channel[1..].fill(0.0));
     let contrast = |probe: &[[f32; 9]; 3]| dominant_light(probe).2;
@@ -18,19 +18,19 @@ fn a_shield_shows_once_either_reading_rises() {
     let values = |name: &str, value: f32| {
         functions::FunctionValues::from([(name.to_owned(), value)])
     };
-    assert!(h3_shield_showing(Some(&values(H3_SHIELD_DAMAGE, 0.5))));
-    assert!(h3_shield_showing(Some(&values(H3_OVERSHIELD, 0.5))));
-    assert!(!h3_shield_showing(Some(&values(H3_OVERSHIELD, 0.0))));
-    assert!(!h3_shield_showing(Some(&values("body_vitality", 1.0))));
-    assert!(!h3_shield_showing(None));
+    assert!(gen3_shield_showing(Some(&values(H3_SHIELD_DAMAGE, 0.5))));
+    assert!(gen3_shield_showing(Some(&values(H3_OVERSHIELD, 0.5))));
+    assert!(!gen3_shield_showing(Some(&values(H3_OVERSHIELD, 0.0))));
+    assert!(!gen3_shield_showing(Some(&values("body_vitality", 1.0))));
+    assert!(!gen3_shield_showing(None));
 }
 
 #[test]
 fn only_modes_that_add_light_leave_coverage_alone() {
-    assert!(h3_adds_light(H3Blend::Additive));
-    assert!(h3_adds_light(H3Blend::AddSrcTimesSrcAlpha));
-    assert!(!h3_adds_light(H3Blend::AlphaBlend));
-    assert!(!h3_adds_light(H3Blend::Opaque));
+    assert!(gen3_adds_light(Gen3Blend::Additive));
+    assert!(gen3_adds_light(Gen3Blend::AddSrcTimesSrcAlpha));
+    assert!(!gen3_adds_light(Gen3Blend::AlphaBlend));
+    assert!(!gen3_adds_light(Gen3Blend::Opaque));
 }
 
 #[test]

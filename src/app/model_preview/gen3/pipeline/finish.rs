@@ -132,11 +132,11 @@ impl Gen3State {
         slot: usize,
         framebuffer: glow::NativeFramebuffer,
         size: [i32; 2],
-        screen: &gen3::effects::screen::H3ScreenSettings,
-        shaders: &[gen3::effects::screen::H3ScreenShader],
+        screen: &gen3::effects::screen::Gen3ScreenSettings,
+        shaders: &[gen3::effects::screen::Gen3ScreenShader],
     ) {
         let blur = screen.blur();
-        if !shaders.iter().any(gen3::effects::screen::H3ScreenShader::at_frame_end)
+        if !shaders.iter().any(gen3::effects::screen::Gen3ScreenShader::at_frame_end)
             && blur.is_none()
             && !game.picture_effects(frame, screen)
         {
@@ -185,7 +185,7 @@ impl Gen3State {
                     continue;
                 };
                 copies.screen_copy(gl, false);
-                h3_set_blend(gl, material.blend);
+                gen3_set_blend(gl, material.blend);
                 self.screen_alpha = Some(shader.alpha);
                 let batch = RenderModelPreviewBatch { material_index: at as u16, ..Default::default() };
                 self.draw_pass(core, gl, frame, slot, &batch, material, &material.lit, None);

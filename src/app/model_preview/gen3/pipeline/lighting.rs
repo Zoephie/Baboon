@@ -76,10 +76,10 @@ pub(super) fn dominant_light(probe: &[[f32; 9]; 3]) -> ([f32; 4], [f32; 4], f32)
 /// light, whose shadow fades out as the probe grows even.
 pub(in crate::app::model_preview) fn h3_shadow_light(frame: &ModelGpuFrame) -> ([f32; 3], f32) {
     let ([x, y, z, _], _, contrast) = dominant_light(&frame_probe(frame));
-    ([x, y, z], h3_shadow_alpha(contrast))
+    ([x, y, z], gen3_shadow_alpha(contrast))
 }
 
-pub(super) fn h3_shadow_alpha(contrast: f32) -> f32 {
+pub(super) fn gen3_shadow_alpha(contrast: f32) -> f32 {
     (contrast.clamp(2.0, 8.0) - 2.0) / 6.0
 }
 
@@ -115,7 +115,7 @@ pub(super) fn frame_probe(frame: &ModelGpuFrame) -> [[f32; 9]; 3] {
 }
 
 /// What a particle's `lighting` option reads.
-pub(in crate::app::model_preview) fn h3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
+pub(in crate::app::model_preview) fn gen3_lighting_constants(frame: &ModelGpuFrame) -> [[f32; 4]; 10] {
     lighting_constants(&frame_probe(frame))
 }
 
@@ -134,7 +134,7 @@ impl Gen3State {
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(drawing.accumulation_target));
             gl.disable(glow::BLEND);
-            h3_set_cull(gl, frame);
+            gen3_set_cull(gl, frame);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
@@ -147,10 +147,10 @@ impl Gen3State {
                 drawing.batches
                     .iter()
                     .filter(|(_, material)| !material.decal || material.after_lighting)
-                    .partition(|(_, material)| material.blend == H3Blend::Opaque);
+                    .partition(|(_, material)| material.blend == Gen3Blend::Opaque);
             game.lit_values(&mut Gen3Cx { gl, frame, core, slot, state: self });
             for (batch, material) in opaque {
-                let pass = h3_lit_pass(frame, batch, material);
+                let pass = gen3_lit_pass(frame, batch, material);
                 self.draw_pass(core, gl, frame, slot, batch, material, pass, None);
             }
             self.shadow_mask = None;

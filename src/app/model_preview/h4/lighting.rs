@@ -3,7 +3,7 @@
 //! setup_default_lighting(true)` leaves in the constants (X360 0x82A72368,
 //! MCC `sub_1408C3E60`), exposure, and the final composite.
 
-use super::super::gen3::shaders::H3Value;
+use super::super::gen3::shaders::Gen3Value;
 use super::super::*;
 
 /// `s_dual_vmf_basis::SetDefaultLighting` (X360 0x82A3CF50, MCC
@@ -127,20 +127,20 @@ pub(in crate::app::model_preview) fn h4_turned_vmf(to_camera: [f32; 3]) -> [[f32
 /// Halo 4's [`FrameValues`](super::super::gen3::pipeline::FrameValues):
 /// its engine constants have names of their own, and none fall back to
 /// Halo 3's.
-pub(in crate::app::model_preview) fn h4_frame_values(frame: &ModelGpuFrame, name: &str, _size: [i32; 2], _stops: f32) -> Option<H3Value> {
+pub(in crate::app::model_preview) fn h4_frame_values(frame: &ModelGpuFrame, name: &str, _size: [i32; 2], _stops: f32) -> Option<Gen3Value> {
     if name == "ps_lighting_constants" && frame.light_follows_camera {
         let camera = super::super::gen3::pipeline::camera_to_world(frame);
         let backward = [camera[2], camera[6], camera[10]];
-        return Some(H3Value::FloatArray(h4_turned_vmf(backward).to_vec()));
+        return Some(Gen3Value::FloatArray(h4_turned_vmf(backward).to_vec()));
     }
     h4_frame_value(name)
 }
 
-pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<H3Value> {
-    let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<Gen3Value> {
+    let floats = |value: [f32; 4]| Some(Gen3Value::Floats(value));
     match name {
-        "ps_lighting_constants" => Some(H3Value::FloatArray(H4_DEFAULT_VMF.to_vec())),
-        "ps_model_sh_lighting" => Some(H3Value::FloatArray(default_sh())),
+        "ps_lighting_constants" => Some(Gen3Value::FloatArray(H4_DEFAULT_VMF.to_vec())),
+        "ps_model_sh_lighting" => Some(Gen3Value::FloatArray(default_sh())),
         // `setup_render_target_globals_with_exposure`: (e / 2^Y, 2^Y, e,
         // alpha), and the self-illumination scale (1 at defaults) times the
         // same. `.w` of the latter is the alpha the lerp keeps [inferred].
@@ -164,7 +164,7 @@ pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<H3Valu
         "ps_boolean_using_floating_sun"
         | "ps_boolean_using_analytic_light"
         | "ps_boolean_using_analytic_light_gobo"
-        | "ps_boolean_using_static_lightmap_only" => Some(H3Value::Integer(0)),
+        | "ps_boolean_using_static_lightmap_only" => Some(Gen3Value::Integer(0)),
         _ => None,
     }
 }
@@ -172,7 +172,7 @@ pub(in crate::app::model_preview) fn h4_frame_value(name: &str) -> Option<H3Valu
 /// `globals\defaults\default`'s colour grading texture: the camera fx
 /// settings the game falls back on with no cluster to read others from
 /// (`c_player_view::setup_camera_fx_parameters`, X360 0x82B704C8).
-pub(in crate::app::model_preview) fn read_h4_color_grading(reader: &TagReader) -> Option<super::super::gen3::materials::H3Bitmap> {
+pub(in crate::app::model_preview) fn read_h4_color_grading(reader: &TagReader) -> Option<super::super::gen3::materials::Gen3Bitmap> {
     let settings = reader.load("globals\\defaults\\default", "camera_fx_settings", b"cfxs").ok()?;
     let grading = settings.root().descend("color_grading")?;
     let path = grading.read_tag_ref_path("color grading texture").filter(|path| !path.is_empty())?;
@@ -237,7 +237,7 @@ mod tests {
     fn exposure_at_zero_stops_is_the_settings_scale() {
         assert!((h4_exposure(0.0) - 0.669_433).abs() < 1e-6);
         assert!((h4_exposure(1.0) - 2.0 * 0.669_433).abs() < 1e-5);
-        let Some(H3Value::Floats(exposure)) = h4_frame_value("ps_view_exposure") else { panic!() };
+        let Some(Gen3Value::Floats(exposure)) = h4_frame_value("ps_view_exposure") else { panic!() };
         assert_eq!(exposure[1], 8.0);
         let expected = h4_exposure(H4_PREVIEW_STOPS);
         assert!((exposure[0] * exposure[1] - expected).abs() < 1e-6, "the dark target times its multiplier is the exposure");

@@ -219,7 +219,7 @@ impl RenderCore {
     pub(in crate::app::model_preview) fn h2_replaces_slots(&self, frame: &ModelGpuFrame, material: usize) -> bool {
         // Halo 3's and ODST's materials draw their shadow passes through here
         // too, and those stand in wherever the translated passes do.
-        if frame.game_shaders && self.h3_material(frame, material).is_some() {
+        if frame.game_shaders && self.gen3_material(frame, material).is_some() {
             return true;
         }
         if self.h2_material_ready(frame, material, Dx9Layer::Transparent) {

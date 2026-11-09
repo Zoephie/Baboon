@@ -5,7 +5,7 @@
 use blam_tags::{TagFile, TagStruct};
 
 use super::super::common::named_function::tag_function_at;
-use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
+use super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 
@@ -47,7 +47,7 @@ pub(crate) struct H3Vision {
     intensity: f32,
     ping_intensity: f32,
     dimming: f32,
-    mask: Option<H3Bitmap>,
+    mask: Option<Gen3Bitmap>,
 }
 
 /// What `sub_14059C370` hands the shader.
@@ -60,7 +60,7 @@ pub(crate) struct H3VisionConstants {
 }
 
 impl H3Vision {
-    pub(crate) fn mask(&self) -> Option<&H3Bitmap> {
+    pub(crate) fn mask(&self) -> Option<&Gen3Bitmap> {
         self.mask.as_ref()
     }
 

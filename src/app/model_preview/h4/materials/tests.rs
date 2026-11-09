@@ -17,10 +17,10 @@ fn a_parameter_finds_its_sampler_whatever_the_source_spells_it() {
 
 #[test]
 fn blend_modes_take_the_preview_states_their_names_describe() {
-    assert_eq!(h4_blend(0), H3Blend::Opaque);
-    assert_eq!(h4_blend(23), H3Blend::Opaque, "opaque_alpha_blend counts as opaque");
-    assert_eq!(h4_blend(3), H3Blend::AlphaBlend);
-    assert_eq!(h4_blend(24), H3Blend::Additive, "alpha_blend_additive_transparent");
-    assert_eq!(h4_blend(9), H3Blend::AddSrcTimesSrcAlpha);
-    assert_eq!(h4_blend(10), H3Blend::InvAlphaBlend);
+    assert_eq!(h4_blend(0), Gen3Blend::Opaque);
+    assert_eq!(h4_blend(23), Gen3Blend::Opaque, "opaque_alpha_blend counts as opaque");
+    assert_eq!(h4_blend(3), Gen3Blend::AlphaBlend);
+    assert_eq!(h4_blend(24), Gen3Blend::Additive, "alpha_blend_additive_transparent");
+    assert_eq!(h4_blend(9), Gen3Blend::AddSrcTimesSrcAlpha);
+    assert_eq!(h4_blend(10), Gen3Blend::InvAlphaBlend);
 }

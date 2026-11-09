@@ -14,7 +14,7 @@ use super::super::functions::FunctionValues;
 use super::lights::attachment_value;
 use super::super::common::image::Image;
 use super::super::effects::marker_name;
-use super::super::gen3::shaders::H3Blend;
+use super::super::gen3::shaders::Gen3Blend;
 use super::super::materials::decode_image;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -104,7 +104,7 @@ pub(crate) struct H2ContrailAt {
     repeats_v: f32,
     fade_first: bool,
     fade_last: bool,
-    blend: H3Blend,
+    blend: Gen3Blend,
     states: Arc<Vec<PointState>>,
     bitmap: Option<Arc<Image>>,
 }
@@ -133,13 +133,13 @@ fn read_state(reader: &TagReader, state: TagStruct<'_>) -> Option<PointState> {
 }
 
 /// What `framebuffer blend function` names.
-fn blend_named(name: &str) -> H3Blend {
+fn blend_named(name: &str) -> Gen3Blend {
     match name {
-        "add" => H3Blend::Additive,
-        "multiply" => H3Blend::Multiply,
-        "double multiply" => H3Blend::DoubleMultiply,
-        "alpha-multiply add" => H3Blend::PreMultiplied,
-        _ => H3Blend::AlphaBlend,
+        "add" => Gen3Blend::Additive,
+        "multiply" => Gen3Blend::Multiply,
+        "double multiply" => Gen3Blend::DoubleMultiply,
+        "alpha-multiply add" => Gen3Blend::PreMultiplied,
+        _ => Gen3Blend::AlphaBlend,
     }
 }
 
@@ -305,7 +305,7 @@ impl H2ContrailAt {
         self.bitmap.as_ref()
     }
 
-    pub(crate) fn blend(&self) -> H3Blend {
+    pub(crate) fn blend(&self) -> Gen3Blend {
         self.blend
     }
 }
@@ -519,9 +519,9 @@ mod tests {
 
     #[test]
     fn a_blend_comes_from_its_option_name() {
-        assert_eq!(blend_named("add"), H3Blend::Additive);
-        assert_eq!(blend_named("alpha blend"), H3Blend::AlphaBlend);
-        assert_eq!(blend_named("alpha-multiply add"), H3Blend::PreMultiplied);
+        assert_eq!(blend_named("add"), Gen3Blend::Additive);
+        assert_eq!(blend_named("alpha blend"), Gen3Blend::AlphaBlend);
+        assert_eq!(blend_named("alpha-multiply add"), Gen3Blend::PreMultiplied);
     }
 
     #[test]

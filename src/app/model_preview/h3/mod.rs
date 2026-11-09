@@ -22,7 +22,7 @@ mod vision_pass;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct H3Features {
     /// The model's own `shield impact parameter override`.
-    pub shield: Option<std::sync::Arc<super::gen3::shaders::H3ShieldSettings>>,
+    pub shield: Option<std::sync::Arc<super::gen3::shaders::Gen3ShieldSettings>>,
     pub lights: Vec<super::h3::lights::H3Light>,
     pub leaves: Vec<std::sync::Arc<super::h3::leaves::H3LeavesAt>>,
     /// ODST's VISR, for an object with an effect that turns it on.

@@ -18,14 +18,14 @@ const CHANNELS: usize = 3;
 
 /// How much of the transfer a mesh baked, as `_transfer_prt_*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum H3PrtKind {
+pub(crate) enum Gen3PrtKind {
     None,
     Ambient,
     Linear,
     Quadratic,
 }
 
-impl H3PrtKind {
+impl Gen3PrtKind {
     fn from_tag(value: i128) -> Self {
         match value {
             1 => Self::Ambient,
@@ -47,31 +47,31 @@ impl H3PrtKind {
 
 /// A model's coefficients, parallel to the preview's vertices.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct H3Prt {
+pub(crate) struct Gen3Prt {
     pub(crate) vertices: Vec<[f32; COEFFICIENTS]>,
     /// Where each mesh's vertices end, and what it baked.
-    meshes: Vec<(u32, H3PrtKind)>,
+    meshes: Vec<(u32, Gen3PrtKind)>,
 }
 
-impl H3Prt {
+impl Gen3Prt {
     /// Stay parallel to vertices that have none of this.
     pub(crate) fn pad(&mut self, count: usize) {
         self.vertices.resize(self.vertices.len() + count, [0.0; COEFFICIENTS]);
     }
 
     /// Take on an attached object's own, after everything so far.
-    pub(crate) fn append(&mut self, other: &H3Prt) {
+    pub(crate) fn append(&mut self, other: &Gen3Prt) {
         let base = self.vertices.len() as u32;
         // What was padded on has no mesh, and must not read as `other`'s first.
-        self.meshes.push((base, H3PrtKind::None));
+        self.meshes.push((base, Gen3PrtKind::None));
         self.vertices.extend_from_slice(&other.vertices);
         self.meshes.extend(other.meshes.iter().map(|(end, kind)| (end + base, *kind)));
     }
 
     /// What the mesh holding `vertex` baked.
-    pub(crate) fn kind_at(&self, vertex: u32) -> H3PrtKind {
+    pub(crate) fn kind_at(&self, vertex: u32) -> Gen3PrtKind {
         let found = self.meshes.iter().find(|(end, _)| vertex < *end);
-        found.map_or(H3PrtKind::None, |(_, kind)| *kind)
+        found.map_or(Gen3PrtKind::None, |(_, kind)| *kind)
     }
 }
 
@@ -81,7 +81,7 @@ pub(in crate::app) fn read_h3_prt(
     tag: &TagFile,
     model: &RenderModel,
     meshes: &[RenderMesh],
-) -> Option<H3Prt> {
+) -> Option<Gen3Prt> {
     let geometry = tag.root().descend("render geometry")?;
     let tag_meshes = elements(geometry, "meshes");
     let data = elements(geometry, "per_mesh_prt_data*");
@@ -92,10 +92,10 @@ pub(in crate::app) fn read_h3_prt(
     let reach = tag_meshes.first().is_some_and(|mesh| mesh.field("lighting policy").is_some());
     let mut per_mesh = Vec::with_capacity(meshes.len());
     for ((mesh, tag_mesh), element) in meshes.iter().zip(&tag_meshes).zip(&data) {
-        let kind = H3PrtKind::from_tag(tag_mesh.read_int_any("PRT vertex type").unwrap_or(0));
-        let kind = if reach && kind != H3PrtKind::Ambient { H3PrtKind::None } else { kind };
+        let kind = Gen3PrtKind::from_tag(tag_mesh.read_int_any("PRT vertex type").unwrap_or(0));
+        let kind = if reach && kind != Gen3PrtKind::Ambient { Gen3PrtKind::None } else { kind };
         let bytes = element.field("mesh pca data").and_then(|field| field.as_data()).unwrap_or(&[]);
-        let mut prt = H3Prt::default();
+        let mut prt = Gen3Prt::default();
         prt.pad(mesh.vertices.len());
         // Every coefficient of red, then green, then blue; the shaders read
         // one gray channel.
@@ -120,12 +120,12 @@ pub(in crate::app) fn read_h3_prt(
             // rigid or skinned; the shader turns the light for any pose.
             for vertex in &mut prt.vertices {
                 // `static_prt_linear_vs` unpacks its four from a byte stream.
-                if kind == H3PrtKind::Linear {
+                if kind == Gen3PrtKind::Linear {
                     vertex[..4].iter_mut().for_each(|value| *value = (*value + 1.0) * 0.5);
                 }
             }
         }
-        let kind = if fits { kind } else { H3PrtKind::None };
+        let kind = if fits { kind } else { Gen3PrtKind::None };
         per_mesh.push((prt.vertices, kind));
     }
     let order = preview_mesh_order(model, meshes.len());
@@ -134,10 +134,10 @@ pub(in crate::app) fn read_h3_prt(
 
 /// Each mesh's coefficients laid out as the preview lays out its vertices.
 fn in_preview_order(
-    per_mesh: &[(Vec<[f32; COEFFICIENTS]>, H3PrtKind)],
+    per_mesh: &[(Vec<[f32; COEFFICIENTS]>, Gen3PrtKind)],
     order: impl Iterator<Item = usize>,
-) -> H3Prt {
-    let mut prt = H3Prt::default();
+) -> Gen3Prt {
+    let mut prt = Gen3Prt::default();
     for (vertices, kind) in order.filter_map(|mesh| per_mesh.get(mesh)) {
         prt.vertices.extend_from_slice(vertices);
         prt.meshes.push((prt.vertices.len() as u32, *kind));
@@ -220,58 +220,58 @@ mod tests {
 
     #[test]
     fn a_vertex_finds_its_mesh_and_past_the_end_there_is_none() {
-        let prt = H3Prt {
+        let prt = Gen3Prt {
             vertices: Vec::new(),
-            meshes: vec![(4, H3PrtKind::Ambient), (9, H3PrtKind::Quadratic)],
+            meshes: vec![(4, Gen3PrtKind::Ambient), (9, Gen3PrtKind::Quadratic)],
         };
-        assert_eq!(prt.kind_at(3), H3PrtKind::Ambient);
-        assert_eq!(prt.kind_at(4), H3PrtKind::Quadratic);
-        assert_eq!(prt.kind_at(9), H3PrtKind::None);
+        assert_eq!(prt.kind_at(3), Gen3PrtKind::Ambient);
+        assert_eq!(prt.kind_at(4), Gen3PrtKind::Quadratic);
+        assert_eq!(prt.kind_at(9), Gen3PrtKind::None);
     }
 
     #[test]
     fn coefficients_follow_the_previews_order_not_the_tags() {
         let vertex = |value: f32| [value; COEFFICIENTS];
         let per_mesh = [
-            (vec![vertex(0.0), vertex(0.5)], H3PrtKind::Ambient),
-            (vec![vertex(1.0)], H3PrtKind::Quadratic),
+            (vec![vertex(0.0), vertex(0.5)], Gen3PrtKind::Ambient),
+            (vec![vertex(1.0)], Gen3PrtKind::Quadratic),
         ];
         let prt = in_preview_order(&per_mesh, [1, 0].into_iter());
         assert_eq!(prt.vertices[0][0], 1.0);
         assert_eq!(prt.vertices[2][0], 0.5);
-        assert_eq!(prt.kind_at(0), H3PrtKind::Quadratic);
-        assert_eq!(prt.kind_at(1), H3PrtKind::Ambient);
+        assert_eq!(prt.kind_at(0), Gen3PrtKind::Quadratic);
+        assert_eq!(prt.kind_at(1), Gen3PrtKind::Ambient);
     }
 
     #[test]
     fn a_mesh_two_permutations_share_appears_twice() {
-        let per_mesh = [(vec![[0.0; COEFFICIENTS]], H3PrtKind::Ambient)];
+        let per_mesh = [(vec![[0.0; COEFFICIENTS]], Gen3PrtKind::Ambient)];
         assert_eq!(in_preview_order(&per_mesh, [0, 0].into_iter()).vertices.len(), 2);
     }
 
     #[test]
     fn an_attached_object_keeps_its_transfer_and_padding_stays_empty() {
         let mut prt = in_preview_order(
-            &[(vec![[0.25; COEFFICIENTS]; 2], H3PrtKind::Linear)],
+            &[(vec![[0.25; COEFFICIENTS]; 2], Gen3PrtKind::Linear)],
             [0].into_iter(),
         );
         prt.pad(3);
         let other = in_preview_order(
-            &[(vec![[0.5; COEFFICIENTS]; 4], H3PrtKind::Ambient)],
+            &[(vec![[0.5; COEFFICIENTS]; 4], Gen3PrtKind::Ambient)],
             [0].into_iter(),
         );
         prt.append(&other);
         assert_eq!(prt.vertices.len(), 9);
         assert_eq!(prt.vertices[5][0], 0.5);
-        assert_eq!(prt.kind_at(1), H3PrtKind::Linear);
-        assert_eq!(prt.kind_at(4), H3PrtKind::None, "padding");
-        assert_eq!(prt.kind_at(5), H3PrtKind::Ambient);
-        assert_eq!(prt.kind_at(9), H3PrtKind::None);
+        assert_eq!(prt.kind_at(1), Gen3PrtKind::Linear);
+        assert_eq!(prt.kind_at(4), Gen3PrtKind::None, "padding");
+        assert_eq!(prt.kind_at(5), Gen3PrtKind::Ambient);
+        assert_eq!(prt.kind_at(9), Gen3PrtKind::None);
     }
 
     #[test]
     fn padding_keeps_parallel() {
-        let mut prt = H3Prt::default();
+        let mut prt = Gen3Prt::default();
         prt.pad(3);
         assert_eq!(prt.vertices.len(), 3);
     }

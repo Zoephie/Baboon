@@ -3,7 +3,7 @@
 //! Halo 3 lit by nine spherical harmonics, and its final composite has no tone
 //! curve: the frame is encoded by a square root.
 
-use super::super::gen3::shaders::H3Value;
+use super::super::gen3::shaders::Gen3Value;
 use super::super::frame::ModelGpuFrame;
 use super::super::common::camera::camera_light;
 
@@ -235,7 +235,7 @@ fn reach_vmf_index(name: &str) -> Option<usize> {
 /// Reach's [`FrameValues`](super::super::gen3::pipeline::FrameValues):
 /// its own, then Halo 3's, but for the lighting constants past its four
 /// vMF, which are not an object's.
-pub(in crate::app::model_preview) fn reach_frame_values(frame: &ModelGpuFrame, name: &str, size: [i32; 2], stops: f32) -> Option<H3Value> {
+pub(in crate::app::model_preview) fn reach_frame_values(frame: &ModelGpuFrame, name: &str, size: [i32; 2], stops: f32) -> Option<Gen3Value> {
     if let Some(value) = reach_frame_value(frame, name, stops) {
         return Some(value);
     }
@@ -248,11 +248,11 @@ pub(in crate::app::model_preview) fn reach_frame_values(frame: &ModelGpuFrame, n
 /// What Reach's rasterizer globals hold for an object here, by uniform name,
 /// at the area screen effects' exposure `stops`. Anything not named falls to
 /// what Reach shares with Halo 3.
-pub(in crate::app::model_preview) fn reach_frame_value(frame: &ModelGpuFrame, name: &str, stops: f32) -> Option<H3Value> {
-    let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+pub(in crate::app::model_preview) fn reach_frame_value(frame: &ModelGpuFrame, name: &str, stops: f32) -> Option<Gen3Value> {
+    let floats = |value: [f32; 4]| Some(Gen3Value::Floats(value));
     let lighting = || reach_frame_lighting(frame);
     if let Some(index) = reach_vmf_index(name) {
-        return lighting().dual_vmf.get(index).copied().map(H3Value::Floats);
+        return lighting().dual_vmf.get(index).copied().map(Gen3Value::Floats);
     }
     match name {
         "k_ps_analytical_light_direction" | "v_analytical_light_direction" => {
@@ -265,11 +265,11 @@ pub(in crate::app::model_preview) fn reach_frame_value(frame: &ModelGpuFrame, na
             let [r, g, b] = lighting().intensity;
             floats([r, g, b, 0.0])
         }
-        "k_ps_bool_is_uber_light_directional" => Some(H3Value::Integer(1)),
+        "k_ps_bool_is_uber_light_directional" => Some(Gen3Value::Integer(1)),
         // The default sample has no bounce.
         "k_ps_bounce_light_direction" | "k_ps_bounce_light_intensity" => floats([0.0; 4]),
         "shadow_mask_enabled" | "vs_boolean_enable_wet_effect" | "ps_boolean_enable_wet_effect" => {
-            Some(H3Value::Integer(0))
+            Some(Gen3Value::Integer(0))
         }
         // `setup_per_object_render_state` (MCC 0x140885320): no level offsets
         // the cube maps' levels, and the object's cube map sample, at its

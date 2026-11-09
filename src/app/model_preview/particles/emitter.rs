@@ -4,7 +4,7 @@ use super::*;
 
 /// `c_particle_emitter_definition`'s emission shapes, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum H3EmissionShape {
+pub(in crate::app::model_preview) enum EmissionShape {
     Sprayer,
     Disc,
     Globe,
@@ -30,13 +30,13 @@ pub(in crate::app::model_preview) enum H3EmissionShape {
 
 /// ODST's `s_particle_emitter_custom_points::s_point`, decompressed.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::app::model_preview) struct H3CustomPoint {
+pub(in crate::app::model_preview) struct CustomPoint {
     pub(super) position: [f32; 3],
     pub(super) normal: [f32; 3],
 }
 
 /// A `particle_emitter_custom_points`.
-fn read_custom_points(reader: &TagReader, emitter: TagStruct<'_>) -> Vec<H3CustomPoint> {
+fn read_custom_points(reader: &TagReader, emitter: TagStruct<'_>) -> Vec<CustomPoint> {
     let path = emitter.read_tag_ref_path("custom shape").filter(|path| !path.is_empty());
     let tag = path.and_then(|path| {
         reader.load(&path, "particle_emitter_custom_points", b"pecp").ok()
@@ -47,7 +47,7 @@ fn read_custom_points(reader: &TagReader, emitter: TagStruct<'_>) -> Vec<H3Custo
     let root = tag.root();
     let (scale, offset) = (root.read_vec3("compression scale"), root.read_vec3("compression offset"));
     let word = |point: TagStruct<'_>, name: &str| point.read_int_any(name).unwrap_or(0) as f32;
-    let points = elements(root, "points").into_iter().map(|point| H3CustomPoint {
+    let points = elements(root, "points").into_iter().map(|point| CustomPoint {
         position: [
             word(point, "position_x") * scale.i + offset.i,
             word(point, "position_y") * scale.j + offset.j,
@@ -62,7 +62,7 @@ fn read_custom_points(reader: &TagReader, emitter: TagStruct<'_>) -> Vec<H3Custo
 /// and `emission angle` how far its normal leans to a random direction, in a
 /// straight line rather than around the sphere.
 pub(super) fn emit_from_points(
-    points: &[H3CustomPoint],
+    points: &[CustomPoint],
     radius: f32,
     angle_degrees: f32,
     random: &mut Random,
@@ -77,7 +77,7 @@ pub(super) fn emit_from_points(
     (point.position, std::array::from_fn(|axis| (1.0 - stray) * point.normal[axis] + stray * toward[axis]))
 }
 
-impl H3EmissionShape {
+impl EmissionShape {
     pub(in crate::app::model_preview) fn named(name: &str) -> Option<Self> {
         Some(match name {
             "sprayer" => Self::Sprayer,
@@ -158,7 +158,7 @@ impl ParticleAxis {
 }
 
 #[derive(Debug)]
-pub(in crate::app::model_preview) struct H3Emitter {
+pub(in crate::app::model_preview) struct Emitter {
     pub(in crate::app::model_preview) update: ParticleUpdate,
     /// On the card, Reach's and Halo 4's self-acceleration is a straight lerp
     /// between its ends (Reach's `map_to_vector3d_range` has its slerp
@@ -172,8 +172,8 @@ pub(in crate::app::model_preview) struct H3Emitter {
     /// `count + 0.0001 >= 1`; Halo 3's floors it.
     pub(in crate::app::model_preview) spawn_slack: f32,
     pub(in crate::app::model_preview) controllers: Vec<ParticleController>,
-    pub(in crate::app::model_preview) shape: H3EmissionShape,
-    pub(in crate::app::model_preview) points: Vec<H3CustomPoint>,
+    pub(in crate::app::model_preview) shape: EmissionShape,
+    pub(in crate::app::model_preview) points: Vec<CustomPoint>,
     pub(in crate::app::model_preview) scroll: [f32; 2],
     pub(in crate::app::model_preview) axis: ParticleAxis,
     pub(in crate::app::model_preview) reference_axis: usize,
@@ -331,10 +331,10 @@ pub(super) fn read_emitter(
     system_flagged: impl Fn(&str) -> bool,
     look: &ParticleLook,
     size_scale: f32,
-) -> Option<H3Emitter> {
+) -> Option<Emitter> {
     // Halo 4 seeds and moves as Reach does, with terms of its own.
     let rules = ParticleRules::of(reader.source.game());
-    let shape = H3EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
+    let shape = EmissionShape::named(&emitter.read_enum_option("emission shape").unwrap_or_default())?;
     let mut properties = unallocated_properties(emitter, EMITTER_PROPERTIES)?;
     let movement = emitter.descend("particle movement");
     let movement_flagged = |wanted: &str| movement.is_some_and(|movement| has_flag(movement, "flags", wanted));
@@ -392,7 +392,7 @@ pub(super) fn read_emitter(
     ] = properties;
     let scroll = emitter.read_vec2("uv scrolling");
     let raw_scale = emitter.read_point3d("axis scale");
-    Some(H3Emitter {
+    Some(Emitter {
         update,
         card_lerps: rules.card_lerps,
         card_at_rest,

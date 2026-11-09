@@ -18,7 +18,7 @@ use super::super::functions::FunctionValues;
 use super::super::common::image::Image;
 use super::super::common::named_function::tag_function_at;
 use super::super::effects::part_markers;
-use super::super::gen3::materials::{H3Bitmap, read_h3_bitmap};
+use super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
 use super::super::reach::lights::object_value;
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;

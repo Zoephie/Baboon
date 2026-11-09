@@ -16,7 +16,7 @@ use super::super::functions::FunctionValues;
 
 use super::super::common::image::Image;
 use super::super::common::named_function::NamedFunction;
-use super::super::gen3::effects::flares::{H3EffectScale, H3Flare, read_h3_flare};
+use super::super::gen3::effects::flares::{Gen3EffectScale, Gen3Flare, read_h3_flare};
 use super::super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::app::model_preview::common::math::{cross, dot};
@@ -74,7 +74,7 @@ pub(crate) struct H3Light {
     pub(in crate::app::model_preview) only_under: Option<(String, String)>,
     pub(in crate::app::model_preview) scale_by: String,
     /// Set for a light an attached effect makes.
-    by_effect: Option<H3EffectScale>,
+    by_effect: Option<Gen3EffectScale>,
     /// `light_update` multiplies in the object's change color.
     change_color: Option<usize>,
     frustum: bool,
@@ -90,7 +90,7 @@ pub(crate) struct H3Light {
     intensity: H3Channel,
     pub(crate) gel: Option<Arc<Image>>,
     /// Its `Lens Flare`, which `light_submit_lens_flares` draws at it.
-    pub(in crate::app::model_preview) flare: Option<Arc<H3Flare>>,
+    pub(in crate::app::model_preview) flare: Option<Arc<Gen3Flare>>,
 }
 
 /// What a frame's pass reads of a light.
@@ -282,7 +282,7 @@ struct H3LightTag {
     color: H3Channel,
     intensity: H3Channel,
     gel: Option<Arc<Image>>,
-    flare: Option<Arc<H3Flare>>,
+    flare: Option<Arc<Gen3Flare>>,
 }
 
 /// An object's attached `light`s, at the first marker of each name, and those
@@ -305,7 +305,7 @@ pub(in crate::app::model_preview) fn read_h3_lights(
                            only_under: Option<(String, String)>,
                            scale_by: String,
                            change_color: Option<usize>,
-                           by_effect: Option<H3EffectScale>,
+                           by_effect: Option<Gen3EffectScale>,
                            event: Option<(Arc<EffectTimes>, usize)>,
                            world_oriented: bool| H3Light {
         event,
@@ -364,7 +364,7 @@ pub(in crate::app::model_preview) fn read_h3_lights(
             let (place, node) = frame(marker);
             let (place, node) = part.placed(place, node);
             let place = part_frame(&place, offset, yaw, pitch);
-            let by_effect = Some(H3EffectScale { scaled: part.scaled });
+            let by_effect = Some(Gen3EffectScale { scaled: part.scaled });
             let only_under = marker.only_under.clone();
             let event = Some((Arc::clone(&part.times), part.event));
             let (scale_by, change_color) = (part.effect.scale_by.clone(), part.effect.change_color);

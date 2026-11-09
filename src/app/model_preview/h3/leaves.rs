@@ -8,8 +8,8 @@ use blam_tags::TagFile;
 use super::super::common::fields::{elements, object_block};
 use super::super::cloth::{H3Wind, away_from_pole, turned_about};
 use super::super::effects::marker_name;
-use super::super::particles::{ParticleCorner, H3SpriteShader};
-use super::super::gen3::shaders::H3Blend;
+use super::super::particles::{ParticleCorner, SpriteShader};
+use super::super::gen3::shaders::Gen3Blend;
 use super::super::gen3::materials::read_h3_bitmap;
 use super::super::gen3::pipeline::EXPOSURE as H3_EXPOSURE;
 use super::super::*;
@@ -172,11 +172,11 @@ pub(crate) struct H3LeavesAt {
     sphere: f32,
     cylinder: f32,
     types: Vec<LeafType>,
-    shader: H3SpriteShader,
+    shader: SpriteShader,
 }
 
 impl H3LeavesAt {
-    pub(crate) fn shader(&self) -> &H3SpriteShader {
+    pub(crate) fn shader(&self) -> &SpriteShader {
         &self.shader
     }
 
@@ -292,7 +292,7 @@ pub(in crate::app::model_preview) fn read_h3_leaves(
             sphere: real("emissions sphere radius"),
             cylinder: real("movement cylinder radius"),
             types,
-            shader: H3SpriteShader::alpha_tested(H3Blend::AlphaBlend, map),
+            shader: SpriteShader::alpha_tested(Gen3Blend::AlphaBlend, map),
         });
     }
     systems
@@ -605,7 +605,7 @@ mod tests {
                 friction: [0.2, 0.0],
                 bounds: [0.0, 1.0, 0.0, 1.0],
             }],
-            shader: H3SpriteShader::blank(),
+            shader: SpriteShader::blank(),
         }
     }
 

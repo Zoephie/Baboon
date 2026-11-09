@@ -5,7 +5,7 @@ use crate::core::game::GameId;
 #[test]
 fn a_custom_shape_picks_its_point_by_radius_and_strays_by_angle() {
     let mut random = Random(1);
-    let point = |x: f32| H3CustomPoint { position: [x, 0.0, 0.0], normal: [0.0, 0.0, 1.0] };
+    let point = |x: f32| CustomPoint { position: [x, 0.0, 0.0], normal: [0.0, 0.0, 1.0] };
     let points = [point(1.0), point(2.0), point(3.0), point(4.0)];
     assert_eq!(emit_from_points(&points, 0.0, 0.0, &mut random), (point(1.0).position, [0.0, 0.0, 1.0]));
     assert_eq!(emit_from_points(&points, 0.5, 0.0, &mut random).0, point(3.0).position);
@@ -19,12 +19,12 @@ fn a_custom_shape_picks_its_point_by_radius_and_strays_by_angle() {
 #[test]
 fn only_odst_and_reach_let_a_particle_that_faces_nothing_stay_still() {
     let (halo3, odst, reach) = (Some(GameId::Halo3), Some(GameId::Halo3Odst), Some(GameId::HaloReach));
-    assert!(still_particles_move(halo3, H3Billboard::ScreenFacing));
-    assert!(!still_particles_move(odst, H3Billboard::ScreenFacing));
-    assert!(still_particles_move(odst, H3Billboard::ScreenParallel));
-    assert!(still_particles_move(odst, H3Billboard::VelocityHorizontal));
-    assert!(!still_particles_move(reach, H3Billboard::ScreenFacing));
-    assert!(still_particles_move(reach, H3Billboard::ScreenPerpendicular));
+    assert!(still_particles_move(halo3, Billboard::ScreenFacing));
+    assert!(!still_particles_move(odst, Billboard::ScreenFacing));
+    assert!(still_particles_move(odst, Billboard::ScreenParallel));
+    assert!(still_particles_move(odst, Billboard::VelocityHorizontal));
+    assert!(!still_particles_move(reach, Billboard::ScreenFacing));
+    assert!(still_particles_move(reach, Billboard::ScreenPerpendicular));
 }
 
 #[test]
@@ -56,16 +56,16 @@ fn only_what_landed_slowly_rests() {
 #[test]
 fn a_line_runs_along_y_and_a_breakable_has_nothing_of_its_own() {
     let mut random = Random(3);
-    let (place, _) = emit(H3EmissionShape::Line, 2.0, 0.0, false, &mut random);
+    let (place, _) = emit(EmissionShape::Line, 2.0, 0.0, false, &mut random);
     assert_eq!(place[0], 0.0);
     assert!(place[1].abs() <= 2.0 && place[1] != 0.0);
-    assert_eq!(emit(H3EmissionShape::Breakable, 2.0, 30.0, false, &mut random), ([0.0; 3], [0.0; 3]));
+    assert_eq!(emit(EmissionShape::Breakable, 2.0, 30.0, false, &mut random), ([0.0; 3], [0.0; 3]));
 }
 
 #[test]
 fn an_impact_with_no_size_sprays_from_one_point_at_its_angle() {
     let mut random = Random(5);
-    for shape in [H3EmissionShape::ImpactContour, H3EmissionShape::ImpactArea] {
+    for shape in [EmissionShape::ImpactContour, EmissionShape::ImpactArea] {
         let (place, velocity) = emit(shape, 9.0, 60.0, false, &mut random);
         assert_eq!(place, [0.0; 3]);
         assert!((velocity[0] - 0.5).abs() < 1e-5);
@@ -213,7 +213,7 @@ fn randoms_take_seeds_in_turn_and_wrap() {
 fn a_sprayer_starts_at_the_origin_inside_its_cone() {
     let mut random = Random(7);
     for _ in 0..50 {
-        let (place, direction) = emit(H3EmissionShape::Sprayer, 2.0, 10.0, false, &mut random);
+        let (place, direction) = emit(EmissionShape::Sprayer, 2.0, 10.0, false, &mut random);
         assert_eq!(place, [0.0; 3]);
         assert!(direction[0] >= 10f32.to_radians().cos() - 1e-5, "{direction:?}");
     }
@@ -222,10 +222,10 @@ fn a_sprayer_starts_at_the_origin_inside_its_cone() {
 #[test]
 fn a_globe_starts_on_its_radius_heading_out_and_an_implode_in() {
     let mut random = Random(9);
-    let (place, direction) = emit(H3EmissionShape::Globe, 2.0, 0.0, false, &mut random);
+    let (place, direction) = emit(EmissionShape::Globe, 2.0, 0.0, false, &mut random);
     assert!((dot(place, place).sqrt() - 2.0).abs() < 1e-4);
     assert!(dot(place, direction) > 0.0);
-    let (place, direction) = emit(H3EmissionShape::Implode, 2.0, 0.0, false, &mut random);
+    let (place, direction) = emit(EmissionShape::Implode, 2.0, 0.0, false, &mut random);
     assert!(dot(place, direction) < 0.0);
 }
 
@@ -280,7 +280,7 @@ fn movements_follow_the_flags_in_tools_order() {
 }
 
 /// The first emitter of an effect's first system, from the Halo 3 kit.
-fn kit_emitter(root: &std::path::Path, path: &str) -> Arc<H3Emitter> {
+fn kit_emitter(root: &std::path::Path, path: &str) -> Arc<Emitter> {
     let source = TagSource::LooseFolder {
         root: root.into(),
         game: Some(GameId::Halo3),
@@ -564,23 +564,23 @@ fn a_reach_near_fade_of_nothing_fades_over_a_hair() {
 /// Reach's four new shapes, and the two it emits nothing from here.
 #[test]
 fn reachs_volumes_fill_their_boxes_and_a_plane_heads_along_x() {
-    assert_eq!(H3EmissionShape::named("cube"), Some(H3EmissionShape::Cube));
-    assert_eq!(H3EmissionShape::named("unweighted line"), Some(H3EmissionShape::UnweightedLine));
-    assert_eq!(H3EmissionShape::named("boat hull surface"), None);
-    assert_eq!(H3EmissionShape::named("jetwash"), None);
+    assert_eq!(EmissionShape::named("cube"), Some(EmissionShape::Cube));
+    assert_eq!(EmissionShape::named("unweighted line"), Some(EmissionShape::UnweightedLine));
+    assert_eq!(EmissionShape::named("boat hull surface"), None);
+    assert_eq!(EmissionShape::named("jetwash"), None);
     let mut random = Random(11);
     for _ in 0..50 {
-        let (place, heading) = emit(H3EmissionShape::Cube, 2.0, 0.0, false, &mut random);
+        let (place, heading) = emit(EmissionShape::Cube, 2.0, 0.0, false, &mut random);
         assert!(place.iter().all(|axis| axis.abs() <= 2.0) && heading == place, "out from the centre");
-        let (place, heading) = emit(H3EmissionShape::Cylinder, 3.0, 0.0, false, &mut random);
+        let (place, heading) = emit(EmissionShape::Cylinder, 3.0, 0.0, false, &mut random);
         assert!(place[0].abs() <= 1.0, "two units long whatever the radius: {place:?}");
         assert!((place[1] * place[1] + place[2] * place[2]).sqrt() <= 3.0 && heading == place);
-        let (place, heading) = emit(H3EmissionShape::Plane, 2.0, 0.0, false, &mut random);
+        let (place, heading) = emit(EmissionShape::Plane, 2.0, 0.0, false, &mut random);
         assert!(place.iter().all(|axis| axis.abs() <= 2.0) && heading == [1.0, 0.0, 0.0]);
-        let (place, _) = emit(H3EmissionShape::UnweightedLine, 2.0, 0.0, false, &mut random);
+        let (place, _) = emit(EmissionShape::UnweightedLine, 2.0, 0.0, false, &mut random);
         assert!(place[0] == 0.0 && place[2] == 0.0 && place[1].abs() <= 2.0);
     }
-    let (place, heading) = emit(H3EmissionShape::Cube, 2.0, 0.0, true, &mut random);
+    let (place, heading) = emit(EmissionShape::Cube, 2.0, 0.0, true, &mut random);
     assert_ne!(heading, place, "volume velocities are random");
 }
 
@@ -620,9 +620,9 @@ fn scale_x_and_y_bake_into_size_and_aspect() {
     assert_eq!(scaled.size_and_aspect(&base), [0.5, 4.0]);
 }
 
-fn test_emitter(shape: H3EmissionShape) -> H3Emitter {
+fn test_emitter(shape: EmissionShape) -> Emitter {
     let fixed = || ParticleProperty::fixed(0.0).unwrap();
-    H3Emitter {
+    Emitter {
         h4: None,
         update: ParticleUpdate::Gpu,
         card_lerps: false,
@@ -695,9 +695,9 @@ fn test_particle() -> Particle {
 fn reachs_axis_scale_flattens_what_its_shape_emits() {
     assert_eq!(reach_axis_scale([0.0; 3]), [1.0; 3]);
     assert_eq!(reach_axis_scale([0.0, 2.0, 2.0]), [0.0, 2.0, 2.0]);
-    let emitter = H3Emitter { axis_scale: [2.0, 1.0, 0.0], ..test_emitter(H3EmissionShape::Plane) };
+    let emitter = Emitter { axis_scale: [2.0, 1.0, 0.0], ..test_emitter(EmissionShape::Plane) };
     let (place, _) = emitter.emitted(1.0, 0.0, &mut Random(5));
-    let (unscaled, _) = emit(H3EmissionShape::Plane, 1.0, 0.0, false, &mut Random(5));
+    let (unscaled, _) = emit(EmissionShape::Plane, 1.0, 0.0, false, &mut Random(5));
     assert_eq!(place, [unscaled[0] * 2.0, unscaled[1], 0.0]);
 }
 
@@ -737,7 +737,7 @@ fn a_turbulent_particle_on_the_card_is_pushed_after_it_moves() {
         xform: [1.0, 0.3, 0.25, 0.0].map(|value| ParticleProperty::fixed(value).unwrap()),
         image: turbulence_image(),
     };
-    let emitter = H3Emitter { turbulence: Some(turbulence), ..test_emitter(H3EmissionShape::Sprayer) };
+    let emitter = Emitter { turbulence: Some(turbulence), ..test_emitter(EmissionShape::Sprayer) };
     let particle = Particle { spawned_this_frame: true, velocity: [1.0, 0.0, 0.0], ..test_particle() };
     let (mut particles, mut ended, dt) = (vec![particle], Vec::new(), 0.5);
     emitter.step(ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
@@ -748,7 +748,7 @@ fn a_turbulent_particle_on_the_card_is_pushed_after_it_moves() {
     // (0.5, -0.5, 0.002), at a strength of 2 over half a second.
     let near = (x - (0.5 + 0.5)).abs() < 1e-4 && (y + 0.5).abs() < 1e-4 && (z - 0.00196).abs() < 1e-4;
     assert!(near, "{:?}", particles[0].position);
-    let calm = test_emitter(H3EmissionShape::Sprayer);
+    let calm = test_emitter(EmissionShape::Sprayer);
     let mut particles = vec![Particle { velocity: [1.0, 0.0, 0.0], ..test_particle() }];
     calm.step(ParticleState::default(), &mut particles, dt, [0.0; 3], &mut ended, None, false);
     assert_eq!(particles[0].position, [0.5, 0.0, 0.0], "none without the movement");
@@ -763,7 +763,7 @@ fn reach_and_halo_4_lerp_opposite_accelerations_on_the_card() {
     let ends = [[-0.1, 0.1, 0.0], [0.1, -0.1, 0.0]];
     let acceleration = ParticleProperty { ends, ..ParticleProperty::fixed(0.25).unwrap() };
     assert!(acceleration.around(&ParticleState::default()).iter().any(|axis| axis.is_nan()), "the turn fails");
-    let emitter = H3Emitter { card_lerps: true, acceleration, ..test_emitter(H3EmissionShape::Sprayer) };
+    let emitter = Emitter { card_lerps: true, acceleration, ..test_emitter(EmissionShape::Sprayer) };
     let mut particles = vec![Particle { velocity: [1.0, 0.0, 0.0], ..test_particle() }];
     let mut ended = Vec::new();
     emitter.step(ParticleState::default(), &mut particles, 1.0, [0.0; 3], &mut ended, None, false);
@@ -776,23 +776,23 @@ fn reach_and_halo_4_lerp_opposite_accelerations_on_the_card() {
 /// `v_exposure.x`, and multiply none; Halo 3's keep its own.
 #[test]
 fn reach_exposes_a_particle_by_its_blend() {
-    assert_eq!(particle_exposure(H3Blend::Additive, true, true, 0.0), reach_alt_exposure(0.0)[1]);
-    assert_eq!(particle_exposure(H3Blend::AddSrcTimesSrcAlpha, true, true, 0.0), reach_alt_exposure(0.0)[1]);
-    assert_eq!(particle_exposure(H3Blend::AlphaBlend, true, true, 0.0), reach_exposure(0.0)[0]);
-    assert_eq!(particle_exposure(H3Blend::Multiply, true, true, 0.0), 1.0);
-    assert_eq!(particle_exposure(H3Blend::Additive, true, false, 0.0), H3_EXPOSURE);
-    assert_eq!(particle_exposure(H3Blend::Additive, false, false, 0.0), 1.0, "Halo 2's show as they are");
+    assert_eq!(particle_exposure(Gen3Blend::Additive, true, true, 0.0), reach_alt_exposure(0.0)[1]);
+    assert_eq!(particle_exposure(Gen3Blend::AddSrcTimesSrcAlpha, true, true, 0.0), reach_alt_exposure(0.0)[1]);
+    assert_eq!(particle_exposure(Gen3Blend::AlphaBlend, true, true, 0.0), reach_exposure(0.0)[0]);
+    assert_eq!(particle_exposure(Gen3Blend::Multiply, true, true, 0.0), 1.0);
+    assert_eq!(particle_exposure(Gen3Blend::Additive, true, false, 0.0), H3_EXPOSURE);
+    assert_eq!(particle_exposure(Gen3Blend::Additive, false, false, 0.0), 1.0, "Halo 2's show as they are");
 }
 
 /// The area screen effects' stops reach Reach's exposure and its
 /// constant self-illumination, and not Halo 3's.
 #[test]
 fn the_stops_move_reachs_particle_exposure_alone() {
-    assert_eq!(particle_exposure(H3Blend::Additive, true, true, 1.0), reach_alt_exposure(1.0)[1]);
+    assert_eq!(particle_exposure(Gen3Blend::Additive, true, true, 1.0), reach_alt_exposure(1.0)[1]);
     assert_ne!(reach_alt_exposure(1.0)[1], reach_alt_exposure(0.0)[1]);
-    assert_eq!(particle_exposure(H3Blend::AlphaBlend, true, true, -1.0), reach_exposure(-1.0)[0]);
-    assert_eq!(particle_exposure(H3Blend::Additive, true, false, 1.0), H3_EXPOSURE);
-    let mut shader = H3SpriteShader::blank();
+    assert_eq!(particle_exposure(Gen3Blend::AlphaBlend, true, true, -1.0), reach_exposure(-1.0)[0]);
+    assert_eq!(particle_exposure(Gen3Blend::Additive, true, false, 1.0), H3_EXPOSURE);
+    let mut shader = SpriteShader::blank();
     shader.add = [1.0; 3];
     assert_eq!(shader.add(1.0), [1.0; 3], "Halo 3's add as authored");
     shader.add_at_illum = true;
@@ -802,10 +802,10 @@ fn the_stops_move_reachs_particle_exposure_alone() {
 
 #[test]
 fn the_cheap_shader_faces_the_screen_or_camera_or_lies_flat() {
-    assert_eq!(cheap_billboard(H3Billboard::ScreenFacing), H3Billboard::ScreenFacing);
-    assert_eq!(cheap_billboard(H3Billboard::CameraFacing), H3Billboard::CameraFacing);
-    assert_eq!(cheap_billboard(H3Billboard::ScreenParallel), H3Billboard::World);
-    assert_eq!(cheap_billboard(H3Billboard::LocalVertical), H3Billboard::World);
+    assert_eq!(cheap_billboard(Billboard::ScreenFacing), Billboard::ScreenFacing);
+    assert_eq!(cheap_billboard(Billboard::CameraFacing), Billboard::CameraFacing);
+    assert_eq!(cheap_billboard(Billboard::ScreenParallel), Billboard::World);
+    assert_eq!(cheap_billboard(Billboard::LocalVertical), Billboard::World);
 }
 
 /// Halo 4 births a vertically authored sprite a three-quarter turn round,
@@ -855,7 +855,7 @@ fn kit_reach_swarm_emits_from_a_flattened_plane_with_turbulence() {
     let systems = elements(effect.root(), "events").into_iter().flat_map(|event| elements(event, "particle systems"));
     let parts = systems.filter_map(|system| read_system_parts(&crate::app::model_preview::load::TagReader::new(&source), system));
     let emitters: Vec<_> = parts.flat_map(|parts| parts.emitters).collect();
-    let plane = emitters.iter().find(|emitter| emitter.shape == H3EmissionShape::Plane).expect("a plane emitter");
+    let plane = emitters.iter().find(|emitter| emitter.shape == EmissionShape::Plane).expect("a plane emitter");
     assert_eq!(plane.axis_scale, [0.0, 2.0, 2.0]);
     assert_eq!(plane.update, ParticleUpdate::Gpu);
     let turbulence = plane.turbulence.as_ref().expect("its turbulence");

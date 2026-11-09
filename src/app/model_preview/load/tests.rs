@@ -307,9 +307,9 @@ fn reach_lights_quadratic_meshes_by_sh_and_clamps_its_ambient_transfer() {
     };
     // Its meshes bake quadratic transfer, which Reach's tool no longer lights by.
     let quadratic = read("objects/test/test_fbx_characters/test_fbx_civilian_female_custom_animation/test_fbx_civilian_female_custom_animation.render_model");
-    assert!((0..quadratic.vertices.len() as u32).all(|vertex| quadratic.kind_at(vertex) == super::super::gen3::prt::H3PrtKind::None));
+    assert!((0..quadratic.vertices.len() as u32).all(|vertex| quadratic.kind_at(vertex) == super::super::gen3::prt::Gen3PrtKind::None));
     let ambient = read("objects/characters/spartans/spartans.render_model");
-    assert!((0..ambient.vertices.len() as u32).any(|vertex| ambient.kind_at(vertex) == super::super::gen3::prt::H3PrtKind::Ambient));
+    assert!((0..ambient.vertices.len() as u32).any(|vertex| ambient.kind_at(vertex) == super::super::gen3::prt::Gen3PrtKind::Ambient));
     // The client's clamp to 0..1 is kept, but no object in the kit has an
     // ambient value outside it (all 1,549 render models scanned), so
     // nothing here can show it.

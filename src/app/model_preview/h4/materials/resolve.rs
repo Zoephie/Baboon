@@ -35,22 +35,22 @@ fn screen_material(reader: &TagReader, path: &str, caches: &mut ResolveCaches) -
     };
     caches.h4_shaders.insert(material.shader.clone(), Ok(shader));
     let pixel = pixel?;
-    let pass = Arc::new(H3Pass {
+    let pass = Arc::new(Gen3Pass {
         fullscreen: true,
         vertex: SCREEN_VERTEX.to_owned(),
         pixel: pixel.source,
         uniforms: pixel.uniforms,
         textures: pixel.textures,
     });
-    let mut textures: Vec<H3Texture> = Vec::new();
+    let mut textures: Vec<Gen3Texture> = Vec::new();
     for texture in &baked.textures {
         let Some((uniform, _)) = texture_uniform(&pass.textures, &texture.parameter) else { continue };
         if textures.iter().any(|known| known.uniform == uniform) {
             continue;
         }
-        let Some((image, texels, mips)) = h3_image(reader, &texture.bitmap, 0, SamplerKind::Texture2D, caches) else { continue };
+        let Some((image, texels, mips)) = gen3_image(reader, &texture.bitmap, 0, SamplerKind::Texture2D, caches) else { continue };
         let sampler = Sampler { address: [h4_address(texture.address_u), h4_address(texture.address_v)], filter: h4_filter(texture.filter) };
-        textures.push(H3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
+        textures.push(Gen3Texture { uniform: uniform.to_owned(), image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
     }
     // `set_explicit_shaders` (X360 0x82AA4FC8) submits for every phase.
     let submit = H4Submit::new(baked, 0, 0, None);
@@ -123,8 +123,8 @@ pub(in crate::app::model_preview) fn resolve_h4_material(reader: &TagReader, tag
     // (0x83B2EB80) draws every hologram, blended ones too, in pass 0 alone:
     // opaque, depth written, back faces culled, through pass 16's entry,
     // `single_pass_single_probe`.
-    let blend = if hologram || blended_hologram { H3Blend::Opaque } else { blend };
-    let opaque = blend == H3Blend::Opaque;
+    let blend = if hologram || blended_hologram { Gen3Blend::Opaque } else { blend };
+    let opaque = blend == Gen3Blend::Opaque;
     let single_pass = |shader: &mut H4Shader| shader.pass("single_pass_single_probe").map(|pass| (pass, ENTRY_SINGLE_PASS_SINGLE_PROBE));
     let (albedo, lit) = if hologram || blended_hologram {
         (None, single_pass(&mut shader))
@@ -156,8 +156,8 @@ pub(in crate::app::model_preview) fn resolve_h4_material(reader: &TagReader, tag
             let post = clip.and_then(|_| hologram_post(reader, caches));
             let submit = H4Submit::new(baked.clone(), ENTRY_ALBEDO, lit_entry, clip).with_post(post);
             let values = submit.baked_values();
-            let mut h3 = H3Material {
-                dialect: H3MaterialDialect::Halo4(Arc::new(submit)),
+            let mut h3 = Gen3Material {
+                dialect: Gen3MaterialDialect::Halo4(Arc::new(submit)),
                 albedo: albedo.filter(|_| opaque),
                 lit: Arc::clone(&lit),
                 fringe,
@@ -192,7 +192,7 @@ pub(in crate::app::model_preview) fn resolve_h4_material(reader: &TagReader, tag
                     TextureKind::Volume => SamplerKind::Volume,
                     _ => SamplerKind::Texture2D,
                 };
-                let Some((image, texels, mips)) = h3_image(reader, &texture.bitmap, 0, kind, caches) else { continue };
+                let Some((image, texels, mips)) = gen3_image(reader, &texture.bitmap, 0, kind, caches) else { continue };
                 // A frame-index function picks among the bitmap's images per draw.
                 let frames: Vec<_> = match texture.frame_index_function {
                     Some(function) => {
@@ -201,11 +201,11 @@ pub(in crate::app::model_preview) fn resolve_h4_material(reader: &TagReader, tag
                         if count > 1 {
                             submit_frames.push((uniform.clone(), function, count));
                         }
-                        (0..count).filter_map(|at| h3_image(reader, &texture.bitmap, at as i16, kind, caches)).map(|(image, ..)| image).collect()
+                        (0..count).filter_map(|at| gen3_image(reader, &texture.bitmap, at as i16, kind, caches)).map(|(image, ..)| image).collect()
                     }
                     None => Vec::new(),
                 };
-                h3.textures.push(H3Texture {
+                h3.textures.push(Gen3Texture {
                     uniform,
                     image,
                     texels,
@@ -226,11 +226,11 @@ pub(in crate::app::model_preview) fn resolve_h4_material(reader: &TagReader, tag
                 pass.textures.iter().find(|(name, _)| name == "distortionTexture_texture").map(|(name, _)| name.clone())
             });
             if let (Some(path), Some(uniform)) = (camo_texture, camo_uniform)
-                && let Some((image, texels, mips)) = h3_image(reader, &path, 0, SamplerKind::Texture2D, caches)
+                && let Some((image, texels, mips)) = gen3_image(reader, &path, 0, SamplerKind::Texture2D, caches)
             {
                 // Address 0 (wrap), filter 2 (bilinear).
                 let sampler = Sampler { address: [BitmapAddressMode::Wrap; 2], filter: BitmapFilterMode::Bilinear };
-                h3.textures.push(H3Texture { uniform, image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
+                h3.textures.push(Gen3Texture { uniform, image, texels, mips, sampler: Some(sampler), frames: Vec::new() });
             }
             // Still this material's alone, so the submit takes them in place.
             if let Some(submit) = h3.h4_mut().and_then(Arc::get_mut) {

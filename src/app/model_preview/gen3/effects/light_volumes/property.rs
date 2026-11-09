@@ -7,7 +7,7 @@ pub(super) const SEEDS: usize = 2;
 
 /// `light_volume_state_input_enum`, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app::model_preview) enum H3VolumeInput {
+pub(in crate::app::model_preview) enum Gen3VolumeInput {
     Percentile,
     GameTime,
     Age,
@@ -21,7 +21,7 @@ pub(in crate::app::model_preview) enum H3VolumeInput {
     Invalid,
 }
 
-impl H3VolumeInput {
+impl Gen3VolumeInput {
     pub(super) fn named(name: &str) -> Self {
         match name {
             "profile position" => Self::Percentile,
@@ -46,7 +46,7 @@ impl H3VolumeInput {
         }
     }
 
-    pub(in crate::app::model_preview) fn of(self, state: &H3VolumeState) -> f32 {
+    pub(in crate::app::model_preview) fn of(self, state: &Gen3VolumeState) -> f32 {
         match self {
             Self::Percentile => state.percentile,
             Self::GameTime => state.game_time,
@@ -62,7 +62,7 @@ impl H3VolumeInput {
 
 /// `c_light_volume_states`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(in crate::app::model_preview) struct H3VolumeState {
+pub(in crate::app::model_preview) struct Gen3VolumeState {
     pub(in crate::app::model_preview) percentile: f32,
     pub(super) game_time: f32,
     pub(super) age: f32,
@@ -76,19 +76,19 @@ pub(in crate::app::model_preview) struct H3VolumeState {
 
 /// `c_editable_property_base`.
 #[derive(Debug, Clone)]
-pub(in crate::app::model_preview) struct H3VolumeProperty {
-    pub(super) input: H3VolumeInput,
-    pub(super) range: H3VolumeInput,
+pub(in crate::app::model_preview) struct Gen3VolumeProperty {
+    pub(super) input: Gen3VolumeInput,
+    pub(super) range: Gen3VolumeInput,
     /// `output_mod_enum`: added, or else multiplied, by `modifier_input`.
     pub(super) adds: Option<bool>,
-    pub(super) modifier_input: H3VolumeInput,
+    pub(super) modifier_input: Gen3VolumeInput,
     pub(super) function: Arc<TagFunction>,
 }
 
-impl H3VolumeProperty {
+impl Gen3VolumeProperty {
     fn read(holder: TagStruct<'_>, name: &str) -> Option<Self> {
         let property = holder.descend(name)?;
-        let input = |field: &str| H3VolumeInput::named(&property.read_enum_option(field).unwrap_or_default());
+        let input = |field: &str| Gen3VolumeInput::named(&property.read_enum_option(field).unwrap_or_default());
         let adds = match property.read_enum_option("Output Modifier").as_deref() {
             Some("Plus") => Some(true),
             Some("Times") => Some(false),
@@ -121,7 +121,7 @@ impl H3VolumeProperty {
         }
         let range = self.function.is_ranged().then_some(self.range);
         let mut inputs = [Some(self.input), range, self.adds.map(|_| self.modifier_input)].into_iter().flatten();
-        inputs.any(|input| input != H3VolumeInput::Percentile)
+        inputs.any(|input| input != Gen3VolumeInput::Percentile)
     }
 
     /// `get_max` (tool 0x140E65CE0): the larger end of the function's range,
@@ -134,7 +134,7 @@ impl H3VolumeProperty {
         low.max(if self.function.is_constant() { low } else { high })
     }
 
-    pub(super) fn inputs(&self) -> impl Iterator<Item = H3VolumeInput> {
+    pub(super) fn inputs(&self) -> impl Iterator<Item = Gen3VolumeInput> {
         let modifier = self.adds.map(|_| self.modifier_input);
         [self.input, self.range].into_iter().chain(modifier)
     }
@@ -154,7 +154,7 @@ impl H3VolumeProperty {
         }
     }
 
-    pub(in crate::app::model_preview) fn scalar(&self, state: &H3VolumeState) -> f32 {
+    pub(in crate::app::model_preview) fn scalar(&self, state: &Gen3VolumeState) -> f32 {
         let value = self.function.evaluate(self.input.of(state), self.range.of(state));
         let modifier = self.modifier_input.of(state);
         match self.adds {
@@ -178,23 +178,23 @@ impl H3VolumeProperty {
         most / ((least + most) * 0.5)
     }
 
-    pub(in crate::app::model_preview) fn color(&self, state: &H3VolumeState) -> [f32; 3] {
+    pub(in crate::app::model_preview) fn color(&self, state: &Gen3VolumeState) -> [f32; 3] {
         let color = self.function.evaluate_color(self.input.of(state), self.range.of(state));
         [color.red, color.green, color.blue]
     }
 }
 
-pub(super) fn allocate_seed(input: &mut H3VolumeInput, next: &mut usize) {
-    if *input == H3VolumeInput::Random {
-        *input = H3VolumeInput::Seed(*next % SEEDS);
+pub(super) fn allocate_seed(input: &mut Gen3VolumeInput, next: &mut usize) {
+    if *input == Gen3VolumeInput::Random {
+        *input = Gen3VolumeInput::Seed(*next % SEEDS);
         *next += 1;
     }
 }
 
 /// The first seed free: past the highest a tag named for itself.
-pub(super) fn first_free_seed(properties: &[&H3VolumeProperty]) -> usize {
+pub(super) fn first_free_seed(properties: &[&Gen3VolumeProperty]) -> usize {
     let named = properties.iter().flat_map(|property| property.inputs());
-    named.filter_map(|input| if let H3VolumeInput::Seed(seed) = input { Some(seed + 1) } else { None }).max().unwrap_or(0)
+    named.filter_map(|input| if let Gen3VolumeInput::Seed(seed) = input { Some(seed + 1) } else { None }).max().unwrap_or(0)
 }
 
 /// `real_internal_random_range`'s generator, for a volume's own seeds.
@@ -205,19 +205,19 @@ pub(super) fn volume_seeds(index: usize) -> [f32; SEEDS] {
 
 /// The eight properties of a `light_volumes` element, as read.
 pub(super) struct VolumeProperties {
-    pub(super) length: H3VolumeProperty,
-    offset: H3VolumeProperty,
-    pub(super) density: H3VolumeProperty,
-    profile_length: H3VolumeProperty,
-    thickness: H3VolumeProperty,
-    color: H3VolumeProperty,
-    alpha: H3VolumeProperty,
-    intensity: H3VolumeProperty,
+    pub(super) length: Gen3VolumeProperty,
+    offset: Gen3VolumeProperty,
+    pub(super) density: Gen3VolumeProperty,
+    profile_length: Gen3VolumeProperty,
+    thickness: Gen3VolumeProperty,
+    color: Gen3VolumeProperty,
+    alpha: Gen3VolumeProperty,
+    intensity: Gen3VolumeProperty,
 }
 
 impl VolumeProperties {
     pub(super) fn read(element: TagStruct<'_>) -> Option<Self> {
-        let each = |name: &str| H3VolumeProperty::read(element, name);
+        let each = |name: &str| Gen3VolumeProperty::read(element, name);
         Some(Self {
             length: each("length")?,
             offset: each("offset")?,
@@ -230,7 +230,7 @@ impl VolumeProperties {
         })
     }
 
-    pub(super) fn all(&self) -> [&H3VolumeProperty; 8] {
+    pub(super) fn all(&self) -> [&Gen3VolumeProperty; 8] {
         [
             &self.length, &self.offset, &self.density, &self.profile_length,
             &self.thickness, &self.color, &self.alpha, &self.intensity,
@@ -242,8 +242,8 @@ impl VolumeProperties {
     pub(super) fn postprocessed(
         self,
         element: TagStruct<'_>,
-        rest: impl FnOnce(H3VolumeDefinition) -> H3VolumeDefinition,
-    ) -> H3VolumeDefinition {
+        rest: impl FnOnce(Gen3VolumeDefinition) -> Gen3VolumeDefinition,
+    ) -> Gen3VolumeDefinition {
         let Self { length, offset, density, profile_length, mut thickness, mut color, mut alpha, mut intensity } = self;
         // With none given, what the functions themselves make of it. A tag
         // older than the field has none either.
@@ -252,13 +252,13 @@ impl VolumeProperties {
             .filter(|ratio| *ratio != 0.0)
             .unwrap_or_else(|| alpha.peak_over_mean() * intensity.peak_over_mean());
         let [length, offset, density, profile_length] =
-            [length, offset, density, profile_length].map(H3VolumeProperty::per_volume);
+            [length, offset, density, profile_length].map(Gen3VolumeProperty::per_volume);
         let mut next =
             first_free_seed(&[&length, &offset, &density, &profile_length, &thickness, &color, &alpha, &intensity]);
         for property in [&mut thickness, &mut color, &mut alpha, &mut intensity] {
             property.allocate_seeds(&mut next);
         }
-        rest(H3VolumeDefinition {
+        rest(Gen3VolumeDefinition {
             length,
             offset,
             density,
@@ -268,7 +268,7 @@ impl VolumeProperties {
             alpha,
             intensity,
             brightness_ratio,
-            blend: H3Blend::Additive,
+            blend: Gen3Blend::Additive,
             bitmap: None,
             sampler: None,
             sort_layer: 2,

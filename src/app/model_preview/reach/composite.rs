@@ -4,7 +4,7 @@
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use eframe::glow::{self, HasContext};
 
-use super::super::gen3::effects::screen::H3ScreenSettings;
+use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use crate::app::model_preview::common::image::Sampler;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
@@ -20,7 +20,7 @@ impl ReachGame {
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
         depth: Option<glow::NativeTexture>,
-        screen: H3ScreenSettings,
+        screen: Gen3ScreenSettings,
     ) {
         let (gl, core) = (cx.gl, &mut *cx.core);
         let state = &mut *cx.state;

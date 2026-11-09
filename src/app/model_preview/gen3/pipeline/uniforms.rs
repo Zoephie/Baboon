@@ -4,7 +4,7 @@ use super::*;
 
 /// Uploaded textures of a geometry, by material then name.
 #[derive(Default)]
-pub(in crate::app::model_preview) struct H3SlotTextures {
+pub(in crate::app::model_preview) struct Gen3SlotTextures {
     id: Option<u64>,
     pub(super) materials: Vec<HashMap<String, glow::NativeTexture>>,
     /// The shield's noise, by uniform.
@@ -48,18 +48,18 @@ pub(super) fn frame_key(uniform: &str, frame: usize) -> String {
 
 /// What the engine's globals hold for an object of a gen3 game, by uniform
 /// name, at `size` and the frame's exposure `stops`. Each game gives its own.
-pub(in crate::app::model_preview) type FrameValues = fn(&ModelGpuFrame, &str, [i32; 2], f32) -> Option<H3Value>;
+pub(in crate::app::model_preview) type FrameValues = fn(&ModelGpuFrame, &str, [i32; 2], f32) -> Option<Gen3Value>;
 
 /// Halo 3's and ODST's [`FrameValues`], which read no stops.
-pub(in crate::app::model_preview) fn halo3_frame_values(frame: &ModelGpuFrame, name: &str, size: [i32; 2], _stops: f32) -> Option<H3Value> {
+pub(in crate::app::model_preview) fn halo3_frame_values(frame: &ModelGpuFrame, name: &str, size: [i32; 2], _stops: f32) -> Option<Gen3Value> {
     frame_value(frame, name, size)
 }
 
 /// What the rasterizer's globals hold for an object here, by uniform name:
 /// Halo 3's, which Reach's fall back to.
-pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, name: &str, size: [i32; 2]) -> Option<H3Value> {
+pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, name: &str, size: [i32; 2]) -> Option<Gen3Value> {
     let [width, height] = size.map(|side| side as f32);
-    let floats = |value: [f32; 4]| Some(H3Value::Floats(value));
+    let floats = |value: [f32; 4]| Some(Gen3Value::Floats(value));
     if let Some(index) = name
         .strip_prefix("p_lighting_constant_")
         .or_else(|| name.strip_prefix("v_lighting_constant_"))
@@ -69,7 +69,7 @@ pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, name: &s
     }
     let eye = eye_position(&frame.camera);
     match name {
-        "v_always_true" | "p_shader_pc_specular_enabled" | "actually_calc_albedo" => Some(H3Value::Integer(1)),
+        "v_always_true" | "p_shader_pc_specular_enabled" | "actually_calc_albedo" => Some(Gen3Value::Integer(1)),
         "Position_Compression_Scale" => floats([1.0; 4]),
         "screenspace_xform" => floats([1.0, 1.0, 0.0, 0.0]),
         "UV_Compression_Scale_Offset" => floats([1.0, 1.0, 0.0, 0.0]),
@@ -92,8 +92,8 @@ pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, name: &s
         // `render_albedo_decals`.
         "fade" => floats([1.0; 4]),
         "sprite" => floats([0.0, 0.0, 1.0, 1.0]),
-        "pixel_kill_enabled" => Some(H3Value::Integer(1)),
-        "simple_light_count" | "dynamic_light_shadowing" => Some(H3Value::Integer(0)),
+        "pixel_kill_enabled" => Some(Gen3Value::Integer(1)),
+        "simple_light_count" | "dynamic_light_shadowing" => Some(Gen3Value::Integer(0)),
         // A window of the whole target.
         "ps_global_viewport_res" | "ps_global_render_resolution" | "texture_size" => {
             floats([width, height, 0.0, 0.0])
@@ -147,18 +147,18 @@ pub(in crate::app::model_preview) fn camera_to_world(frame: &ModelGpuFrame) -> [
 }
 
 /// A translated uniform's value, by its type.
-pub(in crate::app::model_preview) unsafe fn set_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &H3Value) {
+pub(in crate::app::model_preview) unsafe fn set_value(gl: &glow::Context, location: Option<&glow::NativeUniformLocation>, ty: &Type, value: &Gen3Value) {
     unsafe {
         match (ty, value) {
-            (Type::Scalar(Scalar::Float), H3Value::Floats(v)) => gl.uniform_1_f32(location, v[0]),
-            (Type::Vector(Scalar::Float, 2), H3Value::Floats(v)) => gl.uniform_2_f32(location, v[0], v[1]),
-            (Type::Vector(Scalar::Float, 3), H3Value::Floats(v)) => gl.uniform_3_f32(location, v[0], v[1], v[2]),
-            (Type::Vector(Scalar::Float, 4), H3Value::Floats(v)) => gl.uniform_4_f32_slice(location, v),
-            (Type::Scalar(Scalar::Float), H3Value::Integer(v)) => gl.uniform_1_f32(location, *v as f32),
-            (Type::Scalar(Scalar::Uint), H3Value::Integer(v)) => gl.uniform_1_u32(location, *v as u32),
-            (Type::Scalar(_), H3Value::Integer(v)) => gl.uniform_1_i32(location, *v),
-            (Type::Scalar(_), H3Value::Floats(v)) => gl.uniform_1_i32(location, v[0] as i32),
-            (Type::Array(element, Some(length)), H3Value::FloatArray(rows))
+            (Type::Scalar(Scalar::Float), Gen3Value::Floats(v)) => gl.uniform_1_f32(location, v[0]),
+            (Type::Vector(Scalar::Float, 2), Gen3Value::Floats(v)) => gl.uniform_2_f32(location, v[0], v[1]),
+            (Type::Vector(Scalar::Float, 3), Gen3Value::Floats(v)) => gl.uniform_3_f32(location, v[0], v[1], v[2]),
+            (Type::Vector(Scalar::Float, 4), Gen3Value::Floats(v)) => gl.uniform_4_f32_slice(location, v),
+            (Type::Scalar(Scalar::Float), Gen3Value::Integer(v)) => gl.uniform_1_f32(location, *v as f32),
+            (Type::Scalar(Scalar::Uint), Gen3Value::Integer(v)) => gl.uniform_1_u32(location, *v as u32),
+            (Type::Scalar(_), Gen3Value::Integer(v)) => gl.uniform_1_i32(location, *v),
+            (Type::Scalar(_), Gen3Value::Floats(v)) => gl.uniform_1_i32(location, v[0] as i32),
+            (Type::Array(element, Some(length)), Gen3Value::FloatArray(rows))
                 if **element == Type::Vector(Scalar::Float, 4) =>
             {
                 let mut data = rows.clone();
@@ -235,7 +235,7 @@ impl Gen3State {
         &self,
         frame: &ModelGpuFrame,
         batch: &RenderModelPreviewBatch,
-        material: &H3Material,
+        material: &Gen3Material,
         uniform: &str,
     ) -> String {
         let count = material.textures.iter().find(|texture| texture.uniform == uniform);
@@ -250,7 +250,7 @@ impl Gen3State {
             }
         }
         let animation = material.animations.iter().find(|animation| {
-            animation.writes == H3Animated::Frame && animation.uniform == uniform
+            animation.writes == Gen3Animated::Frame && animation.uniform == uniform
         });
         match animation.filter(|_| count > 0) {
             Some(animation) => frame_key(uniform, animation.frame(count, frame.time, owner, frame.function_values_of(object))),

@@ -8,7 +8,7 @@ use super::super::common::sprites::{
     ParticleTargets, advance_sprite_simulations, begin_flares, draw_antennas, draw_particle_system,
 };
 use super::super::effects::EffectOnsets;
-use crate::app::model_preview::common::sprites::h3_layered_distance;
+use crate::app::model_preview::common::sprites::layered_distance;
 use super::super::common::view::ViewFrame;
 use super::super::gl::pass_state::PassState;
 use super::super::renderer::RenderCore;
@@ -85,7 +85,7 @@ impl RenderCore {
                 .filter(|(_, system)| system.look.shader.distortion.is_none())
                 .map(|(at, system)| {
                     let distance = uploaded.simulations.particles.distance(at, system, bones, &view);
-                    (h3_layered_distance(system.look.shader.sort_layer, distance), at)
+                    (layered_distance(system.look.shader.sort_layer, distance), at)
                 })
                 .collect();
             sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));

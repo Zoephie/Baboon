@@ -64,7 +64,7 @@ fn reach_light_passes_link() {
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = headless_gl();
-    let mut sources = super::super::gen3::shaders::H3Sources::new(&source);
+    let mut sources = super::super::gen3::shaders::Gen3Sources::new(&source);
     for file in ["light_apply", "light_apply_frustum", "light_apply_specular", "light_apply_frustum_specular"] {
         let pass = sources.reach_light_pass(file).unwrap_or_else(|error| panic!("{file}: {error}"));
         for (name, _) in &pass.uniforms {

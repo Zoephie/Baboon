@@ -67,11 +67,11 @@ pub(in crate::app::model_preview) fn h2_shader_inputs(data: &ModelPreviewData, o
         }
     }
     // `sub_6C18F0` gates the shield overlay on this itself.
-    let h3_shield = owned.iter().filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
+    let gen3_shield = owned.iter().filter_map(|texture| texture.h3.as_ref()).any(|h3| h3.shield.is_some());
     let shield = data.preview.materials.iter().any(|m| m.object == object && m.shield == Some(Dx9Layer::ShieldDamaged));
     let reach_shield = object == 0 && (data.preview.reach.shield.is_some() || data.preview.h4.shield.is_some());
-    let gate = (shield || h3_shield || reach_shield).then_some("current_shield_damage");
-    let gate = gate.into_iter().chain(h3_shield.then_some(gen3::pipeline::H3_OVERSHIELD));
+    let gate = (shield || gen3_shield || reach_shield).then_some("current_shield_damage");
+    let gate = gate.into_iter().chain(gen3_shield.then_some(gen3::pipeline::H3_OVERSHIELD));
     let sourced = sourced.iter().map(String::as_str);
     for name in passes.flat_map(|pass| pass.function_inputs()).chain(sourced).chain(gate) {
         if !names.iter().any(|known| known == name) {
@@ -141,7 +141,7 @@ pub(in crate::app::model_preview) fn object_moves(
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
                     || material.h4().is_some_and(|submit| submit.moves())
-                    || (material.shield.is_some() && gen3::pipeline::h3_shield_showing(function_values))
+                    || (material.shield.is_some() && gen3::pipeline::gen3_shield_showing(function_values))
             })
         })
 }

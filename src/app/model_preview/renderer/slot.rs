@@ -65,7 +65,7 @@ pub(in crate::app::model_preview) struct SlotSimulations {
     pub(in crate::app::model_preview) particles: particles::ParticleField,
     /// Reach's cheap particles.
     pub(in crate::app::model_preview) reach_cheap: particles::cheap::CheapField,
-    pub(in crate::app::model_preview) h3_strips: gen3::effects::strips::H3StripField,
+    pub(in crate::app::model_preview) h3_strips: gen3::effects::strips::Gen3StripField,
     /// When each effect began, for Halo 2's and the gen3 games' effect parts.
     pub(in crate::app::model_preview) effect_onsets: effects::EffectOnsets,
     /// Halo 2's and the gen3 games' cloth.
@@ -129,7 +129,7 @@ pub(in crate::app::model_preview) struct ModelGpuSlot {
     /// Halo 3's and Halo 4's lens flares: per flare, then per image, of
     /// `flare_geometry`.
     pub(in crate::app::model_preview) flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
-    pub(in crate::app::model_preview) h3_textures: gen3::pipeline::H3SlotTextures,
+    pub(in crate::app::model_preview) h3_textures: gen3::pipeline::Gen3SlotTextures,
     pub(in crate::app::model_preview) flare_geometry: Option<u64>,
     pub(in crate::app::model_preview) antenna_textures: Vec<Option<glow::NativeTexture>>,
     pub(in crate::app::model_preview) volume_textures: Vec<Option<glow::NativeTexture>>,
@@ -309,7 +309,7 @@ impl ModelGpuSlot {
             for texture in drained.flatten().flatten() {
                 gl.delete_texture(texture);
             }
-            let maps = |look: &particles::H3SpriteShader| sprite_maps(gl, look);
+            let maps = |look: &particles::SpriteShader| sprite_maps(gl, look);
             self.particle_textures =
                 frame.preview.particles.iter().map(|system| maps(&system.look.shader)).collect();
             self.strip_textures = frame.preview.gen3.strips.iter().map(|strip| maps(strip.shader())).collect();

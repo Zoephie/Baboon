@@ -4,23 +4,23 @@
 
 use super::super::super::common::view::ViewFrame;
 use super::super::super::functions::FunctionValues;
-use super::super::super::gen3::effects::light_volumes::{H3LightVolumeAt, H3VolumeInput, VolumeLayout, percentile};
+use super::super::super::gen3::effects::light_volumes::{Gen3LightVolumeAt, Gen3VolumeInput, VolumeLayout, percentile};
 use super::particles::{f32_to_f16, pack_argb8};
 
 /// `light_volume_state_input_enum`'s order, the order of
 /// `LightVolumeOverallState.inputs`; `allocate_random_seed` leaves nothing
 /// reading `random`.
-pub(in crate::app::model_preview) const H4_STATE_ORDER: [H3VolumeInput; 10] = [
-    H3VolumeInput::Percentile,
-    H3VolumeInput::GameTime,
-    H3VolumeInput::Age,
-    H3VolumeInput::Random,
-    H3VolumeInput::Seed(0),
-    H3VolumeInput::Seed(1),
-    H3VolumeInput::Lod,
-    H3VolumeInput::EffectA,
-    H3VolumeInput::EffectB,
-    H3VolumeInput::Invalid,
+pub(in crate::app::model_preview) const H4_STATE_ORDER: [Gen3VolumeInput; 10] = [
+    Gen3VolumeInput::Percentile,
+    Gen3VolumeInput::GameTime,
+    Gen3VolumeInput::Age,
+    Gen3VolumeInput::Random,
+    Gen3VolumeInput::Seed(0),
+    Gen3VolumeInput::Seed(1),
+    Gen3VolumeInput::Lod,
+    Gen3VolumeInput::EffectA,
+    Gen3VolumeInput::EffectB,
+    Gen3VolumeInput::Invalid,
 ];
 
 /// `ProfileMemexportedState`, as `light_volume_main` writes it.
@@ -61,7 +61,7 @@ pub(crate) struct H4VolumeDraw {
     pub(crate) states: Vec<[u32; 8]>,
 }
 
-impl H3LightVolumeAt {
+impl Gen3LightVolumeAt {
     /// Halo 4's draw this frame: `SetMaterialState`'s overall state and,
     /// for each profile, the state `light_volume_update.fx` writes, packed.
     pub(crate) fn h4_draw(
@@ -95,7 +95,7 @@ impl H3LightVolumeAt {
         // `inputs[]`: every state but the profile's own place, which the
         // update reads from the profile.
         let inputs = H4_STATE_ORDER.map(|input| match input {
-            H3VolumeInput::Percentile => 0.0,
+            Gen3VolumeInput::Percentile => 0.0,
             other => other.of(&state),
         });
         let states = (0..count)

@@ -13,7 +13,7 @@ use crate::core::source::TagSource;
 /// `BLAM_TEST_H3EK` to the tags folder.
 #[test]
 fn h3_pass_inputs() {
-    use super::super::gen3::shaders::{H3Sources, VERTEX_SKINNED, read_h3_definition};
+    use super::super::gen3::shaders::{Gen3Sources, VERTEX_SKINNED, read_h3_definition};
     let Ok(spec) = std::env::var("H3_PASS") else {
         return;
     };
@@ -26,12 +26,12 @@ fn h3_pass_inputs() {
     };
     // `explicit|<file>` translates one of the explicit shaders.
     let pass = if let Some(file) = spec.strip_prefix("explicit|") {
-        H3Sources::new(&source).explicit_pass(file).unwrap()
+        Gen3Sources::new(&source).explicit_pass(file).unwrap()
     } else {
         let [family, template, entry]: [&str; 3] = spec.split('|').collect::<Vec<_>>().try_into().unwrap();
         let definition = read_h3_definition(&crate::app::model_preview::load::TagReader::new(&source), &format!("shaders\\{family}")).unwrap();
         let options: Vec<usize> = template.split('_').filter_map(|digit| digit.parse().ok()).collect();
-        Arc::new(H3Sources::new(&source).translate_entry(&definition, &options, entry, VERTEX_SKINNED).unwrap())
+        Arc::new(Gen3Sources::new(&source).translate_entry(&definition, &options, entry, VERTEX_SKINNED).unwrap())
     };
     for (name, ty) in &pass.uniforms {
         eprintln!("NOTE UNIFORM {name} {ty:?}");
@@ -48,7 +48,7 @@ fn h3_pass_inputs() {
 /// `H3_SWEEP=<limit>` and `BLAM_TEST_H3EK` to the tags folder.
 #[test]
 fn h3_sweep() {
-    use super::super::gen3::shaders::{H3Sources, VERTEX_RIGID, VERTEX_SKINNED, read_h3_definition};
+    use super::super::gen3::shaders::{Gen3Sources, VERTEX_RIGID, VERTEX_SKINNED, read_h3_definition};
     let Ok(limit) = std::env::var("H3_SWEEP") else {
         return;
     };
@@ -68,7 +68,7 @@ fn h3_sweep() {
     };
     let gl = headless_gl();
     let definition = read_h3_definition(&crate::app::model_preview::load::TagReader::new(&source), &format!("shaders\\{family}")).unwrap();
-    let mut sources = H3Sources::new(&source);
+    let mut sources = Gen3Sources::new(&source);
     let folder = format!("{root}/shaders/{family}_templates");
     let mut templates: Vec<String> = std::fs::read_dir(&folder)
         .unwrap()

@@ -11,21 +11,21 @@ pub(in crate::app::model_preview) const H3_SHIELD_DAMAGE: &str = "current_shield
 pub(in crate::app::model_preview) const H3_OVERSHIELD: &str = "object_overshield_amount";
 
 /// Whether the shield is showing, whose plasma scrolls with game time.
-pub(in crate::app::model_preview) fn h3_shield_showing(values: Option<&functions::FunctionValues>) -> bool {
+pub(in crate::app::model_preview) fn gen3_shield_showing(values: Option<&functions::FunctionValues>) -> bool {
     let reading = |name| values.and_then(|values| values.get(name)).copied().unwrap_or(0.0);
     reading(H3_SHIELD_DAMAGE) > 0.0 || reading(H3_OVERSHIELD) > 0.0
 }
 
 impl RenderCore {
     /// A material's translated passes, if this context can run them.
-    pub(in crate::app::model_preview) fn h3_material<'a>(&self, frame: &'a ModelGpuFrame, material: usize) -> Option<&'a Arc<H3Material>> {
+    pub(in crate::app::model_preview) fn gen3_material<'a>(&self, frame: &'a ModelGpuFrame, material: usize) -> Option<&'a Arc<Gen3Material>> {
         if !self.gen3_supported {
             return None;
         }
         frame.textures.as_ref()?.get(material)?.h3.as_ref()
     }
 
-    pub(in crate::app::model_preview) fn h3_draws(&self, frame: &ModelGpuFrame) -> bool {
+    pub(in crate::app::model_preview) fn gen3_draws(&self, frame: &ModelGpuFrame) -> bool {
         frame.game_shaders
             && self.gen3_supported
             && frame.textures.iter().any(|textures| textures.iter().any(|texture| texture.h3.is_some()))
@@ -59,8 +59,8 @@ pub(super) struct Gen3Frame<'a> {
     accumulation: glow::NativeTexture,
     pub(super) batches: Vec<Gen3Batch>,
     bloomed: bool,
-    screen: gen3::effects::screen::H3ScreenSettings,
-    shaders: Vec<gen3::effects::screen::H3ScreenShader>,
+    screen: gen3::effects::screen::Gen3ScreenSettings,
+    shaders: Vec<gen3::effects::screen::Gen3ScreenShader>,
 }
 
 impl Gen3State {
@@ -72,9 +72,9 @@ impl Gen3State {
         frame: &ModelGpuFrame,
         slot: usize,
         batch: &RenderModelPreviewBatch,
-        material: &H3Material,
-        pass: &Arc<H3Pass>,
-        shield: Option<&H3Shield>,
+        material: &Gen3Material,
+        pass: &Arc<Gen3Pass>,
+        shield: Option<&Gen3Shield>,
     ) {
         let range = model_draw_range(batch.index_start, batch.index_count, frame.preview.indices.len());
         if range.is_none() && !pass.fullscreen {
@@ -135,7 +135,7 @@ impl Gen3State {
                     let change_color = material.change_colors.iter().find(|(uniform, _)| uniform == name);
                     let change_color = change_color.map(|(_, channel)| {
                         let [r, g, b] = frame.change_colors_of(batch.material_index as usize)[*channel];
-                        H3Value::Floats([r, g, b, 1.0])
+                        Gen3Value::Floats([r, g, b, 1.0])
                     });
                     let light = state.hooks.light_value(material, name, &state.inline_lights);
                     let mut value = change_color
@@ -153,17 +153,17 @@ impl Gen3State {
                     let owner = frame.preview.materials.get(object).map_or(0, |material| material.object);
                     for animation in material.animations.iter().filter(|animation| animation.uniform == *name) {
                         let mut slot = match value {
-                            Some(H3Value::Floats(slot)) => slot,
+                            Some(Gen3Value::Floats(slot)) => slot,
                             _ => [0.0; 4],
                         };
                         animation.apply(&mut slot, frame.time, owner, values);
-                        value = Some(H3Value::Floats(slot));
+                        value = Some(Gen3Value::Floats(slot));
                     }
                     if let Some(value) = value {
                         set_value(gl, location.as_ref(), ty, &value);
                     }
                     if let Some(value) = state.pass_values.as_ref().and_then(|values| values.get(name.as_str())) {
-                        set_value(gl, location.as_ref(), ty, &H3Value::Floats(*value));
+                        set_value(gl, location.as_ref(), ty, &Gen3Value::Floats(*value));
                     }
                     let settings = frame.preview.h3.shield.as_ref().or(shield.map(|shield| &shield.settings));
                     if let Some(value) = shield.and(settings).and_then(|settings| settings.values.get(name)) {
@@ -315,7 +315,7 @@ impl Gen3State {
                 if let Some(old) = self.targets.take() {
                     old.delete(gl);
                 }
-                self.targets = H3Targets::new(gl, size, depth);
+                self.targets = Gen3Targets::new(gl, size, depth);
                 core.h3_normal_target = self.targets.as_ref().map(|targets| ShadowNormalTarget {
                     texture: targets.normal,
                     unit: H3_NORMAL_TARGET_UNIT,
@@ -342,7 +342,7 @@ impl Gen3State {
             }
             gl.bind_vertex_array(Some(core.slots[slot].vertex_array));
             gl.disable(glow::BLEND);
-            h3_set_cull(gl, frame);
+            gen3_set_cull(gl, frame);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LEQUAL);
             gl.depth_mask(true);
@@ -351,7 +351,7 @@ impl Gen3State {
                 .iter()
                 .filter_map(|&index| frame.preview.batches.get(index))
                 .filter_map(|batch| {
-                    let material = core.h3_material(frame, batch.material_index as usize)?;
+                    let material = core.gen3_material(frame, batch.material_index as usize)?;
                     Some((batch.clone(), Arc::clone(material)))
                 })
                 .collect();
@@ -367,7 +367,7 @@ impl Gen3State {
                 let view = ce_flare_view(&frame.camera);
                 let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
                 let effects = &frame.preview.gen3.screen_effects;
-                gen3::effects::screen::h3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
+                gen3::effects::screen::gen3_screen_settings(effects, values, &mut uploaded.simulations.effect_onsets, bones, &view, frame.time)
             };
             self.stops = game.stops(&screen);
             Some(Gen3Frame {
@@ -416,19 +416,19 @@ impl Gen3State {
             for (batch, material) in
                 drawing.batches.iter().filter(|(_, material)| material.decal && !material.after_lighting)
             {
-                h3_set_blend(gl, material.blend);
+                gen3_set_blend(gl, material.blend);
                 // `render_mesh_part_default` (Reach X360 0x826754D8): a
                 // decal that leaves the specular mask writes the albedo's RGB
                 // alone. One that modulates writes alpha too, under a separate
                 // alpha blend this preview does not set [inferred: it keeps
                 // the colour blend's].
-                let keeps_mask = material.dialect() == H3Dialect::Reach && !material.decal_modulates_specular;
+                let keeps_mask = material.dialect() == Gen3Dialect::Reach && !material.decal_modulates_specular;
                 gl.color_mask_draw_buffer(0, true, true, true, !keeps_mask);
                 // The blend's mask opens every target, so the normals'
                 // is set after it. Halo 4's normal decals (`DECAL_OUTPUT_NORMAL`)
                 // write the encoded normal's two channels, z and w masked
                 // (`decals.fxh`); nothing else here writes normals.
-                let normals = material.dialect() == H3Dialect::Halo4 && material.lit.pixel.contains("o_target1");
+                let normals = material.dialect() == Gen3Dialect::Halo4 && material.lit.pixel.contains("o_target1");
                 gl.color_mask_draw_buffer(1, normals, normals, false, false);
                 self.draw_pass(core, gl, frame, slot, batch, material, &material.lit, None);
             }
@@ -484,14 +484,14 @@ impl Gen3State {
             // own, or the alpha blend of an `opaque_alpha_blend` fringe.
             let fringes = drawing.batches.iter().filter_map(|(batch, material)| {
                 let fringe = material.fringe.as_ref()?;
-                Some((batch, material, fringe, H3Blend::AlphaBlend))
+                Some((batch, material, fringe, Gen3Blend::AlphaBlend))
             });
             let mut blended: Vec<_> = blended
                 .into_iter()
                 .map(|(batch, material)| (batch, material, &material.lit, material.blend))
                 .chain(fringes)
                 .map(|(batch, material, pass, blend)| {
-                    (h3_layered_distance(material.sort_layer, batch_distance(frame, batch)), batch, material, pass, blend)
+                    (layered_distance(material.sort_layer, batch_distance(frame, batch)), batch, material, pass, blend)
                 })
                 .collect();
             blended.sort_by(|(a, ..), (b, ..)| b.total_cmp(a));
@@ -501,7 +501,7 @@ impl Gen3State {
                     self.draw_sprites(core, game, gl, frame, slot, SpriteStage::FartherThan(distance));
                 }
                 blended_material_state(frame.show_backfaces, core.slots[slot].vertex_array).apply(gl);
-                h3_set_blend(gl, blend);
+                gen3_set_blend(gl, blend);
                 if material.decal {
                     gl.enable(glow::POLYGON_OFFSET_FILL);
                     gl.polygon_offset(DECAL_SLOPE_BIAS, DECAL_DEPTH_BIAS * DEPTH_UNITS);
@@ -582,11 +582,11 @@ impl Gen3State {
     /// `render_object_context`'s shield impact, over every lit part.
     unsafe fn shield_impact(&mut self, core: &mut RenderCore, drawing: &Gen3Frame<'_>) {
         let Gen3Frame { gl, frame, slot, .. } = *drawing;
-        if !h3_shield_showing(frame.function_values.as_ref()) {
+        if !gen3_shield_showing(frame.function_values.as_ref()) {
             return;
         }
         unsafe {
-            h3_set_blend(gl, H3Blend::Additive);
+            gen3_set_blend(gl, Gen3Blend::Additive);
             for (batch, material) in &drawing.batches {
                 if let Some(shield) = material.shield.as_ref() {
                     // `render_object_shield_impact`: by the settings that win.

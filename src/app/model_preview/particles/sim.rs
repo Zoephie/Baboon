@@ -35,7 +35,7 @@ impl Random {
 /// so the emitter's own stream stands in. With `volume_random` (`volume
 /// emitter particle velocities are random`) they head any way, not outward.
 pub(super) fn emit(
-    shape: H3EmissionShape,
+    shape: EmissionShape,
     radius: f32,
     angle_degrees: f32,
     volume_random: bool,
@@ -49,36 +49,36 @@ pub(super) fn emit(
         [cos, sin_turn * sin, cos_turn * sin]
     };
     match shape {
-        H3EmissionShape::Sprayer => ([0.0; 3], spread(random.range(0.0, angle))),
-        H3EmissionShape::Disc => {
+        EmissionShape::Sprayer => ([0.0; 3], spread(random.range(0.0, angle))),
+        EmissionShape::Disc => {
             let out = [0.0, sin_turn, cos_turn];
             (out.map(|axis| axis * radius), out)
         }
-        H3EmissionShape::Globe => {
+        EmissionShape::Globe => {
             let out = random.direction();
             (out.map(|axis| axis * radius), out)
         }
-        H3EmissionShape::Implode => {
+        EmissionShape::Implode => {
             let out = random.direction();
             (out.map(|axis| axis * radius), out.map(|axis| -axis))
         }
-        H3EmissionShape::Tube => ([0.0, sin_turn * radius, cos_turn * radius], spread(angle)),
-        H3EmissionShape::Halo => {
+        EmissionShape::Tube => ([0.0, sin_turn * radius, cos_turn * radius], spread(angle)),
+        EmissionShape::Halo => {
             let velocity = spread(random.range(0.0, angle));
             (random.direction().map(|axis| axis * radius), velocity)
         }
-        H3EmissionShape::Debris => ([0.0, sin_turn * radius, cos_turn * radius], [0.0, 0.0, 1.0]),
-        H3EmissionShape::Line | H3EmissionShape::UnweightedLine => {
+        EmissionShape::Debris => ([0.0, sin_turn * radius, cos_turn * radius], [0.0, 0.0, 1.0]),
+        EmissionShape::Line | EmissionShape::UnweightedLine => {
             let cone = random.range(0.0, angle);
             ([0.0, random.range(-radius, radius), 0.0], spread(cone))
         }
-        H3EmissionShape::Cube => {
+        EmissionShape::Cube => {
             // Drawn z, y, x.
             let [z, y, x] = [(); 3].map(|_| random.range(-radius, radius));
             let place = [x, y, z];
             (place, volume_heading(volume_random, place, random))
         }
-        H3EmissionShape::Cylinder => {
+        EmissionShape::Cylinder => {
             // Two units long whatever the radius; `axis scale` stretches it.
             let along = random.range(-1.0, 1.0);
             let (sin, cos) = random.range(0.0, std::f32::consts::TAU).sin_cos();
@@ -86,20 +86,20 @@ pub(super) fn emit(
             let place = [along, out * sin, out * cos];
             (place, volume_heading(volume_random, place, random))
         }
-        H3EmissionShape::Plane => ([(); 3].map(|_| random.range(-1.0, 1.0) * radius), [1.0, 0.0, 0.0]),
+        EmissionShape::Plane => ([(); 3].map(|_| random.range(-1.0, 1.0) * radius), [1.0, 0.0, 0.0]),
         // An attached effect has no impact, whose size is all that spreads these.
-        H3EmissionShape::ImpactContour => {
+        EmissionShape::ImpactContour => {
             let cone = angle;
             let sign = if random.next() < 0.5 { -1.0 } else { 1.0 };
             let side = cone.sin() * sign;
             ([0.0; 3], if random.next() < 0.5 { [cone.cos(), side, 0.0] } else { [cone.cos(), 0.0, side] })
         }
-        H3EmissionShape::ImpactArea => {
+        EmissionShape::ImpactArea => {
             let cone = angle;
             let (sin, cos) = random.range(0.0, std::f32::consts::TAU).sin_cos();
             ([0.0; 3], [cone.cos(), sin * cone.sin(), cos * cone.sin()])
         }
-        H3EmissionShape::Breakable | H3EmissionShape::CustomPoints => ([0.0; 3], [0.0; 3]),
+        EmissionShape::Breakable | EmissionShape::CustomPoints => ([0.0; 3], [0.0; 3]),
     }
 }
 
@@ -167,7 +167,7 @@ pub(crate) struct ParticleField {
     /// Per system, per emitter.
     pub(super) running: Vec<Vec<RunningEmitter>>,
     /// Per system, what particles have started of it.
-    pub(super) instances: Vec<Vec<H3ChildInstance>>,
+    pub(super) instances: Vec<Vec<ChildInstance>>,
     /// Per system, where the particles something follows are.
     tracks: Vec<Vec<ParticleTrack>>,
 }
@@ -183,7 +183,7 @@ pub(crate) struct ParticleTrack {
 /// `effect_new_attached_from_particle`: one run of a system, attached to a
 /// particle while that lasts. A death's has no particle left to follow.
 #[derive(Debug, Clone)]
-pub(super) struct H3ChildInstance {
+pub(super) struct ChildInstance {
     follows: Option<u64>,
     parent: usize,
     pub(super) origin: [f32; 3],
@@ -340,11 +340,11 @@ fn system_state_stepped(
     })
 }
 
-impl H3Emitter {
+impl Emitter {
     /// `initialize_particle`'s shape, then each axis of the place by `axis
     /// scale` (Reach's, after every shape; ones elsewhere).
     pub(super) fn emitted(&self, radius: f32, angle: f32, random: &mut Random) -> ([f32; 3], [f32; 3]) {
-        let (position, velocity) = if self.shape == H3EmissionShape::CustomPoints {
+        let (position, velocity) = if self.shape == EmissionShape::CustomPoints {
             emit_from_points(&self.points, radius, angle, random)
         } else {
             emit(self.shape, radius, angle, self.volume_random, random)
@@ -533,7 +533,7 @@ impl H3Emitter {
     }
 }
 
-impl H3Emitter {
+impl Emitter {
     /// `particle_update.hlsl`'s `update_particle_state`, for an emitter on the
     /// card: a particle's first update after its spawn moves nothing; then it
     /// ages, moves by the velocity it had, and only then is accelerated. Its
@@ -753,7 +753,7 @@ impl ParticleField {
                     (std::array::from_fn(|axis| origin[axis] + turn(place)[axis]), turn(velocity))
                 };
                 let seed = (runs.len() as u32 + 1).wrapping_mul(index as u32 + 1).wrapping_add((now * 30.0) as u32);
-                runs.push(H3ChildInstance {
+                runs.push(ChildInstance {
                     follows,
                     parent,
                     origin: place,
@@ -808,7 +808,7 @@ impl ParticleField {
     }
 
     /// Where the particles of `system` are, for a contrail that follows them.
-    pub(crate) fn tracks_of<'a>(&'a self, systems: &[Arc<ParticleSystem>], strip: &Arc<H3StripAt>) -> Vec<&'a ParticleTrack> {
+    pub(crate) fn tracks_of<'a>(&'a self, systems: &[Arc<ParticleSystem>], strip: &Arc<Gen3StripAt>) -> Vec<&'a ParticleTrack> {
         let carriers = systems.iter().zip(&self.tracks);
         let carrying = carriers.filter(|(system, _)| system.carried.iter().any(|known| Arc::ptr_eq(known, strip)));
         carrying.flat_map(|(_, tracks)| tracks).collect()
@@ -847,7 +847,7 @@ pub(super) fn location(system: &ParticleSystem, bones: Option<&[[f32; 4]]>) -> (
 /// `c_particle_emitter::calc_matrix`: its direction turns the location, and its
 /// offset moves along that.
 pub(super) fn emitter_frame(
-    emitter: &H3Emitter,
+    emitter: &Emitter,
     origin: [f32; 3],
     axes: [[f32; 3]; 3],
     state: &ParticleState,

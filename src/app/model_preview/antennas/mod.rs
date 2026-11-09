@@ -14,7 +14,7 @@ use super::common::fields::{elements, object_block};
 use super::common::math::{cross, dot};
 use super::common::view::{ViewFrame, posed_on};
 use super::common::image::Image;
-use super::gen3::materials::{H3Bitmap, read_h3_bitmap};
+use super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
 use crate::app::model_preview::common::math::UNSET;
 use super::materials::decode_image;
 use super::*;
@@ -146,7 +146,7 @@ pub(crate) struct Antenna {
     /// The region and permutation its marker belongs to, if only one.
     only_under: Option<(String, String)>,
     /// Halo 3 and Reach read their bitmap as the card would.
-    pub(crate) h3_bitmap: Option<H3Bitmap>,
+    pub(crate) h3_bitmap: Option<Gen3Bitmap>,
     pub(crate) image: Arc<Image>,
 }
 

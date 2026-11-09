@@ -41,9 +41,9 @@ pub(in crate::app::model_preview) fn read_ends(property: TagStruct<'_>) -> [[f32
 
 /// What particles, beams and contrails ask of a shader alike.
 #[derive(Debug)]
-pub(crate) struct H3SpriteShader {
+pub(crate) struct SpriteShader {
     pub(crate) albedo: ParticleAlbedo,
-    pub(crate) blend: H3Blend,
+    pub(crate) blend: Gen3Blend,
     pub(crate) black_point: bool,
     pub(crate) frame_blend: bool,
     /// `depth_fade_range`, with the `depth_fade` option on.
@@ -66,14 +66,14 @@ pub(crate) struct H3SpriteShader {
     pub(in crate::app::model_preview) lighting: ParticleLighting,
     /// `starting_uv_scale` and `ending_uv_scale`.
     pub(in crate::app::model_preview) uv_scale: [f32; 2],
-    pub(crate) base_map: Option<H3Bitmap>,
-    pub(crate) alpha_map: Option<H3Bitmap>,
-    pub(crate) palette_map: Option<H3Bitmap>,
+    pub(crate) base_map: Option<Gen3Bitmap>,
+    pub(crate) alpha_map: Option<Gen3Bitmap>,
+    pub(crate) palette_map: Option<Gen3Bitmap>,
     /// `base_map2`, which only `palettized_plasma` reads.
-    pub(crate) second_map: Option<H3Bitmap>,
+    pub(crate) second_map: Option<Gen3Bitmap>,
     /// `base_map`'s, `alpha_map`'s, `palette`'s and `base_map2`'s, as baked.
     pub(crate) samplers: [Option<Sampler>; 4],
-    pub(crate) constants: H3AlbedoConstants,
+    pub(crate) constants: AlbedoConstants,
     /// Reach's `per_pixel_smooth`: `contrast_scale` and `contrast_offset`.
     pub(in crate::app::model_preview) contrast: [f32; 2],
     /// Reach's `warp` `sphere`: `sphere_warp_scale`.
@@ -85,7 +85,7 @@ pub(crate) struct H3SpriteShader {
     pub(crate) plasma_second_sprite: bool,
 }
 
-impl H3SpriteShader {
+impl SpriteShader {
     /// The constant self-illumination added, at the area screen effects'
     /// exposure `stops` where it is Reach's.
     pub(crate) fn add(&self, stops: f32) -> [f32; 3] {
@@ -99,7 +99,7 @@ impl H3SpriteShader {
     }
 
     /// What a leaf draws with: only a map, cut out at half its alpha.
-    pub(in crate::app::model_preview) fn plain(blend: H3Blend) -> Self {
+    pub(in crate::app::model_preview) fn plain(blend: Gen3Blend) -> Self {
         Self {
             albedo: ParticleAlbedo::Diffuse,
             blend,
@@ -120,7 +120,7 @@ impl H3SpriteShader {
             palette_map: None,
             second_map: None,
             samplers: [None; 4],
-            constants: H3AlbedoConstants::default(),
+            constants: AlbedoConstants::default(),
             contrast: [0.0; 2],
             sphere_warp: None,
             palette_shift: None,
@@ -128,7 +128,7 @@ impl H3SpriteShader {
         }
     }
 
-    pub(crate) fn alpha_tested(blend: H3Blend, base_map: H3Bitmap) -> Self {
+    pub(crate) fn alpha_tested(blend: Gen3Blend, base_map: Gen3Bitmap) -> Self {
         // `leaf_system_render_opaque` binds its plate clamped and bilinear.
         let plate = Sampler { address: [BitmapAddressMode::Clamp; 2], filter: BitmapFilterMode::Bilinear };
         Self { alpha_test: true, base_map: Some(base_map), samplers: [Some(plate), None, None, None], ..Self::plain(blend) }
@@ -136,7 +136,7 @@ impl H3SpriteShader {
 
     #[cfg(test)]
     pub(crate) fn blank() -> Self {
-        Self::plain(H3Blend::Additive)
+        Self::plain(Gen3Blend::Additive)
     }
 }
 
@@ -152,7 +152,7 @@ pub(in crate::app::model_preview) fn loose_kit(root: impl AsRef<std::path::Path>
 }
 
 /// `sort layer`, by option name: what is unset is `normal`.
-pub(in crate::app::model_preview) fn h3_sort_layer(shader: TagStruct<'_>) -> i32 {
+pub(in crate::app::model_preview) fn gen3_sort_layer(shader: TagStruct<'_>) -> i32 {
     match shader.read_enum_option("sort layer").as_deref() {
         Some("pre-pass") => 1,
         Some("post-pass") => 3,
@@ -163,7 +163,7 @@ pub(in crate::app::model_preview) fn h3_sort_layer(shader: TagStruct<'_>) -> i32
 /// A sprite system's `actual shader?`, by its options' names. Reach's options
 /// (`shaders\particle.render_method_definition`) read their parameters
 /// through the resolver, falling to what their option tags default them to.
-pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shader: TagStruct<'_>) -> Option<H3SpriteShader> {
+pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shader: TagStruct<'_>) -> Option<SpriteShader> {
     let definition = shader.read_tag_ref_path("definition").filter(|path| !path.is_empty())?;
     let definition = read_h3_definition(reader, &definition)?;
     let options: Vec<usize> = elements(shader, "options")
@@ -186,7 +186,7 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
     // four taps being the 360's alone, and `palette_shift` fades as `on` does.
     let fades = if reach_method { matches!(depth_fade.as_str(), "on" | "low_res" | "palette_shift") } else { depth_fade == "on" };
     let albedo = ParticleAlbedo::named(&chosen("albedo"));
-    Some(H3SpriteShader {
+    Some(SpriteShader {
         albedo,
         blend: definition.blend(&options),
         black_point: chosen("black_point") == "on",
@@ -207,7 +207,7 @@ pub(in crate::app::model_preview) fn read_sprite_shader(reader: &TagReader, shad
         unit_particle_alpha: false,
         alpha_test: false,
         lit_pixels: chosen("lighting") == "per_pixel_ravi_order_3",
-        sort_layer: h3_sort_layer(shader),
+        sort_layer: gen3_sort_layer(shader),
         distortion: chosen("specialized_rendering").starts_with("distortion").then(|| {
             parameter(shader, "distortion_scale")
                 .and_then(|parameter| elements(parameter, "animated parameters").first().copied())
@@ -266,14 +266,14 @@ pub(super) fn parameter<'a>(shader: TagStruct<'a>, name: &str) -> Option<TagStru
     parameters.into_iter().find(|parameter| parameter.read_string_id("parameter name").as_deref() == Some(name))
 }
 
-fn read_map(reader: &TagReader, shader: TagStruct<'_>, name: &str) -> Option<H3Bitmap> {
+fn read_map(reader: &TagReader, shader: TagStruct<'_>, name: &str) -> Option<Gen3Bitmap> {
     let path = parameter(shader, name)?.read_tag_ref_path("bitmap").filter(|path| !path.is_empty())?;
     read_h3_bitmap(reader, &path, 0, SamplerKind::Texture2D)
 }
 
 /// A sprite shader's maps, and the sampler each is baked with. Failing to
 /// resolve leaves what it authored, on the preview's default sampler.
-fn read_maps(reader: &TagReader, shader: TagStruct<'_>) -> ([Option<H3Bitmap>; 4], [Option<Sampler>; 4]) {
+fn read_maps(reader: &TagReader, shader: TagStruct<'_>) -> ([Option<Gen3Bitmap>; 4], [Option<Sampler>; 4]) {
     const MAPS: [&str; 4] = ["base_map", "alpha_map", "palette", "base_map2"];
     let Some(resolved) = resolve_embedded_method(reader, shader) else {
         return (MAPS.map(|name| read_map(reader, shader, name)), [None; 4]);
@@ -311,7 +311,7 @@ fn sprite_xform(shader: TagStruct<'_>, name: &str) -> [f32; 4] {
     xform
 }
 
-fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRenderMethod>, reach_render_method: bool) -> H3AlbedoConstants {
+fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRenderMethod>, reach_render_method: bool) -> AlbedoConstants {
     let real = |name: &str| inline_real(resolved, name).unwrap_or(0.0);
     let tint = match inline_value(resolved, "tint_color") {
         Some(ResolvedValue::Color([_, red, green, blue])) => [red, green, blue],
@@ -324,7 +324,7 @@ fn read_albedo_constants(shader: TagStruct<'_>, resolved: Option<&ResolvedRender
     } else {
         real("alpha_modulation_factor")
     };
-    H3AlbedoConstants {
+    AlbedoConstants {
         tint,
         modulation: real("modulation_factor"),
         alpha_modulation,
@@ -355,12 +355,12 @@ pub(crate) struct ParticleCorner {
 /// `V_ILLUM_EXPOSURE` (`v_alt_exposure.y`) and the rest at `v_exposure.x`,
 /// at the area screen effects' `stops`. Beams and contrails take the same
 /// (`effects__beam.hlsl` and `effects__contrail_render.hlsl`, l.258–269).
-pub(in crate::app::model_preview) fn particle_exposure(blend: H3Blend, exposed: bool, reach_exposure_stops: bool, stops: f32) -> f32 {
-    if blend == H3Blend::Multiply || !exposed {
+pub(in crate::app::model_preview) fn particle_exposure(blend: Gen3Blend, exposed: bool, reach_exposure_stops: bool, stops: f32) -> f32 {
+    if blend == Gen3Blend::Multiply || !exposed {
         1.0
     } else if !reach_exposure_stops {
         H3_EXPOSURE
-    } else if matches!(blend, H3Blend::Additive | H3Blend::AddSrcTimesSrcAlpha) {
+    } else if matches!(blend, Gen3Blend::Additive | Gen3Blend::AddSrcTimesSrcAlpha) {
         reach_alt_exposure(stops)[1]
     } else {
         reach_exposure(stops)[0]
