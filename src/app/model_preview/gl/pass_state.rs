@@ -21,6 +21,8 @@ pub(in crate::app::model_preview) enum StateCall {
     BindBuffer(u32, Option<glow::NativeBuffer>),
     ActiveTexture(u32),
     BindTexture(u32, Option<glow::NativeTexture>),
+    /// A sampler's unit, set on the program in use.
+    Uniform1i(Option<glow::NativeUniformLocation>, i32),
 }
 
 /// The state a pass hands over: only the calls it makes, in its order. Built
@@ -98,6 +100,23 @@ impl PassState {
         self.with(StateCall::BindTexture(target, texture))
     }
 
+    pub(in crate::app::model_preview) fn uniform_1_i32(self, location: Option<glow::NativeUniformLocation>, value: i32) -> Self {
+        self.with(StateCall::Uniform1i(location, value))
+    }
+
+    /// A sampler: `texture` bound to `target` on unit `unit` (counted from
+    /// `TEXTURE0`), and the program's sampler at `location` set to it, in
+    /// that order. The unit stays active.
+    pub(in crate::app::model_preview) fn sampler(
+        self,
+        unit: u32,
+        target: u32,
+        texture: Option<glow::NativeTexture>,
+        location: Option<glow::NativeUniformLocation>,
+    ) -> Self {
+        self.active_texture(glow::TEXTURE0 + unit).bind_texture(target, texture).uniform_1_i32(location, unit as i32)
+    }
+
     /// `texture` bound to `target` on `unit`, then unit 0 active again: how
     /// a pass binds a map beside the one on unit 0.
     pub(in crate::app::model_preview) fn texture_on(self, unit: u32, target: u32, texture: Option<glow::NativeTexture>) -> Self {
@@ -151,6 +170,7 @@ impl PassState {
                     StateCall::BindBuffer(target, buffer) => gl.bind_buffer(target, buffer),
                     StateCall::ActiveTexture(unit) => gl.active_texture(unit),
                     StateCall::BindTexture(target, texture) => gl.bind_texture(target, texture),
+                    StateCall::Uniform1i(location, value) => gl.uniform_1_i32(location.as_ref(), value),
                 }
             }
         }
@@ -175,6 +195,18 @@ mod tests {
             ]
         );
         assert_eq!(PassState::new().culling_unless(false).calls(), [StateCall::Enable(glow::CULL_FACE)], "no face named");
+    }
+
+    #[test]
+    fn a_sampler_binds_its_texture_then_sets_its_unit() {
+        assert_eq!(
+            PassState::new().sampler(3, glow::TEXTURE_3D, None, None).calls(),
+            [
+                StateCall::ActiveTexture(glow::TEXTURE3),
+                StateCall::BindTexture(glow::TEXTURE_3D, None),
+                StateCall::Uniform1i(None, 3),
+            ]
+        );
     }
 
     #[test]

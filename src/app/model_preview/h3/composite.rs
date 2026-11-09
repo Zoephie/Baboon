@@ -6,7 +6,8 @@ use eframe::glow::{self, HasContext};
 use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
-use crate::app::model_preview::gl::screen::screen_program;
+use crate::app::model_preview::gl::pass_state::PassState;
+use crate::app::model_preview::gl::screen::{premultiplied_over, screen_program};
 use super::render::H3Game;
 
 /// `final_composite`'s `tone_curve_constants` at a white point of one: the
@@ -69,16 +70,13 @@ impl H3Game {
             let Some(program) = self.composite_program else {
                 return;
             };
-            gl.use_program(Some(program));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            let location = gl.get_uniform_location(program, "accumulation");
-            gl.uniform_1_i32(location.as_ref(), 0);
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, bloom.or(core.black_flat));
-            let location = gl.get_uniform_location(program, "bloom");
-            gl.uniform_1_i32(location.as_ref(), 1);
-            gl.active_texture(glow::TEXTURE0);
+            let at = |name: &str| gl.get_uniform_location(program, name);
+            PassState::new()
+                .use_program(program)
+                .sampler(0, glow::TEXTURE_2D, Some(accumulation), at("accumulation"))
+                .sampler(1, glow::TEXTURE_2D, bloom.or(core.black_flat), at("bloom"))
+                .active_texture(glow::TEXTURE0)
+                .apply(gl);
             let location = gl.get_uniform_location(program, "tone_curve_constants");
             gl.uniform_4_f32_slice(location.as_ref(), &TONE_CURVE);
             let matrix = screen.color_matrix();
@@ -88,13 +86,9 @@ impl H3Game {
             gl.uniform_1_f32(gl.get_uniform_location(program, "contrast").as_ref(), screen.gamma());
             gl.uniform_1_f32(gl.get_uniform_location(program, "exposure").as_ref(), screen.exposure());
             gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
-            gl.disable(glow::DEPTH_TEST);
-            gl.enable(glow::BLEND);
-            // The accumulation is premultiplied: what adds light covers nothing.
-            gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            gl.bind_vertex_array(Some(state.empty_array(gl)));
+            premultiplied_over(state.empty_array(gl)).apply(gl);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
-            gl.enable(glow::DEPTH_TEST);
+            PassState::new().enable(glow::DEPTH_TEST).apply(gl);
         }
     }
 }

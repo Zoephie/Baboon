@@ -2,6 +2,18 @@
 //! fragment stage.
 
 use eframe::glow;
+use super::pass_state::PassState;
+
+/// A screen pass laid over the picture: no depth test, blended as
+/// premultiplied (what adds light covers nothing), drawn from `array`, the
+/// empty vertex array. What the gen3 composites draw with.
+pub(in crate::app::model_preview) fn premultiplied_over(array: glow::NativeVertexArray) -> PassState {
+    PassState::new()
+        .disable(glow::DEPTH_TEST)
+        .enable(glow::BLEND)
+        .blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+        .bind_vertex_array(array)
+}
 
 const COMPOSITE_VERTEX: &str = "#version 410 core
 void main() {

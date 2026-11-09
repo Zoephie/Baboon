@@ -8,7 +8,8 @@ use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
 use super::super::common::image::Image;
 use crate::app::model_preview::common::image::{Sampler, ImageTexels};
 use super::super::gen3::pipeline::{H3_SHIELD_DAMAGE, HALF_LENS};
-use crate::app::model_preview::gl::screen::screen_program;
+use crate::app::model_preview::gl::pass_state::PassState;
+use crate::app::model_preview::gl::screen::{premultiplied_over, screen_program};
 use crate::app::model_preview::gl::texture::upload_image_linear;
 use eframe::glow::{self, HasContext};
 use std::sync::Arc;
@@ -90,17 +91,16 @@ impl H4Game {
             let Some(program) = self.composite_program else {
                 return;
             };
-            gl.use_program(Some(program));
-            let bind = |unit: u32, target: u32, texture: Option<glow::NativeTexture>, name: &str| {
-                gl.active_texture(glow::TEXTURE0 + unit);
-                gl.bind_texture(target, texture);
-                gl.uniform_1_i32(gl.get_uniform_location(program, name).as_ref(), unit as i32);
-            };
-            bind(0, glow::TEXTURE_2D, Some(accumulation), "accumulation");
-            bind(1, glow::TEXTURE_2D, bloom.or(core.black_flat), "bloom");
-            bind(2, glow::TEXTURE_2D, depth, "scene_depth");
-            bind(3, glow::TEXTURE_3D, grading.as_ref().map(|grading| grading.texture).or(core.white_volume), "grading");
-            gl.active_texture(glow::TEXTURE0);
+            let at = |name: &str| gl.get_uniform_location(program, name);
+            let grading_texture = grading.as_ref().map(|grading| grading.texture).or(core.white_volume);
+            PassState::new()
+                .use_program(program)
+                .sampler(0, glow::TEXTURE_2D, Some(accumulation), at("accumulation"))
+                .sampler(1, glow::TEXTURE_2D, bloom.or(core.black_flat), at("bloom"))
+                .sampler(2, glow::TEXTURE_2D, depth, at("scene_depth"))
+                .sampler(3, glow::TEXTURE_3D, grading_texture, at("grading"))
+                .active_texture(glow::TEXTURE0)
+                .apply(gl);
             let (scale, offset) = grading.as_ref().map_or(([1.0; 3], [0.0; 3]), |grading| (grading.scale, grading.offset));
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_scale").as_ref(), &scale);
             gl.uniform_3_f32_slice(gl.get_uniform_location(program, "grading_offset").as_ref(), &offset);
@@ -108,12 +108,9 @@ impl H4Game {
             let filmic = super::lighting::h4_filmic_params(super::lighting::H4_FILMIC_CURVE, false);
             gl.uniform_1_f32_slice(gl.get_uniform_location(program, "filmic").as_ref(), &filmic);
             gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
-            gl.disable(glow::DEPTH_TEST);
-            gl.enable(glow::BLEND);
-            gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            gl.bind_vertex_array(Some(state.empty_array(gl)));
+            premultiplied_over(state.empty_array(gl)).apply(gl);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
-            gl.enable(glow::DEPTH_TEST);
+            PassState::new().enable(glow::DEPTH_TEST).apply(gl);
         }
     }
 }

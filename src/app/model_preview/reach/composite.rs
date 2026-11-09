@@ -8,7 +8,8 @@ use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use crate::app::model_preview::common::image::Sampler;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::pipeline::HALF_LENS;
-use crate::app::model_preview::gl::screen::screen_program;
+use crate::app::model_preview::gl::pass_state::PassState;
+use crate::app::model_preview::gl::screen::{premultiplied_over, screen_program};
 use crate::app::model_preview::gl::texture::upload_image_linear;
 use super::render::ReachGame;
 
@@ -39,20 +40,15 @@ impl ReachGame {
             let Some(program) = self.composite_program else {
                 return;
             };
-            gl.use_program(Some(program));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(accumulation));
-            gl.uniform_1_i32(gl.get_uniform_location(program, "accumulation").as_ref(), 0);
-            gl.active_texture(glow::TEXTURE1);
-            gl.bind_texture(glow::TEXTURE_2D, bloom.or(core.black_flat));
-            gl.uniform_1_i32(gl.get_uniform_location(program, "bloom").as_ref(), 1);
-            gl.active_texture(glow::TEXTURE2);
-            gl.bind_texture(glow::TEXTURE_2D, depth);
-            gl.uniform_1_i32(gl.get_uniform_location(program, "scene_depth").as_ref(), 2);
-            gl.active_texture(glow::TEXTURE3);
-            gl.bind_texture(glow::TEXTURE_2D, self.noise.or(core.black_flat));
-            gl.uniform_1_i32(gl.get_uniform_location(program, "noise").as_ref(), 3);
-            gl.active_texture(glow::TEXTURE0);
+            let at = |name: &str| gl.get_uniform_location(program, name);
+            PassState::new()
+                .use_program(program)
+                .sampler(0, glow::TEXTURE_2D, Some(accumulation), at("accumulation"))
+                .sampler(1, glow::TEXTURE_2D, bloom.or(core.black_flat), at("bloom"))
+                .sampler(2, glow::TEXTURE_2D, depth, at("scene_depth"))
+                .sampler(3, glow::TEXTURE_2D, self.noise.or(core.black_flat), at("noise"))
+                .active_texture(glow::TEXTURE0)
+                .apply(gl);
             let matrix = screen.color_matrix();
             let columns: [f32; 16] = std::array::from_fn(|at| matrix[at % 4][at / 4]);
             gl.uniform_matrix_4_f32_slice(gl.get_uniform_location(program, "hue_saturation").as_ref(), false, &columns);
@@ -70,12 +66,9 @@ impl ReachGame {
             gl.uniform_2_f32(gl.get_uniform_location(program, "noise_offset").as_ref(), x, y);
             gl.uniform_1_f32(gl.get_uniform_location(program, "dark_multiplier").as_ref(), REACH_DARK_MULTIPLIER);
             gl.uniform_1_f32(gl.get_uniform_location(program, "view_scale").as_ref(), screen.view_scale(HALF_LENS));
-            gl.disable(glow::DEPTH_TEST);
-            gl.enable(glow::BLEND);
-            gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            gl.bind_vertex_array(Some(state.empty_array(gl)));
+            premultiplied_over(state.empty_array(gl)).apply(gl);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
-            gl.enable(glow::DEPTH_TEST);
+            PassState::new().enable(glow::DEPTH_TEST).apply(gl);
         }
     }
 }
