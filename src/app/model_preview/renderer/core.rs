@@ -351,6 +351,19 @@ impl RenderCore {
         unsafe { gl.bind_vertex_array(Some(self.slots[slot].vertex_array)) }
     }
 
+    /// Whether a material's passes stand in for the slots, by either
+    /// pipeline's rule: its translated gen3 passes with game shaders on, or
+    /// the dx9 ones. Halo 3's and ODST's materials draw their dx9 shadow
+    /// passes too, and those stand in wherever the translated passes do.
+    pub(in crate::app::model_preview) fn passes_replace_slots(
+        &self,
+        frame: &ModelGpuFrame,
+        material: usize,
+    ) -> bool {
+        (frame.game_shaders && self.gen3_material(frame, material).is_some())
+            || self.dx9_replaces_slots(frame, material)
+    }
+
     /// The slot's own draw of the visible batches, in the shared program:
     /// what a game's passes do not replace. `replaced` says, by material,
     /// which the calling game's own passes draw instead.

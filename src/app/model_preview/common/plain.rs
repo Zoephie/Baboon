@@ -18,8 +18,7 @@ impl GameRender for PlainRender {
         unsafe {
             cx.core
                 .draw_slot_batches(cx.gl, frame, cx.slot, &|core, material| {
-                    (frame.game_shaders && core.gen3_material(frame, material).is_some())
-                        || core.dx9_replaces_slots(frame, material)
+                    core.passes_replace_slots(frame, material)
                 })
         }
     }
