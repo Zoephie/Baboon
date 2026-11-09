@@ -1,13 +1,15 @@
 //! A model variant's child objects, `model_variant_create_children`'s list,
 //! attached at their markers.
 
+use super::super::super::tag_path;
 use super::super::common::fields::elements;
 use super::super::common::fields::holder_of;
 use super::super::load::build_render_preview;
-use super::super::*;
+use super::super::{ModelVariantPreview, RenderModelPreview, TagReader, object_default_variant};
 use super::attached::{AttachedObject, fold_attached};
 use crate::app::model_preview::common::marker::MarkerFrame;
 use blam_tags::{TagFile, TagStruct};
+use std::sync::Arc;
 
 /// The first owner a variant's child object takes, after the two hands.
 const FIRST_CHILD_OWNER: u8 = 3;

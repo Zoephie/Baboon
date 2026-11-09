@@ -5,13 +5,8 @@
 //! an attached object brings with it is in [`attached`], and a variant's
 //! child objects in [`variants`].
 
-use std::collections::BTreeSet;
-
-use blam_tags::{TagFile, TagStruct};
-
 use super::common::fields::{elements, has_flag, holder_of};
 use super::load::build_render_preview;
-use super::*;
 use crate::app::model_preview::animation::ik::weapon::CeWeaponIk;
 use crate::app::model_preview::animation::ik::weapon::weapon_ik;
 use crate::app::model_preview::common::marker::MarkerFrame;

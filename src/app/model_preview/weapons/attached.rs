@@ -1,6 +1,7 @@
 //! An object held or carried by another, folded into its preview: its own
 //! features by game, then its geometry, functions and change colors.
 
+use super::super::super::GameId;
 use super::super::common::fields::{elements, has_flag};
 use super::super::dx9::passes::{change_colors_for, read_change_colors};
 use super::super::h3::attached::read_h3_attached_features;
@@ -8,7 +9,7 @@ use super::super::h4::attached::read_h4_attached_features;
 use super::super::load::LoadCx;
 use super::super::load::merge_attached;
 use super::super::reach::attached::read_reach_attached_features;
-use super::super::*;
+use super::super::{RenderModelPreview, RenderModelPreviewMarker, TagReader};
 use crate::app::model_preview::animation::ik::weapon::attached_marker_frame;
 use crate::app::model_preview::common::attached::named;
 use crate::app::model_preview::common::marker::MarkerFrame;

@@ -1,6 +1,14 @@
 //! Attaching a held weapon to its marker.
 
-use super::*;
+use super::super::super::{GameId, tag_path};
+use super::super::{RenderModelPreview, TagReader};
+use super::graph::{descendants, string_id_in};
+use super::unit::UnitWeapons;
+use super::{
+    AttachedObject, CeWeaponIk, MarkerFrame, attach_point, attach_vector, build_render_preview,
+    elements, fold_attached, holder_of, object_variant, weapon_ik,
+};
+use blam_tags::TagFile;
 
 /// Halo 4's `unit_show_weapon_from_inventory` (X360 0x84AB9B40): the unit's
 /// `weapon specific markers` entry for the weapon's class and name gives the

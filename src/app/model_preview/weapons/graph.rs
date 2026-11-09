@@ -1,6 +1,11 @@
 //! What a unit's animation graph says about the weapons it holds: modes, overlays, IK and arms.
 
-use super::*;
+use super::super::{RenderModelPreview, TagReader};
+use super::unit::WeaponOption;
+use super::{elements, has_flag, holder_of};
+use blam_tags::{TagFile, TagStruct};
+use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// The mode a unit nobody controls is in.
 const RESTING_MODE: &str = "combat";

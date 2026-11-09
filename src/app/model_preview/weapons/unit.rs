@@ -1,6 +1,15 @@
 //! A unit's weapons, as the panel offers them.
 
-use super::*;
+use super::super::super::tag_path;
+use super::super::TagReader;
+use super::graph::{
+    AIM_OVERLAY, ANY, ARM_OFFSETS, Arm, CAN_BE_DUAL, DUAL, Equippable, GRIP, GraphEntry, GraphIk,
+    IK_OVERLAYS, NO_IK_ACTIONS, ONLY_DUAL, PoseLayer, UNARMED, accepts, clips_without_ik,
+    graph_entries, graph_ik, graph_overlays, string_id_in, unit_graph,
+};
+use super::{TagSource, has_flag, holder_of, loose_weapon_paths};
+use blam_tags::TagFile;
+use std::collections::BTreeSet;
 
 /// What a Halo 2 unit can hold, and which clips what it holds leaves out.
 #[derive(Debug, Clone, Default)]

@@ -1,6 +1,8 @@
+use super::super::{RenderModelPreview, RenderModelPreviewNode, load_referenced_tag_from_source};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_source;
 use crate::core::game::GameId;
+use std::collections::BTreeSet;
 
 /// Bad node data gives no descendants rather than a hang or a panic.
 #[test]
