@@ -15,7 +15,7 @@ attached_feature!(super::lights::H4Light, moves: |at| at.animates(), inputs: |at
 
 attached_feature!(super::lights::H4CheapLight, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
 
-attached_feature!(super::flares::H4FlareAt, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
+attached_feature!(sprite super::flares::H4FlareAt, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
 
 // Simulations run on whenever there are any.
-attached_feature!(super::tracers::H4TracerAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(sprite super::tracers::H4TracerAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());

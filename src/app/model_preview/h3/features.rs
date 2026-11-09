@@ -12,6 +12,8 @@ features!(super::H3Features {
 attached_feature!(super::lights::H3Light, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
 
 impl Feature for super::leaves::H3LeavesAt {
+    const SPRITE: bool = true;
+
     fn moves(&self) -> bool {
         true
     }

@@ -167,30 +167,13 @@ pub(in crate::app::model_preview) fn function_values_for(
     set: &super::super::functions::FunctionInputs,
     time: f32,
 ) -> Option<super::super::functions::FunctionValues> {
-    let flares = data
-        .preview
-        .h2
-        .flares
-        .iter()
-        .any(|at| !at.scale_name().is_empty())
-        || data
-            .preview
-            .h2
-            .point_lights
-            .iter()
-            .any(|light| !light.scale_name().is_empty())
-        || data
-            .preview
-            .h2
-            .gel_lights
-            .iter()
-            .any(|light| !light.scale_name().is_empty());
+    let features = data.preview.any_feature(|list| list.needs_values());
     let h3 = data
         .textures
         .iter()
         .flat_map(|textures| textures.iter())
         .any(|texture| texture.h3.is_some());
-    (data.object_functions.is_some() || flares || h3)
+    (data.object_functions.is_some() || features || h3)
         .then(|| object_function_values(data, set, time))
 }
 

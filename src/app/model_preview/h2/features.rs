@@ -15,15 +15,15 @@ features!(super::H2Features {
 
 // Lights and flares move when they animate (`object_moves`), and read their
 // scale and the functions their channels name (`shader_input_names`).
-attached_feature!(super::lights::H2FlareAt, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
+attached_feature!(sprite values super::lights::H2FlareAt, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
 
-attached_feature!(super::lights::H2PointLight, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
+attached_feature!(values super::lights::H2PointLight, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
 
-attached_feature!(super::lights::H2GelLight, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
+attached_feature!(values super::lights::H2GelLight, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
 
 // Halo 2's light volumes draw still at rest.
-attached_feature!(super::light_volumes::H2LightVolume, moves: |_at| false, inputs: |at| vec![at.scale_name()]);
+attached_feature!(sprite super::light_volumes::H2LightVolume, moves: |_at| false, inputs: |at| vec![at.scale_name()]);
 
-attached_feature!(super::contrails::H2ContrailAt, moves: |_at| true, inputs: |at| vec![at.scale_name()]);
+attached_feature!(sprite super::contrails::H2ContrailAt, moves: |_at| true, inputs: |at| vec![at.scale_name()]);
 
-attached_feature!(super::liquid::H2LiquidAt, moves: |_at| true, inputs: |at| vec![at.scale_name()]);
+attached_feature!(sprite super::liquid::H2LiquidAt, moves: |_at| true, inputs: |at| vec![at.scale_name()]);

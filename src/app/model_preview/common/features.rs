@@ -13,6 +13,19 @@ use super::super::frame::marker_active;
 
 /// One of the things a preview carries.
 pub(in crate::app::model_preview) trait Feature {
+    /// Whether it draws in the object's sprite pass, among the flares,
+    /// antennas, effects and particles.
+    const SPRITE: bool = false;
+
+    /// Whether a function it names has the opened object's values worked
+    /// out for it, though the object has no functions of its own.
+    const NEEDS_VALUES: bool = false;
+
+    /// Whether it names any function, on whichever object it hangs.
+    fn names_a_function(&self) -> bool {
+        false
+    }
+
     /// The region and permutation it shows only under, if any.
     fn only_under(&self) -> Option<&(String, String)> {
         None
@@ -37,6 +50,13 @@ pub(in crate::app::model_preview) trait Feature {
 }
 
 impl<T: Feature> Feature for Arc<T> {
+    const SPRITE: bool = T::SPRITE;
+    const NEEDS_VALUES: bool = T::NEEDS_VALUES;
+
+    fn names_a_function(&self) -> bool {
+        T::names_a_function(self)
+    }
+
     fn only_under(&self) -> Option<&(String, String)> {
         T::only_under(self)
     }
@@ -61,6 +81,13 @@ pub(in crate::app::model_preview) trait FeatureList {
 
     /// Whether any it holds moves.
     fn moves(&self) -> bool;
+
+    /// Whether it holds any that draw in the object's sprite pass.
+    fn draws_sprites(&self) -> bool;
+
+    /// Whether it holds any naming a function that needs the opened
+    /// object's values ([`Feature::NEEDS_VALUES`]).
+    fn needs_values(&self) -> bool;
 
     /// The function names those on `object` read, in order (each one's
     /// inputs, then each one's late inputs), empty names left out.
@@ -102,6 +129,14 @@ impl<T: Feature> FeatureList for Vec<T> {
         <[T]>::is_empty(self)
     }
 
+    fn draws_sprites(&self) -> bool {
+        T::SPRITE && !<[T]>::is_empty(self)
+    }
+
+    fn needs_values(&self) -> bool {
+        T::NEEDS_VALUES && self.iter().any(Feature::names_a_function)
+    }
+
     fn moves(&self) -> bool {
         self.iter().any(Feature::moves)
     }
@@ -123,6 +158,14 @@ impl<T: Feature> FeatureList for Vec<T> {
 impl<T: Feature> FeatureList for Option<T> {
     fn is_empty(&self) -> bool {
         self.is_none()
+    }
+
+    fn draws_sprites(&self) -> bool {
+        T::SPRITE && self.is_some()
+    }
+
+    fn needs_values(&self) -> bool {
+        T::NEEDS_VALUES && self.iter().any(Feature::names_a_function)
     }
 
     fn moves(&self) -> bool {
@@ -333,12 +376,36 @@ macro_rules! features {
 pub(in crate::app::model_preview) use features;
 
 /// [`Feature`] for kinds that hang under a region through [`Attached`]: `$moves`
-/// and `$inputs` are each kind's rule, `|at|` and `|at, object|`.
+/// and `$inputs` are each kind's rule, `|at|` and `|at, object|`. A kind
+/// that draws in the sprite pass is marked `sprite` first, and one whose
+/// functions need the opened object's values `values` (see
+/// [`Feature::NEEDS_VALUES`]).
 ///
 /// [`Attached`]: super::attached::Attached
 macro_rules! attached_feature {
+    (sprite values $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
+        $crate::app::model_preview::common::features::attached_feature!(@impl true, true, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+    };
+    (values $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
+        $crate::app::model_preview::common::features::attached_feature!(@impl false, true, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+    };
+    (sprite $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
+        $crate::app::model_preview::common::features::attached_feature!(@impl true, false, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+    };
     ($kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
+        $crate::app::model_preview::common::features::attached_feature!(@impl false, false, $kind, moves: |$at| $moves, inputs: |$item| $inputs);
+    };
+    (@impl $sprite:literal, $values:literal, $kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
         impl $crate::app::model_preview::common::features::Feature for $kind {
+            const SPRITE: bool = $sprite;
+            const NEEDS_VALUES: bool = $values;
+
+            fn names_a_function(&self) -> bool {
+                let $item = self;
+                let names: Vec<&str> = $inputs;
+                names.iter().any(|name| !name.is_empty())
+            }
+
             fn only_under(&self) -> Option<&(String, String)> {
                 $crate::app::model_preview::common::attached::Attached::only_under(self)
             }
@@ -362,10 +429,12 @@ macro_rules! attached_feature {
 
 pub(in crate::app::model_preview) use attached_feature;
 
-attached_feature!(super::super::particles::ParticleSystem, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
-attached_feature!(super::super::particles::cheap::CheapEmitterAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(sprite super::super::particles::ParticleSystem, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+attached_feature!(sprite super::super::particles::cheap::CheapEmitterAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 
 impl Feature for super::super::antennas::Antenna {
+    const SPRITE: bool = true;
+
     fn only_under(&self) -> Option<&(String, String)> {
         super::attached::Attached::only_under(self)
     }

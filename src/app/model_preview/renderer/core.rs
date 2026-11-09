@@ -429,35 +429,15 @@ impl RenderCore {
         }
     }
 
-    /// Whether a frame has flares or antennas to draw.
+    /// Whether a frame has flares, antennas, effects or particles to draw:
+    /// any of its features that draw in the sprite pass.
     pub(in crate::app::model_preview) fn draws_object_sprites(
         &self,
         frame: &ModelGpuFrame,
     ) -> bool {
-        let preview = &frame.preview;
         frame.game_shaders
             && self.shaders_supported
-            && !(preview.ce.lights.is_empty()
-                && preview.ce.antennas.is_empty()
-                && preview.ce.effects.is_empty()
-                && preview.ce.contrails.is_empty()
-                && preview.ce.light_volumes.is_empty()
-                && preview.ce.lightning.is_empty()
-                && preview.ce.glows.is_empty()
-                && preview.ce.particle_systems.is_empty()
-                && preview.antennas.is_empty()
-                && preview.h2.flares.is_empty()
-                && preview.gen3.flares.is_empty()
-                && preview.h4.flares.is_empty()
-                && preview.gen3.light_volumes.is_empty()
-                && preview.h4.tracers.is_empty()
-                && preview.h2.light_volumes.is_empty()
-                && preview.h2.contrails.is_empty()
-                && preview.h2.liquids.is_empty()
-                && preview.particles.is_empty()
-                && preview.gen3.cheap_emitters.is_empty()
-                && preview.gen3.strips.is_empty()
-                && preview.h3.leaves.is_empty())
+            && frame.preview.any_feature(|list| list.draws_sprites())
     }
 
     /// The slot's uploaded maps, or none in a mode that draws without them.
