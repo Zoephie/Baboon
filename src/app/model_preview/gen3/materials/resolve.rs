@@ -1,6 +1,6 @@
 //! Resolving a render method: Reach's references and version update, embedded methods and their maps.
 
-use super::super::super::{GameId, ResolveCaches, TagReader, TagStruct};
+use super::super::super::{ResolveCaches, TagReader, TagStruct};
 use super::bitmap::{Gen3Bitmap, gen3_image, read_h3_bitmap};
 use super::{Gen3Material, Gen3Pass, Gen3Texture, Sampler, SamplerKind};
 use blam_tags::render_method::{
@@ -56,7 +56,7 @@ pub(in crate::app::model_preview) fn resolve_embedded_method(
 ) -> Option<ResolvedRenderMethod> {
     let mut method = RenderMethod::from_struct(&shader).ok()?;
     let definition = reader.render_method_definition(&method.definition_path)?;
-    if reader.source.game() == Some(GameId::HaloReach) {
+    if reader.rules().gen3.reference_shaders {
         let reference = reach_reference(reader, &method, "", &definition, &mut HashMap::new());
         method.apply_reference_shader(&definition, reference.as_deref());
     }

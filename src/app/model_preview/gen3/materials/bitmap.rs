@@ -135,10 +135,10 @@ pub(in crate::app::model_preview) fn read_h3_bitmap(
                 .format()
                 .ok()
         });
-        let halo4 = reader.source.game() == Some(crate::core::game::GameId::Halo4);
+        let own_texels = reader.rules().gen3.texels;
         let texels = format.map_or(ImageTexels::Linear, |format| {
-            if halo4 {
-                return ImageTexels::of_halo4(format, curve.unwrap_or(0));
+            if let Some(texels) = own_texels {
+                return texels(format, curve.unwrap_or(0));
             }
             let srgb = if matches!(curve, None | Some(0)) {
                 ImageTexels::default_srgb(format)
@@ -156,9 +156,7 @@ pub(in crate::app::model_preview) fn read_h3_bitmap(
                 .chain(&mut mips)
                 .for_each(alpha_only);
         }
-        // Halo 4 uploads `y8` and `ay8` as R8_UNORM (`halo4_tag_test`
-        // 0x141B7E080), and DirectX 11 views have no swizzle.
-        if halo4
+        if reader.rules().gen3.luminance_as_red
             && matches!(
                 format,
                 Some(blam_tags::bitmap::BitmapFormat::Y8 | blam_tags::bitmap::BitmapFormat::Ay8)

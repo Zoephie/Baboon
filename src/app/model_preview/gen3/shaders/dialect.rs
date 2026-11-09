@@ -1,6 +1,5 @@
 //! Which game's shader dialect a render method speaks.
 
-use super::super::super::GameId;
 use super::TagSource;
 
 /// Whose frame a material is lit and drawn in: Halo 3's (and ODST's),
@@ -23,12 +22,9 @@ pub(crate) enum RenderMethodDialect {
 }
 
 impl RenderMethodDialect {
-    /// Reach's for a Reach kit, Halo 3's for any other.
+    /// The kit's game's, by its rules.
     pub(super) fn of(source: &TagSource) -> Self {
-        match source.game() {
-            Some(GameId::HaloReach) => Self::Reach,
-            _ => Self::Halo3,
-        }
+        super::super::super::load::rules(source.game()).gen3.dialect
     }
 }
 

@@ -1,6 +1,6 @@
 //! A material prepared for draw: its passes compiled, their values, textures and animations bound.
 
-use super::super::super::{GameId, ResolveCaches, TagReader, Values};
+use super::super::super::{ResolveCaches, TagReader, Values};
 use super::bitmap::gen3_image;
 use super::parameters::{
     gen3_extern_bitmap, gen3_extern_change_color, gen3_parameter_value, gen3_xform,
@@ -57,7 +57,7 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
     for pass in &passes {
         bind_pass_values(values, pass, &mut material);
         bind_pass_textures(reader, values, pass, &mut material, caches);
-        if compiled.dialect == RenderMethodDialect::Reach {
+        if reader.rules().gen3.environment_maps {
             reach_environment_maps(reader, pass, &mut material, caches);
         }
     }
@@ -110,16 +110,14 @@ fn compile_passes(
         .ok_or("no lit entry point")?;
     let opaque = blend == Gen3Blend::Opaque;
     let dialect = sources.dialect();
+    let rules = reader.rules().gen3;
     let has = |entry: &str| definition.entry_points.iter().any(|known| known == entry);
-    // Reach's `select_mesh_entry_point_for_pass` (MCC `sub_14084C910`) lights
-    // what blends in a single pass, by the mesh's policy: one probe, or the
-    // ambient transfer.
+    // See `Gen3Rules::single_pass_entries`.
     let single_pass_entries =
-        (dialect == RenderMethodDialect::Reach && !opaque && has("single_pass_single_probe"))
-            .then_some((
-                "single_pass_single_probe",
-                "single_pass_single_probe_ambient",
-            ));
+        (rules.single_pass_entries && !opaque && has("single_pass_single_probe")).then_some((
+            "single_pass_single_probe",
+            "single_pass_single_probe_ambient",
+        ));
     let lit_entry = single_pass_entries
         .as_ref()
         .map_or(lit_entry, |(entry, _)| entry);
@@ -150,18 +148,13 @@ fn compile_passes(
         .any(|entry| entry == "active_camo"))
     .then(|| sources.pass(&definition, &options, "active_camo", false))
     .transpose()?;
-    // Reach's writes back what it samples, which the preview's copy holds
-    // encoded.
-    let camo = match dialect {
-        RenderMethodDialect::Reach => camo
-            .and_then(|pass| super::super::super::reach::camo::camo_pass(&pass))
-            .map(Arc::new),
-        RenderMethodDialect::Halo3 => camo,
+    let camo = match rules.camo_pass {
+        Some(camo_pass) => camo.and_then(|pass| camo_pass(&pass)).map(Arc::new),
+        None => camo,
     };
-    let shadow_generate =
-        (dialect == RenderMethodDialect::Reach && opaque && has("shadow_generate"))
-            .then(|| sources.pass(&definition, &options, "shadow_generate", false))
-            .transpose()?;
+    let shadow_generate = (rules.shadow_generate && opaque && has("shadow_generate"))
+        .then(|| sources.pass(&definition, &options, "shadow_generate", false))
+        .transpose()?;
     let dynamic_light = (opaque
         && definition
             .entry_points
@@ -227,11 +220,11 @@ fn material_passes(material: &Gen3Material) -> Vec<Arc<Gen3Pass>> {
 
 /// Which clock the material's animated parameters run by.
 fn animation_clock(reader: &TagReader, screen: bool) -> Gen3Clock {
-    match (reader.source.game(), screen) {
-        (Some(GameId::Halo3Odst), true) => Gen3Clock::OdstScreen,
-        (Some(GameId::Halo3Odst), false) => Gen3Clock::Odst,
-        (Some(GameId::HaloReach), _) => Gen3Clock::Reach,
-        _ => Gen3Clock::Halo3,
+    let rules = reader.rules().gen3;
+    if screen {
+        rules.screen_clock
+    } else {
+        rules.clock
     }
 }
 
