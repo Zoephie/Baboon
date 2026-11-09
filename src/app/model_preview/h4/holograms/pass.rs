@@ -1,5 +1,6 @@
 //! The hologram pass: the screen maps uploaded and the hologram drawn.
 
+use crate::app::model_preview::gl::blit::blit_depth;
 use super::super::lighting::h4_frame_values;
 use super::*;
 
@@ -58,11 +59,8 @@ impl H4Game {
             };
             // MCC: the scene's depth copied in (`copy_depth`), the colour
             // cleared to nothing.
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(scene));
-            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(framebuffer));
+            blit_depth(gl, scene, framebuffer, size);
             let [width, height] = size;
-            let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-            gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             gl.viewport(0, 0, width, height);
             gl.color_mask(true, true, true, true);

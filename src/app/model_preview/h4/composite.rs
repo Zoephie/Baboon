@@ -1,6 +1,7 @@
 //! Halo 4's end of the frame: its colour grading, final composite, full camo
 //! drawn after it, and shield.
 
+use crate::app::model_preview::gl::blit::blit_depth;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use blam_tags::render_method::{BitmapAddressMode, BitmapFilterMode};
@@ -63,11 +64,7 @@ impl H4Game {
         values.insert(super::shield::WORLD_SCALE, [camera.scale; 4]);
         unsafe {
             if let Some(targets) = state.targets.as_ref() {
-                let [width, height] = targets.size;
-                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
-                let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-                gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+                blit_depth(gl, targets.accumulation_framebuffer, targets.depth_copy_framebuffer, targets.size);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                 state.depth_copy = Some(targets.depth_copy);
             }

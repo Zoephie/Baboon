@@ -98,10 +98,7 @@ impl Gen3State {
     ) {
         unsafe {
             gl.viewport(0, 0, size[0], size[1]);
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(scene));
-            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(depth_copy));
-            let bits = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-            gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], bits, glow::NEAREST);
+            super::super::gl::blit::blit_depth(gl, scene, depth_copy, size);
         }
     }
 

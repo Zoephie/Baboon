@@ -1,5 +1,7 @@
 //! The picture finished: distortion, the suck and vision effects, and the composite.
 
+use crate::app::model_preview::gl::blit::empty_vertex_array;
+use crate::app::model_preview::gl::blit::blit_depth;
 use super::*;
 
 const DISTORTION_FRAGMENT: &str = "#version 410 core
@@ -73,12 +75,8 @@ impl PictureCopies {
 
     /// The scene's depth and stencil into `depth_copy`.
     pub(in crate::app::model_preview) unsafe fn copy_depth(&self, gl: &glow::Context) {
-        let size = self.size;
         unsafe {
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(self.accumulation_framebuffer));
-            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(self.depth_copy_framebuffer));
-            let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-            gl.blit_framebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], mask, glow::NEAREST);
+            blit_depth(gl, self.accumulation_framebuffer, self.depth_copy_framebuffer, self.size);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.picture_framebuffer));
         }
     }
@@ -224,7 +222,7 @@ impl Gen3State {
 
     pub(in crate::app::model_preview) unsafe fn empty_array(&mut self, gl: &glow::Context) -> glow::NativeVertexArray {
         unsafe {
-            *self.empty_vertex_array.get_or_insert_with(|| gl.create_vertex_array().expect("a vertex array"))
+            empty_vertex_array(gl, &mut self.empty_vertex_array)
         }
     }
 }

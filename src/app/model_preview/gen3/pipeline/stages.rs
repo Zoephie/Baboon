@@ -1,5 +1,6 @@
 //! The pipeline's stages: the frame begun, the albedo and transparent passes, camo and the shield.
 
+use crate::app::model_preview::gl::blit::blit_depth;
 use super::*;
 use super::super::shadow::{H3_NORMAL_TARGET_UNIT, H3_SHADOW_MAP_SIZE};
 use super::super::super::dx9::shadow::ShadowNormalTarget;
@@ -484,11 +485,7 @@ impl Gen3State {
         unsafe {
             if sprites {
                 if let Some(targets) = self.targets.as_ref() {
-                    let [width, height] = targets.size;
-                    gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                    gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
-                    let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-                    gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+                    blit_depth(gl, targets.accumulation_framebuffer, targets.depth_copy_framebuffer, targets.size);
                     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                     self.depth_copy = Some(targets.depth_copy);
                     // `submit_distortions`.
@@ -646,11 +643,7 @@ impl Gen3State {
         framebuffer: glow::NativeFramebuffer,
     ) -> Option<glow::NativeTexture> {
         self.targets.as_ref().map(|targets| unsafe {
-            let [width, height] = targets.size;
-            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
-            let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-            gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+            blit_depth(gl, targets.accumulation_framebuffer, targets.depth_copy_framebuffer, targets.size);
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             targets.depth_copy
         })
@@ -696,11 +689,7 @@ impl Gen3State {
         unsafe {
             // What the pass fades against: everything drawn so far.
             if let Some(targets) = self.targets.as_ref() {
-                let [width, height] = targets.size;
-                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(targets.accumulation_framebuffer));
-                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(targets.depth_copy_framebuffer));
-                let mask = glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT;
-                gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, mask, glow::NEAREST);
+                blit_depth(gl, targets.accumulation_framebuffer, targets.depth_copy_framebuffer, targets.size);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.accumulation_framebuffer));
                 self.depth_copy = Some(targets.depth_copy);
             }
