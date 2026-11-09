@@ -1,6 +1,9 @@
 //! A pass's animated values: their kinds, clocks and rows, and the readers they share.
 
-use super::*;
+use super::{FunctionValues, H2_TEXTURE_ROWS, tag_function_at};
+use blam_tags::tag_function::FunctionType;
+use blam_tags::{TagFunction, TagStruct};
+use std::sync::Arc;
 
 /// What a game's own shader animates on a pass past the template's
 /// animations, evaluated at draw: Halo CE's rows and constants.

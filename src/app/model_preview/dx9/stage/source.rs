@@ -1,7 +1,9 @@
 //! A stage's GLSL: its outputs, its drawn position and its full source.
 
 use super::super::super::gl::glsl::fill;
-use super::*;
+use super::ce::{CE_POINT_LIGHT_ROWS, CE_TRANSPARENT_CUBE};
+use super::kind::{Dx9VertexStage, H2_TEXTURE_ROWS};
+use super::{H2_PRT_REGISTERS, model_vertex_prelude};
 
 impl Dx9VertexStage {
     fn outputs(self) -> &'static str {

@@ -1,6 +1,10 @@
 //! Halo 2's default lights, and the object and PRT lights its passes read.
 
-use super::*;
+use super::H2PrtLight;
+use super::globals::{
+    DEFAULT_AMBIENT, DEFAULT_DIRECT_COLOR, DEFAULT_DIRECT_VECTOR, DEFAULT_INDIRECT_COLOR,
+    DEFAULT_INDIRECT_VECTOR,
+};
 
 /// The sphere lights `render_lights` falls back on with nothing else lighting
 /// the scene: a warm key and a cool fill.

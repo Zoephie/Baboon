@@ -5,10 +5,6 @@
 //! `h2::shader`; Halo CE's shaders in `ce::shaders`.
 
 use super::super::common::named_function::tag_function_at;
-use std::sync::Arc;
-
-use blam_tags::tag_function::FunctionType;
-use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::super::functions::FunctionValues;
 

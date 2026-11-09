@@ -3,7 +3,7 @@
 //! shields; and what the finished frame blooms over. Each game hooks in
 //! where its own differs.
 
-use super::super::*;
+use super::super::{FrameCx, ModelGpuFrame, RenderCore};
 use super::draw::draw_order;
 use super::passes::{Dx9Layer, H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT};
 use super::shadow::ShadowStyle;

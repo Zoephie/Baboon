@@ -1,6 +1,6 @@
 //! Halo 2's stages: chosen by the kit's file names, and their lightmap outputs.
 
-use super::*;
+use super::kind::Dx9VertexStage;
 
 impl Dx9VertexStage {
     /// From a pass's `vertex shader` reference, which ignores case as every

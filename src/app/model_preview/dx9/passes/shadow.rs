@@ -1,7 +1,13 @@
 //! The self-shadow passes, and the shadow apply that Halo 3 shares.
 
 use super::super::super::gl::glsl::fill;
-use super::*;
+use super::Dx9VertexStage;
+use super::layer::Dx9Layer;
+use super::lights::H2_SHADOW_BIAS;
+use super::pass::{
+    Dx9Blend, Dx9BlendEquation, Dx9BlendFactor, Dx9Compare, Dx9Cull, Dx9Depth, Dx9DrawPass,
+    H2_GLSL_VERSION, identity_rows,
+};
 use crate::app::model_preview::gen3::shadow::{H3_SHADOW_APPLY, H3_SHADOW_APPLY_BIAS};
 
 /// The passes behind the preview's own key light shadow. Under the default

@@ -5,7 +5,7 @@ use super::super::dx9::passes::{Dx9Layer, h2_prt_lights};
 use super::super::gl::pass_state::PassState;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::{Made, Sampling, Texels};
-use super::super::*;
+use super::super::{ModelGpuFrame, RenderCore, RenderModelPreview};
 use eframe::glow::{self, HasContext as _};
 
 pub(in crate::app::model_preview) const H2_SHADOW_MAP_SIZE: i32 = 2048;

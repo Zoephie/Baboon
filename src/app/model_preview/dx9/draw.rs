@@ -13,10 +13,15 @@ use super::super::gl::program::Linked;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::H2Target;
 use super::super::h2::bloom::H2Bloom;
-use super::super::*;
-use super::shadow::*;
+use super::super::{
+    DEPTH_UNITS, ModelGpuFrame, RenderCore, RenderModelPreview, TextureSlot, eye_position,
+    link_h2_program, rotate_view_vector, unrotate_view_vector,
+};
+use super::shadow::{H2_SHADOW_MAP_UNIT, ShadowStyle, h2_shadow_matrix};
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
+use std::collections::HashMap;
+use std::rc::Rc;
 
 /// The DX9 pipeline's GL state on the shared core: the linked pass programs,
 /// the pass targets, the frame copy, the gel, bloom and the self shadow. The
@@ -896,6 +901,7 @@ impl RenderCore {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::DEPTH_UNITS;
     use super::super::super::dx9::passes::{Dx9Blend, Dx9Depth};
     use super::super::super::gl::pass_state::StateCall;
     use super::*;

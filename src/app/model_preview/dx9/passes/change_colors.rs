@@ -1,6 +1,7 @@
 //! Change colours: Halo 2's permutations and tints, and Halo CE's colour interpolation.
 
-use super::*;
+use super::animation::{H2Animation, elements, rgb};
+use blam_tags::TagFile;
 
 /// One initial permutation of a change color channel.
 #[derive(Debug, Clone, PartialEq)]

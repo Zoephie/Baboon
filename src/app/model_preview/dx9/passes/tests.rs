@@ -1,5 +1,7 @@
 use super::super::super::functions::object_input;
 use super::*;
+use blam_tags::TagFunction;
+use std::sync::Arc;
 
 fn animation(kind: H2AnimationKind, period: f32, value: f32) -> H2Animation {
     let function = blam_tags::tag_function::H2Function::new_constant(value);
@@ -276,16 +278,33 @@ fn only_the_dx9_game_table_names_halo_ce() {
         {
             continue;
         }
+        // How many modules below `dx9` this file's module is: a `super`
+        // chain one longer reaches the module root, where `ce` is Halo CE's
+        // folder; a shorter one names dx9's own `stage::ce`.
+        let relative = path.strip_prefix(&root).unwrap();
+        let depth = relative.components().count()
+            - usize::from(relative.file_name().is_some_and(|name| name == "mod.rs"));
         let source = std::fs::read_to_string(&path).unwrap();
         for (number, line) in source.lines().enumerate() {
             // Spelled apart, so this test's own source is not a match.
-            if [
-                concat!("super::", "ce::"),
-                concat!("model_preview::", "ce::"),
-            ]
-            .iter()
-            .any(|path| line.contains(path))
-            {
+            let game = concat!("model_preview::", "ce::");
+            let names_game = line.contains(game)
+                || line.match_indices(concat!("ce", "::")).any(|(at, _)| {
+                    let before = &line[..at];
+                    let supers = before
+                        .strip_suffix("::")
+                        .map(|chain| {
+                            chain
+                                .rsplit(|c: char| !(c.is_alphanumeric() || c == ':' || c == '_'))
+                                .next()
+                                .unwrap_or("")
+                        })
+                        .unwrap_or("");
+                    !supers.is_empty()
+                        && supers.split("::").all(|segment| segment == "super")
+                        && supers.split("::").count() == depth + 1
+                });
+            if names_game {
                 naming.push(format!("{}:{}", path.display(), number + 1));
             }
         }
