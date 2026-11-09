@@ -8,12 +8,12 @@ use super::*;
 ///
 /// Answered from the file-name index: a path with that tail has the tail's
 /// last segment as its file name, so only those few entries are compared.
-pub(super) fn ce_package_entries<'c>(
+pub(super) fn cev_package_entries<'c>(
     containers: &'c [MountedContainer],
     package: &str,
 ) -> impl Iterator<Item = (&'c MountedContainer, &'c blam_tags::iostore::Entry)> {
-    let (file_name, suffix) = ce_package_file_name_and_suffix(package);
-    let candidates = ce_path_index(containers)
+    let (file_name, suffix) = cev_package_file_name_and_suffix(package);
+    let candidates = cev_path_index(containers)
         .by_file_name
         .get(&file_name)
         .cloned()
@@ -33,19 +33,19 @@ pub(super) fn ce_package_entries<'c>(
 
 /// A package path's `.uasset` file name, and the path tail a matching entry
 /// ends with: `/Game/A/SK_Foo` → (`sk_foo.uasset`, `/a/sk_foo.uasset`).
-pub(super) fn ce_package_file_name_and_suffix(package: &str) -> (String, String) {
+pub(super) fn cev_package_file_name_and_suffix(package: &str) -> (String, String) {
     let tail = package.to_ascii_lowercase().replace('\\', "/");
     let tail = tail.strip_prefix("/game/").unwrap_or(&tail);
     let file_name = format!("{}.uasset", tail.rsplit('/').next().unwrap_or(tail));
     (file_name, format!("/{tail}.uasset"))
 }
 
-/// Read a `.uasset` by its UE package path; see [`ce_package_entries`].
-pub(super) fn ce_read_uasset_by_package(
+/// Read a `.uasset` by its UE package path; see [`cev_package_entries`].
+pub(super) fn cev_read_uasset_by_package(
     containers: &[MountedContainer],
     package: &str,
 ) -> Option<(String, Vec<u8>)> {
-    ce_package_entries(containers, package).find_map(|(c, e)| {
+    cev_package_entries(containers, package).find_map(|(c, e)| {
         c.archive
             .read(&e.path)
             .ok()
@@ -54,11 +54,11 @@ pub(super) fn ce_read_uasset_by_package(
 }
 
 /// Read the sibling `.ubulk` (Nanite streaming pages) for a package, matched
-/// the same way as [`ce_read_uasset_by_package`]. Bulk data isn't in the
+/// the same way as [`cev_read_uasset_by_package`]. Bulk data isn't in the
 /// directory index — it shares the package's chunk id with the BulkData type,
 /// fetched via [`IoStoreArchive::read_bulk_for`].
-pub(super) fn ce_read_bulk_by_package(containers: &[MountedContainer], package: &str) -> Option<Vec<u8>> {
-    let (c, e) = ce_package_entries(containers, package).next()?;
+pub(super) fn cev_read_bulk_by_package(containers: &[MountedContainer], package: &str) -> Option<Vec<u8>> {
+    let (c, e) = cev_package_entries(containers, package).next()?;
     c.archive.read_bulk_for(e.chunk_index, 0).ok()
 }
 
@@ -69,7 +69,7 @@ pub(super) fn ce_read_bulk_by_package(containers: &[MountedContainer], package: 
 /// the head's `default` face/skin lives in the character's `anatomy` mesh.
 /// Meshes the game keeps as `SM_` static (helmets/armor) or MetaHuman (faces)
 /// aren't `SK_` and simply don't resolve here (a known gap).
-pub(super) fn ce_load_variant_meshes(
+pub(super) fn cev_load_variant_meshes(
     containers: &[MountedContainer],
     char_root: &str,
     needed: &std::collections::BTreeSet<(String, String)>,
@@ -94,7 +94,7 @@ pub(super) fn ce_load_variant_meshes(
                 continue;
             }
             let base = norm.rsplit('/').next().unwrap_or("");
-            if !base.starts_with("sk_") || ce_is_excluded(&norm, base) || base.contains("female") {
+            if !base.starts_with("sk_") || cev_is_excluded(&norm, base) || base.contains("female") {
                 continue;
             }
             let stem = base.strip_suffix(".uasset").unwrap_or(base).to_string();
@@ -138,7 +138,7 @@ pub(super) fn ce_load_variant_meshes(
             continue;
         };
         let Ok(hdr) =
-            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
         else {
             continue;
         };
@@ -169,7 +169,7 @@ pub(super) fn ce_load_variant_meshes(
 
 /// Non-renderable / overlay meshes to skip (skeleton bind mesh, shield/shadow
 /// proxies, cloth AnimDynamics, damage states, collision/physics/imposters).
-fn ce_is_excluded(norm: &str, base: &str) -> bool {
+fn cev_is_excluded(norm: &str, base: &str) -> bool {
     norm.contains("/skeleton/")
         || [
             "shield",

@@ -2,9 +2,9 @@
 
 use super::*;
 
-pub(super) const CE_CV: EIoStoreTocVersion = EIoStoreTocVersion::ReplaceIoChunkHashWithIoHash;
+pub(super) const CEV_CV: EIoStoreTocVersion = EIoStoreTocVersion::ReplaceIoChunkHashWithIoHash;
 
-pub(super) const CE_HV: EIoContainerHeaderVersion = EIoContainerHeaderVersion::SoftPackageReferences;
+pub(super) const CEV_HV: EIoContainerHeaderVersion = EIoContainerHeaderVersion::SoftPackageReferences;
 
 /// Halo: Campaign Evolved model preview. Returns `None` when this isn't a CE
 /// model (caller falls through to the classic render_model path); `Some(_)`
@@ -46,13 +46,13 @@ fn build_campaign_evolved_preview(
     skel_ref: &str,
     high_detail: bool,
 ) -> Result<ModelPreviewData, String> {
-    let CeModelMeshes {
+    let CevModelMeshes {
         skel,
         variants,
         meshes,
         render_path,
     } = resolve_ce_model_meshes(model_tag, entry, reader, containers, skel_ref, high_detail)?;
-    let (parts, static_parts, world_parts) = ce_mesh_parts(&meshes);
+    let (parts, static_parts, world_parts) = cev_mesh_parts(&meshes);
 
     // 5. Reconstruct the cross-game RenderModel and run the standard pipeline.
     let (render_model, render_meshes) =
@@ -87,9 +87,9 @@ pub(in crate::app) fn campaign_evolved_render_jms(
     let TagSource::IoStoreContainerSet { containers, .. } = source else {
         return Err("CE render extraction requires an IoStore container source.".to_owned());
     };
-    let CeModelMeshes { skel, meshes, .. } =
+    let CevModelMeshes { skel, meshes, .. } =
         resolve_ce_model_meshes(model_tag, entry, reader, containers, skel_ref, true)?;
-    let (parts, static_parts, world_parts) = ce_mesh_parts(&meshes);
+    let (parts, static_parts, world_parts) = cev_mesh_parts(&meshes);
     let mut jms =
         blam_tags::jms::JmsFile::from_ue_meshes(&parts, &static_parts, &world_parts, &skel)
             .map_err(|e| e.to_string())?;
@@ -105,7 +105,7 @@ pub(in crate::app) fn campaign_evolved_render_jms(
 /// here.
 fn apply_chimp_jms_uv_conventions(
     target: &mut blam_tags::jms::JmsFile,
-    meshes: &CeMeshes,
+    meshes: &CevMeshes,
 ) -> Result<(), String> {
     let mut vertex_offset = 0usize;
 

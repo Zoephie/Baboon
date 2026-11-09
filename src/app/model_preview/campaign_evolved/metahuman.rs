@@ -16,7 +16,7 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 /// The Blueprint component class that marks an actor as having a MetaHuman head.
-const CE_MH_COMPONENT: &str = "BPC_MetaHumanCreator";
+const CEV_MH_COMPONENT: &str = "BPC_MetaHumanCreator";
 
 /// A decoded `DT_MetaHumanHeads` row: the face mesh + optional facial-hair
 /// meshes, each as a `(package, asset)` soft reference.
@@ -41,26 +41,26 @@ struct MetaHumanHelmetRow {
 
 /// The decoded MetaHuman head + helmet tables for a mounted container set (row
 /// key, lowercased → meshes).
-struct CeMetaHumanTables {
+struct CevMetaHumanTables {
     heads: HashMap<String, MetaHumanHeadRow>,
     helmets: HashMap<String, MetaHumanHelmetRow>,
 }
 
-static CE_MH_CACHE: LazyLock<Mutex<HashMap<String, Arc<CeMetaHumanTables>>>> =
+static CEV_MH_CACHE: LazyLock<Mutex<HashMap<String, Arc<CevMetaHumanTables>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn ce_metahuman_tables(containers: &[MountedContainer]) -> Arc<CeMetaHumanTables> {
-    let key = ce_container_set_key(containers);
-    let mut cache = CE_MH_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+fn cev_metahuman_tables(containers: &[MountedContainer]) -> Arc<CevMetaHumanTables> {
+    let key = cev_container_set_key(containers);
+    let mut cache = CEV_MH_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(t) = cache.get(&key) {
         return t.clone();
     }
     fn lower<T>(v: Vec<(String, T)>) -> HashMap<String, T> {
         v.into_iter().map(|(k, r)| (k.to_lowercase(), r)).collect()
     }
-    let t = Arc::new(CeMetaHumanTables {
-        heads: lower(ce_decode_head_table(containers).unwrap_or_default()),
-        helmets: lower(ce_decode_helmet_table(containers).unwrap_or_default()),
+    let t = Arc::new(CevMetaHumanTables {
+        heads: lower(cev_decode_head_table(containers).unwrap_or_default()),
+        helmets: lower(cev_decode_helmet_table(containers).unwrap_or_default()),
     });
     cache.insert(key, t.clone());
     t
@@ -68,8 +68,8 @@ fn ce_metahuman_tables(containers: &[MountedContainer]) -> Arc<CeMetaHumanTables
 
 /// Find a `.uasset` by its exact basename (no extension), returning `(container
 /// index, bytes)`. Used for the singleton MetaHuman data tables / row structs.
-fn ce_find_uasset_by_basename(containers: &[MountedContainer], basename: &str) -> Option<Vec<u8>> {
-    let index = ce_path_index(containers);
+fn cev_find_uasset_by_basename(containers: &[MountedContainer], basename: &str) -> Option<Vec<u8>> {
+    let index = cev_path_index(containers);
     let candidates = index
         .by_file_name
         .get(&format!("{}.uasset", basename.to_ascii_lowercase()))?;
@@ -80,7 +80,7 @@ fn ce_find_uasset_by_basename(containers: &[MountedContainer], basename: &str) -
 }
 
 /// The first export's serial byte slice within a package.
-fn ce_export0_bytes<'a>(bytes: &'a [u8], hdr: &FZenPackageHeader) -> Option<&'a [u8]> {
+fn cev_export0_bytes<'a>(bytes: &'a [u8], hdr: &FZenPackageHeader) -> Option<&'a [u8]> {
     let ex = hdr.export_map.first()?;
     let start = hdr.summary.header_size as usize + ex.cooked_serial_offset as usize;
     bytes.get(start..start + ex.cooked_serial_size as usize)
@@ -90,20 +90,20 @@ fn ce_export0_bytes<'a>(bytes: &'a [u8], hdr: &FZenPackageHeader) -> Option<&'a 
 /// `UUserDefinedStruct` asset, register it, and decode the table's rows. The
 /// `.usmap` is native-reflection only, so the row struct must be recovered
 /// first. Shared by the head and helmet tables.
-fn ce_decode_metahuman_table(
+fn cev_decode_metahuman_table(
     containers: &[MountedContainer],
     struct_basename: &str,
     struct_name: &str,
     table_basename: &str,
 ) -> Option<Vec<(String, PropertyBlock)>> {
     let mut usmap = Usmap::meteorite().ok()?;
-    let sbytes = ce_find_uasset_by_basename(containers, struct_basename)?;
+    let sbytes = cev_find_uasset_by_basename(containers, struct_basename)?;
     let shdr =
-        FZenPackageHeader::deserialize(&mut Cursor::new(&sbytes[..]), None, CE_CV, CE_HV, None)
+        FZenPackageHeader::deserialize(&mut Cursor::new(&sbytes[..]), None, CEV_CV, CEV_HV, None)
             .ok()?;
     let sctx = blam_tags::iostore::unversioned::ExportContext::new(&[]);
     let props = blam_tags::iostore::unversioned::read_userdefined_struct_layout(
-        ce_export0_bytes(&sbytes, &shdr)?,
+        cev_export0_bytes(&sbytes, &shdr)?,
         &shdr.name_map.copy_raw_names(),
         &usmap,
         shdr.export_map.first()?.object_flags,
@@ -111,12 +111,12 @@ fn ce_decode_metahuman_table(
     )
     .ok()?;
     usmap.register_struct(struct_name, None, props);
-    let dbytes = ce_find_uasset_by_basename(containers, table_basename)?;
+    let dbytes = cev_find_uasset_by_basename(containers, table_basename)?;
     let dhdr =
-        FZenPackageHeader::deserialize(&mut Cursor::new(&dbytes[..]), None, CE_CV, CE_HV, None)
+        FZenPackageHeader::deserialize(&mut Cursor::new(&dbytes[..]), None, CEV_CV, CEV_HV, None)
             .ok()?;
     blam_tags::iostore::unversioned::read_datatable(
-        ce_export0_bytes(&dbytes, &dhdr)?,
+        cev_export0_bytes(&dbytes, &dhdr)?,
         &dhdr.name_map.copy_raw_names(),
         &usmap,
         struct_name,
@@ -126,7 +126,7 @@ fn ce_decode_metahuman_table(
 }
 
 /// A non-empty soft-object path as `(package, asset)`.
-fn ce_soft(sp: &blam_tags::iostore::unversioned::SoftObjectPath) -> Option<(String, String)> {
+fn cev_soft(sp: &blam_tags::iostore::unversioned::SoftObjectPath) -> Option<(String, String)> {
     (!sp.is_empty()).then(|| {
         (
             sp.package.as_str().to_string(),
@@ -136,10 +136,10 @@ fn ce_soft(sp: &blam_tags::iostore::unversioned::SoftObjectPath) -> Option<(Stri
 }
 
 /// Decode `DT_MetaHumanHeads` → per-row face + facial-hair mesh references.
-fn ce_decode_head_table(
+fn cev_decode_head_table(
     containers: &[MountedContainer],
 ) -> Option<Vec<(String, MetaHumanHeadRow)>> {
-    let rows = ce_decode_metahuman_table(
+    let rows = cev_decode_metahuman_table(
         containers,
         "S_MetaHumanHeads",
         "S_MetaHumanHeads",
@@ -150,13 +150,13 @@ fn ce_decode_head_table(
             .map(|(key, fields)| {
                 let mut row = MetaHumanHeadRow::default();
                 if let Some(sp) = fields.get("Head").and_then(PropValue::as_soft_object) {
-                    row.head = ce_soft(sp);
+                    row.head = cev_soft(sp);
                 }
                 if let Some(arr) = fields.get("FacialHair").and_then(PropValue::as_array) {
                     row.hair = arr
                         .iter()
                         .filter_map(PropValue::as_soft_object)
-                        .filter_map(ce_soft)
+                        .filter_map(cev_soft)
                         .collect();
                 }
                 row.type_ = fields
@@ -171,10 +171,10 @@ fn ce_decode_head_table(
 }
 
 /// Decode `DT_MetaHumanHelmets` → per-row helmet/hat mesh reference.
-fn ce_decode_helmet_table(
+fn cev_decode_helmet_table(
     containers: &[MountedContainer],
 ) -> Option<Vec<(String, MetaHumanHelmetRow)>> {
-    let rows = ce_decode_metahuman_table(
+    let rows = cev_decode_metahuman_table(
         containers,
         "S_MetaHumanHelmets",
         "S_MetaHumanHelmets",
@@ -187,7 +187,7 @@ fn ce_decode_helmet_table(
                 if let Some(m) = fields
                     .get("Mesh")
                     .and_then(PropValue::as_soft_object)
-                    .and_then(ce_soft)
+                    .and_then(cev_soft)
                 {
                     row.skeletal = m.1.to_ascii_lowercase().starts_with("sk_");
                     row.mesh = Some(m);
@@ -202,8 +202,8 @@ fn ce_decode_helmet_table(
 /// derived from its actor Blueprint's name (`BP_JohnsonBipedActor` → `johnson`),
 /// but only when that actor actually mounts a MetaHuman head component
 /// (`BPC_MetaHumanCreator`). Non-human actors return `None`.
-fn ce_metahuman_character_key(containers: &[MountedContainer], model_key: &str) -> Option<String> {
-    let index = ce_mesh_sync_index(containers);
+fn cev_metahuman_character_key(containers: &[MountedContainer], model_key: &str) -> Option<String> {
+    let index = cev_mesh_sync_index(containers);
     let refs: Vec<&ActorRef> = index
         .by_model
         .iter()
@@ -212,14 +212,14 @@ fn ce_metahuman_character_key(containers: &[MountedContainer], model_key: &str) 
         .collect();
     for r in refs {
         let c = containers.get(r.container)?;
-        let Some(hdr) = ce_read_header(&c.archive, &r.path) else {
+        let Some(hdr) = cev_read_header(&c.archive, &r.path) else {
             continue;
         };
         let is_human = hdr.imported_package_names.iter().any(|p| {
             p.rsplit('/')
                 .next()
                 .unwrap_or(p)
-                .eq_ignore_ascii_case(CE_MH_COMPONENT)
+                .eq_ignore_ascii_case(CEV_MH_COMPONENT)
         });
         if !is_human {
             continue;
@@ -246,7 +246,7 @@ fn ce_metahuman_character_key(containers: &[MountedContainer], model_key: &str) 
 /// The skeleton's head node name — CE human rigs use `head_m` (midline `_m`
 /// suffix), but resolve it from the skeleton so a differently-named rig still
 /// binds. Falls back to `head_m`.
-pub(super) fn ce_head_node_name(skel: &TagFile) -> String {
+pub(super) fn cev_head_node_name(skel: &TagFile) -> String {
     let root = skel.root();
     if let Some(block) = root.field_path("nodes").and_then(|f| f.as_block()) {
         let names: Vec<String> = (0..block.len())
@@ -268,18 +268,18 @@ pub(super) fn ce_head_node_name(skel: &TagFile) -> String {
     "head_m".to_string()
 }
 
-pub(super) fn ce_add_metahuman_head(
+pub(super) fn cev_add_metahuman_head(
     containers: &[MountedContainer],
     model_key: &str,
     needed: &std::collections::BTreeSet<(String, String)>,
     head_node: &str,
     high_detail: bool,
-    out: &mut CeMeshes,
+    out: &mut CevMeshes,
 ) {
-    let Some(key) = ce_metahuman_character_key(containers, model_key) else {
+    let Some(key) = cev_metahuman_character_key(containers, model_key) else {
         return;
     };
-    let tables = ce_metahuman_tables(containers);
+    let tables = cev_metahuman_tables(containers);
 
     // The model's permutations for `region` (fall back to every distinct
     // permutation it needs when the region declares none).
@@ -330,16 +330,16 @@ pub(super) fn ce_add_metahuman_head(
         }
         refs.extend(row.hair.iter());
         for (i, (pkg, asset)) in refs.iter().enumerate() {
-            let Some(mesh) = ce_read_skeletal_mesh(containers, pkg) else {
+            let Some(mesh) = cev_read_skeletal_mesh(containers, pkg) else {
                 continue;
             };
             // Each mesh's own `head` bone world position anchors it to the classic
             // head node; the face's (first ref) also marks the hat below.
-            let anchor = ce_metahuman_head_anchor(&mesh).unwrap_or([0.0; 3]);
+            let anchor = cev_metahuman_head_anchor(&mesh).unwrap_or([0.0; 3]);
             if i == 0 {
                 head_anchor = Some(anchor);
             }
-            let mats = ce_read_default_materials(containers, pkg);
+            let mats = cev_read_default_materials(containers, pkg);
             for perm in &head_perms {
                 out.world.push((
                     "head".to_string(),
@@ -361,9 +361,9 @@ pub(super) fn ce_add_metahuman_head(
         if let Some((pkg, asset)) = &hrow.mesh {
             let helmet_perms = perms_for("helmet");
             if hrow.skeletal {
-                if let Some(mesh) = ce_read_skeletal_mesh(containers, pkg) {
-                    let mats = ce_read_default_materials(containers, pkg);
-                    let anchor = ce_metahuman_head_anchor(&mesh).unwrap_or([0.0; 3]);
+                if let Some(mesh) = cev_read_skeletal_mesh(containers, pkg) {
+                    let mats = cev_read_default_materials(containers, pkg);
+                    let anchor = cev_metahuman_head_anchor(&mesh).unwrap_or([0.0; 3]);
                     for perm in &helmet_perms {
                         out.world.push((
                             "helmet".to_string(),
@@ -376,8 +376,8 @@ pub(super) fn ce_add_metahuman_head(
                         ));
                     }
                 }
-            } else if let Some(mesh) = ce_read_static_mesh(containers, pkg, high_detail) {
-                let mats = ce_read_default_materials(containers, pkg);
+            } else if let Some(mesh) = cev_read_static_mesh(containers, pkg, high_detail) {
+                let mats = cev_read_default_materials(containers, pkg);
                 for perm in &helmet_perms {
                     out.statics.push((
                         "helmet".to_string(),
@@ -397,7 +397,7 @@ pub(super) fn ce_add_metahuman_head(
 
 /// The MetaHuman face rig's `head` bone world position (UE cm) — the anchor a
 /// hat/helmet is authored relative to. `None` if the mesh has no head bone.
-fn ce_metahuman_head_anchor(face: &SkeletalMesh) -> Option<[f32; 3]> {
+fn cev_metahuman_head_anchor(face: &SkeletalMesh) -> Option<[f32; 3]> {
     let idx = face
         .bones
         .iter()

@@ -4,10 +4,10 @@ use super::*;
 
 /// A Campaign Evolved model's skeleton and Unreal render geometry, resolved
 /// the one way both its preview and its JMS export need.
-pub(super) struct CeModelMeshes {
+pub(super) struct CevModelMeshes {
     pub(super) skel: TagFile,
     pub(super) variants: Vec<ModelVariantPreview>,
-    pub(super) meshes: CeMeshes,
+    pub(super) meshes: CevMeshes,
     /// Where the geometry came from, for the preview's label.
     pub(super) render_path: String,
 }
@@ -19,7 +19,7 @@ pub(super) fn resolve_ce_model_meshes(
     containers: &[MountedContainer],
     skel_ref: &str,
     high_detail: bool,
-) -> Result<CeModelMeshes, String> {
+) -> Result<CevModelMeshes, String> {
     // 1. Resolve the skeleton_model (node skeleton + markers + regions) through
     //    the container tag index — the same read the browser tree performs.
     let skel = reader.source.read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), skel_ref)
@@ -51,19 +51,19 @@ pub(super) fn resolve_ce_model_meshes(
     //    exact region→perm→mesh binding into its mesh-sync RuntimeRegions —
     //    skeletal body + bone-attached static pieces. Fall back to the
     //    folder-scan heuristic (skeletal only) if that can't be found.
-    let (meshes, render_path) = match ce_load_meshsync_regions(containers, &model_key) {
+    let (meshes, render_path) = match cev_load_meshsync_regions(containers, &model_key) {
         Some(regions) => {
             // `high_detail` decodes the full-resolution Nanite geometry (slow,
             // millions of tris); otherwise the coarse LOD fallback (fast).
             (
-                ce_collect_parts_from_regions(containers, &regions, &needed, high_detail),
+                cev_collect_parts_from_regions(containers, &regions, &needed, high_detail),
                 format!("meshsync:{model_key}"),
             )
         }
-        None => (CeMeshes::default(), String::new()),
+        None => (CevMeshes::default(), String::new()),
     };
     let (mut meshes, render_path) = if meshes.is_empty() {
-        let char_root = ce_find_character_root(containers, &model_key).ok_or_else(|| {
+        let char_root = cev_find_character_root(containers, &model_key).ok_or_else(|| {
             // First-person hand/body models (GameGlobals FirstPersonHands /
             // FirstPersonBody) are a separate representation: no world
             // DA_MeshSynchronization imports them, and their geometry is
@@ -78,9 +78,9 @@ pub(super) fn resolve_ce_model_meshes(
                     .to_owned()
             }
         })?;
-        let skeletal = ce_load_variant_meshes(containers, &char_root, &needed);
+        let skeletal = cev_load_variant_meshes(containers, &char_root, &needed);
         (
-            CeMeshes {
+            CevMeshes {
                 skeletal,
                 ..Default::default()
             },
@@ -91,8 +91,8 @@ pub(super) fn resolve_ce_model_meshes(
     };
     // Human characters' heads come from a separate MetaHuman `Face` component
     // (DT_MetaHumanHeads), not the mesh-sync path — resolve and fuse it in.
-    let head_node = ce_head_node_name(&skel);
-    ce_add_metahuman_head(
+    let head_node = cev_head_node_name(&skel);
+    cev_add_metahuman_head(
         containers,
         &model_key,
         &needed,
@@ -103,7 +103,7 @@ pub(super) fn resolve_ce_model_meshes(
     if meshes.is_empty() {
         return Err("No UE meshes resolved for this model.".to_owned());
     }
-    Ok(CeModelMeshes {
+    Ok(CevModelMeshes {
         skel,
         variants,
         meshes,
@@ -112,8 +112,8 @@ pub(super) fn resolve_ce_model_meshes(
 }
 
 /// The resolved meshes as the part lists the cross-game builders take.
-pub(super) fn ce_mesh_parts(
-    meshes: &CeMeshes,
+pub(super) fn cev_mesh_parts(
+    meshes: &CevMeshes,
 ) -> (
     Vec<UeMeshPart<'_>>,
     Vec<UeStaticPart<'_>>,
@@ -165,10 +165,10 @@ pub(super) fn ce_mesh_parts(
 }
 
 /// Read + decode a `USkeletalMesh` by package path (`None` on any failure).
-pub(super) fn ce_read_skeletal_mesh(containers: &[MountedContainer], pkg: &str) -> Option<Arc<SkeletalMesh>> {
-    let (_, bytes) = ce_read_uasset_by_package(containers, pkg)?;
+pub(super) fn cev_read_skeletal_mesh(containers: &[MountedContainer], pkg: &str) -> Option<Arc<SkeletalMesh>> {
+    let (_, bytes) = cev_read_uasset_by_package(containers, pkg)?;
     let hdr =
-        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
             .ok()?;
     let names = hdr.name_map.copy_raw_names();
     SkeletalMesh::from_package(&bytes, &names, hdr.summary.header_size as usize)
@@ -178,17 +178,17 @@ pub(super) fn ce_read_skeletal_mesh(containers: &[MountedContainer], pkg: &str) 
 
 /// Read + decode a `UStaticMesh` by package, preferring Nanite bulk data when
 /// `high_detail` is enabled and falling back to the coarse cooked LOD.
-pub(super) fn ce_read_static_mesh(
+pub(super) fn cev_read_static_mesh(
     containers: &[MountedContainer],
     pkg: &str,
     high_detail: bool,
 ) -> Option<Arc<StaticMesh>> {
-    let (_, bytes) = ce_read_uasset_by_package(containers, pkg)?;
+    let (_, bytes) = cev_read_uasset_by_package(containers, pkg)?;
     let hdr =
-        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
             .ok()?;
     let bulk = high_detail
-        .then(|| ce_read_bulk_by_package(containers, pkg))
+        .then(|| cev_read_bulk_by_package(containers, pkg))
         .flatten();
     StaticMesh::from_package_preferring_nanite(
         &bytes,
@@ -200,16 +200,16 @@ pub(super) fn ce_read_static_mesh(
 }
 
 /// The default per-slot materials of a mesh package (its `MI_`/`M_` imports).
-pub(super) fn ce_read_default_materials(containers: &[MountedContainer], pkg: &str) -> Vec<String> {
-    let Some((_, bytes)) = ce_read_uasset_by_package(containers, pkg) else {
+pub(super) fn cev_read_default_materials(containers: &[MountedContainer], pkg: &str) -> Vec<String> {
+    let Some((_, bytes)) = cev_read_uasset_by_package(containers, pkg) else {
         return Vec::new();
     };
     let Ok(hdr) =
-        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
     else {
         return Vec::new();
     };
-    ce_default_materials(&hdr)
+    cev_default_materials(&hdr)
 }
 
 /// Decode the authoritative region→permutation→mesh mapping for a model from
@@ -217,13 +217,13 @@ pub(super) fn ce_read_default_materials(containers: &[MountedContainer], pkg: &s
 /// imported by a `BlamMeshSynchronizationDataAsset` (identified by class), which
 /// is imported by the actor Blueprint whose `BlamMeshSynchronizationComponent`
 /// (also by class) bakes the `RuntimeRegions` map. Actors and their bindings are
-/// resolved once into a cached [`CeMeshSyncIndex`]; this just decodes the few
+/// resolved once into a cached [`CevMeshSyncIndex`]; this just decodes the few
 /// relevant actors' world regions and merges them.
-fn ce_load_meshsync_regions(
+fn cev_load_meshsync_regions(
     containers: &[MountedContainer],
     model_key: &str,
 ) -> Option<MeshSyncRegions> {
-    let index = ce_mesh_sync_index(containers);
+    let index = cev_mesh_sync_index(containers);
     // The actors whose DA's ModelTag is this model (suffix match, preserving the
     // resolver's long-standing `ends_with` semantics). Several DAs can name the
     // same model (a world biped's DA plus the first-person arms/legs DAs), so
@@ -240,7 +240,7 @@ fn ce_load_meshsync_regions(
         return None;
     }
 
-    let (_, comp_class, comp_base_class) = *CE_CLASSES;
+    let (_, comp_class, comp_base_class) = *CEV_CLASSES;
     let usmap = Usmap::meteorite().ok()?;
     let mut merged = MeshSyncRegions::default();
     for r in refs {
@@ -251,7 +251,7 @@ fn ce_load_meshsync_regions(
             continue;
         };
         let Ok(hdr) =
-            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
         else {
             continue;
         };
@@ -273,7 +273,7 @@ fn ce_load_meshsync_regions(
             // components (`is_world() == false`) also reference the same model
             // and must not leak into the world preview.
             if regions.is_world() {
-                ce_merge_regions(&mut merged, regions);
+                cev_merge_regions(&mut merged, regions);
             }
         }
     }
@@ -283,7 +283,7 @@ fn ce_load_meshsync_regions(
 /// Merge one actor's world `RuntimeRegions` into the accumulator, deduping
 /// meshes by `(package, parent_bone)` so overlapping actors (or world variants
 /// of the same actor) don't double-emit the same piece.
-fn ce_merge_regions(dst: &mut MeshSyncRegions, src: MeshSyncRegions) {
+fn cev_merge_regions(dst: &mut MeshSyncRegions, src: MeshSyncRegions) {
     fn add(dst: &mut Vec<MeshRef>, m: MeshRef) {
         if !dst.iter().any(|x| {
             x.package.eq_ignore_ascii_case(&m.package)
@@ -337,7 +337,7 @@ fn ce_merge_regions(dst: &mut MeshSyncRegions, src: MeshSyncRegions) {
 /// pieces (each attached to a bone), tagged with their authoritative
 /// `(region, permutation)`.
 #[derive(Default)]
-pub(super) struct CeMeshes {
+pub(super) struct CevMeshes {
     /// `(region, perm, asset name, mesh, material names)`. Meshes are shared
     /// (`Arc`) because color variants reference the same geometry — loading and
     /// (Nanite-)decoding each package once, not once per variant.
@@ -378,7 +378,7 @@ pub(super) struct CeMeshes {
     )>,
 }
 
-impl CeMeshes {
+impl CevMeshes {
     fn is_empty(&self) -> bool {
         self.skeletal.is_empty() && self.statics.is_empty() && self.world.is_empty()
     }
@@ -401,7 +401,7 @@ fn strip_material_prefix(name: &str) -> String {
 /// `material_index` addresses. UE names each material slot after its default
 /// material, so an instance's [`MeshRef::material_overrides`] key (a slot name)
 /// matches one of these entries by name.
-fn ce_default_materials(hdr: &FZenPackageHeader) -> Vec<String> {
+fn cev_default_materials(hdr: &FZenPackageHeader) -> Vec<String> {
     hdr.imported_package_names
         .iter()
         .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
@@ -414,7 +414,7 @@ fn ce_default_materials(hdr: &FZenPackageHeader) -> Vec<String> {
 /// override binds by slot name, which equals the default material's name, so we
 /// replace the matching default in place (exact, order-preserving) — no reliance
 /// on decoding the mesh's slot array. Names are prefix-stripped for tool.exe.
-fn ce_effective_materials(
+fn cev_effective_materials(
     default_materials: &[String],
     overrides: &[(String, String)],
 ) -> Vec<String> {
@@ -434,13 +434,13 @@ fn ce_effective_materials(
 /// `(region, permutation)` — skinned `SkeletalMesh`es plus rigid `StaticMesh`
 /// pieces (each with its `parent_bone`), including multi-mesh permutations
 /// (e.g. arms = anatomy skin + sleeve, or a vehicle body + dozens of parts).
-fn ce_collect_parts_from_regions(
+fn cev_collect_parts_from_regions(
     containers: &[MountedContainer],
     regions: &MeshSyncRegions,
     needed: &std::collections::BTreeSet<(String, String)>,
     nanite: bool,
-) -> CeMeshes {
-    let mut out = CeMeshes::default();
+) -> CevMeshes {
+    let mut out = CevMeshes::default();
     // Cache loaded+decoded meshes by package, so a mesh referenced by dozens of
     // color-variant permutations is read and (Nanite-)decoded exactly once.
     // `None` marks a package that failed to load (don't retry it per variant).
@@ -455,12 +455,12 @@ fn ce_collect_parts_from_regions(
     for (region, perm) in needed {
         for mref in regions.skeletal_meshes(region, perm) {
             let entry = sk_cache.entry(mref.package.clone()).or_insert_with(|| {
-                let (_, bytes) = ce_read_uasset_by_package(containers, &mref.package)?;
+                let (_, bytes) = cev_read_uasset_by_package(containers, &mref.package)?;
                 let hdr = FZenPackageHeader::deserialize(
                     &mut Cursor::new(&bytes[..]),
                     None,
-                    CE_CV,
-                    CE_HV,
+                    CEV_CV,
+                    CEV_HV,
                     None,
                 )
                 .ok()?;
@@ -468,7 +468,7 @@ fn ce_collect_parts_from_regions(
                 let mesh =
                     SkeletalMesh::from_package(&bytes, &names, hdr.summary.header_size as usize)
                         .ok()?;
-                Some((std::sync::Arc::new(mesh), ce_default_materials(&hdr)))
+                Some((std::sync::Arc::new(mesh), cev_default_materials(&hdr)))
             });
             if let Some((mesh, default_mats)) = entry {
                 out.skeletal.push((
@@ -476,18 +476,18 @@ fn ce_collect_parts_from_regions(
                     perm.clone(),
                     mref.asset.clone(),
                     mesh.clone(),
-                    ce_effective_materials(default_mats, &mref.material_overrides),
+                    cev_effective_materials(default_mats, &mref.material_overrides),
                 ));
             }
         }
         for mref in regions.static_meshes(region, perm) {
             let entry = sm_cache.entry(mref.package.clone()).or_insert_with(|| {
-                let (_, bytes) = ce_read_uasset_by_package(containers, &mref.package)?;
+                let (_, bytes) = cev_read_uasset_by_package(containers, &mref.package)?;
                 let hdr = FZenPackageHeader::deserialize(
                     &mut Cursor::new(&bytes[..]),
                     None,
-                    CE_CV,
-                    CE_HV,
+                    CEV_CV,
+                    CEV_HV,
                     None,
                 )
                 .ok()?;
@@ -495,7 +495,7 @@ fn ce_collect_parts_from_regions(
                 // full-resolution Nanite geometry from the package's `.ubulk`;
                 // the light preview uses the coarse LOD fallback.
                 let ubulk = if nanite {
-                    ce_read_bulk_by_package(containers, &mref.package)
+                    cev_read_bulk_by_package(containers, &mref.package)
                 } else {
                     None
                 };
@@ -505,7 +505,7 @@ fn ce_collect_parts_from_regions(
                     ubulk.as_deref(),
                 )
                 .ok()?;
-                Some((std::sync::Arc::new(mesh), ce_default_materials(&hdr)))
+                Some((std::sync::Arc::new(mesh), cev_default_materials(&hdr)))
             });
             if let Some((mesh, default_mats)) = entry {
                 out.statics.push((
@@ -514,7 +514,7 @@ fn ce_collect_parts_from_regions(
                     mref.asset.clone(),
                     mesh.clone(),
                     mref.parent_bone.clone(),
-                    ce_effective_materials(default_mats, &mref.material_overrides),
+                    cev_effective_materials(default_mats, &mref.material_overrides),
                     mref.rel_transform,
                     None,
                 ));

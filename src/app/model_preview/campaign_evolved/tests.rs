@@ -62,7 +62,7 @@ fn a_package_lookup_through_the_index_finds_what_a_scan_found() {
         "/Game/Nope",
         "/Game/B/Foo",
     ] {
-        let (file_name, suffix) = ce_package_file_name_and_suffix(package);
+        let (file_name, suffix) = cev_package_file_name_and_suffix(package);
         let indexed = index
             .by_file_name
             .get(&file_name)
@@ -103,7 +103,7 @@ fn indexed_package_lookups_match_a_linear_scan() {
     let TagSource::IoStoreContainerSet { containers, .. } = &loaded.source else {
         panic!("not a container set");
     };
-    // What `ce_read_uasset_by_package` did before the index.
+    // What `cev_read_uasset_by_package` did before the index.
     let scan = |package: &str| {
         let tail = package.to_ascii_lowercase().replace('\\', "/");
         let tail = tail.strip_prefix("/game/").unwrap_or(&tail).to_owned();
@@ -132,7 +132,7 @@ fn indexed_package_lookups_match_a_linear_scan() {
             continue;
         };
         let package = format!("/Game/{}", rest.trim_end_matches(".uasset"));
-        let found = ce_package_entries(containers, &package)
+        let found = cev_package_entries(containers, &package)
             .next()
             .map(|(_, e)| e.path.clone());
         assert_eq!(found, scan(&package), "{package}");
@@ -145,7 +145,7 @@ fn indexed_package_lookups_match_a_linear_scan() {
 /// installation. `CE_MODEL` selects the tag path fragment and `CE_HD`
 /// enables Nanite detail. Skips when `CE_PAKS` is not configured.
 #[test]
-fn ce_model_real_path() {
+fn cev_model_real_path() {
     let Some(paks) = std::env::var_os("CE_PAKS").map(PathBuf::from) else {
         eprintln!("skip: set CE_PAKS to a Campaign Evolved Paks directory");
         return;

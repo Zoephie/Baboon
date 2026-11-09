@@ -13,8 +13,8 @@ pub(super) fn is_first_person_model(model_key: &str) -> bool {
 /// Find a character's UE asset root by locating the `*MeshSynchronization`
 /// data asset that imports this model's package, returning a
 /// `.../characters/<name>` path prefix.
-pub(super) fn ce_find_character_root(containers: &[MountedContainer], model_key: &str) -> Option<String> {
-    let index = ce_path_index(containers);
+pub(super) fn cev_find_character_root(containers: &[MountedContainer], model_key: &str) -> Option<String> {
+    let index = cev_path_index(containers);
     for (norm, container, entry) in &index.mesh_sync {
         let c = &containers[*container];
         let e = &c.archive.entries()[*entry];
@@ -22,7 +22,7 @@ pub(super) fn ce_find_character_root(containers: &[MountedContainer], model_key:
             continue;
         };
         let Ok(hdr) =
-            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
         else {
             continue;
         };
@@ -49,23 +49,23 @@ pub(super) fn ce_find_character_root(containers: &[MountedContainer], model_key:
 /// an export's `class_index` as a `ScriptImport` whose value is the CityHash64
 /// of the lowercased object path — so we compare against a precomputed
 /// `FPackageObjectIndex` in O(1).
-const CE_MESHSYNC_DA_CLASS: &str = "/Script/BlamSynchronization.BlamMeshSynchronizationDataAsset";
+const CEV_MESHSYNC_DA_CLASS: &str = "/Script/BlamSynchronization.BlamMeshSynchronizationDataAsset";
 
-const CE_MESHSYNC_COMP_CLASS: &str = "/Script/BlamSynchronization.BlamMeshSynchronizationComponent";
+const CEV_MESHSYNC_COMP_CLASS: &str = "/Script/BlamSynchronization.BlamMeshSynchronizationComponent";
 
-const CE_MESHSYNC_COMP_BASE_CLASS: &str =
+const CEV_MESHSYNC_COMP_BASE_CLASS: &str =
     "/Script/BlamSynchronization.BlamMeshSynchronizationComponentBase";
 
 /// Precomputed class indices `(mesh-sync DA, component, component base)`.
-pub(super) static CE_CLASSES: LazyLock<(
+pub(super) static CEV_CLASSES: LazyLock<(
     FPackageObjectIndex,
     FPackageObjectIndex,
     FPackageObjectIndex,
 )> = LazyLock::new(|| {
     (
-        FPackageObjectIndex::create_script_import(CE_MESHSYNC_DA_CLASS),
-        FPackageObjectIndex::create_script_import(CE_MESHSYNC_COMP_CLASS),
-        FPackageObjectIndex::create_script_import(CE_MESHSYNC_COMP_BASE_CLASS),
+        FPackageObjectIndex::create_script_import(CEV_MESHSYNC_DA_CLASS),
+        FPackageObjectIndex::create_script_import(CEV_MESHSYNC_COMP_CLASS),
+        FPackageObjectIndex::create_script_import(CEV_MESHSYNC_COMP_BASE_CLASS),
     )
 });
 
@@ -85,7 +85,7 @@ pub(super) struct ActorRef {
 /// heuristics: the class check catches `DA_*`, `BP_*`, and tokenless device
 /// assets alike, and the import join is immune to codename aliases
 /// (`tuning_fork`↔`Spirit`, `monitor`↔`GuiltySpark`, …).
-pub(super) struct CeMeshSyncIndex {
+pub(super) struct CevMeshSyncIndex {
     /// `(imported model package name, lowercased) → actor Blueprints that render
     /// it`. Matched against a previewed model by suffix, preserving the exact
     /// `ends_with` semantics the resolver has always used.
@@ -93,14 +93,14 @@ pub(super) struct CeMeshSyncIndex {
 }
 
 /// Cache of the mesh-sync index, keyed by the mounted container set's identity
-/// ([`ce_container_set_key`]). Building it scans every package header once
+/// ([`cev_container_set_key`]). Building it scans every package header once
 /// (~5s), so we keep it for the life of the mount rather than rebuilding per
 /// preview.
-static CE_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CeMeshSyncIndex>>>> =
+static CEV_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CevMeshSyncIndex>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Every `.uasset` in a mounted container set, found by name without a scan.
-pub(super) struct CePathIndex {
+pub(super) struct CevPathIndex {
     /// Lowercased file name (`sk_foo.uasset`) → `(container, entry)`, in the
     /// order a scan of containers then entries meets them, so the first match
     /// is the one a linear scan would have found.
@@ -109,14 +109,14 @@ pub(super) struct CePathIndex {
     pub(super) mesh_sync: Vec<(String, usize, usize)>,
 }
 
-/// Cache of [`CePathIndex`], keyed like [`CE_INDEX_CACHE`].
-static CE_PATH_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CePathIndex>>>> =
+/// Cache of [`CevPathIndex`], keyed like [`CEV_INDEX_CACHE`].
+static CEV_PATH_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CevPathIndex>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// A container set's identity: its `.utoc` paths, with each one's size and
 /// modified time, so a game update that rewrites them makes a new set rather
 /// than reusing indices of the old.
-pub(super) fn ce_container_set_key(containers: &[MountedContainer]) -> String {
+pub(super) fn cev_container_set_key(containers: &[MountedContainer]) -> String {
     files_key(containers.iter().map(|c| c.utoc_path.as_path()))
 }
 
@@ -137,7 +137,7 @@ pub(super) fn files_key<'a>(paths: impl Iterator<Item = &'a std::path::Path>) ->
         .join("|")
 }
 
-fn build_ce_path_index(containers: &[MountedContainer]) -> CePathIndex {
+fn build_ce_path_index(containers: &[MountedContainer]) -> CevPathIndex {
     index_ce_paths(containers.iter().enumerate().flat_map(|(container, c)| {
         c.archive
             .entries()
@@ -148,7 +148,7 @@ fn build_ce_path_index(containers: &[MountedContainer]) -> CePathIndex {
 }
 
 /// Index `(container, entry, path)` in the order given.
-pub(super) fn index_ce_paths<'p>(paths: impl Iterator<Item = (usize, usize, &'p str)>) -> CePathIndex {
+pub(super) fn index_ce_paths<'p>(paths: impl Iterator<Item = (usize, usize, &'p str)>) -> CevPathIndex {
     let mut by_file_name: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
     let mut mesh_sync = Vec::new();
     for (container, entry, path) in paths {
@@ -165,16 +165,16 @@ pub(super) fn index_ce_paths<'p>(paths: impl Iterator<Item = (usize, usize, &'p 
             mesh_sync.push((norm, container, entry));
         }
     }
-    CePathIndex {
+    CevPathIndex {
         by_file_name,
         mesh_sync,
     }
 }
 
 /// The cached path index for this container set (built on first use).
-pub(super) fn ce_path_index(containers: &[MountedContainer]) -> Arc<CePathIndex> {
-    let key = ce_container_set_key(containers);
-    let mut cache = CE_PATH_INDEX_CACHE
+pub(super) fn cev_path_index(containers: &[MountedContainer]) -> Arc<CevPathIndex> {
+    let key = cev_container_set_key(containers);
+    let mut cache = CEV_PATH_INDEX_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     cache
@@ -186,26 +186,26 @@ pub(super) fn ce_path_index(containers: &[MountedContainer]) -> Arc<CePathIndex>
 /// Parse a package's Zen header cheaply — decode only the header prefix (name
 /// map + import/export tables live at the front, before the bulky export data),
 /// falling back to a full read for the rare header that exceeds the window.
-pub(super) fn ce_read_header(archive: &IoStoreArchive, path: &str) -> Option<FZenPackageHeader> {
+pub(super) fn cev_read_header(archive: &IoStoreArchive, path: &str) -> Option<FZenPackageHeader> {
     if let Ok(bytes) = archive.read_prefix(path, 192 * 1024)
-        && let Ok(hdr) = FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+        && let Ok(hdr) = FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None)
     {
         return Some(hdr);
     }
     let bytes = archive.read(path).ok()?;
-    FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None).ok()
+    FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CEV_CV, CEV_HV, None).ok()
 }
 
 /// The lowercased basename stem (no dir, no extension) of a UE path.
-fn ce_stem(path: &str) -> String {
+fn cev_stem(path: &str) -> String {
     let n = path.to_ascii_lowercase().replace('\\', "/");
     let base = n.rsplit('/').next().unwrap_or(&n);
     base.strip_suffix(".uasset").unwrap_or(base).to_string()
 }
 
-/// Build the mesh-sync binding index for a container set (see [`CeMeshSyncIndex`]).
-fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex {
-    let (da_class, comp_class, comp_base_class) = *CE_CLASSES;
+/// Build the mesh-sync binding index for a container set (see [`CevMeshSyncIndex`]).
+fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CevMeshSyncIndex {
+    let (da_class, comp_class, comp_base_class) = *CEV_CLASSES;
 
     // Single header-only pass over every `.uasset`.
     // `da_to_models`: DA stem → the `-model` package names it imports (its ModelTag).
@@ -217,7 +217,7 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
             if !e.path.to_ascii_lowercase().ends_with(".uasset") {
                 continue;
             }
-            let Some(hdr) = ce_read_header(&c.archive, &e.path) else {
+            let Some(hdr) = cev_read_header(&c.archive, &e.path) else {
                 continue;
             };
             let is_da = hdr.exports_class(da_class);
@@ -234,7 +234,7 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
                     .collect();
                 if !models.is_empty() {
                     da_to_models
-                        .entry(ce_stem(&e.path))
+                        .entry(cev_stem(&e.path))
                         .or_default()
                         .extend(models);
                 }
@@ -243,7 +243,7 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
                 let imported_stems: Vec<String> = hdr
                     .imported_package_names
                     .iter()
-                    .map(|p| ce_stem(p))
+                    .map(|p| cev_stem(p))
                     .collect();
                 actors.push((
                     ActorRef {
@@ -277,16 +277,16 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
     }
 
     let by_model: Vec<(String, Vec<ActorRef>)> = model_to_actors.into_iter().collect();
-    CeMeshSyncIndex { by_model }
+    CevMeshSyncIndex { by_model }
 }
 
 /// The cached mesh-sync index for this container set (built on first use).
-pub(super) fn ce_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CeMeshSyncIndex> {
-    let key = ce_container_set_key(containers);
+pub(super) fn cev_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CevMeshSyncIndex> {
+    let key = cev_container_set_key(containers);
     // Held for the whole build, so a preview that asks while the prewarm is
     // running waits for it instead of scanning every header a second time. A
     // build that panicked poisons the lock; the map it guards is still sound.
-    let mut cache = CE_INDEX_CACHE
+    let mut cache = CEV_INDEX_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(idx) = cache.get(&key) {
@@ -305,7 +305,7 @@ pub(super) fn ce_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CeMeshS
 /// build rather than starting its own).
 pub(in crate::app) fn prewarm_ce_mesh_sync_index(containers: Vec<MountedContainer>) {
     spawn_background("Campaign Evolved mesh index prewarm", move || {
-        ce_path_index(&containers);
-        ce_mesh_sync_index(&containers);
+        cev_path_index(&containers);
+        cev_mesh_sync_index(&containers);
     });
 }
