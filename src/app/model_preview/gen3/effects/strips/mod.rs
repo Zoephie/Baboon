@@ -2,11 +2,6 @@
 //! is worked out whole each frame; a contrail leaves profiles behind as its
 //! location moves, so one on a still object draws nothing, as in the game.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
-use blam_tags::{TagFunction, TagStruct};
-
 use super::super::super::common::fields::{elements, has_flag};
 use super::super::super::common::named_function::tag_function_at;
 use super::super::super::common::view::{ViewFrame, posed_on};
@@ -18,7 +13,6 @@ use super::super::super::particles::{
     ParticleCorner, SpriteShader, lightmap_tint, particle_exposure, read_ends, read_sprite_shader,
     slerped,
 };
-use super::super::super::*;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::app::model_preview::common::math::{clamped_unit, cross, dot, minus};
@@ -27,9 +21,8 @@ use crate::app::model_preview::common::random::{high24_over_2_24, lcg_step};
 mod load;
 pub(in crate::app::model_preview) use load::*;
 mod contrail;
-mod geometry;
-use contrail::*;
 mod field;
+mod geometry;
 pub(in crate::app::model_preview) use field::*;
 #[cfg(test)]
 mod tests;

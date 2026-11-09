@@ -15,7 +15,6 @@ use crate::app::export::{
 };
 use crate::app::kits::KitStamp;
 use crate::app::shell::{WorkerMessage, spawn_background, spawn_worker};
-use blam_tags::render_model::RenderMesh;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 

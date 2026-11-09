@@ -20,7 +20,7 @@ use blam_tags::tag_function::transition_function_evaluate;
 use super::super::super::common::image::Image;
 use super::super::super::common::named_function::tag_function_at;
 use super::super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
-use super::super::super::*;
+use super::super::super::{RenderModelPreviewMarker, TagReader};
 use super::super::pipeline::EXPOSURE;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::math::{cross, dot, unit_by_reciprocal};

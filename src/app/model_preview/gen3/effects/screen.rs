@@ -12,7 +12,9 @@ use super::super::super::common::view::{ViewFrame, posed_on};
 use super::super::super::effects::{EffectOnsets, EffectTimes, for_each_attached_part};
 use super::super::super::functions::FunctionValues;
 use super::super::super::reach::composite::REACH_SCREEN_NOISE_BITMAP;
-use super::super::super::*;
+use super::super::super::{
+    GameId, RenderModelPreview, RenderModelPreviewMarker, RenderModelPreviewMaterial, TagReader,
+};
 use crate::app::model_preview::common::marker::MarkerFrame;
 use crate::core::h2_pixel_shader::SamplerKind;
 
@@ -785,6 +787,7 @@ pub(crate) fn gen3_screen_settings<'a>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::super::load_referenced_tag_from_source;
     use super::*;
     use crate::app::model_preview::harness::kit::kit_source;
     use crate::core::game::GameId;

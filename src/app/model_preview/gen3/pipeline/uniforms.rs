@@ -1,6 +1,19 @@
 //! What a pass's uniforms read: the frame's values, the view and node matrices, and the slot's uploaded maps.
 
-use super::*;
+use super::super::super::{
+    HashMap, ModelGpuCamera, ModelGpuFrame, RenderCore, RenderModelPreviewBatch, eye_position,
+    rotate_view_vector, unrotate_view_vector,
+};
+use super::lighting::{
+    DOMINANT_DIRECTION, DOMINANT_INTENSITY, EXPOSURE, dominant_light, frame_probe,
+    lighting_constants,
+};
+use super::{
+    Gen3Animated, Gen3Material, Gen3State, Gen3Value, ImageTexels, Scalar, Type,
+    upload_image_linear,
+};
+use eframe::glow;
+use eframe::glow::HasContext as _;
 
 /// Uploaded textures of a geometry, by material then name.
 #[derive(Default)]

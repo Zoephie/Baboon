@@ -1,6 +1,9 @@
 //! Reach's light volume level of detail and precompiled profiles, which Halo 4 also reads.
 
-use super::*;
+use super::EPSILON;
+use super::load::{DEFAULT_LOD_OUT, MOST_PROFILES};
+use super::property::Gen3VolumeProperty;
+use blam_tags::TagStruct;
 
 /// Reach's `LOD in distance` and the rest, as `postprocess` (tool
 /// 0x140DD0FA0) leaves them, for `calc_lod_amount`.

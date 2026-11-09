@@ -1,6 +1,10 @@
 //! The strips' field, stepped a tick at a time.
 
-use super::*;
+use super::contrail::RunningContrail;
+use super::load::{Gen3StripAt, StripKind, StripState};
+use super::{EffectOnsets, FunctionValues, ParticleCorner, ViewFrame, attached, dot, minus};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// What a slot keeps of its contrails from frame to frame.
 #[derive(Debug, Clone, Default)]

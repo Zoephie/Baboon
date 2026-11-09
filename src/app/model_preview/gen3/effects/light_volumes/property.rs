@@ -1,6 +1,9 @@
 //! A light volume's animated properties: their inputs, states and seeds.
 
-use super::*;
+use super::load::Gen3VolumeDefinition;
+use super::{Gen3Blend, high16_over_65535, lcg_step, tag_function_at};
+use blam_tags::{TagFunction, TagStruct};
+use std::sync::Arc;
 
 /// `c_light_volume::k_random_seed_count`.
 pub(super) const SEEDS: usize = 2;

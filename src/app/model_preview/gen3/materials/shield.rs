@@ -1,6 +1,11 @@
 //! A gen3 material's shield settings.
 
-use super::*;
+use super::super::super::{ResolveCaches, TagReader, decode_image};
+use super::{
+    Gen3Shield, Gen3ShieldSettings, Gen3Sources, Gen3Texture, Gen3Value, ImageTexels, SamplerKind,
+    has_flag,
+};
+use std::sync::Arc;
 
 /// A `shield_impact` tag's constants and noise, as `render_object_context`
 /// submits them.

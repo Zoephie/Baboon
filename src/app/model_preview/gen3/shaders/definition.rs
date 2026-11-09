@@ -1,6 +1,11 @@
 //! A render method definition: its categories, options, vertex types and shared stages, as read off the tag.
 
-use super::*;
+use super::super::super::TagReader;
+use super::dialect::RenderMethodDialect;
+use super::pass::Gen3Blend;
+use super::{Stage, elements, has_flag, has_flag_labelled};
+use blam_tags::TagStruct;
+use blam_tags::render_method::{BLEND_MODES, REACH_BLEND_MODES};
 
 /// Indices into [`VERTEX_TYPES`].
 #[cfg(test)]

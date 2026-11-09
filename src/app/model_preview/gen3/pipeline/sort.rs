@@ -1,6 +1,7 @@
 //! The order blended batches draw in.
 
-use super::*;
+use super::super::super::{ModelGpuFrame, RenderModelPreviewBatch};
+use super::ce_flare_view;
 
 /// How far along the view a batch's middle lies, as sprites measure theirs.
 pub(super) fn batch_distance(frame: &ModelGpuFrame, batch: &RenderModelPreviewBatch) -> f32 {

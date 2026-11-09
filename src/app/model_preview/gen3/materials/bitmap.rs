@@ -1,6 +1,8 @@
 //! Decoding a gen3 bitmap tag into an image, with its stored mips.
 
-use super::*;
+use super::super::super::{ResolveCaches, TagFile, TagReader, TextureImage, decode_image};
+use super::{Image, ImageTexels, SamplerKind, elements};
+use std::sync::Arc;
 
 /// A bitmap for a pass, and whether `curve` has the card decode it.
 pub(in crate::app::model_preview) fn gen3_image(

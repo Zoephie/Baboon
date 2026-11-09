@@ -4,10 +4,12 @@
 
 use super::super::dx9::shadow::ShadowStyle;
 use super::super::gl::pass_state::PassState;
-use super::super::*;
+use super::super::{ModelGpuFrame, RenderCore, RenderModelPreviewBatch};
 use super::shaders::{Gen3Material, Gen3Pass};
 use super::state::Gen3State;
+use crate::app::model_preview::gen3;
 use eframe::glow::{self, HasContext as _};
+use std::sync::Arc;
 
 /// Where Halo 3's and ODST's shadow apply reads the albedo pass's normals.
 pub(in crate::app::model_preview) const H3_NORMAL_TARGET_UNIT: u32 = 9;

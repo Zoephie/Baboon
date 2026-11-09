@@ -1,6 +1,16 @@
 //! Reading a light volume definition, and the volumes on an object's markers.
 
-use super::*;
+use super::super::super::super::{GameId, RenderModelPreviewMarker, TagReader};
+use super::lod::{ReachVolumeLod, max_profile_count, precompiles};
+use super::property::{Gen3VolumeProperty, Gen3VolumeState, SEEDS, VolumeProperties, volume_seeds};
+use super::{
+    EffectTimes, Gen3Bitmap, Gen3Blend, H3_EXPOSURE, H4EffectMaterial, MarkerFrame, Sampler,
+    SamplerKind, elements, for_each_attached_part, has_flag, inline_real, part_frame,
+    reach_alt_exposure, read_h3_bitmap, read_h3_definition, read_part_placement,
+    resolve_embedded_method, resolve_h4_effect_material,
+};
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 /// What a volume's row can hold, whatever its tag says; also the most
 /// Reach's postprocess bakes.

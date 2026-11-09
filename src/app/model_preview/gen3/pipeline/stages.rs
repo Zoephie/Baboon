@@ -1,7 +1,24 @@
 //! The pipeline's stages: the frame begun, the albedo and transparent passes, camo and the shield.
 
-use super::*;
+use super::super::super::{
+    DEPTH_UNITS, ModelGpuFrame, RenderCore, RenderModelPreviewBatch, functions,
+};
+use super::blend::{
+    DECAL_DEPTH_BIAS, DECAL_SLOPE_BIAS, blended_material_state, gen3_set_blend, gen3_set_cull,
+};
+use super::sort::batch_distance;
+use super::targets::Gen3Targets;
+use super::uniforms::{camera_to_world, set_value, view_matrix, view_projection};
+use super::{
+    Gen3Batch, Gen3Blend, Gen3Cx, Gen3Dialect, Gen3Game, Gen3Material, Gen3Pass, Gen3Shield,
+    Gen3State, Gen3Value, SpriteStage, TextureKind, ce_flare_view, layered_distance,
+    model_draw_range,
+};
+use crate::app::model_preview::gen3;
 use crate::app::model_preview::gl::blit::blit_depth;
+use eframe::glow;
+use eframe::glow::HasContext as _;
+use std::sync::Arc;
 
 /// The object function values behind the shield's two quantities.
 pub(in crate::app::model_preview) const H3_SHIELD_DAMAGE: &str = "current_shield_damage";

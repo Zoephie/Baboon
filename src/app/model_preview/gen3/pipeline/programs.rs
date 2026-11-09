@@ -1,6 +1,10 @@
 //! Linking a pass's program, with the vertex attributes it binds, and the program cache.
 
-use super::*;
+use super::super::super::{Rc, RenderCore};
+use super::{Gen3Pass, Gen3State, Linked};
+use eframe::glow;
+use eframe::glow::HasContext as _;
+use std::sync::Arc;
 
 /// Which attributes of the preview's vertex each semantic reads.
 const ATTRIBUTES: [(&str, &str); 7] = [

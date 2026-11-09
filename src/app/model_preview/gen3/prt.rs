@@ -9,7 +9,8 @@
 use blam_tags::TagFile;
 
 use super::super::common::fields::elements;
-use super::super::*;
+use super::super::{RenderModel, preview_mesh_order};
+use blam_tags::render_model::RenderMesh;
 
 /// The most any vertex carries: quadratic's nine.
 pub(crate) const COEFFICIENTS: usize = 9;

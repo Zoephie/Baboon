@@ -1,6 +1,8 @@
 //! A render method's parameters: transforms, values, and the externs it binds.
 
-use super::*;
+use super::super::super::{Values, parameter_named};
+use super::Gen3Value;
+use blam_tags::render_method::{ParameterSource, RenderMethodAnimatedParameterType, ResolvedValue};
 
 /// A map's `_xform`: its scale, then its offset. Tool's
 /// `render_method_update_real_parameter` starts from identity and takes only

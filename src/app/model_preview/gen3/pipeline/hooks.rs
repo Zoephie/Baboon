@@ -2,8 +2,11 @@
 //! hooks `draw_pass` asks as it binds a pass's uniforms and textures, which
 //! each game's pipeline keeps on its state.
 
+use super::super::super::{ModelGpuFrame, RenderModelPreviewBatch};
 use super::super::shaders::Gen3Values;
-use super::*;
+use super::{Gen3Material, Gen3Pass, Gen3Value};
+use eframe::glow;
+use std::sync::Arc;
 
 /// Where a game's passes differ inside [`Gen3State::draw_pass`]. Each
 /// default is Halo 3's and ODST's: nothing of their own.

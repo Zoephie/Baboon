@@ -4,10 +4,6 @@
 //! Halo 4 draws them through their material from each profile's packed
 //! state (`h4_light_volume_pass`), which is worked out here the same way.
 
-use std::sync::Arc;
-
-use blam_tags::{TagFunction, TagStruct};
-
 use super::super::super::common::fields::{elements, has_flag};
 use super::super::super::common::named_function::tag_function_at;
 use super::super::super::common::view::{ViewFrame, posed_on};
@@ -19,7 +15,6 @@ use super::super::super::gen3::materials::{Gen3Bitmap, read_h3_bitmap, resolve_e
 use super::super::super::h4::materials::{H4EffectMaterial, resolve_h4_effect_material};
 use super::super::super::particles::inline_real;
 use super::super::super::reach::lighting::reach_alt_exposure;
-use super::super::super::*;
 use super::super::effects::strips::EPSILON;
 use super::super::pipeline::EXPOSURE as H3_EXPOSURE;
 use super::super::shaders::{Gen3Blend, read_h3_definition};
@@ -33,9 +28,8 @@ use crate::core::h2_pixel_shader::SamplerKind;
 
 mod property;
 pub(in crate::app::model_preview) use property::*;
-mod lod;
-use lod::*;
 mod load;
+mod lod;
 pub(in crate::app::model_preview) use load::*;
 mod eval;
 pub(in crate::app::model_preview) use eval::*;

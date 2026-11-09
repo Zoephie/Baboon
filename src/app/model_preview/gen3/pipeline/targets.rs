@@ -1,6 +1,8 @@
 //! The frame's render targets, sized to the scene.
 
-use super::*;
+use super::{Made, Sampling, Texels};
+use eframe::glow;
+use eframe::glow::HasContext as _;
 
 /// The targets a frame draws through.
 pub(in crate::app::model_preview) struct Gen3Targets {

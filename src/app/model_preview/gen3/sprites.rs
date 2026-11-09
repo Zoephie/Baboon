@@ -18,10 +18,14 @@ use super::super::gl::pass_state::PassState;
 use super::super::particles::ParticleField;
 use super::super::particles::{CHEAP_FLOATS, CheapGl, ParticleGl, particle_floats, reach_cheap_gl};
 use super::super::reach::lighting::reach_exposure;
-use super::super::*;
+use super::super::{
+    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, ce_flare_clip, ce_flare_pixels, h4,
+    scene_depth_terms,
+};
 use super::pipeline::{gen3_lighting_constants, gen3_set_blend};
 use super::render::Gen3Game;
 use crate::app::model_preview::common::sprites::layered_distance;
+use crate::app::model_preview::gen3;
 
 /// Which part of the object's sprites a call draws.
 #[derive(Debug, Clone, Copy)]

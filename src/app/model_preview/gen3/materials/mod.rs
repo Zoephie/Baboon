@@ -7,17 +7,9 @@ use super::super::gen3::shaders::{
     Gen3Animated, Gen3Animation, Gen3Blend, Gen3Clock, Gen3Material, Gen3Pass, Gen3Shield,
     Gen3ShieldSettings, Gen3Sources, Gen3Texture, Gen3Value, RenderMethodDialect,
 };
-use super::super::*;
 use crate::app::model_preview::common::image::{ImageTexels, Sampler};
 use crate::core::h2_pixel_shader::SamplerKind;
 use crate::core::hlsl::parse::TextureKind;
-use blam_tags::render_method::{
-    BitmapAddressMode, BitmapFilterMode, ParameterSource, RenderMethod,
-    RenderMethodAnimatedParameterType, RenderMethodBitmapExternMode, RenderMethodDefinition,
-    RenderMethodParameterType, ResolvedRenderMethod, ResolvedValue,
-};
-use std::collections::HashMap;
-use std::sync::Arc;
 
 mod bitmap;
 pub(in crate::app::model_preview) use bitmap::*;

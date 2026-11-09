@@ -1,10 +1,13 @@
 use super::super::super::super::reach::lighting::{reach_alt_exposure, reach_exposure};
+use super::super::super::super::{TagSource, load_referenced_tag_from_source};
 use super::super::super::pipeline::EXPOSURE as H3_EXPOSURE;
 use super::super::super::shaders::Gen3Blend;
+use super::contrail::RunningContrail;
 use super::geometry::*;
 use super::*;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
+use std::sync::Arc;
 
 #[test]
 fn a_beam_always_has_two_profiles_and_never_more_than_its_rows() {

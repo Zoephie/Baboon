@@ -1,6 +1,13 @@
 //! Reading beams and contrails: their properties, shapes, looks and definitions, and the strips on an object.
 
-use super::*;
+use super::super::super::super::{GameId, RenderModelPreviewMarker, TagReader};
+use super::{
+    EffectTimes, MarkerFrame, SpriteShader, elements, for_each_attached_part, has_flag,
+    high24_over_2_24, lcg_step, part_frame, read_ends, read_part_placement, read_sprite_shader,
+    slerped, tag_function_at,
+};
+use blam_tags::{TagFunction, TagStruct};
+use std::sync::Arc;
 
 /// `beams.inl`'s limit, and what a contrail's rows hold.
 pub(super) const MOST_PROFILES: usize = 128;

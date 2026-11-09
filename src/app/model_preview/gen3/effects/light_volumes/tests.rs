@@ -1,6 +1,10 @@
+use super::super::super::super::load_referenced_tag_from_source;
+use super::lod::{ReachVolumeLod, lod_amount, max_profile_count, precompiles};
 use super::*;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
+use blam_tags::TagFunction;
+use std::sync::Arc;
 
 #[test]
 fn the_count_truncates_while_the_shaders_keep_the_whole_product() {

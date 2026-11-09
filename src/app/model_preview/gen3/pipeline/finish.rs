@@ -1,8 +1,13 @@
 //! The picture finished: distortion, the suck and vision effects, and the composite.
 
-use super::*;
+use super::super::super::{ModelGpuFrame, RenderCore, RenderModelPreviewBatch};
+use super::blend::gen3_set_blend;
+use super::{Gen3Cx, Gen3Game, Gen3State, screen_program};
+use crate::app::model_preview::gen3;
 use crate::app::model_preview::gl::blit::blit_depth;
 use crate::app::model_preview::gl::blit::empty_vertex_array;
+use eframe::glow;
+use eframe::glow::HasContext as _;
 
 const DISTORTION_FRAGMENT: &str = include_str!("shaders/distortion.frag");
 

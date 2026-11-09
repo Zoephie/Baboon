@@ -1,6 +1,10 @@
 //! A running contrail and its profiles.
 
-use super::*;
+use super::load::{
+    ContrailDefinition, EPSILON, MOST_PROFILES, PROFILE_SEEDS, REACH_MOST_EMISSION_RATE, StripLook,
+    StripState,
+};
+use super::{dot, high24_over_2_24, lcg_step, minus};
 
 /// `c_contrail_profile`, and what its update keeps.
 #[derive(Debug, Clone, Copy)]

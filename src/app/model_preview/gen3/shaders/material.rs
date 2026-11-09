@@ -1,6 +1,10 @@
 //! A material's passes and what they bind: textures, values and the shield.
 
-use super::*;
+use super::animation::Gen3Animation;
+use super::dialect::{Gen3Dialect, RenderMethodDialect};
+use super::pass::{Gen3Blend, Gen3Pass};
+use super::{Image, ImageTexels, Sampler};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Gen3Value {

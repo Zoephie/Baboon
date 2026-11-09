@@ -1,6 +1,10 @@
 //! A pass's blend, cull and decal depth state.
 
-use super::*;
+use super::super::super::{ModelGpuFrame, RenderModelPreviewBatch};
+use super::{Gen3Blend, Gen3Material, Gen3Pass, Gen3PrtKind, PassState};
+use eframe::glow;
+use eframe::glow::HasContext as _;
+use std::sync::Arc;
 
 /// `g_decal_slope_depth_bias` and `g_decal_depth_bias`.
 pub(super) const DECAL_SLOPE_BIAS: f32 = -0.5;

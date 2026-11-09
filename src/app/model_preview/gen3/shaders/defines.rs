@@ -1,6 +1,8 @@
 //! The preprocessor defines a pass compiles with: the base set and each chosen option's.
 
-use super::*;
+use super::Stage;
+use super::definition::{Gen3Definition, VERTEX_TYPES};
+use super::dialect::RenderMethodDialect;
 
 /// `sub_140C587A0`: what every shader compiles with. Reach's `sub_141171B10`
 /// adds `_standard_vs`, without which every vertex shader body is compiled

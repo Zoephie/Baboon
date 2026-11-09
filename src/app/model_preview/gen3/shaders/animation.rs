@@ -1,6 +1,7 @@
 //! A material's animated values and the clocks that drive them.
 
-use super::*;
+use super::FunctionValues;
+use blam_tags::tag_function::FunctionType;
 
 /// Which part of a constant an animation writes, as `update_constants` does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

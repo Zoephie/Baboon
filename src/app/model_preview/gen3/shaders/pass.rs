@@ -1,6 +1,8 @@
 //! A translated pass: its programs' sources, its varyings and its blend.
 
-use super::*;
+use super::super::super::MAX_PREVIEW_BONES;
+use super::{TextureKind, Translated, Type};
+use blam_tags::render_method::BLEND_MODES;
 
 /// `default_vs` of `screen.fx`, for a triangle that covers the picture.
 pub(in crate::app::model_preview) const SCREEN_VERTEX: &str = include_str!("screen.vert");

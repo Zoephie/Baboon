@@ -1,6 +1,13 @@
 //! The kit's shader sources and their includes.
 
-use super::*;
+use super::super::super::TagReader;
+use super::defines::{base_defines, option_defines};
+use super::definition::{Gen3Definition, VERTEX_SKINNED, entry_functions, read_h3_definition};
+use super::dialect::RenderMethodDialect;
+use super::pass::{Gen3Pass, SCREEN_VERTEX, pass_of};
+use super::{Preprocessor, Stage, TagSource, Translated, parse, translate};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// The tag behind an `#include`. Halo 3 keeps every source in one folder:
 /// `global.fx` is `shaders\global_fx`. Reach's `c_tag_d3dx_include`

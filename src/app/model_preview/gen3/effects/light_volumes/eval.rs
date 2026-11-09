@@ -1,6 +1,12 @@
 //! A light volume evaluated for a frame: its profile layout, quads and draws.
 
-use super::*;
+use super::load::{Gen3LightVolumeAt, MOST_PROFILES};
+use super::lod::lod_amount;
+use super::property::{Gen3VolumeInput, Gen3VolumeState};
+use super::{
+    AntennaQuad, FunctionValues, Gen3Bitmap, Gen3Blend, H4EffectMaterial, Sampler, ViewFrame,
+    attached, clamped_unit, cross, length, posed_on,
+};
 
 /// What a volume's frame lays out before its profiles.
 pub(in crate::app::model_preview) struct VolumeLayout {

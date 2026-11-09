@@ -1,6 +1,7 @@
 //! Which game's shader dialect a render method speaks.
 
-use super::*;
+use super::super::super::GameId;
+use super::TagSource;
 
 /// Whose frame a material is lit and drawn in: Halo 3's (and ODST's),
 /// Reach's or Halo 4's.

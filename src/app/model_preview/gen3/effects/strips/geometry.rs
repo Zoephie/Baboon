@@ -1,6 +1,15 @@
 //! A strip's geometry: its basis, profiles and vertices, and the beam and contrail vertices for a frame.
 
-use super::*;
+use super::contrail::RunningContrail;
+use super::load::{
+    BeamDefinition, ContrailDefinition, FEWEST_PROFILES, Gen3StripAt, MOST_PROFILES,
+    REACH_BEAM_SCROLL_PERIOD, REACH_CONTRAIL_SCROLL_PERIOD, StripLook, StripShape, StripState,
+    saturate,
+};
+use super::{
+    FunctionValues, ParticleCorner, SpriteShader, ViewFrame, clamped_unit, cross, dot,
+    lightmap_tint, minus, particle_exposure, posed_on,
+};
 
 /// `cross_section_world_basis`. Reach's has no guard for straight up, where
 /// `normalize(0)` takes every corner to NaN and the strip does not draw; the

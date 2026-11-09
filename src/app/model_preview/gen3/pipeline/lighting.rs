@@ -1,6 +1,11 @@
 //! The probe, the dominant light and the static and dynamic lighting passes.
 
-use super::*;
+use super::super::super::{ModelGpuFrame, RenderCore, camera_light};
+use super::blend::{gen3_lit_pass, gen3_set_cull};
+use super::stages::Gen3Frame;
+use super::{Gen3Batch, Gen3Blend, Gen3Cx, Gen3Game, Gen3State, second_order_rotation};
+use eframe::glow;
+use eframe::glow::HasContext as _;
 
 /// `c_geometry_sampler::m_default_lightprobe_sample`, the first nine terms of
 /// each channel: the light of an object with no level around it.

@@ -1,6 +1,14 @@
 //! Resolving a render method: Reach's references and version update, embedded methods and their maps.
 
-use super::*;
+use super::super::super::{GameId, ResolveCaches, TagReader, TagStruct};
+use super::bitmap::{Gen3Bitmap, gen3_image, read_h3_bitmap};
+use super::{Gen3Material, Gen3Pass, Gen3Texture, Sampler, SamplerKind};
+use blam_tags::render_method::{
+    BitmapAddressMode, BitmapFilterMode, ParameterSource, RenderMethod, RenderMethodDefinition,
+    ResolvedRenderMethod, ResolvedValue,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// `c_render_method_shader::version_update`, which Reach runs on every
 /// `shader` it loads: older tags' options and parameters as the game draws

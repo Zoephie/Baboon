@@ -1,6 +1,21 @@
 //! A material prepared for draw: its passes compiled, their values, textures and animations bound.
 
-use super::*;
+use super::super::super::{GameId, ResolveCaches, TagReader, Values};
+use super::bitmap::gen3_image;
+use super::parameters::{
+    gen3_extern_bitmap, gen3_extern_change_color, gen3_parameter_value, gen3_xform,
+};
+use super::resolve::reach_environment_maps;
+use super::shield::gen3_shield;
+use super::{
+    Gen3Animated, Gen3Animation, Gen3Blend, Gen3Clock, Gen3Material, Gen3Pass, Gen3Sources,
+    Gen3Texture, Gen3Value, RenderMethodDialect, Sampler, SamplerKind, TextureKind, elements,
+};
+use blam_tags::render_method::{
+    ParameterSource, RenderMethod, RenderMethodAnimatedParameterType, RenderMethodBitmapExternMode,
+    RenderMethodParameterType, ResolvedValue,
+};
+use std::sync::Arc;
 
 /// The first of these a family has is what lights its objects.
 const H3_LIT_ENTRIES: [&str; 3] = ["static_sh", "static_per_vertex", "default"];

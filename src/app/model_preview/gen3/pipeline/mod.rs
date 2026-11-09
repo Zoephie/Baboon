@@ -20,11 +20,9 @@ use super::super::gl::buffer::model_draw_range;
 #[cfg(test)]
 use super::super::gl::texture::signed_bytes;
 use super::super::gl::texture::upload_image_linear;
-use super::super::*;
 use super::state::Gen3State;
 use crate::app::model_preview::common::image::ImageTexels;
 use crate::core::hlsl::parse::{Scalar, TextureKind, Type};
-use eframe::glow::{self, HasContext as _};
 
 mod targets;
 pub(in crate::app::model_preview) use targets::*;
@@ -36,9 +34,8 @@ mod lighting;
 pub(in crate::app::model_preview) use lighting::*;
 mod blend;
 pub(in crate::app::model_preview) use blend::*;
-mod sort;
-use sort::*;
 mod hooks;
+mod sort;
 pub(in crate::app::model_preview) use hooks::*;
 mod stages;
 pub(in crate::app::model_preview) use stages::*;
