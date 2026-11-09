@@ -9,6 +9,7 @@ pub(super) mod contrails;
 pub(super) mod light_volumes;
 pub(super) mod liquid;
 pub(super) mod lights;
+pub(super) mod lighting;
 pub(super) mod effect_part;
 pub(in crate::app::model_preview) mod shader;
 pub(in crate::app) mod prt;

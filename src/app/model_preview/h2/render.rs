@@ -35,9 +35,14 @@ impl Dx9Game for H2Game {
         }
     }
 
-    unsafe fn gel_maps(&mut self, cx: &mut FrameCx<'_>) -> Vec<Option<glow::NativeTexture>> {
-        let h2 = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
-        unsafe { h2.gels(cx.gl, cx.frame).to_vec() }
+    /// `render_lights`' sphere lights, then the gel lights with their maps.
+    unsafe fn lights(&mut self, cx: &mut FrameCx<'_>, order: &[usize]) {
+        unsafe {
+            super::lighting::draw_h2_point_lights(cx.core, cx.gl, cx.frame, cx.slot, order);
+            let h2 = self.slots.of(cx.slot, cx.core.slot_uploads(cx.slot));
+            let gels = h2.gels(cx.gl, cx.frame).to_vec();
+            super::lighting::draw_h2_gel_lights(cx.core, cx.gl, cx.frame, cx.slot, order, &gels);
+        }
     }
 
     /// The light volumes, liquids and contrails, under the widgets' depth

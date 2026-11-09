@@ -5,15 +5,8 @@
 
 use eframe::glow::{self, HasContext as _};
 use super::shadow::ShadowStyle;
-
-
-
-
-
-
-
 use super::super::*;
-use super::passes::{H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT, H2DefaultLight, H2Layer};
+use super::passes::{H2_DEFAULT_LIGHTS, H2_SHADOWED_LIGHT, H2Layer};
 use super::sprites::Dx9Sprites;
 use super::draw::h2_draw_order;
 
@@ -28,10 +21,9 @@ pub(in crate::app::model_preview) trait Dx9Game {
         unsafe { cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None) }
     }
 
-    /// The gel lights' maps, by `h2.gel_lights`, while the lights draw.
-    unsafe fn gel_maps(&mut self, _cx: &mut FrameCx<'_>) -> Vec<Option<glow::NativeTexture>> {
-        Vec::new()
-    }
+    /// After the default lights, before the hologram layer: the game's own
+    /// lights, in `order`.
+    unsafe fn lights(&mut self, _cx: &mut FrameCx<'_>, _order: &[usize]) {}
 
     /// In the sprite pass, under the widgets' depth state, before the
     /// antennas: the game's own sprites.
@@ -107,59 +99,8 @@ impl RenderCore {
                         gl.disable(glow::STENCIL_TEST);
                     }
                 }
-                // `render_lights`: real lights draw whichever rig stands behind them.
-                let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-                for (index, point) in frame.preview.h2.point_lights.iter().enumerate() {
-                    if !frame.shown.is(super::super::common::features::paths::H2_POINT_LIGHTS, index) {
-                        continue;
-                    }
-                    let values = frame.function_values_of_object(point.object);
-                    let onsets = &mut self.slots[slot].simulations.effect_onsets;
-                    let onset = onsets.of(point.object, point.scale_name(), values, frame.time);
-                    let Some(light) = point.lit(values, bones, frame.time, onset) else {
-                        continue;
-                    };
-                    let (light, draws) = h2::lights::overbrighten(&light);
-                    let specular = H2DefaultLight { color: light.specular, ..light };
-                    for _ in 0..draws {
-                        for (layer, light) in
-                            [(point.diffuse_layer(), &light), (H2Layer::LightSpecular, &specular)]
-                        {
-                            self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
-                        }
-                    }
-                }
-                let gels = game.gel_maps(&mut FrameCx { gl, frame, core: self, slot });
-                let mut masked = false;
-                for (index, gel) in frame.preview.h2.gel_lights.iter().enumerate() {
-                    if !frame.shown.is(super::super::common::features::paths::H2_GEL_LIGHTS, index) {
-                        continue;
-                    }
-                    let values = frame.function_values_of_object(gel.object);
-                    let onsets = &mut self.slots[slot].simulations.effect_onsets;
-                    let onset = onsets.of(gel.object, gel.scale_name(), values, frame.time);
-                    let Some((light, rows)) = gel.lit(values, bones, frame.time, onset) else {
-                        continue;
-                    };
-                    let specular = h2::lights::has_specular(&light);
-                    let (light, draws) = h2::lights::overbrighten(&light);
-                    self.dx9.h2_gel = Some((gels.get(index).copied().flatten(), rows.rows));
-                    if specular {
-                        self.draw_h2_passes(gl, frame, slot, &order, H2Layer::GelMask, Some(&light));
-                        masked = true;
-                    }
-                    let layer = if specular { H2Layer::LightFrustum } else { H2Layer::LightGel };
-                    for _ in 0..draws {
-                        self.draw_h2_passes(gl, frame, slot, &order, layer, Some(&light));
-                    }
-                    self.dx9.h2_gel = None;
-                }
-                if masked {
-                    gl.color_mask(false, false, false, true);
-                    gl.clear_color(0.0, 0.0, 0.0, 1.0);
-                    gl.clear(glow::COLOR_BUFFER_BIT);
-                    gl.color_mask(true, true, true, true);
-                }
+                // `render_lights`: the game's own lights, each drawn over the layers it lights.
+                game.lights(&mut FrameCx { gl, frame, core: self, slot }, &order);
                 self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
             }
             let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
