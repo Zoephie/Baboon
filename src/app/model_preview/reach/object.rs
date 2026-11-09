@@ -1,7 +1,7 @@
 //! A Reach object's own features, read when it opens.
 
 use super::super::common::marker::own_marker_frame;
-use super::super::*;
+use super::super::{RenderModelPreview, RenderModelPreviewMarker, TagReader};
 use blam_tags::TagFile;
 
 /// A Reach object's own shield, camo, shadow caster and IK markers, then
