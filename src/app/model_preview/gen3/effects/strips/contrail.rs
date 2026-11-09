@@ -1,8 +1,8 @@
 //! A running contrail and its profiles.
 
 use super::load::{
-    ContrailDefinition, EPSILON, MOST_PROFILES, PROFILE_SEEDS, REACH_MOST_EMISSION_RATE, StripLook,
-    StripState,
+    ContrailDefinition, EPSILON, MOST_PROFILES, MOST_PULSED_EMISSION_RATE, PROFILE_SEEDS,
+    StripLook, StripState,
 };
 use super::{dot, high24_over_2_24, lcg_step, minus};
 
@@ -144,7 +144,7 @@ impl RunningContrail {
         let mut remaining = total;
         let rate = contrail.emission_rate.scalar(state);
         let rate = if look.own_terms {
-            rate.min(REACH_MOST_EMISSION_RATE)
+            rate.min(MOST_PULSED_EMISSION_RATE)
         } else {
             rate
         };

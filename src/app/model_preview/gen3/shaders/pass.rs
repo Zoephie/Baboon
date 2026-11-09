@@ -21,7 +21,7 @@ pub(crate) struct Gen3Pass {
 /// The game's `Nodes[70]` holds one mesh's node map, uploaded a mesh at a time.
 /// The preview's vertices name the skeleton's own nodes, all at once, with the
 /// last kept spare.
-const H3_NODES: usize = MAX_PREVIEW_BONES + 1;
+const NODE_SLOTS: usize = MAX_PREVIEW_BONES + 1;
 
 /// A skinned vertex without weights rides the spare node, which holds still.
 /// Direct3D lets a stage write less of a semantic than the next reads, as
@@ -80,8 +80,8 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
         _ => None,
     });
     let spare = nodes.map(|nodes| {
-        *nodes = H3_NODES;
-        H3_NODES - 1
+        *nodes = NODE_SLOTS;
+        NODE_SLOTS - 1
     });
     for uniform in pixel.uniforms {
         if !uniforms.iter().any(|known| known.0 == uniform.0) {
@@ -101,20 +101,20 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
         .source
         .replacen('\n', "\ninvariant gl_Position;\n", 1);
     let source = widen_varyings(&invariant, &pixel.source)
-        .replace("Nodes[210]", &format!("Nodes[{}]", H3_NODES * 3))
+        .replace("Nodes[210]", &format!("Nodes[{}]", NODE_SLOTS * 3))
         .replace(
             "vs_model_skinning_matrices[210]",
-            &format!("vs_model_skinning_matrices[{}]", H3_NODES * 3),
+            &format!("vs_model_skinning_matrices[{}]", NODE_SLOTS * 3),
         );
     let source = source.replace(
         "hlsl_p0.node_weights = a_BLENDWEIGHT;",
         "hlsl_p0.node_weights = a_BLENDWEIGHT;
     if (dot(a_BLENDWEIGHT, vec4(1.0)) <= 0.0) {
         hlsl_p0.node_weights = vec4(1.0, 0.0, 0.0, 0.0);
-        hlsl_p0.node_indices = uvec4(H3_STILL_NODE);
+        hlsl_p0.node_indices = uvec4(STILL_NODE_SLOT);
     }",
     );
-    let source = source.replace("H3_STILL_NODE", &format!("{}u", spare.unwrap_or(0)));
+    let source = source.replace("STILL_NODE_SLOT", &format!("{}u", spare.unwrap_or(0)));
     // A vertex's occlusion ratio divides by the light's response to its
     // normal. Level probes keep that well above its floor, but the default
     // probe is lit nearly from one side, so on knobbly geometry a ratio of 100
@@ -127,13 +127,13 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
     // preview's three-component positions leave at 1: every mirrored half
     // lit with the wrong binormal. The preview carries the authored
     // binormal, so its side of the normal and tangent gives the sign.
-    const REACH_BINORMAL_SCALE: &str =
+    const AUTHORED_BINORMAL_SCALE: &str =
         "float l_binormal_scale = ((l_vertex.position.w * 2.) - 1.);";
-    let source = if source.contains(REACH_BINORMAL_SCALE) {
+    let source = if source.contains(AUTHORED_BINORMAL_SCALE) {
         // Functions come before the inputs they would read, so `main` works
         // the sign out into a global first.
         let source = source
-            .replace(REACH_BINORMAL_SCALE, "float l_binormal_scale = g_reach_binormal_sign;")
+            .replace(AUTHORED_BINORMAL_SCALE, "float l_binormal_scale = g_reach_binormal_sign;")
             .replacen("void main() {", "void main() {\n    g_reach_binormal_sign = (dot(cross(a_NORMAL, a_TANGENT), a_BINORMAL) < 0.0) ? -1.0 : 1.0;", 1);
         let source = if source.contains("in vec3 a_BINORMAL;") {
             source
@@ -153,10 +153,12 @@ pub(crate) fn pass_of(vertex: Translated, pixel: Translated) -> Gen3Pass {
     // (`generate_binormal(normal, tangent, vertex.tangent.w)`), which the
     // preview's three-component tangents leave at 1. As for Reach, the
     // authored binormal's side of the normal and tangent gives it.
-    const H4_TANGENT: &str = "hlsl_p0.tangent = a_TANGENT;";
-    let source = if source.contains(H4_TANGENT) && source.contains("in vec4 a_NORMAL;") {
+    const TANGENT_WITHOUT_HANDEDNESS: &str = "hlsl_p0.tangent = a_TANGENT;";
+    let source = if source.contains(TANGENT_WITHOUT_HANDEDNESS)
+        && source.contains("in vec4 a_NORMAL;")
+    {
         let source = source.replace(
-            H4_TANGENT,
+            TANGENT_WITHOUT_HANDEDNESS,
             "hlsl_p0.tangent = vec4(a_TANGENT.xyz, (dot(cross(a_NORMAL.xyz, a_TANGENT.xyz), a_BINORMAL) < 0.0) ? -1.0 : 1.0);",
         );
         if source.contains("in vec3 a_BINORMAL;") {

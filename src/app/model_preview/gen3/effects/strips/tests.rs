@@ -373,16 +373,13 @@ fn a_reach_strip_is_exposed_by_its_blend_and_the_stops() {
 /// seconds'; Halo 3's run on.
 #[test]
 fn reach_strips_scroll_on_a_clock_that_wraps() {
-    assert_eq!(REACH_CONTRAIL_SCROLL_PERIOD, 131.0);
+    assert_eq!(CONTRAIL_SCROLL_PERIOD, 131.0);
+    assert_eq!(reach_look(None).scroll_time(BEAM_SCROLL_PERIOD, 61.5), 1.5);
     assert_eq!(
-        reach_look(None).scroll_time(REACH_BEAM_SCROLL_PERIOD, 61.5),
-        1.5
-    );
-    assert_eq!(
-        reach_look(None).scroll_time(REACH_CONTRAIL_SCROLL_PERIOD, 132.0),
+        reach_look(None).scroll_time(CONTRAIL_SCROLL_PERIOD, 132.0),
         1.0
     );
-    assert_eq!(look(None).scroll_time(REACH_BEAM_SCROLL_PERIOD, 61.5), 61.5);
+    assert_eq!(look(None).scroll_time(BEAM_SCROLL_PERIOD, 61.5), 61.5);
 }
 
 /// `c_contrail::pulse` holds Reach's emission rate to 100000.

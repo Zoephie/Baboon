@@ -36,17 +36,17 @@ pub(crate) enum Gen3Clock {
     /// Halo 3 (`evaluate_function`, March 2007 build): `unique_id` is time
     /// shifted by the object's index, so like objects run out of step.
     #[default]
-    Halo3,
+    IndexShift,
     /// ODST (`sub_140946C30`): `unique_id` shifted by the object's index
     /// times 1.37317.
-    Odst,
+    ScaledIndexShift,
     /// An ODST screen shader (`sub_14096D0E0`): `time` and `render_time` are
     /// the clock as well.
-    OdstScreen,
+    ScaledIndexScreen,
     /// Reach (MCC `sub_140816D50`, the 360's `evaluate_function`
     /// 0x826d8ce0): `unique_id` is the object's index times 1.37317, which
     /// only a periodic function adds to the clock; any other holds it still.
-    Reach,
+    PeriodicIndexShift,
 }
 
 impl Gen3Clock {
@@ -56,9 +56,12 @@ impl Gen3Clock {
     fn phase(self, input: &str, owner: u8) -> Option<f32> {
         let owner = f32::from(owner);
         match (self, input) {
-            (Self::Halo3, "unique_id") => Some(owner),
-            (Self::Odst | Self::OdstScreen | Self::Reach, "unique_id") => Some(owner * 1.37317),
-            (Self::OdstScreen, "time" | "render_time") => Some(0.0),
+            (Self::IndexShift, "unique_id") => Some(owner),
+            (
+                Self::ScaledIndexShift | Self::ScaledIndexScreen | Self::PeriodicIndexShift,
+                "unique_id",
+            ) => Some(owner * 1.37317),
+            (Self::ScaledIndexScreen, "time" | "render_time") => Some(0.0),
             _ => None,
         }
     }
@@ -90,7 +93,11 @@ impl Gen3Animation {
         }
         let periodic = self.function.function_type() == FunctionType::Periodic;
         let input = match (self.clock, phase) {
-            (Gen3Clock::Reach, Some(phase)) if self.input == "unique_id" && !periodic => phase,
+            (Gen3Clock::PeriodicIndexShift, Some(phase))
+                if self.input == "unique_id" && !periodic =>
+            {
+                phase
+            }
             _ => (time + phase.unwrap_or(0.0)) / self.period,
         };
         if periodic {

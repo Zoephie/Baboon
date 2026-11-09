@@ -169,7 +169,7 @@ mod texel_tests {
             input: input.to_owned(),
             range: range.to_owned(),
             period: 1.0,
-            clock: Gen3Clock::Halo3,
+            clock: Gen3Clock::IndexShift,
         }
     }
 
@@ -195,9 +195,9 @@ mod texel_tests {
             (0.0, 1.0),
             "an object function, and none is set"
         );
-        timed.clock = Gen3Clock::Odst;
+        timed.clock = Gen3Clock::ScaledIndexShift;
         assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.0, 1.0));
-        timed.clock = Gen3Clock::OdstScreen;
+        timed.clock = Gen3Clock::ScaledIndexScreen;
         assert_eq!(timed.sample(0.25, 0, Some(&values)), (0.25, 0.0));
     }
 
@@ -211,7 +211,7 @@ mod texel_tests {
             (0.75, 0.0),
             "Halo 3: time plus the object's index"
         );
-        unique.clock = Gen3Clock::Odst;
+        unique.clock = Gen3Clock::ScaledIndexShift;
         assert_eq!(unique.sample(1.0, 2, None).0, (1.0 + 2.0 * 1.37317) / 4.0);
     }
 
@@ -219,11 +219,11 @@ mod texel_tests {
     fn reachs_unique_id_holds_still_unless_the_function_is_periodic() {
         let mut unique = animation("unique_id", "");
         unique.period = 4.0;
-        unique.clock = Gen3Clock::Reach;
+        unique.clock = Gen3Clock::PeriodicIndexShift;
         let held = (2.0f32 * 1.37317).rem_euclid(1.0);
         assert_eq!(unique.sample(1.0, 2, None), (held, 0.0));
         assert_eq!(unique.sample(3.0, 2, None), (held, 0.0), "no time in it");
-        unique.clock = Gen3Clock::Odst;
+        unique.clock = Gen3Clock::ScaledIndexShift;
         assert_ne!(
             unique.sample(1.0, 2, None),
             unique.sample(3.0, 2, None),

@@ -2,9 +2,8 @@
 
 use super::contrail::RunningContrail;
 use super::load::{
-    BeamDefinition, ContrailDefinition, FEWEST_PROFILES, Gen3StripAt, MOST_PROFILES,
-    REACH_BEAM_SCROLL_PERIOD, REACH_CONTRAIL_SCROLL_PERIOD, StripLook, StripShape, StripState,
-    saturate,
+    BEAM_SCROLL_PERIOD, BeamDefinition, CONTRAIL_SCROLL_PERIOD, ContrailDefinition,
+    FEWEST_PROFILES, Gen3StripAt, MOST_PROFILES, StripLook, StripShape, StripState, saturate,
 };
 use super::{
     FunctionValues, ParticleCorner, SpriteShader, ViewFrame, clamped_unit, cross, dot,
@@ -291,7 +290,7 @@ impl Gen3StripAt {
             })
             .collect();
         let fade = look.origin_fade;
-        let scroll_time = look.scroll_time(REACH_BEAM_SCROLL_PERIOD, time);
+        let scroll_time = look.scroll_time(BEAM_SCROLL_PERIOD, time);
         strip_vertices(
             look,
             &profiles,
@@ -385,7 +384,7 @@ impl Gen3StripAt {
                 0.0
             },
         ];
-        let scroll_time = look.scroll_time(REACH_CONTRAIL_SCROLL_PERIOD, time);
+        let scroll_time = look.scroll_time(CONTRAIL_SCROLL_PERIOD, time);
         strip_vertices(
             look,
             &profiles,

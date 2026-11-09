@@ -133,7 +133,7 @@ pub(super) fn gen3_shield(
     }
     let settings = read_shield_settings(reader, "globals\\global_shield_impact_settings");
     let sources = caches
-        .h3_sources
+        .gen3_sources
         .get_or_insert_with(|| Gen3Sources::new(&reader.source));
     let shield = settings.and_then(|settings| {
         let pass = sources.explicit_pass("shield_impact").ok()?;

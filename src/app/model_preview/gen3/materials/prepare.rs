@@ -5,7 +5,7 @@ use super::bitmap::gen3_image;
 use super::parameters::{
     gen3_extern_bitmap, gen3_extern_change_color, gen3_parameter_value, gen3_xform,
 };
-use super::resolve::reach_environment_maps;
+use super::resolve::default_environment_maps;
 use super::shield::gen3_shield;
 use super::{
     Gen3Animated, Gen3Animation, Gen3Blend, Gen3Clock, Gen3Material, Gen3Pass, Gen3Sources,
@@ -18,9 +18,9 @@ use blam_tags::render_method::{
 use std::sync::Arc;
 
 /// The first of these a family has is what lights its objects.
-const H3_LIT_ENTRIES: [&str; 3] = ["static_sh", "static_per_vertex", "default"];
+const LIT_ENTRIES: [&str; 3] = ["static_sh", "static_per_vertex", "default"];
 
-pub(in crate::app::model_preview) fn prepare_h3_material(
+pub(in crate::app::model_preview) fn prepare_gen3_material(
     reader: &TagReader,
     values: &Values<'_>,
     caches: &mut ResolveCaches,
@@ -58,7 +58,7 @@ pub(in crate::app::model_preview) fn prepare_h3_material(
         bind_pass_values(values, pass, &mut material);
         bind_pass_textures(reader, values, pass, &mut material, caches);
         if reader.rules().gen3.environment_maps {
-            reach_environment_maps(reader, pass, &mut material, caches);
+            default_environment_maps(reader, pass, &mut material, caches);
         }
     }
     Ok(material)
@@ -90,7 +90,7 @@ fn compile_passes(
     caches: &mut ResolveCaches,
 ) -> Result<CompiledPasses, String> {
     let sources = caches
-        .h3_sources
+        .gen3_sources
         .get_or_insert_with(|| Gen3Sources::new(&reader.source));
     let definition = sources
         .definition(&method.definition_path)
@@ -103,7 +103,7 @@ fn compile_passes(
     let glass = method.group_tag == u32::from_be_bytes(*b"rmgl");
     let blend = definition.blend_of(&options, glass);
     // ODST's `black` has only `albedo`, which is all it needs to be black.
-    let lit_entry = H3_LIT_ENTRIES
+    let lit_entry = LIT_ENTRIES
         .iter()
         .chain(&["albedo"])
         .find(|entry| definition.entry_points.iter().any(|known| known == *entry))

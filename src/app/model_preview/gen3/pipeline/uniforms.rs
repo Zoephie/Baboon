@@ -66,7 +66,7 @@ pub(in crate::app::model_preview) type FrameValues =
     fn(&ModelGpuFrame, &str, [i32; 2], f32) -> Option<Gen3Value>;
 
 /// Halo 3's and ODST's [`FrameValues`], which read no stops.
-pub(in crate::app::model_preview) fn halo3_frame_values(
+pub(in crate::app::model_preview) fn plain_frame_values(
     frame: &ModelGpuFrame,
     name: &str,
     size: [i32; 2],

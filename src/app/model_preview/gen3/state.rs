@@ -72,7 +72,7 @@ pub(in crate::app::model_preview) struct Gen3State {
 impl Default for Gen3State {
     fn default() -> Self {
         Self {
-            frame_values: super::pipeline::halo3_frame_values,
+            frame_values: super::pipeline::plain_frame_values,
             targets: Default::default(),
             programs: Default::default(),
             light: Default::default(),

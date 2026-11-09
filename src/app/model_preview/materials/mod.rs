@@ -12,7 +12,7 @@ use super::gen3::shaders::{Gen3Material, Gen3Shield, Gen3Sources};
 use crate::core::h2_pixel_shader::SamplerKind;
 
 use super::gen3::materials::{
-    Gen3Bitmap, gen3_xform, prepare_h3_material, reach_reference, reach_version_update,
+    Gen3Bitmap, gen3_xform, prepare_gen3_material, reference_shader, shader_version_update,
 };
 
 mod slots;

@@ -1,7 +1,7 @@
 //! Reading a light volume definition, and the volumes on an object's markers.
 
 use super::super::super::super::{RenderModelPreviewMarker, TagReader};
-use super::lod::{ReachVolumeLod, max_profile_count, precompiles};
+use super::lod::{DistanceVolumeLod, max_profile_count, precompiles};
 use super::property::{Gen3VolumeProperty, Gen3VolumeState, SEEDS, VolumeProperties, volume_seeds};
 use super::{
     EffectTimes, Extension, FIXED_EXPOSURE, Gen3Bitmap, Gen3Blend, MarkerFrame, Sampler,
@@ -43,7 +43,7 @@ pub(crate) struct Gen3VolumeDefinition {
     pub(super) circular: Option<[f32; 2]>,
     /// Reach's `depth_fade` `on`: `depth_fade_range`.
     pub(super) depth_fade: Option<f32>,
-    pub(super) lod: Option<ReachVolumeLod>,
+    pub(super) lod: Option<DistanceVolumeLod>,
     /// Reach's precompiled rows (`s_light_volume_pre_vertex`), at
     /// `max profile count`: each profile's colour times its intensity
     /// squared times its alpha, and its thickness.
@@ -210,7 +210,7 @@ pub(super) fn read_definition(
         .then(|| resolved_real("depth_fade_range", 0.1).max(1e-4));
     let flagged = |wanted: &str| has_flag(element, "flags", wanted);
     let lod = if reach {
-        ReachVolumeLod::read(element, flagged)
+        DistanceVolumeLod::read(element, flagged)
     } else {
         None
     };
@@ -247,7 +247,7 @@ pub(in crate::app::model_preview) fn read_material_definition(
     material: (Box<dyn Extension>, u32),
 ) -> Option<Gen3VolumeDefinition> {
     let flagged = |wanted: &str| has_flag(element, "flags", wanted);
-    let lod = ReachVolumeLod::read(element, flagged);
+    let lod = DistanceVolumeLod::read(element, flagged);
     let properties = VolumeProperties::read(element)?;
     Some(
         properties.postprocessed(element, |properties| Gen3VolumeDefinition {

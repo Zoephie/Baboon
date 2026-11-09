@@ -1,5 +1,5 @@
 use super::super::super::super::load_referenced_tag_from_source;
-use super::lod::{ReachVolumeLod, lod_amount, max_profile_count, precompiles};
+use super::lod::{DistanceVolumeLod, lod_amount, max_profile_count, precompiles};
 use super::*;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
@@ -237,13 +237,13 @@ fn reachs_lod_input_reads_the_amount_and_halo_3s_none() {
 /// the out distance over its, and nothing with `lod always 1.0`.
 #[test]
 fn a_reach_volume_fades_in_and_out_by_its_lod_distances() {
-    let lod = ReachVolumeLod::postprocessed([30.0, 15.0], [100.0, 0.0], false);
+    let lod = DistanceVolumeLod::postprocessed([30.0, 15.0], [100.0, 0.0], false);
     assert_eq!(lod_amount(None, 1000.0), 1.0, "no lod, always whole");
     assert_eq!(lod_amount(Some(&lod), 30.0), 0.0);
     assert_eq!(lod_amount(Some(&lod), 37.5), 0.5);
     assert_eq!(lod_amount(Some(&lod), 50.0), 1.0);
     assert_eq!(lod_amount(Some(&lod), 100.0), 0.0);
-    let quirk = ReachVolumeLod {
+    let quirk = DistanceVolumeLod {
         always_one: true,
         ..lod
     };
@@ -252,7 +252,7 @@ fn a_reach_volume_fades_in_and_out_by_its_lod_distances() {
         0.0,
         "enabled and always 1 draws nothing"
     );
-    let gated = |lod: Option<ReachVolumeLod>, reach: bool, distance: f32| {
+    let gated = |lod: Option<DistanceVolumeLod>, reach: bool, distance: f32| {
         let volume = at(Gen3VolumeDefinition {
             lod,
             ..definition(reach, fixed(1.0))
@@ -274,13 +274,13 @@ fn a_reach_volume_fades_in_and_out_by_its_lod_distances() {
 /// distance at least epsilon, and each feather inverted over at least it.
 #[test]
 fn reachs_postprocess_fills_in_lod_distances_and_inverses() {
-    let lod = ReachVolumeLod::postprocessed([0.0, 0.0], [0.0, 10.0], false);
+    let lod = DistanceVolumeLod::postprocessed([0.0, 0.0], [0.0, 10.0], false);
     assert_eq!(lod.far, DEFAULT_LOD_OUT);
     assert_eq!(lod.near, EPSILON);
     assert_eq!(lod.inverse_in, EPSILON.recip());
     assert_eq!(lod.inverse_out, 0.1);
     assert_eq!(
-        ReachVolumeLod::postprocessed([5.0, 2.0], [15.0, 10.0], false).far,
+        DistanceVolumeLod::postprocessed([5.0, 2.0], [15.0, 10.0], false).far,
         15.0
     );
 }
@@ -448,7 +448,7 @@ fn kit_reach_volumes_read_circular_depth_fade_and_lod() {
     let roof = first("levels\\solo\\m52\\fx\\roof_glow\\roof_glow");
     assert_eq!(
         roof.lod,
-        Some(ReachVolumeLod::postprocessed(
+        Some(DistanceVolumeLod::postprocessed(
             [30.0, 15.0],
             [100.0, 0.0],
             false

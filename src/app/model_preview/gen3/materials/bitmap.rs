@@ -13,11 +13,11 @@ pub(in crate::app::model_preview) fn gen3_image(
     caches: &mut ResolveCaches,
 ) -> Option<Gen3Bitmap> {
     let key = (path.to_owned(), index, kind as usize);
-    if let Some(found) = caches.h3_images.get(&key) {
+    if let Some(found) = caches.gen3_images.get(&key) {
         return found.clone();
     }
     let found = read_gen3_bitmap(reader, path, index, kind);
-    caches.h3_images.insert(key, found.clone());
+    caches.gen3_images.insert(key, found.clone());
     found
 }
 

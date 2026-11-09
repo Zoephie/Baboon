@@ -14,8 +14,8 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
     gen3: Gen3Rules {
         dialect: RenderMethodDialect::Reach,
         reference_shaders: true,
-        clock: Gen3Clock::Reach,
-        screen_clock: Gen3Clock::Reach,
+        clock: Gen3Clock::PeriodicIndexShift,
+        screen_clock: Gen3Clock::PeriodicIndexShift,
         single_pass_entries: true,
         shadow_generate: true,
         camo_pass: Some(super::camo::camo_pass),

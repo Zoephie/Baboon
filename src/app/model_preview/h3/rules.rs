@@ -15,8 +15,8 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
 /// and its still particles.
 pub(in crate::app::model_preview) const ODST_RULES: GameRules = GameRules {
     gen3: Gen3Rules {
-        clock: Gen3Clock::Odst,
-        screen_clock: Gen3Clock::OdstScreen,
+        clock: Gen3Clock::ScaledIndexShift,
+        screen_clock: Gen3Clock::ScaledIndexScreen,
         screen_object_falloff: true,
         ..RULES.gen3
     },

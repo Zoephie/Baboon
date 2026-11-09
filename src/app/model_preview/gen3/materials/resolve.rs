@@ -14,7 +14,7 @@ use std::sync::Arc;
 /// `shader` it loads: older tags' options and parameters as the game draws
 /// them. Old Spartan helmets keep a `misc` option that would otherwise turn
 /// every map on them by a radian.
-pub(in crate::app::model_preview) fn reach_version_update(
+pub(in crate::app::model_preview) fn shader_version_update(
     method: &mut RenderMethod,
     definition: &RenderMethodDefinition,
 ) {
@@ -26,7 +26,7 @@ pub(in crate::app::model_preview) fn reach_version_update(
 /// The template a Reach shader names as its `reference`, which Reach's tool
 /// (`postprocess_as_child`, 0x141166270) lays under it before the bake. A
 /// shader naming itself has none, as tool refuses it.
-pub(in crate::app::model_preview) fn reach_reference(
+pub(in crate::app::model_preview) fn reference_shader(
     reader: &TagReader,
     method: &RenderMethod,
     own_path: &str,
@@ -43,7 +43,7 @@ pub(in crate::app::model_preview) fn reach_reference(
             let extension = blam_tags::paths::group_tag_to_extension(*group)?;
             let tag = reader.load(path, extension, &group.to_be_bytes()).ok()?;
             let mut reference = RenderMethod::from_tag(&tag).ok()?;
-            reach_version_update(&mut reference, definition);
+            shader_version_update(&mut reference, definition);
             Some(Arc::new(reference))
         })
         .clone()
@@ -57,7 +57,7 @@ pub(in crate::app::model_preview) fn resolve_embedded_method(
     let mut method = RenderMethod::from_struct(&shader).ok()?;
     let definition = reader.render_method_definition(&method.definition_path)?;
     if reader.rules().gen3.reference_shaders {
-        let reference = reach_reference(reader, &method, "", &definition, &mut HashMap::new());
+        let reference = reference_shader(reader, &method, "", &definition, &mut HashMap::new());
         method.apply_reference_shader(&definition, reference.as_deref());
     }
     let resolved = ResolvedRenderMethod::resolve(&method, &definition, |option_path| {
@@ -95,7 +95,7 @@ pub(in crate::app::model_preview) fn read_resolved_map(
 /// Reach's cube maps are the rasterizer's own, not a shader's externs. With no
 /// level, `render_method_submit_dynamic_cubemap` (MCC `sub_140817F70`) binds
 /// `rasterizer_globals`' default bitmap 2 to both, clamped, trilinear.
-pub(super) fn reach_environment_maps(
+pub(super) fn default_environment_maps(
     reader: &TagReader,
     pass: &Gen3Pass,
     material: &mut Gen3Material,

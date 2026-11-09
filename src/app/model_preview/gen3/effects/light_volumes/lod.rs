@@ -8,7 +8,7 @@ use blam_tags::TagStruct;
 /// Reach's `LOD in distance` and the rest, as `postprocess` (tool
 /// 0x140DD0FA0) leaves them, for `calc_lod_amount`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct ReachVolumeLod {
+pub(super) struct DistanceVolumeLod {
     pub(super) near: f32,
     pub(super) feather_in: f32,
     pub(super) inverse_in: f32,
@@ -19,7 +19,7 @@ pub(super) struct ReachVolumeLod {
     pub(super) always_one: bool,
 }
 
-impl ReachVolumeLod {
+impl DistanceVolumeLod {
     /// With `lod enabled` only; the inverses are the postprocess's, which a
     /// tag on disk holds 0 for.
     pub(super) fn read(element: TagStruct<'_>, flagged: impl Fn(&str) -> bool) -> Option<Self> {
@@ -59,7 +59,7 @@ impl ReachVolumeLod {
 /// `c_light_volume_definition::calc_lod_amount` (the 360's 0x82EC77D0, MCC
 /// sub_14029B0D0) at `distance` from the eye. `lod same in splitscreen`
 /// only skips `x_distance_lod_scale`, which is 1 for one view \[inferred\].
-pub(super) fn lod_amount(lod: Option<&ReachVolumeLod>, distance: f32) -> f32 {
+pub(super) fn lod_amount(lod: Option<&DistanceVolumeLod>, distance: f32) -> f32 {
     let Some(lod) = lod else {
         return 1.0;
     };

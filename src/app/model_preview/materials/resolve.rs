@@ -9,7 +9,7 @@ use super::super::{
 };
 use super::binding::{cached_bitmap, slot_binding};
 use super::slots::{MAX_TEXTURE_EDGE, SLOT_PARAMETERS};
-use super::{Image, SamplerKind, prepare_h3_material, reach_reference, reach_version_update};
+use super::{Image, SamplerKind, prepare_gen3_material, reference_shader, shader_version_update};
 use blam_tags::render_method::{RenderMethod, ResolvedRenderMethod};
 use std::sync::Arc;
 
@@ -112,8 +112,8 @@ fn resolve_one_material(
     if let Some(definition) = &definition
         && reader.rules().gen3.reference_shaders
     {
-        reach_version_update(&mut render_method, definition);
-        let reference = reach_reference(
+        shader_version_update(&mut render_method, definition);
+        let reference = reference_shader(
             reader,
             &render_method,
             &material.shader_path,
@@ -170,7 +170,7 @@ fn resolve_one_material(
     }
     // `Game::of` calls every tag after Halo 2 `Halo3`, Reach's included.
     if blam_tags::game::Game::of(&shader) == blam_tags::game::Game::Halo3 {
-        match prepare_h3_material(reader, &values, caches) {
+        match prepare_gen3_material(reader, &values, caches) {
             Ok(material) => textures.gen3 = Some(Arc::new(material)),
             // The general shader still draws it, so this is only worth saying
             // when there is nothing else to show.

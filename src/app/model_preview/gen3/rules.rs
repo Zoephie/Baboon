@@ -67,8 +67,8 @@ impl Gen3Rules {
     pub(crate) const DEFAULT: Self = Self {
         dialect: RenderMethodDialect::Halo3,
         reference_shaders: false,
-        clock: Gen3Clock::Halo3,
-        screen_clock: Gen3Clock::Halo3,
+        clock: Gen3Clock::IndexShift,
+        screen_clock: Gen3Clock::IndexShift,
         single_pass_entries: false,
         shadow_generate: false,
         camo_pass: None,

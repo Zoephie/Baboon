@@ -12,7 +12,7 @@ use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
 use super::effects::screen::Gen3ScreenSettings;
 use super::pipeline::stops_exposure;
-use super::pipeline::{FrameValues, Gen3PassHooks, NoPassHooks, PictureCopies, halo3_frame_values};
+use super::pipeline::{FrameValues, Gen3PassHooks, NoPassHooks, PictureCopies, plain_frame_values};
 use super::shaders::{Gen3Material, Gen3ShieldSettings, Gen3Texture};
 use super::sprites::{Gen3Sprite, Gen3Sprites, OwnSortPlace};
 use super::state::Gen3State;
@@ -44,7 +44,7 @@ pub(in crate::app::model_preview) trait Gen3Game {
 
     /// What the engine's globals hold for the game's passes.
     fn frame_values(&self) -> FrameValues {
-        halo3_frame_values
+        plain_frame_values
     }
 
     /// The exposure stops the scene draws at, from the screen effects.

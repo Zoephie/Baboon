@@ -20,16 +20,16 @@ pub(in crate::app::model_preview) const EPSILON: f32 = 0.0001;
 /// Reach's beam uv scroll clock, `g_render_time+0x10`: the frames' time,
 /// wrapped at a minute (`c_beam_gpu::set_shader_state<render>`, the 360's
 /// 0x826B2F98, MCC sub_14088B5B0).
-pub(super) const REACH_BEAM_SCROLL_PERIOD: f32 = 60.0;
+pub(super) const BEAM_SCROLL_PERIOD: f32 = 60.0;
 
 /// Reach's contrail's, `get_game_time_seconds_repeat_arbitrary(0x830000)`:
 /// a count of 1/65536 seconds wrapped at 0x830000, 131 seconds
 /// (`c_contrail_gpu::set_shader_state<render>`, MCC sub_14085A3D0).
-pub(super) const REACH_CONTRAIL_SCROLL_PERIOD: f32 = 0x83_0000 as f32 / 65_536.0;
+pub(super) const CONTRAIL_SCROLL_PERIOD: f32 = 0x83_0000 as f32 / 65_536.0;
 
 /// What Reach's `c_contrail::pulse` (the 360's 0x82ECB188) holds a
 /// contrail's emission rate to before it accumulates.
-pub(super) const REACH_MOST_EMISSION_RATE: f32 = 100_000.0;
+pub(super) const MOST_PULSED_EMISSION_RATE: f32 = 100_000.0;
 
 /// `get_sort_bias` (beam 0x82EA2548, contrail 0x82ECB7D8): world units a step
 /// of `sort bias`.

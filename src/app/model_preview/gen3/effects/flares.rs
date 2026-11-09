@@ -40,7 +40,7 @@ pub(crate) struct Gen3Flare {
     occlusion_offset_direction: OcclusionOffset,
     inner: FlareInner,
     /// Reach's reflection curves; none for Halo 3's bounds.
-    curves: Option<ReachFlareCurves>,
+    curves: Option<ScaleFlareCurves>,
     rotation_offset: f32,
     radius: [f32; 2],
     brightness: [f32; 2],
@@ -83,7 +83,7 @@ impl FlareInner {
         match self {
             Self::Halved(times) => 1.0 / 2f32.powi(times as i32),
             Self::Fraction(inner) => {
-                let size = (pixels / REACH_OCCLUSION_PIXELS).clamp(0.0, 1.0);
+                let size = (pixels / INNER_OCCLUSION_PIXELS).clamp(0.0, 1.0);
                 inner + (1.0 - inner) * (1.0 - size)
             }
         }
@@ -92,13 +92,13 @@ impl FlareInner {
 
 /// The width plus height, in pixels, at which a Reach flare occludes against
 /// its inner fraction alone.
-const REACH_OCCLUSION_PIXELS: f32 = 600.0;
+const INNER_OCCLUSION_PIXELS: f32 = 600.0;
 
 /// Reach's reflection `radius curve` and `brightness curve`: each a function
 /// of the flare's scale, where Halo 3 took the scale across bounds
 /// (`lens_flare_evaluate_parameters`, the 360's 0x826a9978).
 #[derive(Debug, Clone)]
-struct ReachFlareCurves {
+struct ScaleFlareCurves {
     radius: Arc<TagFunction>,
     brightness: Arc<TagFunction>,
 }
@@ -293,7 +293,7 @@ pub(in crate::app::model_preview) fn read_h3_flare(
     };
     let curves = curve("radius curve")
         .zip(curve("brightness curve"))
-        .map(|(radius, brightness)| ReachFlareCurves { radius, brightness });
+        .map(|(radius, brightness)| ScaleFlareCurves { radius, brightness });
     // Reach's inner scale is a real fraction; Halo 3's an enum.
     let inner = match curves {
         Some(_) => FlareInner::Fraction(

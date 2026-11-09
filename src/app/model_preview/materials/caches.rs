@@ -19,9 +19,10 @@ pub(in crate::app::model_preview) struct ResolveCaches {
     /// camo texture.
     pub(in crate::app::model_preview) h4: super::super::h4::materials::H4ResolveCaches,
     pub(in crate::app::model_preview) gen3_shield: Option<Option<Arc<Gen3Shield>>>,
-    pub(in crate::app::model_preview) h3_sources: Option<Gen3Sources>,
+    pub(in crate::app::model_preview) gen3_sources: Option<Gen3Sources>,
     /// Images decoded for Halo 3 passes, with whether each is sRGB.
-    pub(in crate::app::model_preview) h3_images: HashMap<(String, i16, usize), Option<Gen3Bitmap>>,
+    pub(in crate::app::model_preview) gen3_images:
+        HashMap<(String, i16, usize), Option<Gen3Bitmap>>,
     pub(in crate::app::model_preview) definitions:
         HashMap<String, Option<Arc<RenderMethodDefinition>>>,
     pub(in crate::app::model_preview) options: HashMap<String, Option<Arc<RenderMethodOption>>>,
