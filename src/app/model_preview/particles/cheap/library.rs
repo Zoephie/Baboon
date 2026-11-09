@@ -356,7 +356,8 @@ impl CheapLibrary {
         self.render.as_ref()
     }
 
-    /// Whether it is Halo 4's, which lights by its own exposures.
+    /// Whether each type turbulates by its own map.
+    #[cfg(test)]
     pub(crate) fn turbulence_per_type(&self) -> bool {
         self.turbulence_per_type
     }

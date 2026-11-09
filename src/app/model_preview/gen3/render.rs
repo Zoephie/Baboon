@@ -10,9 +10,10 @@ use super::super::common::plain::PlainRender;
 use super::super::frame::ModelGpuFrame;
 use super::super::renderer::{FrameCx, GameRender, RenderCore};
 use super::effects::screen::Gen3ScreenSettings;
+use super::pipeline::reach_exposure;
 use super::pipeline::{FrameValues, Gen3PassHooks, NoPassHooks, PictureCopies, halo3_frame_values};
 use super::shaders::{Gen3Material, Gen3ShieldSettings, Gen3Texture};
-use super::sprites::{Gen3Sprite, Gen3Sprites};
+use super::sprites::{Gen3Sprite, Gen3Sprites, OwnSortPlace};
 use super::state::Gen3State;
 
 /// A batch the gen3 pipeline draws, with its material.
@@ -144,6 +145,28 @@ pub(in crate::app::model_preview) trait Gen3Game {
     /// In the sprite pass, once a frame after the shared simulations: the
     /// game's own.
     unsafe fn advance_own_sprites(&mut self, _cx: &mut Gen3Sprites<'_>) {}
+
+    /// The game's own sprites that sort among the shared ones at `place`,
+    /// each with its distance, from `eye_distance`'s along the view. None
+    /// draw among the distortions.
+    fn own_sorted_sprites(
+        &self,
+        _frame: &ModelGpuFrame,
+        _bones: Option<&[[f32; 4]]>,
+        _eye_distance: &dyn Fn([f32; 3]) -> f32,
+        _place: OwnSortPlace,
+    ) -> Vec<(f32, Gen3Sprite)> {
+        Vec::new()
+    }
+
+    /// The exposures the cheap particles lerp between by their alpha
+    /// (`cheap_particles_render.fx`: `lerp(ps_view_exposure.x,
+    /// ps_view_self_illum_exposure.y, alpha)`), at the frame's `stops`: the
+    /// shared exposure, both alike.
+    fn cheap_exposures(&self, stops: f32) -> [f32; 2] {
+        let exposure = reach_exposure(stops)[0];
+        [exposure, exposure]
+    }
 
     /// In the sprite pass, in its far-to-near order: `sprite`, if it is the
     /// game's own to draw. Whether it was.

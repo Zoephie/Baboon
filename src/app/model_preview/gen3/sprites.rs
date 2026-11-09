@@ -1,7 +1,7 @@
 //! The gen3 games' sprites, which the pipeline enters by stage from inside
 //! its blended sort: light volumes, Halo 4's tracers, particle systems,
-//! strips and leaves far to near, then the antennas, Reach's and Halo 4's
-//! cheap particles and the lens flares.
+//! strips and a game's own far to near, then the antennas, the cheap
+//! particles and the lens flares.
 
 use super::state::Gen3State;
 use eframe::glow::{self, HasContext as _};
@@ -18,14 +18,12 @@ use super::super::gl::pass_state::PassState;
 use super::super::particles::ParticleField;
 use super::super::particles::{CHEAP_FLOATS, CheapGl, ParticleGl, link_cheap_gl, particle_floats};
 use super::super::{
-    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, clip_position, h4, scene_depth_terms,
+    ModelGpuCamera, ModelGpuFrame, ModelGpuSlot, RenderCore, clip_position, scene_depth_terms,
     sprite_pixels,
 };
-use super::pipeline::reach_exposure;
 use super::pipeline::{gen3_lighting_constants, gen3_set_blend};
 use super::render::Gen3Game;
 use crate::app::model_preview::common::sprites::layered_distance;
-use crate::app::model_preview::gen3;
 
 /// Which part of the object's sprites a call draws.
 #[derive(Debug, Clone, Copy)]
@@ -106,9 +104,9 @@ impl Gen3State {
             // simulations have stepped by then, and drawing moves nothing a
             // sort reads.
             let queue = self.sprite_queue.get_or_insert_with(|| SpriteQueue {
-                sorted: pass.sorted(SpriteStage::Rest, uploaded),
+                sorted: pass.sorted(&*game, SpriteStage::Rest, uploaded),
                 next: 0,
-                distortions: pass.sorted(SpriteStage::Distortions, uploaded),
+                distortions: pass.sorted(&*game, SpriteStage::Distortions, uploaded),
             });
             if matches!(stage, SpriteStage::Distortions) {
                 let mut distorted = 0;
@@ -123,7 +121,7 @@ impl Gen3State {
                 }
             }
             if matches!(stage, SpriteStage::Rest) {
-                pass.draw_cheap_particles(uploaded, &mut core.cheap_gl, core.program);
+                pass.draw_cheap_particles(&*game, uploaded, &mut core.cheap_gl, core.program);
             }
             if matches!(
                 stage,
@@ -198,10 +196,21 @@ impl SpriteQueue {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(in crate::app::model_preview) enum SortedSprite {
     Volume(usize),
-    Tracer(usize),
     System(usize),
     Strip(usize),
-    Leaves(usize),
+    /// The game's own, which it draws.
+    Own(Gen3Sprite),
+}
+
+/// Where among the shared sorted sprites a game's own go, before a sort that
+/// keeps their order among equals: `c_transparency_renderer`'s.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(in crate::app::model_preview) enum OwnSortPlace {
+    /// After the light volumes, before the particle systems (Halo 4's
+    /// tracers).
+    BeforeParticles,
+    /// After the strips (Halo 3's leaves).
+    Last,
 }
 
 /// What one call of the sprite pass draws with: the sprite and particle
@@ -263,9 +272,15 @@ impl SpritePass<'_> {
     }
 
     /// `c_transparency_renderer` sorts far to near, each from its location:
-    /// the light volumes, Halo 4's tracers, the particle systems (only those
-    /// that bend the scene for the distortions), strips and leaves.
-    fn sorted(&self, stage: SpriteStage, uploaded: &ModelGpuSlot) -> Vec<(f32, SortedSprite)> {
+    /// the light volumes, the game's own that sort before the particles, the
+    /// particle systems (only those that bend the scene for the distortions),
+    /// strips and the game's own that sort last.
+    fn sorted(
+        &self,
+        game: &dyn Gen3Game,
+        stage: SpriteStage,
+        uploaded: &ModelGpuSlot,
+    ) -> Vec<(f32, SortedSprite)> {
         let (frame, bones, view) = (self.frame, self.bones, &self.view);
         let eye_distance = |origin: [f32; 3]| {
             (0..3)
@@ -282,16 +297,15 @@ impl SpritePass<'_> {
                     SortedSprite::Volume(at),
                 )
             });
-        let tracers = frame.preview.h4.tracers.iter().enumerate();
-        let tracers = tracers
-            .filter(|_| !matches!(stage, SpriteStage::Distortions))
-            .map(|(at, tracer)| {
-                let distance = eye_distance(tracer.origin(bones)) - tracer.sort_bias();
-                (
-                    layered(tracer.sort_layer(), distance),
-                    SortedSprite::Tracer(at),
-                )
-            });
+        let own = |place| {
+            let own = match stage {
+                SpriteStage::Distortions => Vec::new(),
+                _ => game.own_sorted_sprites(frame, bones, &eye_distance, place),
+            };
+            own.into_iter()
+                .map(|(distance, sprite)| (distance, SortedSprite::Own(sprite)))
+        };
+        let first_own = own(OwnSortPlace::BeforeParticles);
         let systems = frame.preview.particles.iter().enumerate();
         let distorting = matches!(stage, SpriteStage::Distortions);
         let systems = systems
@@ -318,20 +332,12 @@ impl SpritePass<'_> {
                     SortedSprite::Strip(at),
                 )
             });
-        let leaves = frame.preview.h3.leaves.iter().enumerate();
-        let leaves = leaves
-            .filter(|_| !matches!(stage, SpriteStage::Distortions))
-            .map(|(at, leaves)| {
-                (
-                    layered(2, eye_distance(leaves.origin())),
-                    SortedSprite::Leaves(at),
-                )
-            });
+        let last_own = own(OwnSortPlace::Last);
         let mut sorted: Vec<_> = volumes
-            .chain(tracers)
+            .chain(first_own)
             .chain(systems)
             .chain(strips)
-            .chain(leaves)
+            .chain(last_own)
             .collect();
         sorted.sort_by(|(a, _), (b, _)| b.total_cmp(a));
         sorted
@@ -346,26 +352,14 @@ impl SpritePass<'_> {
         distortion_copy: &mut Option<super::super::gl::target::ColorTarget>,
         sprite: SortedSprite,
     ) {
-        let frame = self.frame;
         unsafe {
             match sprite {
-                SortedSprite::Tracer(index) => {
-                    if frame
-                        .shown
-                        .is(super::super::common::features::paths::H4_TRACERS, index)
-                    {
-                        game.draw_own_sprite(
-                            &mut self.sprites(uploaded),
-                            Gen3Sprite::Tracer(index),
-                        );
-                    }
+                SortedSprite::Own(sprite) => {
+                    game.draw_own_sprite(&mut self.sprites(uploaded), sprite);
                 }
                 SortedSprite::Volume(index) => self.draw_volume(game, uploaded, index),
                 SortedSprite::System(index) => {
                     self.draw_system(game, uploaded, distortion_copy, index)
-                }
-                SortedSprite::Leaves(index) => {
-                    game.draw_own_sprite(&mut self.sprites(uploaded), Gen3Sprite::Leaves(index));
                 }
                 SortedSprite::Strip(index) => self.draw_strip(uploaded, index),
             }
@@ -522,6 +516,7 @@ impl SpritePass<'_> {
     /// one batch, in ring-slot order.
     unsafe fn draw_cheap_particles(
         &self,
+        game: &dyn Gen3Game,
         uploaded: &mut ModelGpuSlot,
         cheap_gl: &mut Option<Option<CheapGl>>,
         program: glow::NativeProgram,
@@ -551,21 +546,7 @@ impl SpritePass<'_> {
                         [a, b, c, d, e, f, g, h, i, j, k]
                     })
                     .collect();
-                // `cheap_particles_render.fx`: `lerp(ps_view_exposure.x,
-                // ps_view_self_illum_exposure.y, alpha)`.
-                let exposures = if first.library().turbulence_per_type() {
-                    let channel = |name: &str, at: usize| match h4::lighting::h4_frame_value(name) {
-                        Some(gen3::shaders::Gen3Value::Floats(value)) => value[at],
-                        _ => 1.0,
-                    };
-                    [
-                        channel("ps_view_exposure", 0),
-                        channel("ps_view_self_illum_exposure", 1),
-                    ]
-                } else {
-                    let exposure = reach_exposure(self.stops)[0];
-                    [exposure, exposure]
-                };
+                let exposures = game.cheap_exposures(self.stops);
                 cheap.draw(gl, &vertices, texture, exposures);
             }
         }
@@ -626,7 +607,7 @@ impl SpritePass<'_> {
 }
 
 /// A sprite a game may draw as its own, inside the gen3 sprite pass.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(in crate::app::model_preview) enum Gen3Sprite {
     /// Of `h4.tracers`.
     Tracer(usize),
@@ -696,8 +677,8 @@ mod tests {
             (9.0, SortedSprite::Volume(0)),
             (7.5, SortedSprite::System(2)),
             (7.5, SortedSprite::Strip(1)),
-            (f32::NAN, SortedSprite::Tracer(0)),
-            (3.0, SortedSprite::Leaves(0)),
+            (f32::NAN, SortedSprite::Own(Gen3Sprite::Tracer(0))),
+            (3.0, SortedSprite::Own(Gen3Sprite::Leaves(0))),
             (3.0, SortedSprite::System(0)),
             (-2.0, SortedSprite::Volume(1)),
         ];
@@ -733,8 +714,8 @@ mod tests {
     fn a_run_is_empty_exactly_when_the_queue_would_draw_nothing() {
         let sorted = vec![
             (9.0, SortedSprite::Volume(0)),
-            (f32::NAN, SortedSprite::Tracer(0)),
-            (3.0, SortedSprite::Leaves(0)),
+            (f32::NAN, SortedSprite::Own(Gen3Sprite::Tracer(0))),
+            (3.0, SortedSprite::Own(Gen3Sprite::Leaves(0))),
         ];
         let limits = [
             10.0,

@@ -6,6 +6,7 @@
 use eframe::glow::{self, HasContext};
 
 use super::super::common::slots::GameSlots;
+use super::super::common::sprites::layered_distance;
 use super::super::dx9::passes::Dx9Layer;
 use super::super::frame::ModelGpuFrame;
 use super::super::gen3::effects::screen::Gen3ScreenSettings;
@@ -14,7 +15,7 @@ use super::super::gen3::pipeline::gen3_lighting_constants;
 use super::super::gen3::pipeline::gen3_set_cull;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
-use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
+use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites, OwnSortPlace};
 use super::super::particles::particle_floats;
 use super::bloom::H3Bloom;
 use super::light_pass::draw_dynamic_lights;
@@ -56,6 +57,28 @@ impl Gen3Game for H3Game {
     }
 
     /// The leaves, through the particle program.
+    /// The leaves sort last, after the strips.
+    fn own_sorted_sprites(
+        &self,
+        frame: &ModelGpuFrame,
+        _bones: Option<&[[f32; 4]]>,
+        eye_distance: &dyn Fn([f32; 3]) -> f32,
+        place: OwnSortPlace,
+    ) -> Vec<(f32, Gen3Sprite)> {
+        if place != OwnSortPlace::Last {
+            return Vec::new();
+        }
+        let leaves = frame.preview.h3.leaves.iter().enumerate();
+        leaves
+            .map(|(at, leaves)| {
+                (
+                    layered_distance(2, eye_distance(leaves.origin())),
+                    Gen3Sprite::Leaves(at),
+                )
+            })
+            .collect()
+    }
+
     unsafe fn draw_own_sprite(&mut self, cx: &mut Gen3Sprites<'_>, sprite: Gen3Sprite) -> bool {
         let Gen3Sprite::Leaves(index) = sprite else {
             return false;

@@ -11,7 +11,8 @@ use super::super::gen3::effects::screen::Gen3ScreenSettings;
 use super::super::gen3::pipeline::gen3_set_cull;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::render::{Gen3Batch, Gen3Game};
-use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites};
+use super::super::gen3::shaders::Gen3Value;
+use super::super::gen3::sprites::{Gen3Sprite, Gen3Sprites, OwnSortPlace};
 use super::camo::H4CamoDraw;
 use super::effects::gl::H4EffectCx;
 use super::holograms::{HologramPicture, draws_as_hologram};
@@ -266,8 +267,52 @@ impl Gen3Game for H4Game {
 
     /// The tracers, and the light volumes and particle systems that draw
     /// through their material, from packed state.
+    /// The tracers sort after the light volumes, before the particles.
+    fn own_sorted_sprites(
+        &self,
+        frame: &ModelGpuFrame,
+        bones: Option<&[[f32; 4]]>,
+        eye_distance: &dyn Fn([f32; 3]) -> f32,
+        place: OwnSortPlace,
+    ) -> Vec<(f32, Gen3Sprite)> {
+        if place != OwnSortPlace::BeforeParticles {
+            return Vec::new();
+        }
+        let tracers = frame.preview.h4.tracers.iter().enumerate();
+        tracers
+            .map(|(at, tracer)| {
+                let distance = eye_distance(tracer.origin(bones)) - tracer.sort_bias();
+                (
+                    layered_distance(tracer.sort_layer(), distance),
+                    Gen3Sprite::Tracer(at),
+                )
+            })
+            .collect()
+    }
+
+    /// The view's exposure and its self illumination's, as Halo 4's
+    /// globals hold them.
+    fn cheap_exposures(&self, _stops: f32) -> [f32; 2] {
+        let channel = |name: &str, at: usize| match super::lighting::h4_frame_value(name) {
+            Some(Gen3Value::Floats(value)) => value[at],
+            _ => 1.0,
+        };
+        [
+            channel("ps_view_exposure", 0),
+            channel("ps_view_self_illum_exposure", 1),
+        ]
+    }
+
     unsafe fn draw_own_sprite(&mut self, cx: &mut Gen3Sprites<'_>, sprite: Gen3Sprite) -> bool {
         let (gl, frame, bones, view) = (cx.gl, cx.frame, cx.bones, cx.view);
+        // A hidden tracer draws nothing, its sort place kept.
+        if let Gen3Sprite::Tracer(index) = sprite
+            && !frame
+                .shown
+                .is(super::super::common::features::paths::H4_TRACERS, index)
+        {
+            return true;
+        }
         let h4 = self.slots.of(cx.slot, cx.uploads);
         let (depth, size, placeholder) = (cx.depth_copy, cx.size, cx.placeholder);
         let drew = unsafe {
