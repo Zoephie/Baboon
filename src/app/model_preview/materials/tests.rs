@@ -7,9 +7,14 @@
 //! thing being tested *is* whether shipped tags match the assumptions. So these
 //! run against installed kits and self-skip without them.
 
+use super::super::super::TagSource;
+use super::super::{
+    RenderModelPreviewMaterial, load_referenced_tag_from_source, texture_resolve_note,
+};
 use super::*;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
+use std::path::PathBuf;
 
 /// The model's hologram and damage passes go to its own materials, never
 /// to a held weapon's.

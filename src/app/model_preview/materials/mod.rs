@@ -9,20 +9,11 @@ use super::common::image::Image;
 use super::dx9::passes::{Dx9DrawPass, Dx9Layer, H2_LAYER_COUNT, h2_shadow_passes};
 use super::dx9::stage::Dx9VertexStage;
 use super::gen3::shaders::{Gen3Material, Gen3Shield, Gen3Sources};
-use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
-use blam_tags::render_method::{
-    BitmapAddressMode, ParameterSource, RenderMethod, RenderMethodDefinition, RenderMethodOption,
-    RenderMethodParameter, ResolvedRenderMethod, ResolvedValue,
-};
-use std::collections::HashMap;
-use std::sync::Arc;
 
-use super::ce::shaders::resolve::*;
 use super::gen3::materials::{
     Gen3Bitmap, gen3_xform, prepare_h3_material, reach_reference, reach_version_update,
 };
-use super::h2::shader::resolve::*;
 
 mod slots;
 pub(in crate::app) use slots::*;

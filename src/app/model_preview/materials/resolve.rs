@@ -1,6 +1,21 @@
 //! Resolving a model's materials into their textures.
 
-use super::*;
+use super::super::super::{GameId, TagNameIndex, TagSource};
+use super::super::ce::shaders::resolve::resolve_ce_shader;
+use super::super::h2::shader::resolve::resolve_h2_shader;
+use super::super::{
+    MaterialTextures, RenderModelPreviewMaterial, ResolveCaches, TagReader, TextureImage,
+    TextureSlot, Values, cached_render_method_definition, cached_render_method_option,
+    decode_thumbnail,
+};
+use super::binding::{cached_bitmap, slot_binding};
+use super::slots::{MAX_TEXTURE_EDGE, SLOT_PARAMETERS};
+use super::{
+    Dx9DrawPass, Dx9Layer, Dx9VertexStage, Image, SamplerKind, h2_shadow_passes,
+    prepare_h3_material, reach_reference, reach_version_update,
+};
+use blam_tags::render_method::{RenderMethod, ResolvedRenderMethod};
+use std::sync::Arc;
 
 /// Resolve every material of one model to its textures.
 ///

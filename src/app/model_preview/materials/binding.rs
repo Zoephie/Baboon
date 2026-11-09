@@ -1,6 +1,12 @@
 //! Binding a slot to its bitmap: parameters, values and the bitmap cache.
 
-use super::*;
+use super::super::{ResolveCaches, TagReader, TextureImage, decode_thumbnail};
+use super::gen3_xform;
+use super::slots::MAX_TEXTURE_EDGE;
+use blam_tags::render_method::{
+    BitmapAddressMode, ParameterSource, RenderMethod, RenderMethodParameter, ResolvedRenderMethod,
+    ResolvedValue,
+};
 
 /// Where a named parameter's value comes from.
 ///

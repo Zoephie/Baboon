@@ -1,6 +1,15 @@
 //! The caches a resolve shares across a model's materials.
 
-use super::*;
+use super::super::super::TagNameIndex;
+use super::super::TextureImage;
+use super::super::h2::shader::resolve::H2TemplateDefaults;
+use super::{
+    CeCamoSettings, CeModelCommon, Gen3Bitmap, Gen3Shield, Gen3Sources, Image, SamplerKind,
+};
+use blam_tags::TagFile;
+use blam_tags::render_method::{RenderMethod, RenderMethodDefinition, RenderMethodOption};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Loaders shared across one model's materials.
 ///
