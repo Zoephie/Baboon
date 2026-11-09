@@ -4,7 +4,8 @@ use super::super::gen3::shaders::Gen3Blend;
 use super::super::gl::buffer::slice_bytes;
 use super::super::gl::glsl::{VIEW_DEPTH, fill};
 use super::super::reach::lighting::reach_particle_light;
-use super::*;
+use super::super::{ModelGpuCamera, ce_flare_clip, gen3, link_h2_program, scene_depth_terms};
+use crate::app::model_preview::particles;
 use eframe::glow::{self, HasContext as _};
 
 const PARTICLE_VERTEX: &str = include_str!("shaders/particle.vert");

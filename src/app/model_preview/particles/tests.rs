@@ -1,6 +1,9 @@
+use super::super::{TagSource, load_referenced_tag_from_source};
 use super::*;
 use crate::app::model_preview::harness::kit::{kit_root, kit_source};
 use crate::core::game::GameId;
+use blam_tags::TagFunction;
+use std::sync::Arc;
 
 #[test]
 fn a_custom_shape_picks_its_point_by_radius_and_strays_by_angle() {

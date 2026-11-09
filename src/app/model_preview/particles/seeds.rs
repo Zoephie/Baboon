@@ -1,6 +1,7 @@
 //! Seed allocation for particle properties, with Reach's seed tables that Halo 4 shares.
 
-use super::*;
+use super::property::ParticleInput;
+use super::rules::{SEEDS, SYSTEM_SEEDS};
 
 /// `allocate_random_seed`'s two counters, handing seeds out in property order,
 /// and what the game's state list leaves of the inputs it does not seed.

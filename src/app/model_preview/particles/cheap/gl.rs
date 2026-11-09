@@ -2,7 +2,8 @@
 
 use super::super::super::gen3::shaders::Gen3Blend;
 use super::super::super::gl::buffer::slice_bytes;
-use super::super::*;
+use super::super::super::{gen3, link_h2_program};
+use crate::app::model_preview::particles;
 use eframe::glow::{self, HasContext as _};
 
 /// The cheap particle program: the quads as built, the render texture's

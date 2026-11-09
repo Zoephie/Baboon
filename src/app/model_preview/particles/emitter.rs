@@ -1,6 +1,20 @@
 //! Emitters: their shapes, custom points, triggers and axes, and how an emitter is read.
 
-use super::*;
+use super::super::TagReader;
+use super::look::{ParticleLook, unallocated_properties, used_states_of};
+use super::movement::{
+    ParticleCollider, ParticleFlock, ParticlePhysics, ParticleTurbulence, read_collider,
+    read_flock, read_turbulence,
+};
+use super::property::{ParticleProperty, ParticleState};
+use super::rules::{
+    ParticleController, ParticleRules, ParticleUpdate, flagged_controllers, movement_parameter,
+    particle_update,
+};
+use super::seeds::{REACH_ALLOCATED_STATES, SeedAllocator};
+use super::sim::{Random, reach_axis_scale};
+use super::{elements, has_flag};
+use blam_tags::TagStruct;
 
 /// `c_particle_emitter_definition`'s emission shapes, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,6 +1,9 @@
+use super::super::super::{RenderModelPreviewMarker, load_referenced_tag_from_source};
+use super::super::sim::Random;
 use super::*;
 use crate::app::model_preview::harness::kit::kit_source;
 use crate::core::game::GameId;
+use std::sync::Arc;
 
 fn texels(width: usize, height: usize, texels: Vec<[f32; 4]>) -> CheapTexels {
     CheapTexels {

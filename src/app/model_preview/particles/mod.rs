@@ -11,13 +11,6 @@ pub(in crate::app::model_preview) use cheap::{
 };
 pub(in crate::app::model_preview) use gl::*;
 
-use std::sync::Arc;
-
-use blam_tags::render_method::{
-    BitmapAddressMode, BitmapFilterMode, ParameterSource, ResolvedRenderMethod, ResolvedValue,
-};
-use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
-
 use super::common::fields::{elements, has_flag, has_flag_labelled};
 use super::common::image::Image;
 use super::common::named_function::tag_function_at;
@@ -35,7 +28,6 @@ use super::materials::{TextureImage, decode_image};
 use super::reach::lighting::{
     reach_alt_exposure, reach_exposure, reach_lightmap_tint, reach_particle_light,
 };
-use super::*;
 use crate::app::model_preview::common::attached::attached;
 use crate::app::model_preview::common::image::Sampler;
 use crate::app::model_preview::common::marker::MarkerFrame;

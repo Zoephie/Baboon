@@ -1,6 +1,19 @@
 //! The shared ring of cheap particles: stepping, spawning and building vertices.
 
-use super::*;
+use super::super::super::{frame_steps, resume_point};
+use super::super::rules::PRE_ROLL;
+use super::super::sim::Random;
+use super::emitter::{
+    CheapEmitterAt, CheapParticle, CheapSubmission, illumination, packed_lighting, spawn_count,
+    spawn_input, spawn_transforms, turned_up,
+};
+use super::library::{CheapLibrary, turbulence_of};
+use super::{
+    COLOR0, EMPTY, EffectOnsets, FADE, FunctionValues, MOST_EMITTERS, MOST_PARTICLES,
+    MOST_SHADER_STEP, NO_PROBE_INTENSITY, PHYSICS, RENDER, ViewFrame, clamped_unit, cross, dot,
+    frac, minus, object_value, sign,
+};
+use std::sync::Arc;
 
 /// The pool every emitter writes, as the card holds it.
 #[derive(Debug)]

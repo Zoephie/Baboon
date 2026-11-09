@@ -1,6 +1,10 @@
 //! Halo 4's packed particle draws, built from the same fields.
 
-use super::*;
+use super::property::{ParticleState, lod_amount};
+use super::rules::particle_game_time;
+use super::sim::{ParticleField, RunningEmitter, emitter_frame, location, system_state};
+use super::system::ParticleSystem;
+use super::{FunctionValues, ViewFrame, dot, minus};
 
 /// One Halo 4 emitter's draw: its particles packed as the card holds them,
 /// and the matrix from their space to the world.

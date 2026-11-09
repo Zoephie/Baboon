@@ -1,6 +1,21 @@
 //! The simulation: runtime particles, emitters and fields, emitting and stepping a fixed step at a time.
 
-use super::*;
+use super::super::{frame_steps, resume_point};
+use super::emitter::{EmissionShape, Emitter, ParticleTrigger, emit_from_points};
+use super::look::ParticleLook;
+use super::movement::turbulence_push;
+use super::property::{ParticleState, lod_amount};
+use super::rules::{
+    MOST_PARTICLES, PRE_ROLL, ParticleController, ParticleUpdate, SEEDS, SYSTEM_SEEDS,
+    comes_to_rest, particle_game_time, starting_rotation,
+};
+use super::shader::ParticleCorner;
+use super::system::ParticleSystem;
+use super::{
+    EffectOnsets, FunctionValues, Gen3StripAt, ViewFrame, clamped_unit, cross, dot, high_bits,
+    lcg_step, minus,
+};
+use std::sync::Arc;
 
 /// `real_internal_random_range`'s generator, seeded so a preview repeats.
 #[derive(Debug, Clone, Copy)]

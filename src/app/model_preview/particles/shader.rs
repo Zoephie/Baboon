@@ -1,6 +1,21 @@
 //! The sprite shader that particles, strips, leaves and tracers share, read from its render method, and the sprite vertex.
 
-use super::*;
+use super::super::TagReader;
+#[cfg(test)]
+use super::super::TagSource;
+#[cfg(test)]
+use super::GameId;
+use super::look::{AlbedoConstants, ParticleAlbedo, ParticleLighting};
+use super::rules::ParticleRules;
+use super::{
+    Gen3Bitmap, Gen3Blend, H3_EXPOSURE, Sampler, SamplerKind, dot, elements, reach_alt_exposure,
+    reach_exposure, read_h3_bitmap, read_h3_definition, read_resolved_map, resolve_embedded_method,
+    tag_function_at,
+};
+use blam_tags::render_method::{
+    BitmapAddressMode, BitmapFilterMode, ParameterSource, ResolvedRenderMethod, ResolvedValue,
+};
+use blam_tags::{TagFieldData, TagStruct};
 
 /// Unnormalized, as the game's is, and with no special case but what keeps it
 /// from dividing by nothing.

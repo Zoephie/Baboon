@@ -1,6 +1,14 @@
 //! Movement controllers, read and run: physics, the collider, flocks and turbulence.
 
-use super::*;
+use super::super::TagReader;
+use super::property::{ParticleProperty, ParticleState};
+use super::rules::{GRAVITY, movement_parameter, movement_parameter_or};
+use super::seeds::SeedAllocator;
+use super::sim::Particle;
+use super::{
+    Image, SamplerKind, TextureImage, clamped_unit, decode_image, dot, elements, has_flag, minus,
+};
+use blam_tags::TagStruct;
 
 /// `set_shader_update_state`'s three, each off without a physics controller.
 #[derive(Debug)]

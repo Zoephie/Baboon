@@ -1,6 +1,11 @@
 //! Particle properties: the state inputs, a property function with its inputs and seeds, and level-of-detail amounts.
 
-use super::*;
+use super::rules::{SEEDS, SYSTEM_SEEDS};
+use super::seeds::SeedAllocator;
+use super::shader::{read_ends, slerped};
+use super::tag_function_at;
+use blam_tags::{TagFunction, TagStruct};
+use std::sync::Arc;
 
 /// `game_state_type_enum`, by option name. Those with a `{` carry another
 /// name after it, which a tag's own schema may spell the first way only.

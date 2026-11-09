@@ -1,6 +1,18 @@
 //! Cheap particle emitters: the emitter tag, its spawn maths, the definitions and their markers on an object.
 
-use super::*;
+use super::super::super::{RenderModelPreviewMarker, TagReader};
+use super::super::rules::particle_game_time;
+use super::super::sim::Random;
+use super::library::{CheapLibrary, CheapTexels};
+use super::{
+    ALPHA, CHEAP_PARTICLE_EMITTER, CORRELATE, DEFAULT_POSITION, DEFAULT_VELOCITY, EffectTimes,
+    FunctionValues, MarkerFrame, NORMALIZE, PHYSICS, POSITION_LOCAL, ROTATE_UP, VELOCITY_LOCAL,
+    attached, clamped_unit, cross, dot, for_each_attached_part, frac, has_flag, object_value,
+    part_frame, posed_on, read_part_placement, tag_function_at,
+};
+use blam_tags::{TagFile, TagFunction, TagStruct};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A `cheap_particle_emitter` as its tag has it, before `postprocess`.
 #[derive(Debug, Clone)]

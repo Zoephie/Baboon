@@ -1,6 +1,13 @@
 //! The per-game particle rules and the rules the tool's postprocess bakes: rest, fades, controllers and update kinds.
 
-use super::*;
+use super::super::TagReader;
+use super::emitter::Emitter;
+use super::look::{Billboard, ParticleLook, ParticleMaterialReader};
+use super::property::ParticleProperty;
+use super::seeds::SeedAllocator;
+use super::{GameId, dot, elements};
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 /// Seconds run before the first frame, so a held pose has its particles.
 pub(in crate::app::model_preview) const PRE_ROLL: f32 = 6.0;

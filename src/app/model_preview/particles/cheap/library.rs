@@ -1,6 +1,8 @@
 //! The global cheap particle library: its types, render textures and turbulence, read once per game.
 
-use super::*;
+use super::super::super::{GameId, TagReader};
+use super::{COLLISION, COLOR0, FADE, PHYSICS, RENDER, elements};
+use blam_tags::{TagFieldData, TagStruct};
 
 /// A map the cheap particle shaders fetch texels of: -1 to 1 for a signed
 /// format (`q8w8v8u8`), 0 to 1 otherwise, in the decoder's r, g, b, a

@@ -1,6 +1,16 @@
 //! Particle systems: their parts, the strips they carry, and reading them off an effect.
 
-use super::*;
+use super::super::{RenderModelPreviewMarker, TagReader};
+use super::emitter::{Emitter, ParticleTrigger, read_emitter};
+use super::look::{ParticleLook, read_look};
+use super::rules::{ParticleRules, baked_lod, near_fade_range, reach_baked_lod};
+use super::sim::location;
+use super::{
+    EffectTimes, Gen3StripAt, MarkerFrame, ObjectEffect, ViewFrame, attached, dot, elements,
+    has_flag, has_flag_labelled, object_effects, part_runs_by, read_carried_strips,
+};
+use blam_tags::{TagFile, TagStruct};
+use std::sync::Arc;
 
 /// A system in an event of an attached effect, at a marker.
 #[derive(Debug)]

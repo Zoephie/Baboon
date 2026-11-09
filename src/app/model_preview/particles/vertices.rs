@@ -1,6 +1,15 @@
 //! CPU vertex building for Halo 2, Halo 3, ODST and Reach: billboards, frames and the per-system vertex pass.
 
-use super::*;
+use super::look::{Billboard, ParticleLighting, ravi};
+use super::property::{ParticleState, lod_amount};
+use super::rules::particle_game_time;
+use super::shader::{ParticleCorner, frame_variant, particle_exposure};
+use super::sim::{RunningEmitter, emitter_frame, system_state};
+use super::system::ParticleSystem;
+use super::{
+    FunctionValues, ViewFrame, clamped_unit, cross, dot, minus, reach_lightmap_tint,
+    reach_particle_light,
+};
 
 /// `billboard_basis`.
 fn billboard(

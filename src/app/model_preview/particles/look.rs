@@ -1,6 +1,14 @@
 //! A particle's look: billboard, albedo and lighting, its frames and mesh, and how it is read.
 
-use super::*;
+use super::super::TagReader;
+use super::emitter::ParticleTrigger;
+use super::property::ParticleProperty;
+use super::rules::{MOST_FRAMES, ParticleRules, still_particles_move};
+use super::seeds::{REACH_ALLOCATED_STATES, SeedAllocator};
+use super::shader::{SpriteShader, parameter, read_sprite_shader};
+use super::{Gen3Blend, elements, has_flag, tag_function_at};
+use blam_tags::TagStruct;
+use std::sync::Arc;
 
 /// `c_particle_definition`'s billboard styles, by option name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
