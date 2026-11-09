@@ -2,6 +2,7 @@
 //! draws for them (Reach's flares read through here too). What Halo 3 shares
 //! with Reach and Halo 4 is in `gen3`; its draw and bloom are the renderer's.
 
+mod features;
 pub(in crate::app::model_preview) mod object;
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod bloom;

@@ -1,6 +1,7 @@
 //! Halo CE: what an object brings with it, its functions, and the effects,
 //! lights and shader passes the preview draws for it.
 
+mod features;
 pub(in crate::app::model_preview) mod object;
 pub(super) mod weapons;
 pub(super) mod contrails;

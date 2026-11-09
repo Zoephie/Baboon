@@ -288,14 +288,14 @@ impl RenderModelPreview {
 /// whole and a new field must be listed or skipped.
 macro_rules! features {
     ($group:path { $($field:ident => $path:literal),* $(,)? ; skip $($skipped:ident),* $(,)? }) => {
-        impl Features for $group {
-            fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn FeatureList)) {
+        impl $crate::app::model_preview::common::features::Features for $group {
+            fn each(&self, visit: &mut dyn FnMut(&'static str, &dyn $crate::app::model_preview::common::features::FeatureList)) {
                 let Self { $($field,)* $($skipped: _,)* } = self;
                 $(visit($path, $field);)*
             }
 
             #[cfg(test)]
-            fn each_mut(&mut self, visit: &mut dyn FnMut(&'static str, &mut dyn FeatureList)) {
+            fn each_mut(&mut self, visit: &mut dyn FnMut(&'static str, &mut dyn $crate::app::model_preview::common::features::FeatureList)) {
                 let Self { $($field,)* $($skipped: _,)* } = self;
                 $(visit($path, $field);)*
             }
@@ -303,57 +303,7 @@ macro_rules! features {
     };
 }
 
-features!(super::super::ce::CeFeatures {
-    lights => "ce.lights",
-    antennas => "ce.antennas",
-    effects => "ce.effects",
-    contrails => "ce.contrails",
-    light_volumes => "ce.light_volumes",
-    lightning => "ce.lightning",
-    glows => "ce.glows",
-    flags => "ce.flags",
-    particle_systems => "ce.particle_systems";
-    skip firing
-});
-
-features!(super::super::h2::H2Features {
-    flares => "h2.flares",
-    point_lights => "h2.point_lights",
-    gel_lights => "h2.gel_lights",
-    light_volumes => "h2.light_volumes",
-    contrails => "h2.contrails",
-    liquids => "h2.liquids";
-    skip prt, hologram_control
-});
-
-features!(super::super::gen3::Gen3Features {
-    cheap_emitters => "gen3.cheap_emitters",
-    flares => "gen3.flares",
-    light_volumes => "gen3.light_volumes",
-    strips => "gen3.strips",
-    screen_effects => "gen3.screen_effects";
-    skip prt, ik_markers
-});
-
-features!(super::super::h3::H3Features {
-    lights => "h3.lights",
-    leaves => "h3.leaves";
-    skip shield, vision, motion_blur
-});
-
-features!(super::super::reach::ReachFeatures {
-    lights => "reach.lights",
-    cheap_lights => "reach.cheap_lights";
-    skip light_passes, shield, camo, shadow_caster, screen_noise
-});
-
-features!(super::super::h4::H4Features {
-    lights => "h4.lights",
-    cheap_lights => "h4.cheap_lights",
-    flares => "h4.flares",
-    tracers => "h4.tracers";
-    skip light_passes, flare_pass, camo, shield, shadow_caster, color_grading, bounding_sphere, change_color_count
-});
+pub(in crate::app::model_preview) use features;
 
 /// [`Feature`] for kinds that hang under a region through [`Attached`]: `$moves`
 /// and `$inputs` are each kind's rule, `|at|` and `|at, object|`.
@@ -361,9 +311,9 @@ features!(super::super::h4::H4Features {
 /// [`Attached`]: super::attached::Attached
 macro_rules! attached_feature {
     ($kind:ty, moves: |$at:ident| $moves:expr, inputs: |$item:ident| $inputs:expr) => {
-        impl Feature for $kind {
+        impl $crate::app::model_preview::common::features::Feature for $kind {
             fn only_under(&self) -> Option<&(String, String)> {
-                super::attached::Attached::only_under(self)
+                $crate::app::model_preview::common::attached::Attached::only_under(self)
             }
 
             fn moves(&self) -> bool {
@@ -379,54 +329,14 @@ macro_rules! attached_feature {
     };
 }
 
-// Lights and flares move when they animate (`object_moves`), and read their
-// scale and the functions their channels name (`h2_shader_inputs`).
-attached_feature!(super::super::h2::lights::H2FlareAt, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
-attached_feature!(super::super::h2::lights::H2PointLight, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
-attached_feature!(super::super::h2::lights::H2GelLight, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
-attached_feature!(super::super::h3::lights::H3Light, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
-attached_feature!(super::super::reach::lights::ReachLight, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
-attached_feature!(super::super::reach::lights::ReachCheapLight, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
-attached_feature!(super::super::h4::lights::H4Light, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
-attached_feature!(super::super::h4::lights::H4CheapLight, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
-attached_feature!(super::super::h4::flares::H4FlareAt, moves: |at| at.animates(), inputs: |at| at.inputs().collect());
-attached_feature!(super::super::gen3::effects::flares::H3FlareAt, moves: |at| at.animates(), inputs: |at| vec![at.scale_name()]);
-attached_feature!(super::super::gen3::effects::light_volumes::H3LightVolumeAt, moves: |at| at.animates(), inputs: |at| at.scale_names().into_iter().collect());
-// Halo 2's light volumes draw still at rest.
-attached_feature!(super::super::h2::light_volumes::H2LightVolume, moves: |_at| false, inputs: |at| vec![at.scale_name()]);
-// Simulations run on whenever there are any.
-attached_feature!(super::super::h4::tracers::H4TracerAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
+pub(in crate::app::model_preview) use attached_feature;
+
 attached_feature!(super::super::particles::H3ParticleSystem, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
 attached_feature!(super::super::particles::cheap::ReachCheapEmitterAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
-attached_feature!(super::super::gen3::effects::strips::H3StripAt, moves: |_at| true, inputs: |at| at.scale_names().into_iter().collect());
-attached_feature!(super::super::h2::contrails::H2ContrailAt, moves: |_at| true, inputs: |at| vec![at.scale_name()]);
-attached_feature!(super::super::h2::liquid::H2LiquidAt, moves: |_at| true, inputs: |at| vec![at.scale_name()]);
 
 impl Feature for super::super::antennas::Antenna {
     fn only_under(&self) -> Option<&(String, String)> {
         super::attached::Attached::only_under(self)
-    }
-}
-
-impl Feature for super::super::gen3::effects::screen::H3ScreenEffectAt {
-    fn moves(&self) -> bool {
-        true
-    }
-
-    fn inputs(&self, object: u8) -> Vec<&str> {
-        if self.object != object {
-            return Vec::new();
-        }
-        vec![self.scale_name()]
-    }
-
-    /// The object functions its falloffs read, offered after every screen
-    /// effect's scale.
-    fn late_inputs(&self, object: u8) -> Vec<&str> {
-        if self.object != object {
-            return Vec::new();
-        }
-        self.object_inputs().collect()
     }
 }
 
@@ -436,55 +346,7 @@ impl Feature for super::super::cloth::H3ClothAt {
     }
 }
 
-impl Feature for super::super::h3::leaves::H3LeavesAt {
-    fn moves(&self) -> bool {
-        true
-    }
-}
-
-// Halo CE's read no Halo 2 function names; an effect runs at rest only when
-// no event plays it.
-impl Feature for super::super::ce::lights::CeLight {}
 impl Feature for super::super::antennas::ce::CeAntenna {}
-impl Feature for super::super::ce::widgets::CeLightVolume {}
-
-impl Feature for super::super::ce::effects::CeEffectAt {
-    /// An event's effect runs only when played, and asks for frames then.
-    fn moves(&self) -> bool {
-        self.event.is_none()
-    }
-}
-
-impl Feature for super::super::ce::contrails::CeContrailAt {
-    fn moves(&self) -> bool {
-        true
-    }
-}
-
-impl Feature for super::super::ce::widgets::CeLightning {
-    fn moves(&self) -> bool {
-        true
-    }
-}
-
-impl Feature for super::super::ce::widgets::CeGlow {
-    fn moves(&self) -> bool {
-        true
-    }
-}
-
-impl Feature for super::super::ce::flags::CeFlagAt {
-    fn moves(&self) -> bool {
-        true
-    }
-}
-
-impl Feature for super::super::ce::particle_systems::CeParticleSystemAt {
-    fn moves(&self) -> bool {
-        true
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

@@ -2,6 +2,7 @@
 //! passes, an object's attached effects and their parts, light volumes,
 //! strips, screen effects and PRT.
 
+mod features;
 pub(in crate::app::model_preview) mod materials;
 pub(crate) mod effects;
 pub(in crate::app::model_preview) mod pipeline;

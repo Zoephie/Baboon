@@ -2,6 +2,7 @@
 //! light volumes, contrails, liquid and PRT the preview draws for it. Its
 //! shader passes, which Halo CE's share, are in `dx9`.
 
+mod features;
 pub(in crate::app::model_preview) mod particles;
 pub(in crate::app::model_preview) mod attached;
 pub(in crate::app::model_preview) mod overlays;

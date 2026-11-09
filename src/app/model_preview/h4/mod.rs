@@ -2,6 +2,7 @@
 //! and lights, flares, camo, shield, shadow, particles and tracers. Its passes
 //! are the renderer's.
 
+mod features;
 pub(in crate::app::model_preview) mod materials;
 pub(in crate::app::model_preview) mod effects;
 pub(in crate::app::model_preview) mod object;
