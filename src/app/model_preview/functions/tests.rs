@@ -1,6 +1,10 @@
+use super::outputs::{DEVICE_EXPORTS, OBJECT_EXPORTS, TypeExports};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
+use blam_tags::tag_function::FunctionType;
+use blam_tags::{TagFile, TagFunction};
+use std::sync::Arc;
 
 fn identity() -> Arc<TagFunction> {
     let mut function = blam_tags::tag_function::H2Function::new(FunctionType::Identity);

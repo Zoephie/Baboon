@@ -1,6 +1,10 @@
 //! Evaluating an object's functions for a frame.
 
-use super::*;
+use super::read::{
+    Clock, DEEPEST_CHAIN, FunctionInputs, FunctionRules, FunctionValues, H2ObjectFunction,
+    ObjectFunctions, object_input,
+};
+use blam_tags::tag_function::FunctionType;
 
 impl H2ObjectFunction {
     fn is_periodic(&self) -> bool {

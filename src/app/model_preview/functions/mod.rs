@@ -5,13 +5,6 @@
 //! outputs. In a preview nothing runs, so the panel sets those inputs, and
 //! each starts where an idle object leaves it.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use blam_tags::tag_function::FunctionType;
-use blam_tags::{TagFile, TagFunction, TagStruct};
-use eframe::egui::{self, Ui};
-
 use crate::app::ui_kit::ThemedCheckbox;
 
 use super::common::fields::{elements, has_flag, object_block};
@@ -20,10 +13,9 @@ use crate::app::model_preview::common::random::{high16_over_65535, lcg_step};
 
 mod read;
 pub(in crate::app::model_preview) use read::*;
-mod outputs;
-use outputs::*;
 mod controls;
 mod evaluate;
+mod outputs;
 pub(in crate::app::model_preview) use controls::*;
 #[cfg(test)]
 mod tests;

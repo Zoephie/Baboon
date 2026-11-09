@@ -1,6 +1,10 @@
 //! Reading an object's functions: their flags, clocks, switches and inputs.
 
-use super::*;
+use super::outputs::TypeExports;
+use super::{elements, has_flag, high16_over_65535, lcg_step, object_block, tag_function_at};
+use blam_tags::{TagFile, TagFunction, TagStruct};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// What the panel has set, by object geometry and input name.
 pub(crate) type FunctionInputs = HashMap<(u64, String), f32>;

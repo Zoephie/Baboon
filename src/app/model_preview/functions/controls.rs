@@ -1,6 +1,9 @@
 //! The panel's function controls and event effects.
 
-use super::*;
+use super::ThemedCheckbox;
+use super::read::{FunctionInputs, FunctionValues, ObjectFunctions};
+use eframe::egui;
+use eframe::egui::Ui;
 
 /// A button for each effect an event would play. An effect starts when its
 /// function comes on, so a press turns it off for a frame and then on.

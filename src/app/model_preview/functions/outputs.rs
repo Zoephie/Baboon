@@ -1,6 +1,7 @@
 //! The exports each object type publishes to its functions.
 
-use super::*;
+use super::elements;
+use blam_tags::TagFile;
 
 /// One of Halo 2's function exporters: the names it claims, with what an idle
 /// object, just placed, gives each. MCC `halo2_tag_test`; the object one is
