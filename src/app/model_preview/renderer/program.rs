@@ -1,6 +1,7 @@
 //! The main model program: its GLSL for each dialect, the vertex layout and the linker that binds its attributes.
 
 use super::*;
+use super::super::gl::glsl::fill;
 use super::super::gl::link::link;
 use eframe::glow;
 
@@ -61,228 +62,31 @@ pub(super) fn model_shader_sources(
     // Position and normal are required; the rest are read only on the
     // shaded path and a driver may drop them from an unused program.
     let bone_rows = MAX_PREVIEW_BONES * 3;
-    let vertex_source = format!(
-        "{}{precision}\
-             {attribute} vec3 a_position;\n\
-             {attribute} vec3 a_normal;\n\
-             {attribute} vec2 a_texcoord;\n\
-             {attribute} vec3 a_tangent;\n\
-             {attribute} vec3 a_binormal;\n\
-             {attribute} vec4 a_node_indices;\n\
-             {attribute} vec4 a_node_weights;\n\
-             uniform vec3 u_center;\n\
-             uniform float u_scale;\n\
-             uniform vec2 u_angles;\n\
-             uniform vec2 u_clip_scale;\n\
-             uniform float u_depth_scale;\n\
-             // Depth remap `z = t * x + y` across the near and far planes.\n\
-             // See PREVIEW_RENDER_DISTANCE.\n\
-             uniform vec2 u_depth_map;\n\
-             // 1 / eye distance (scaled view units); 0 is orthographic.\n\
-             uniform float u_perspective;\n\
-             // Skinning: three vec4 rows of an affine matrix per bone,\n\
-             // bind-relative (world * inverse_bind), so zero-weight vertices\n\
-             // and unanimated draws stay exactly where the tag put them.\n\
-             uniform float u_animated;\n\
-             uniform vec4 u_bones[{bone_rows}];\n\
-             {varying_out} vec2 v_uv;\n\
-             {varying_out} vec3 v_normal;\n\
-             {varying_out} vec3 v_tangent;\n\
-             {varying_out} vec3 v_binormal;\n\
-             vec3 rotate_view(vec3 value) {{\n\
-                 float sy = sin(u_angles.x);\n\
-                 float cy = cos(u_angles.x);\n\
-                 float sp = sin(u_angles.y);\n\
-                 float cp = cos(u_angles.y);\n\
-                 vec3 yawed = vec3(value.x * cy - value.y * sy, value.x * sy + value.y * cy, value.z);\n\
-                 return vec3(yawed.x, yawed.y * cp - yawed.z * sp, yawed.y * sp + yawed.z * cp);\n\
-             }}\n\
-             void skin_influence(float index_f, float weight, vec4 point_h,\n\
-                                 inout vec3 skinned_pos, inout vec3 skinned_nrm,\n\
-                                 inout vec3 skinned_tan, inout vec3 skinned_bin) {{\n\
-                 if (weight <= 0.0) {{ return; }}\n\
-                 int base = int(index_f + 0.5) * 3;\n\
-                 vec4 r0 = u_bones[base];\n\
-                 vec4 r1 = u_bones[base + 1];\n\
-                 vec4 r2 = u_bones[base + 2];\n\
-                 skinned_pos += weight * vec3(dot(r0, point_h), dot(r1, point_h), dot(r2, point_h));\n\
-                 skinned_nrm += weight * vec3(dot(r0.xyz, a_normal), dot(r1.xyz, a_normal), dot(r2.xyz, a_normal));\n\
-                 skinned_tan += weight * vec3(dot(r0.xyz, a_tangent), dot(r1.xyz, a_tangent), dot(r2.xyz, a_tangent));\n\
-                 skinned_bin += weight * vec3(dot(r0.xyz, a_binormal), dot(r1.xyz, a_binormal), dot(r2.xyz, a_binormal));\n\
-             }}\n\
-             void skinned_pose(out vec3 position, out vec3 normal_in, out vec3 tangent_in, out vec3 binormal_in) {{\n\
-                 position = a_position;\n\
-                 normal_in = a_normal;\n\
-                 tangent_in = a_tangent;\n\
-                 binormal_in = a_binormal;\n\
-                 float weight_total = a_node_weights.x + a_node_weights.y + a_node_weights.z + a_node_weights.w;\n\
-                 if (u_animated > 0.5 && weight_total > 0.0001) {{\n\
-                     vec4 point_h = vec4(a_position, 1.0);\n\
-                     vec3 sp = vec3(0.0);\n\
-                     vec3 sn = vec3(0.0);\n\
-                     vec3 st = vec3(0.0);\n\
-                     vec3 sb = vec3(0.0);\n\
-                     skin_influence(a_node_indices.x, a_node_weights.x, point_h, sp, sn, st, sb);\n\
-                     skin_influence(a_node_indices.y, a_node_weights.y, point_h, sp, sn, st, sb);\n\
-                     skin_influence(a_node_indices.z, a_node_weights.z, point_h, sp, sn, st, sb);\n\
-                     skin_influence(a_node_indices.w, a_node_weights.w, point_h, sp, sn, st, sb);\n\
-                     position = sp / weight_total;\n\
-                     normal_in = sn;\n\
-                     tangent_in = st;\n\
-                     binormal_in = sb;\n\
-                 }}\n\
-             }}\n\
-             vec4 clip_position(vec3 position) {{\n\
-                 vec3 view = rotate_view((position - u_center) * u_scale);\n\
-                 // Perspective: the eye sits along -Y so w grows with depth;\n\
-                 // at the focus plane (view.y = 0) w is exactly 1 and the\n\
-                 // framing matches the orthographic view. See the derivation\n\
-                 // on PERSPECTIVE_FOV_Y.\n\
-                 float w = 1.0 + view.y * u_perspective;\n\
-                 float z_clip = view.y * u_depth_scale * u_depth_map.x + u_depth_map.y;\n\
-                 return vec4(view.x * u_clip_scale.x, view.z * u_clip_scale.y, z_clip, w);\n\
-             }}\n\
-             void main() {{\n\
-                 vec3 position;\n\
-                 vec3 normal_in;\n\
-                 vec3 tangent_in;\n\
-                 vec3 binormal_in;\n\
-                 skinned_pose(position, normal_in, tangent_in, binormal_in);\n\
-                 gl_Position = clip_position(position);\n\
-                 vec3 source_normal = length(normal_in) > 0.0001 ? normalize(normal_in) : vec3(0.0, 0.0, 1.0);\n\
-                 v_normal = rotate_view(source_normal);\n\
-                 v_tangent = rotate_view(tangent_in);\n\
-                 v_binormal = rotate_view(binormal_in);\n\
-                 v_uv = a_texcoord;\n\
-             }}\n",
-        version_declaration
+    let vertex_source = fill(
+        include_str!("shaders/model.vert"),
+        &[
+            ("version", &version_declaration),
+            ("precision", &precision),
+            ("attribute", &attribute),
+            ("bone_rows", &bone_rows),
+            ("varying_out", &varying_out),
+        ],
     );
     // The lighting rig is the one this preview has always used — a key, a
     // fill, a rim and an overhead term, all in view space so they follow the
     // camera. It moved from the vertex shader to here so a normal map has
     // something to perturb: per-vertex lighting would sample the map and
     // then throw the result away between vertices.
-    let fragment_source = format!(
-        "{}{precision}\
-             {varying_in} vec2 v_uv;\n\
-             {varying_in} vec3 v_normal;\n\
-             {varying_in} vec3 v_tangent;\n\
-             {varying_in} vec3 v_binormal;\n\
-             uniform sampler2D u_tex_base;\n\
-             uniform sampler2D u_tex_detail;\n\
-             uniform sampler2D u_tex_bump;\n\
-             uniform sampler2D u_tex_bump_detail;\n\
-             uniform sampler2D u_tex_alpha;\n\
-             uniform sampler2D u_tex_multipurpose;\n\
-             // Which slots this material bound: 0-3 in `u_have_a`, 4-5 in\n\
-             // `u_have_b.xy`. Each slot's UV multiplier is a per-axis pair:\n\
-             // base and detail in `_a`, bump and bump detail in `_b`, alpha\n\
-             // and multipurpose in `_c`.\n\
-             uniform vec4 u_have_a;\n\
-             uniform vec4 u_have_b;\n\
-             uniform vec4 u_uv_scale_a;\n\
-             uniform vec4 u_uv_scale_b;\n\
-             uniform vec4 u_uv_scale_c;\n\
-             // Detail combine: x the function (0 the Halo 3 linear-space\n\
-             // biased multiply; 1-3 Halo CE's biased multiply, multiply and\n\
-             // biased add, on stored values), y the CE detail mask (0 none),\n\
-             // z the Xbox multipurpose channel order.\n\
-             uniform vec4 u_detail;\n\
-             uniform vec3 u_base_color;\n\
-             uniform float u_unlit;\n\
-             uniform float u_shaded;\n\
-             {fragment_output}\n\
-             vec3 to_linear(vec3 c) {{ return pow(c, vec3(2.2)); }}\n\
-             vec3 to_srgb(vec3 c) {{ return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)); }}\n\
-             void main() {{\n\
-                 vec3 albedo = u_base_color;\n\
-                 bool shaded = u_shaded > 0.5;\n\
-                 if (shaded) {{\n\
-                     // Alpha test first: a discarded fragment costs nothing else.\n\
-                     // This is the ONLY thing that discards. A base map's alpha\n\
-                     // is not opacity in Halo — it carries a mask, most often\n\
-                     // specular — so treating it as coverage punched holes\n\
-                     // through every character whose diffuse had a dark mask.\n\
-                     if (u_have_b.x > 0.5 && {sample}(u_tex_alpha, v_uv * u_uv_scale_c.xy).a < 0.5) discard;\n\
-                     if (u_have_a.x > 0.5) {{\n\
-                         albedo = to_linear({sample}(u_tex_base, v_uv * u_uv_scale_a.xy).rgb);\n\
-                     }}\n\
-                     // Halo detail maps are grey-centred and modulate: mid-grey\n\
-                     // leaves the base untouched, darker and lighter push it.\n\
-                     // They tile — commonly sixteen times — so the scale matters.\n\
-                     if (u_have_a.y > 0.5) {{\n\
-                         vec3 detail = {sample}(u_tex_detail, v_uv * u_uv_scale_a.zw).rgb;\n\
-                         if (u_detail.x < 0.5) {{\n\
-                             albedo = clamp(albedo * to_linear(detail) * 2.0, 0.0, 1.0);\n\
-                         }} else {{\n\
-                             // Halo CE's ShaderModel() (fx/model_common.h): the\n\
-                             // mask lerps the detail toward its function's\n\
-                             // neutral value, then combines with the base.\n\
-                             float mask = 1.0;\n\
-                             if (u_detail.y > 0.5 && u_have_b.y > 0.5) {{\n\
-                                 vec4 mp = {sample}(u_tex_multipurpose, v_uv * u_uv_scale_c.zw);\n\
-                                 if (u_detail.z > 0.5) mp = mp.agrb;\n\
-                                 float k = u_detail.y;\n\
-                                 float channel = k < 2.5 ? mp.b : (k < 4.5 ? mp.g : (k < 6.5 ? mp.a : mp.r));\n\
-                                 mask = mod(k, 2.0) > 0.5 ? 1.0 - channel : channel;\n\
-                             }}\n\
-                             vec3 neutral = u_detail.x > 1.5 && u_detail.x < 2.5 ? vec3(1.0) : vec3(0.5);\n\
-                             vec3 d = mix(neutral, detail, mask);\n\
-                             vec3 base = to_srgb(albedo);\n\
-                             vec3 combined = u_detail.x < 1.5 ? base * d * 2.0\n\
-                                 : (u_detail.x < 2.5 ? base * d : base + 2.0 * d - 1.0);\n\
-                             albedo = to_linear(clamp(combined, 0.0, 1.0));\n\
-                         }}\n\
-                     }}\n\
-                 }}\n\
-                 vec3 normal = normalize(v_normal);\n\
-                 if (shaded && (u_have_a.z > 0.5 || u_have_a.w > 0.5)) {{\n\
-                     // Tangent space, using the frame the tag authored rather\n\
-                     // than a reconstructed one — mirrored UV islands need the\n\
-                     // binormal's own sign to come out the right way round.\n\
-                     vec3 t = normalize(v_tangent);\n\
-                     vec3 b = normalize(v_binormal);\n\
-                     if (length(v_tangent) > 0.0001 && length(v_binormal) > 0.0001) {{\n\
-                         // The engine's own unpack, verbatim from the kit's\n\
-                         // source (rasterizer/hlsl/bump_mapping.fx): X and Y\n\
-                         // come off the texture through BUMP_CONVERT — byte\n\
-                         // 128 is exactly flat — Z is ALWAYS reconstructed\n\
-                         // rather than sampled (the compressed formats carry\n\
-                         // no trustworthy blue), and the components go into\n\
-                         // the authored tangent frame with no negation.\n\
-                         vec3 tn = vec3(0.0, 0.0, 1.0);\n\
-                         if (u_have_a.z > 0.5) {{\n\
-                             vec2 sampled = {sample}(u_tex_bump, v_uv * u_uv_scale_b.xy).xy * (255.0 / 127.0) - (128.0 / 127.0);\n\
-                             tn = vec3(sampled, sqrt(1.0 - min(dot(sampled, sampled), 1.0)));\n\
-                         }}\n\
-                         // A detail normal tiles far finer than the base one\n\
-                         // and adds its tangent-plane components over it —\n\
-                         // the engine's stock combine — staying stable when\n\
-                         // either map is flat.\n\
-                         if (u_have_a.w > 0.5) {{\n\
-                             vec2 dn = {sample}(u_tex_bump_detail, v_uv * u_uv_scale_b.zw).xy * (255.0 / 127.0) - (128.0 / 127.0);\n\
-                             tn = vec3(tn.xy + dn, tn.z);\n\
-                         }}\n\
-                         tn = normalize(tn);\n\
-                         normal = normalize(t * tn.x + b * tn.y + normal * tn.z);\n\
-                     }}\n\
-                 }}\n\
-                 // The rig this preview has always used — a key, a fill, a rim\n\
-                 // and an overhead term, in view space so they follow the camera.\n\
-                 // Neutral on purpose: the maps supply the colour, and anything\n\
-                 // that tried to supply more needed a scene this preview has not\n\
-                 // got.\n\
-                 float key = max(dot(normal, normalize(vec3(-0.35, -0.55, 0.76))), 0.0);\n\
-                 float fill = max(dot(normal, normalize(vec3(0.72, 0.22, 0.36))), 0.0);\n\
-                 float rim = pow(clamp(1.0 - abs(normal.y), 0.0, 1.0), 2.0);\n\
-                 float overhead = clamp(normal.z * 0.5 + 0.5, 0.0, 1.0);\n\
-                 float shade = clamp(0.42 + key * 0.46 + fill * 0.16 + rim * 0.10 + overhead * 0.08, 0.32, 1.22);\n\
-                 vec3 lit = albedo * shade + vec3(key * key * (22.0 / 255.0));\n\
-                 vec3 flat_color = shaded ? to_srgb(albedo) : u_base_color;\n\
-                 vec3 result = mix(to_srgb(lit), flat_color, u_unlit);\n\
-                 {output_name} = vec4(result, 1.0);\n\
-             }}\n",
-        version_declaration
+    let fragment_source = fill(
+        include_str!("shaders/model.frag"),
+        &[
+            ("version", &version_declaration),
+            ("precision", &precision),
+            ("varying_in", &varying_in),
+            ("fragment_output", &fragment_output),
+            ("sample", &sample),
+            ("output_name", &output_name),
+        ],
     );
 
     (vertex_source, fragment_source)
