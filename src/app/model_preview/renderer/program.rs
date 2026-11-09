@@ -396,4 +396,21 @@ mod tests {
         assert_eq!(offset(std::ptr::addr_of!(vertex.node_indices) as usize), 56);
         assert_eq!(offset(std::ptr::addr_of!(vertex.node_weights) as usize), 72);
     }
+
+    /// Both dialects of the model shader, as every caller builds them,
+    /// through the shader dump (`BABOON_SHADER_DUMP`): the shots draw only
+    /// the modern one.
+    #[test]
+    fn both_model_shader_dialects_go_through_the_shader_dump() {
+        use crate::app::model_preview::gl::glsl::record_source;
+        for (declaration, modern, precision) in [
+            ("#version 330\n", true, ""),
+            ("#version 120\n", false, ""),
+            ("#version 100\n", false, "precision mediump float;\n"),
+        ] {
+            let (vertex, fragment) = model_shader_sources(declaration, modern, precision);
+            record_source(&vertex);
+            record_source(&fragment);
+        }
+    }
 }

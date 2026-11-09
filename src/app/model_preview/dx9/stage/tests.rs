@@ -179,3 +179,17 @@ fn lightmap_stages_link_with_the_kit_shaders() {
         }
     }
 }
+
+/// Every stage's source, and the shadow passes' fragments, through the
+/// shader dump (`BABOON_SHADER_DUMP`), so a change to how they are built is
+/// checked even for the stages no shot draws.
+#[test]
+fn every_stage_source_goes_through_the_shader_dump() {
+    use crate::app::model_preview::gl::glsl::record_source;
+    for stage in STAGES {
+        record_source(&stage.source("#version 330\n"));
+    }
+    for (_, pass) in crate::app::model_preview::dx9::passes::h2_shadow_passes() {
+        record_source(&pass.fragment);
+    }
+}
