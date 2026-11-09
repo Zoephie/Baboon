@@ -2,11 +2,11 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
-use super::dx9::passes::{H2Layer, h2_prt_lights};
+use super::dx9::passes::h2_prt_lights;
 use super::h2::prt::read_h2_prt;
 use std::sync::Arc;
 use super::common::geometry::{Overflow, VertexBase};
-use super::common::marker::{MarkerFrame, attach_point, attach_vector, own_marker_frame};
+use super::common::marker::{MarkerFrame, attach_point, attach_vector};
 
 pub(in crate::app::model_preview) mod reader;
 pub(in crate::app) use reader::TagReader;
@@ -25,10 +25,12 @@ pub(in crate::app::model_preview) use overlays::*;
 mod jobs;
 pub(in crate::app::model_preview) use jobs::*;
 mod guard;
-use guard::*;
+pub(in crate::app::model_preview) use guard::{feature, feature_into};
 mod render_model;
 pub(in crate::app::model_preview) use render_model::*;
 pub(in crate::app) use render_model::build_render_preview;
+mod games;
+use games::{add_overlay_shaders, load_ce_object};
 mod object;
 pub(in crate::app::model_preview) use object::*;
 mod model;
@@ -58,10 +60,7 @@ pub(super) fn load_model_preview(
     let preview = Arc::make_mut(&mut data.preview);
     preview.game = game;
     preview.generation = Some(generation);
-    if let Some(reader) = reader.filter(|reader| reader.source.game() == Some(GameId::Halo4)) {
-        // Just built: no other handle shares it, so this does not copy.
-        Arc::make_mut(&mut data.preview).h4.color_grading = super::h4::lighting::read_h4_color_grading(reader);
-    }
+    games::read_model_features(reader, &mut data);
     Ok(data)
 }
 

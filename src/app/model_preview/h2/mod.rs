@@ -4,6 +4,7 @@
 
 pub(in crate::app::model_preview) mod particles;
 pub(in crate::app::model_preview) mod attached;
+pub(in crate::app::model_preview) mod overlays;
 pub(super) mod bloom;
 pub(super) mod contrails;
 pub(super) mod light_volumes;

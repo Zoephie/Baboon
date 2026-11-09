@@ -4,7 +4,7 @@ use super::*;
 
 /// Read one feature of a preview: a broken tag that panics its reader costs
 /// that feature, noted as `what`, never the geometry.
-pub(super) fn feature<T: Default>(notes: &mut Vec<String>, what: &str, read: impl FnOnce() -> T) -> T {
+pub(in crate::app::model_preview) fn feature<T: Default>(notes: &mut Vec<String>, what: &str, read: impl FnOnce() -> T) -> T {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)).unwrap_or_else(|panic| {
         note_crash(notes, what, panic.as_ref());
         T::default()
@@ -14,7 +14,7 @@ pub(super) fn feature<T: Default>(notes: &mut Vec<String>, what: &str, read: imp
 /// [`feature`] for a reader that adds to the preview itself, such as a held
 /// weapon's geometry: a panic puts the preview back as it was, so nothing is
 /// left half merged.
-pub(super) fn feature_into<T: Default>(
+pub(in crate::app::model_preview) fn feature_into<T: Default>(
     notes: &mut Vec<String>,
     what: &str,
     preview: &mut RenderModelPreview,

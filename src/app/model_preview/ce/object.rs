@@ -2,6 +2,8 @@
 
 use super::super::*;
 use blam_tags::TagFile;
+use super::super::load::{build_render_preview, feature, feature_into};
+use super::super::object_reference;
 
 /// A Halo CE object's own lights, antennas, effects, contrails, light volumes,
 /// lightning, glows, particle systems, flags and the effects it names for its
@@ -68,4 +70,78 @@ fn read_ce_features(
     ce.lightning.extend(super::super::ce::widgets::read_ce_lightning(reader, object, owner, markers));
     ce.glows.extend(super::super::ce::widgets::read_ce_glows(reader, object, owner, markers));
     ce.particle_systems.extend(super::super::ce::particle_systems::read_ce_particle_systems(reader, object, owner, markers));
+}
+
+/// Halo CE object-family tags are the equivalent of later engines' model
+/// wrapper: the object directly names its gbxmodel, collision, animation,
+/// and legacy physics tags. Start with the render reference here; collision
+/// is added by the background overlay path.
+pub(in crate::app::model_preview) fn load_ce_object(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    reader: Option<&TagReader>,
+    settings: &PreviewLoadSettings,
+) -> Result<ModelPreviewData, String> {
+    let Some(reader) = reader else {
+        return Err("Halo CE object preview requires a loaded source.".to_owned());
+    };
+    let reference = object_reference(model_tag, "model")
+        .ok_or("This object references no gbxmodel.")?;
+    let render = reader.load(&reference, "gbxmodel", b"mod2")
+        .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;
+    let mut preview = build_render_preview(&render)?;
+    if preview.batches.is_empty() {
+        return Err("Referenced gbxmodel has no previewable draw batches.".to_owned());
+    }
+    if let Some((shader_group, shader_path)) =
+        super::functions::read_ce_modifier_shader(model_tag)
+    {
+        preview.materials.push(RenderModelPreviewMaterial {
+            shader_path,
+            shader_group,
+            overlay: true, shield: None,
+            permutation: 0,
+            object: 0,
+        });
+    }
+    // `render_model_parts`: an object's own index wins over each shader's.
+    let forced = super::functions::read_ce_forced_permutation(model_tag);
+    if forced != 0 {
+        preview.materials.iter_mut().for_each(|material| material.permutation = forced);
+    }
+    let mut notes = Vec::new();
+    // A vehicle's guns are part of it. A biped holds what it is handed.
+    let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
+    let chosen = settings.weapon.as_deref();
+    let weapons = feature(&mut notes, "the biped's weapons", || {
+        let known = settings.ce_equippable.as_deref();
+        is_biped.then(|| super::weapons::biped_weapons(reader, model_tag, chosen, known))
+    });
+    let held = match &weapons {
+        Some(weapons) => chosen
+            .filter(|path| weapons.equippable.iter().any(|weapon| weapon.path == *path))
+            .map(str::to_owned),
+        None => super::weapons::first_weapon(model_tag),
+    };
+    let attached = held.and_then(|path| {
+        let attach = |preview: &mut RenderModelPreview| {
+            super::weapons::attach_ce_weapon(reader, model_tag, &path, preview)
+        };
+        let attached = feature_into(&mut notes, "the held weapon", &mut preview, attach);
+        if attached.is_none() {
+            notes.push(format!("the weapon {path} could not be attached"));
+        }
+        attached
+    });
+    feature_into(&mut notes, "its lights and effects", &mut preview, |preview| {
+        super::object::read_ce_object_features(reader, model_tag, attached.as_ref(), preview);
+    });
+    let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
+    data.change_colors = feature(&mut notes, "its change colors", || read_h2_change_colors(model_tag));
+    data.ce_object_functions =
+        feature(&mut notes, "its functions", || super::functions::read_ce_object_functions(model_tag));
+    data.ce_attached.extend(attached);
+    data.ce_weapons = weapons;
+    data.notes = notes;
+    Ok(data)
 }
