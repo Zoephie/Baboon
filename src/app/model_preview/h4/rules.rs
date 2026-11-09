@@ -25,5 +25,6 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
         light_volume_reader: Some(super::effects::light_volumes::read_h4_definition),
         ..Gen3Rules::DEFAULT
     },
+    textures: true,
     ..GameRules::DEFAULT
 };

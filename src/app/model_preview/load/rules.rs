@@ -34,6 +34,16 @@ pub(crate) struct GameRules {
     pub(crate) effect_vectors: bool,
     /// The Halo 3 family's choices.
     pub(crate) gen3: Gen3Rules,
+    /// Whether the preview resolves its materials to textures. The kits it
+    /// was checked against: H3EK's, H3ODSTEK's and HREK's render-method
+    /// shaders, Halo 4's, Halo 2's template-and-parameters `shader`, and Halo
+    /// CE's model and environment shaders. Other kits may share a tag
+    /// container generation, but that alone does not make their texture
+    /// path supported.
+    pub(crate) textures: bool,
+    /// Whether the panel offers Default Lights, PRT, Bloom and Self Shadow,
+    /// which change what its models draw.
+    pub(crate) lit_options: bool,
 }
 
 /// A unit's own hand marker for a weapon: the unit, the weapon, and whether
@@ -51,5 +61,7 @@ impl GameRules {
         particles: ParticleRules::DEFAULT,
         effect_vectors: false,
         gen3: Gen3Rules::DEFAULT,
+        textures: false,
+        lit_options: true,
     };
 }

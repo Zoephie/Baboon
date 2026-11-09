@@ -153,11 +153,9 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                     "Draw Halo CE, Halo 2 and Halo 3 materials through the game's own \
                      shaders, lit by its default lighting.",
                 );
-            // Default Lights, PRT and Self Shadow change nothing a Halo CE
-            // model draws, and its renderer has no bloom, so its menu leaves
-            // them out.
-            let halo_ce = data.preview.game == Some(GameId::HaloCe);
-            if !halo_ce {
+            // What a game's models draw no differently for, its rules leave out.
+            let lit_options = super::super::load::rules(data.preview.game).lit_options;
+            if lit_options {
                 ui.add_enabled(
                     state.game_shaders,
                     ThemedCheckbox::new(&mut state.default_lights, "Default Lights"),
@@ -177,7 +175,7 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                 );
             }
             ui.add_enabled(
-                state.game_shaders && (halo_ce || !state.default_lights),
+                state.game_shaders && (!lit_options || !state.default_lights),
                 ThemedCheckbox::new(&mut state.light_follows_camera, "Light Follows Camera"),
             )
             .on_hover_text(
@@ -192,7 +190,7 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                 "Draw a Halo 2 or Halo 3 model through its active camouflage, for \
                  the models that have it.",
             );
-            if !halo_ce {
+            if lit_options {
                 ui.add_enabled(
                     state.game_shaders,
                     ThemedCheckbox::new(&mut state.bloom, "Bloom"),
@@ -203,7 +201,7 @@ pub(in crate::app::model_preview) fn draw_model_view_settings_menu(
                      game's follows the exposure of the whole scene.",
                 );
             }
-            if !halo_ce {
+            if lit_options {
                 ui.add_enabled(
                     state.game_shaders,
                     ThemedCheckbox::new(&mut state.self_shadow, "Self Shadow"),

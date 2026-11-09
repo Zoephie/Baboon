@@ -7,6 +7,7 @@ use super::super::particles::ParticleRules;
 
 pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
     unit_weapons: true,
+    textures: true,
     ..GameRules::DEFAULT
 };
 

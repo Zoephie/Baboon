@@ -12,5 +12,6 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
         }),
         ..ParticleRules::DEFAULT
     },
+    textures: true,
     ..GameRules::DEFAULT
 };

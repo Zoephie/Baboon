@@ -25,6 +25,7 @@ pub(in crate::app::model_preview) const RULES: GameRules = GameRules {
         light_volume_terms: true,
         ..Gen3Rules::DEFAULT
     },
+    textures: true,
     ..GameRules::DEFAULT
 };
 

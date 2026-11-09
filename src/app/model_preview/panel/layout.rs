@@ -20,22 +20,10 @@ use super::viewport_size::{draw_model_viewport_with_stats, model_viewport_size};
 use blam_tags::TagFile;
 use eframe::egui::{Color32, RichText, Ui, Vec2};
 
-// The material resolver understands the render-method shaders validated for
-// H3EK, H3ODSTEK and HREK, Halo 2's template-and-parameters `shader`, and Halo CE's
-// model and environment shaders. Other kits may share a tag container
-// generation, but that alone does not make their texture path supported.
+/// Whether the preview resolves `game`'s materials to textures, by its
+/// rules.
 pub(in crate::app::model_preview) fn model_preview_supports_textures(game: Option<GameId>) -> bool {
-    matches!(
-        game,
-        Some(
-            GameId::Halo3
-                | GameId::Halo3Odst
-                | GameId::HaloReach
-                | GameId::Halo4
-                | GameId::Halo2
-                | GameId::HaloCe
-        )
-    )
+    super::super::load::rules(game).textures
 }
 
 pub(in crate::app) fn draw_model_preview_panel(
