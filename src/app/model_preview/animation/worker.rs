@@ -1,6 +1,17 @@
 //! The background animation worker that decodes a preview's animations.
 
-use super::*;
+use super::super::super::Baboon;
+use super::super::{
+    KitStamp, MAX_PREVIEW_BONES, ModelPreviewState, WorkerMessage, is_object_family_group,
+    spawn_worker,
+};
+use super::decode::decode_held_animation;
+use super::graph::list_model_animations;
+use super::playback::PreviewAnimationEntry;
+use super::pose::{DecodedAnimationPose, PreviewAnimationPose, PreviewNodeTransform};
+use super::skinning::h2_held_layers;
+use eframe::egui;
+use std::collections::HashMap;
 
 /// Whether the preview loaded now is the geometry `geometry_id`.
 fn is_current_geometry(state: &ModelPreviewState, geometry_id: u64) -> bool {

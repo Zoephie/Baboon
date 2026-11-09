@@ -3,11 +3,24 @@
 //! identical to the bind pose must skin every vertex to exactly where the tag
 //! put it — any drift there deforms the model just by pressing play.
 
+use super::super::super::{TagEntry, TagEntryLocation, TagNameIndex, TagSource, file_entry_key};
+use super::super::{
+    MAX_PREVIEW_BONES, ModelPreviewData, ModelPreviewState, ModelVariantPreview,
+    RenderModelPreview, RenderModelPreviewNode, build_render_preview, compute_variant_selection,
+    load_referenced_tag_from_source, model_preview_data, object_reference, preview_skeleton_nodes,
+};
+use super::decode::{
+    ce_idle_beneath, ce_inverted_clip, ce_jma_kind, ce_rest_pose, decode_model_animation,
+};
+use super::graph::{list_model_animations, load_object_animations};
 use super::*;
 use crate::app::model_preview::harness::kit::kit_root;
 use crate::core::game::GameId;
+use blam_tags::animation::classic::CeAnimations;
 use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::Node;
+use blam_tags::{Animation, AnimationGraph, JmaKind, Skeleton};
+use std::collections::HashMap;
 
 fn preview_node(name: &str, parent: i16) -> RenderModelPreviewNode {
     RenderModelPreviewNode {

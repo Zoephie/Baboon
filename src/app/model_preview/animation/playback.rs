@@ -1,6 +1,6 @@
 //! Playing an animation: its entry, playback state and the frames it samples.
 
-use super::*;
+use super::pose::{ANIMATION_FRAME_RATE, PreviewAnimationPose};
 
 /// One row of the preview's animation list.
 #[derive(Debug, Clone)]

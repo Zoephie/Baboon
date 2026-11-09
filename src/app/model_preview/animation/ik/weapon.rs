@@ -9,7 +9,7 @@ use super::super::super::common::math::{
     axis_of, cross, dot, matrix_of, minus, place_of, plus, rigid_inverse, scaled,
     unit_by_reciprocal,
 };
-use super::super::super::*;
+use super::super::super::{RenderModelPreview, RenderModelPreviewMarker};
 
 /// Clips the game runs without weapon IK, by the last word of their names.
 /// `unit_animation_weapon_ik` turns it off for an action, a soft ping, and

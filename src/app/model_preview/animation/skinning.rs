@@ -1,6 +1,11 @@
 //! A pose made world: muted nodes, world and bind matrices, skinning rows, weapon IK and the armature.
 
-use super::*;
+use super::super::{
+    MAX_PREVIEW_BONES, ModelPreviewData, ModelPreviewState, RenderModelPreviewNode,
+};
+use super::playback::{PreviewAnimationEntry, sampled_frames};
+use super::pose::{blend_transforms, quat};
+use blam_tags::math::{Matrix4, RealPoint3d, RealQuaternion, RealVector3d};
 
 /// Which nodes a variant's `muted nodes` hold: each named node and its whole
 /// subtree (`model_postprocess_muted_nodes`, X360 0x82D96890, through

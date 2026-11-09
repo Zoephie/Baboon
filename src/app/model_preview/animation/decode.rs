@@ -1,6 +1,13 @@
 //! Decoding an animation into poses: held layers over a base, and Halo CE's own clips.
 
-use super::*;
+use super::super::super::{TagEntry, TagSource};
+use super::super::{load_referenced_tag_from_source, object_reference, preview_model_tag};
+use super::graph::{inherited_animation_order, load_graph_chain, load_object_animations};
+use super::pose::DecodedAnimationPose;
+use blam_tags::animation::classic::{CeAnimation, CeAnimations};
+use blam_tags::paths::tag_ref_path;
+use blam_tags::{Animation, AnimationGraph, JmaKind, NodeTransform, Skeleton, TagFile};
+use std::collections::HashMap;
 
 pub(super) fn ce_jma_kind(animation: &CeAnimation<'_>) -> JmaKind {
     JmaKind::from_metadata(
@@ -334,9 +341,13 @@ pub(super) fn decode_ce_animation(
 
 #[cfg(test)]
 mod ce_replacement_tests {
-    use super::super::*;
+
+    use super::super::super::load_referenced_tag_from_source;
+    use super::super::graph::load_object_animations;
+    use super::decode_ce_animation;
     use crate::app::model_preview::harness::kit::kit_source;
     use crate::core::game::GameId;
+    use blam_tags::animation::classic::CeAnimations;
 
     /// With `BLAM_TEST_HCEEK`: an action's clip plays over the idle, so the
     /// nodes it leaves alone stand where the idle puts them, not at bind.

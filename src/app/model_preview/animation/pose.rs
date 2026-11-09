@@ -1,6 +1,18 @@
 //! An animation pose: node transforms, decoded and preview poses, and the blends between them.
 
-use super::*;
+#[cfg(test)]
+use super::super::super::{TagEntry, TagSource};
+use super::super::RenderModelPreviewNode;
+#[cfg(test)]
+use super::super::{ModelPreviewData, ModelPreviewState};
+#[cfg(test)]
+use super::decode::decode_held_animation;
+#[cfg(test)]
+use super::graph::list_model_animations;
+#[cfg(test)]
+use super::skinning::h2_held_layers;
+use blam_tags::math::{RealQuaternion, RealVector3d};
+use blam_tags::{NodeTransform, Skeleton};
 
 /// Halo's animation clock. No tag carries a rate; the engine (and the JMA
 /// header the extractor writes) is a fixed 30 Hz.
