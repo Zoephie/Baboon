@@ -1,7 +1,7 @@
 //! The view and the pose every game's sprites and attachments are placed by:
 //! where the camera is, and where a posed node puts a point.
 
-use super::camera::{ModelGpuCamera, h2_eye_position, unrotate_view_vector};
+use super::camera::{ModelGpuCamera, eye_position, unrotate_view_vector};
 
 /// Where the preview's camera sits and faces: what sprites, flares and
 /// screen-facing quads are turned toward.
@@ -28,7 +28,7 @@ pub(in crate::app::model_preview) fn posed_on(node: usize, position: [f32; 3], d
 pub(in crate::app::model_preview) fn ce_flare_view(camera: &ModelGpuCamera) -> ViewFrame {
     let along = |vector| unrotate_view_vector(camera.yaw, camera.pitch, vector);
     ViewFrame {
-        eye: h2_eye_position(camera),
+        eye: eye_position(camera),
         forward: along([0.0, 1.0, 0.0]),
         right: along([1.0, 0.0, 0.0]),
         up: along([0.0, 0.0, 1.0]),

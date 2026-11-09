@@ -52,7 +52,7 @@ pub(in crate::app::model_preview) const PREVIEW_RENDER_DISTANCE: f32 = 8.0;
 
 /// Over the viewer's shoulder, so orbiting never leaves the near side unlit.
 /// The preview's own, in view axes: right, forward and up.
-pub(in crate::app::model_preview) fn h2_camera_light(yaw: f32, pitch: f32) -> [f32; 3] {
+pub(in crate::app::model_preview) fn camera_light(yaw: f32, pitch: f32) -> [f32; 3] {
     const LIGHT: [f32; 3] = [-0.4, -0.7, 0.6];
     let length = LIGHT.iter().map(|value| value * value).sum::<f32>().sqrt();
     unrotate_view_vector(yaw, pitch, LIGHT.map(|value| value / length))
@@ -60,7 +60,7 @@ pub(in crate::app::model_preview) fn h2_camera_light(yaw: f32, pitch: f32) -> [f
 
 /// The eye in model space, which the pass stages measure Fresnel from. An
 /// orthographic view has no eye, so one far away along the view axis stands in.
-pub(in crate::app::model_preview) fn h2_eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
+pub(in crate::app::model_preview) fn eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
     let distance = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
     let eye = unrotate_view_vector(camera.yaw, camera.pitch, [0.0, -distance, 0.0]);
     std::array::from_fn(|axis| camera.center[axis] + eye[axis] / camera.scale.max(1e-6))
@@ -308,7 +308,7 @@ mod tests {
     fn the_camera_light_keeps_its_place_as_the_view_orbits() {
         let toward_eye = |yaw, pitch| unrotate_view_vector(yaw, pitch, [0.0, -1.0, 0.0]);
         let share = |yaw, pitch| {
-            let (light, eye): ([f32; 3], [f32; 3]) = (h2_camera_light(yaw, pitch), toward_eye(yaw, pitch));
+            let (light, eye): ([f32; 3], [f32; 3]) = (camera_light(yaw, pitch), toward_eye(yaw, pitch));
             (0..3).map(|axis| light[axis] * eye[axis]).sum::<f32>()
         };
         for (yaw, pitch) in [(0.0, 0.0), (1.5, 0.4), (3.1, -0.6), (-2.0, 1.0)] {

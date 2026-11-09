@@ -110,7 +110,7 @@ pub(super) fn frame_probe(frame: &ModelGpuFrame) -> [[f32; 9]; 3] {
     if !frame.light_follows_camera {
         return DEFAULT_PROBE;
     }
-    let [x, y, _] = h2_camera_light(frame.camera.yaw, frame.camera.pitch);
+    let [x, y, _] = camera_light(frame.camera.yaw, frame.camera.pitch);
     turned_probe(y.atan2(x) - probe_heading())
 }
 

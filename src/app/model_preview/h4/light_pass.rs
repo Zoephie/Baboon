@@ -10,7 +10,7 @@ use super::super::gen3::screen_lights::screen_to_relative_world;
 use super::super::gen3::pipeline::{set_value, view_projection};
 use super::pass_hooks::h4_matrix;
 use super::super::frame::ModelGpuFrame;
-use crate::app::model_preview::common::camera::h2_eye_position;
+use crate::app::model_preview::common::camera::eye_position;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use super::lights::{H4LightBlend, H4LitLight};
@@ -27,7 +27,7 @@ impl H4Game {
     /// Every Halo 4 light of the frame, on the preview's clock as game time.
     fn frame_lights_of(frame: &ModelGpuFrame) -> Vec<H4LitLight> {
         let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
-        let eye = h2_eye_position(&frame.camera);
+        let eye = eye_position(&frame.camera);
         let mut lit = Vec::new();
         for (index, light) in frame.preview.h4.lights.iter().enumerate() {
             if !frame.shown.is(super::super::common::features::paths::H4_LIGHTS, index) {
@@ -74,7 +74,7 @@ impl H4Game {
             targets.normal,
             targets.depth_copy,
         );
-        let eye = h2_eye_position(&frame.camera);
+        let eye = eye_position(&frame.camera);
         let view_projection = view_projection(&frame.camera);
         let exposure = match super::lighting::h4_frame_value("ps_view_exposure") {
             Some(H3Value::Floats(exposure)) => exposure[0],

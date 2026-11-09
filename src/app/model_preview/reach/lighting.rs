@@ -5,7 +5,7 @@
 
 use super::super::gen3::shaders::H3Value;
 use super::super::frame::ModelGpuFrame;
-use super::super::common::camera::h2_camera_light;
+use super::super::common::camera::camera_light;
 
 /// `c_geometry_sampler::m_default_lightprobe_sample` (MCC 0x14201E920, the
 /// 360's 0x8527C000, the same floats): its dual vMF, as
@@ -205,7 +205,7 @@ pub(in crate::app::model_preview) fn reach_shadow_direction(frame: &ModelGpuFram
     if !frame.light_follows_camera {
         return reach_shadow_direction_at(0.0);
     }
-    let [x, y, _] = h2_camera_light(frame.camera.yaw, frame.camera.pitch);
+    let [x, y, _] = camera_light(frame.camera.yaw, frame.camera.pitch);
     reach_shadow_direction_at(y.atan2(x) - light_heading())
 }
 
@@ -220,7 +220,7 @@ pub(in crate::app::model_preview) fn reach_frame_lighting(frame: &ModelGpuFrame)
     if !frame.light_follows_camera {
         return reach_object_lighting(0.0);
     }
-    let [x, y, _] = h2_camera_light(frame.camera.yaw, frame.camera.pitch);
+    let [x, y, _] = camera_light(frame.camera.yaw, frame.camera.pitch);
     reach_object_lighting(y.atan2(x) - light_heading())
 }
 

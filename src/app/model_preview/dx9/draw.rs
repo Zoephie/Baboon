@@ -430,7 +430,7 @@ impl RenderCore {
         layer: Dx9Layer,
         light: Option<&H2DefaultLight>,
     ) {
-        let eye = h2_eye_position(&frame.camera);
+        let eye = eye_position(&frame.camera);
         let mut drew = false;
         let camouflaged = self.h2_camo_on(frame);
         for &batch_index in order {

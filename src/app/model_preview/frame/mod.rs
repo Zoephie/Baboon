@@ -329,7 +329,7 @@ impl ModelGpuFrame {
     /// Which way the object path's direct light lies from a surface.
     pub(in crate::app::model_preview) fn h2_object_light(&self) -> [f32; 3] {
         if self.light_follows_camera {
-            h2_camera_light(self.camera.yaw, self.camera.pitch)
+            camera_light(self.camera.yaw, self.camera.pitch)
         } else {
             h2_object_light_direction()
         }

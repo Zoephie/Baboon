@@ -75,7 +75,7 @@ use viewport::*;
 use frame::*;
 use common::camera::{
     DEPTH_UNITS, MAX_PREVIEW_SCALE, ModelGpuCamera, PreviewCamera, ce_flare_clip, ce_flare_pixels,
-    h2_camera_light, h2_eye_position, min_preview_scale, preview_center_radius, rotate_view_vector,
+    camera_light, eye_position, min_preview_scale, preview_center_radius, rotate_view_vector,
     scene_depth_terms, unrotate_view_vector,
 };
 use common::clock::{frame_steps, resume_point};

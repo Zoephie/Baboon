@@ -7,7 +7,7 @@ use eframe::glow::{self, HasContext};
 
 use super::super::gen3::screen_lights::screen_to_relative_world;
 use super::super::gen3::pipeline::{set_value, view_projection};
-use crate::app::model_preview::common::camera::h2_eye_position;
+use crate::app::model_preview::common::camera::eye_position;
 use super::super::gen3::render::Gen3Cx;
 use super::super::gen3::state::Gen3State;
 use super::lighting::{REACH_EXPOSURE, REACH_HDR_DIVISOR, reach_frame_value};
@@ -106,7 +106,7 @@ impl ReachGame {
             return;
         }
         let (size, albedo, normal, depth_copy) = (targets.size, targets.albedo, targets.normal, targets.depth_copy);
-        let eye = h2_eye_position(&frame.camera);
+        let eye = eye_position(&frame.camera);
         let view_projection = view_projection(&frame.camera);
         let depth_copy_framebuffer = targets.depth_copy_framebuffer;
         unsafe {

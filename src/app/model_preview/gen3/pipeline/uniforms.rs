@@ -67,7 +67,7 @@ pub(in crate::app::model_preview) fn frame_value(frame: &ModelGpuFrame, name: &s
     {
         return floats(lighting_constants(&frame_probe(frame))[index]);
     }
-    let eye = h2_eye_position(&frame.camera);
+    let eye = eye_position(&frame.camera);
     match name {
         "v_always_true" | "p_shader_pc_specular_enabled" | "actually_calc_albedo" => Some(H3Value::Integer(1)),
         "Position_Compression_Scale" => floats([1.0; 4]),
@@ -114,7 +114,7 @@ pub(super) fn view_matrix(frame: &ModelGpuFrame) -> [f32; 16] {
     let forward = unrotate_view_vector(yaw, pitch, [0.0, 1.0, 0.0]);
     let left = unrotate_view_vector(yaw, pitch, [-1.0, 0.0, 0.0]);
     let up = unrotate_view_vector(yaw, pitch, [0.0, 0.0, 1.0]);
-    let eye = h2_eye_position(&frame.camera);
+    let eye = eye_position(&frame.camera);
     let mut matrix = [0.0; 16];
     for row in 0..3 {
         matrix[row * 4] = forward[row];
@@ -134,7 +134,7 @@ pub(in crate::app::model_preview) fn camera_to_world(frame: &ModelGpuFrame) -> [
     let right = unrotate_view_vector(yaw, pitch, [1.0, 0.0, 0.0]);
     let up = unrotate_view_vector(yaw, pitch, [0.0, 0.0, 1.0]);
     let backward = unrotate_view_vector(yaw, pitch, [0.0, -1.0, 0.0]);
-    let eye = h2_eye_position(&frame.camera);
+    let eye = eye_position(&frame.camera);
     let mut matrix = [0.0; 16];
     for row in 0..3 {
         matrix[row * 4] = right[row];
