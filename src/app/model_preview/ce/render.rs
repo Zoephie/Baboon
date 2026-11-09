@@ -37,7 +37,7 @@ impl Dx9Game for CeGame {
                 let made: Vec<super::lights::CeLight> =
                     ce.simulations.particles.lights(&frame.preview.ce.effects).into_iter().map(|(_, _, light)| light).collect();
                 if !made.is_empty() {
-                    cx.core.ce_points_now = Some(frame.ce_point_lights_with(&made));
+                    cx.core.dx9.ce_points_now = Some(frame.ce_point_lights_with(&made));
                 }
             }
             // Before anything draws: the transparents and the sprites both

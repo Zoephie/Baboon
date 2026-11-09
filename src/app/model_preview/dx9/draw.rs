@@ -18,6 +18,43 @@ use super::super::dx9::stage::H2VertexStage;
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
 
+/// The DX9 pipeline's GL state on the shared core: the linked pass programs,
+/// the pass targets, the frame copy, the gel, bloom and the self shadow. The
+/// core owns it, not `Dx9Render`, because Halo 3's shadow draws through it.
+pub(in crate::app::model_preview) struct Dx9Gl {
+    /// Linked pass programs. `None` records a failure, so it is not retried
+    /// every frame and the material keeps drawing as it did.
+    pub(in crate::app::model_preview) h2_programs: HashMap<(H2VertexStage, String), Option<Rc<Linked>>>,
+    pub(in crate::app::model_preview) h2_normalization_cube: Option<glow::NativeTexture>,
+    pub(in crate::app::model_preview) h2_target: Option<H2Target>,
+    pub(in crate::app::model_preview) h2_frame_copy: Option<H2Target>,
+    /// The gel and `H2GelRows` of the frustum light drawing now.
+    pub(in crate::app::model_preview) h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
+    /// Made on first use; `Some(None)` once making it failed, so a driver
+    /// that cannot is not asked again (and nothing leaks) every frame.
+    pub(in crate::app::model_preview) h2_bloom: Option<Option<H2Bloom>>,
+    /// As `h2_bloom`.
+    pub(in crate::app::model_preview) h2_shadow_map: Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
+    /// The frame's CE point lights with those its effects have made, which
+    /// only the drawing knows; none while effects make no lights.
+    pub(in crate::app::model_preview) ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
+}
+
+impl Dx9Gl {
+    pub(in crate::app::model_preview) unsafe fn new(gl: &glow::Context) -> Self {
+        Self {
+            h2_programs: HashMap::new(),
+            h2_normalization_cube: unsafe { upload_normalization_cube(gl) },
+            h2_target: None,
+            h2_frame_copy: None,
+            h2_gel: None,
+            h2_bloom: None,
+            h2_shadow_map: None,
+            ce_points_now: None,
+        }
+    }
+}
+
 pub(in crate::app::model_preview) const H2_GEL_MASK_UNIT: u32 = 10;
 
 pub(in crate::app::model_preview) fn gl_blend_factor(factor: H2BlendFactor) -> u32 {
@@ -209,7 +246,7 @@ impl RenderCore {
             && !passes.is_empty()
             && (layer != H2Layer::Prt || (frame.prt && frame.preview.h2.prt.is_some()))
             && passes.iter().all(|pass| {
-                self.h2_programs
+                self.dx9.h2_programs
                     .get(&(pass.stage, pass.fragment.clone()))
                     .is_some_and(Option::is_some)
             })
@@ -227,7 +264,7 @@ impl RenderCore {
         let passes = textures.iter().flat_map(|material| material.h2_layers.iter().flatten());
         for pass in passes {
             let key = (pass.stage, pass.fragment.clone());
-            if self.h2_programs.contains_key(&key) {
+            if self.dx9.h2_programs.contains_key(&key) {
                 continue;
             }
             let vertex = pass.stage.source(H2_GLSL_VERSION);
@@ -239,7 +276,7 @@ impl RenderCore {
                     None
                 }
             };
-            self.h2_programs.insert(key, program);
+            self.dx9.h2_programs.insert(key, program);
         }
     }
 
@@ -265,13 +302,13 @@ impl RenderCore {
         unsafe {
             let state = PostScope::capture(gl);
             let size = state.size();
-            if self.h2_target.as_ref().is_none_or(|target| target.size != size) {
-                if let Some(old) = self.h2_target.take() {
+            if self.dx9.h2_target.as_ref().is_none_or(|target| target.size != size) {
+                if let Some(old) = self.dx9.h2_target.take() {
                     old.delete(gl);
                 }
-                self.h2_target = H2Target::new(gl, size[0], size[1]);
+                self.dx9.h2_target = H2Target::new(gl, size[0], size[1]);
             }
-            if let Some(target) = &self.h2_target {
+            if let Some(target) = &self.dx9.h2_target {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
                 gl.viewport(0, 0, size[0], size[1]);
                 gl.disable(glow::SCISSOR_TEST);
@@ -325,7 +362,7 @@ impl RenderCore {
             if hologram {
                 self.draw_h2_passes(gl, frame, slot, order, H2Layer::HologramBloom, None);
             }
-            if let Some(bloom) = self.h2_bloom.get_or_insert_with(|| H2Bloom::new(gl, H2_GLSL_VERSION)) {
+            if let Some(bloom) = self.dx9.h2_bloom.get_or_insert_with(|| H2Bloom::new(gl, H2_GLSL_VERSION)) {
                 bloom.apply(gl, framebuffer, color, size, frame.show_backfaces);
             }
         }
@@ -349,14 +386,14 @@ impl RenderCore {
         };
         let (framebuffer, [width, height]) = (scene.framebuffer, scene.size);
         unsafe {
-            if self.h2_frame_copy.as_ref().is_none_or(|copy| copy.size != [width, height]) {
-                if let Some(old) = self.h2_frame_copy.take() {
+            if self.dx9.h2_frame_copy.as_ref().is_none_or(|copy| copy.size != [width, height]) {
+                if let Some(old) = self.dx9.h2_frame_copy.take() {
                     old.delete(gl);
                 }
-                self.h2_frame_copy = H2Target::new(gl, width, height);
+                self.dx9.h2_frame_copy = H2Target::new(gl, width, height);
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
             }
-            if let Some(copy) = &self.h2_frame_copy {
+            if let Some(copy) = &self.dx9.h2_frame_copy {
                 gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer));
                 gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(copy.framebuffer));
                 gl.blit_framebuffer(
@@ -415,7 +452,7 @@ impl RenderCore {
                     continue;
                 }
                 let key = (pass.stage, pass.fragment.clone());
-                let Some(Some(program)) = self.h2_programs.get(&key).cloned() else {
+                let Some(Some(program)) = self.dx9.h2_programs.get(&key).cloned() else {
                     continue;
                 };
                 drew = true;
@@ -431,14 +468,14 @@ impl RenderCore {
                         gl.active_texture(glow::TEXTURE0 + texture.slot);
                         match texture.kind {
                             SamplerKind::Texture2D => {
-                                let target = self.h2_target.as_ref().map(|target| target.color);
-                                let gel = self.h2_gel.and_then(|(texture, _)| texture);
+                                let target = self.dx9.h2_target.as_ref().map(|target| target.color);
+                                let gel = self.dx9.h2_gel.and_then(|(texture, _)| texture);
                                 let bound = if texture.gel {
                                     gel.or(self.placeholder)
                                 } else if texture.texaccum {
                                     target.or(self.placeholder)
                                 } else if texture.frame_copy {
-                                    let copy = self.h2_frame_copy.as_ref();
+                                    let copy = self.dx9.h2_frame_copy.as_ref();
                                     copy.map(|copy| copy.color).or(self.placeholder)
                                 } else {
                                     uploaded.or(self.placeholder)
@@ -448,7 +485,7 @@ impl RenderCore {
                             SamplerKind::Cube => gl.bind_texture(
                                 glow::TEXTURE_CUBE_MAP,
                                 if texture.normalization {
-                                    self.h2_normalization_cube
+                                    self.dx9.h2_normalization_cube
                                 } else {
                                     uploaded.or(self.black_cube)
                                 },
@@ -551,7 +588,7 @@ impl RenderCore {
             if matches!(pass.stage, H2VertexStage::CeModel | H2VertexStage::CeGlassLit) {
                 let object = frame.preview.materials.get(material).map_or(0, |material| material.object);
                 let location = program.location(gl, "u_ce_point");
-                let points = self.ce_points_now.as_ref().unwrap_or(&frame.ce_points);
+                let points = self.dx9.ce_points_now.as_ref().unwrap_or(&frame.ce_points);
                 let rows = points.get(usize::from(object)).copied().unwrap_or_default();
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
@@ -569,7 +606,7 @@ impl RenderCore {
                 // A caster draws into the map: bound then, it would be read
                 // and written at once.
                 if pass.stage == H2VertexStage::ShadowMask
-                    && let Some(Some((_, map))) = self.h2_shadow_map
+                    && let Some(Some((_, map))) = self.dx9.h2_shadow_map
                 {
                     gl.active_texture(glow::TEXTURE0 + H2_SHADOW_MAP_UNIT);
                     gl.bind_texture(glow::TEXTURE_2D, Some(map));
@@ -644,7 +681,7 @@ impl RenderCore {
             gl.uniform_3_f32_slice(location.as_ref(), &camera.center);
             let location = program.location(gl, "u_eye");
             gl.uniform_3_f32_slice(location.as_ref(), &eye);
-            if let Some(copy) = &self.h2_frame_copy {
+            if let Some(copy) = &self.dx9.h2_frame_copy {
                 let location = program.location(gl, "u_view_size");
                 gl.uniform_2_f32(location.as_ref(), copy.size[0] as f32, copy.size[1] as f32);
             }
@@ -712,12 +749,12 @@ impl RenderCore {
                 let location = program.location(gl, "u_light_falloff");
                 gl.uniform_1_f32(location.as_ref(), 0.5 / light.radius);
             }
-            if let Some((_, rows)) = &self.h2_gel {
+            if let Some((_, rows)) = &self.dx9.h2_gel {
                 let location = program.location(gl, "u_gel_rows");
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
             if let (H2VertexStage::LightGel, Some(location), Some((gel, _))) =
-                (pass.stage, program.location(gl, "u_gel_map"), &self.h2_gel)
+                (pass.stage, program.location(gl, "u_gel_map"), &self.dx9.h2_gel)
             {
                 gl.active_texture(glow::TEXTURE0 + H2_GEL_MASK_UNIT);
                 gl.bind_texture(glow::TEXTURE_2D, gel.or(self.placeholder));

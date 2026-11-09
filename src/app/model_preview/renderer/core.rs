@@ -7,15 +7,12 @@ use super::super::gl::texture::{upload_black_cube, upload_black_flat, upload_pla
 use super::super::gl::target::H2Target;
 use super::super::common::view::ce_flare_view;
 use super::super::gl::link::link;
-use super::super::gl::program::Linked;
 use super::super::gl::scope::PostScope;
 use super::super::gl::target::ColorTarget;
 use super::super::particles::{H3ParticleGl, ReachCheapGl};
 use super::super::dx9::passes::H2Layer;
-use super::super::h2::bloom::H2Bloom;
-use super::super::dx9::stage::H2VertexStage;
+use super::super::dx9::draw::Dx9Gl;
 use eframe::glow;
-use std::collections::HashMap;
 
 /// The GL state the preview draws with: the shared program, slots and
 /// targets, and, until each game's drawing moves to its own folder, every
@@ -26,14 +23,11 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) h3_normal_target: Option<glow::NativeTexture>,
     /// What a gen3 array sampler reads with nothing of its own.
     pub(in crate::app::model_preview) black_array: Option<glow::NativeTexture>,
-    /// As `h2_bloom`.
+    /// As `Dx9Gl::h2_bloom`.
     pub(in crate::app::model_preview) sprite_gl: Option<Option<SpriteGl>>,
-    /// The frame's CE point lights with those its effects have made, which
-    /// only the drawing knows; none while effects make no lights.
-    pub(in crate::app::model_preview) ce_points_now: Option<Vec<[[f32; 4]; ce::lights::CE_POINT_LIGHT_ROWS]>>,
-    /// As `h2_bloom`.
+    /// As `Dx9Gl::h2_bloom`.
     pub(in crate::app::model_preview) particle_gl: Option<Option<H3ParticleGl>>,
-    /// As `h2_bloom`.
+    /// As `Dx9Gl::h2_bloom`.
     pub(in crate::app::model_preview) reach_cheap_gl: Option<Option<ReachCheapGl>>,
     /// Particles step once a frame, however many calls draw them.
     pub(in crate::app::model_preview) sprites_advanced: bool,
@@ -42,9 +36,9 @@ pub(in crate::app::model_preview) struct RenderCore {
     /// Whether this context's GLSL can draw the games' shaders, which every
     /// pipeline's scene needs; see `H2_GLSL_VERSION`.
     pub(in crate::app::model_preview) shaders_supported: bool,
-    /// Linked pass programs. `None` records a failure, so it is not retried
-    /// every frame and the material keeps drawing as it did.
-    pub(in crate::app::model_preview) h2_programs: HashMap<(H2VertexStage, String), Option<Rc<Linked>>>,
+    /// The DX9 pipeline's programs, targets and maps, which Halo 2 and
+    /// Halo CE draw with and Halo 3's shadow draws through.
+    pub(in crate::app::model_preview) dx9: Dx9Gl,
     /// Whether this context can draw the gen3 games' shaders: the translated
     /// shaders want GLSL 4.10.
     pub(in crate::app::model_preview) gen3_supported: bool,
@@ -54,17 +48,7 @@ pub(in crate::app::model_preview) struct RenderCore {
     pub(in crate::app::model_preview) black_cube: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) black_volume: Option<glow::NativeTexture>,
     pub(in crate::app::model_preview) white_volume: Option<glow::NativeTexture>,
-    pub(in crate::app::model_preview) h2_normalization_cube: Option<glow::NativeTexture>,
-    pub(in crate::app::model_preview) h2_target: Option<H2Target>,
     pub(in crate::app::model_preview) scene: Option<H2Target>,
-    pub(in crate::app::model_preview) h2_frame_copy: Option<H2Target>,
-    /// The gel and `H2GelRows` of the frustum light drawing now.
-    pub(in crate::app::model_preview) h2_gel: Option<(Option<glow::NativeTexture>, [[f32; 4]; 4])>,
-    /// Made on first use; `Some(None)` once making it failed, so a driver
-    /// that cannot is not asked again (and nothing leaks) every frame.
-    pub(in crate::app::model_preview) h2_bloom: Option<Option<H2Bloom>>,
-    /// As `h2_bloom`.
-    pub(in crate::app::model_preview) h2_shadow_map: Option<Option<(glow::NativeFramebuffer, glow::NativeTexture)>>,
     pub(in crate::app::model_preview) program: glow::NativeProgram,
     pub(in crate::app::model_preview) slots: Vec<ModelGpuSlot>,
     pub(super) lru: ModelSlotLru,
@@ -162,22 +146,15 @@ impl RenderCore {
                 h3_normal_target: None,
                 sprite_gl: None,
                 shaders_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
-                h2_programs: HashMap::new(),
                 black_cube: upload_black_cube(gl),
                 particle_gl: None,
                 reach_cheap_gl: None,
-                ce_points_now: None,
                 sprites_advanced: false,
                 h2_distortion_copy: None,
                 black_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [0, 0, 0, 255]),
                 white_volume: upload_solid_volume(gl, glow::TEXTURE_3D, [255; 4]),
-                h2_normalization_cube: upload_normalization_cube(gl),
-                h2_target: None,
+                dx9: Dx9Gl::new(gl),
                 scene: None,
-                h2_frame_copy: None,
-                h2_gel: None,
-                h2_bloom: None,
-                h2_shadow_map: None,
                 program,
                 slots: Vec::new(),
                 lru: ModelSlotLru::default(),
@@ -233,7 +210,7 @@ impl RenderCore {
                 self.slots[slot].upload_geometry(gl, frame);
             }
             self.slots[slot].sync_textures(gl, frame);
-            self.ce_points_now = None;
+            self.dx9.ce_points_now = None;
             Some(slot)
         }
     }

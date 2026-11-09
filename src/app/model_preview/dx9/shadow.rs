@@ -83,7 +83,7 @@ impl RenderCore {
         order: &[usize],
     ) -> bool {
         unsafe {
-            let Some((framebuffer, _)) = *self.h2_shadow_map.get_or_insert_with(|| h2_shadow_map(gl)) else {
+            let Some((framebuffer, _)) = *self.dx9.h2_shadow_map.get_or_insert_with(|| h2_shadow_map(gl)) else {
                 return false;
             };
             let h3 = self.h3_draws(frame);

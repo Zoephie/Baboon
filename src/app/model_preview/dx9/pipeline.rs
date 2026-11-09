@@ -142,7 +142,7 @@ impl RenderCore {
                     };
                     let specular = h2::lights::has_specular(&light);
                     let (light, draws) = h2::lights::overbrighten(&light);
-                    self.h2_gel = Some((gels.get(index).copied().flatten(), rows.rows));
+                    self.dx9.h2_gel = Some((gels.get(index).copied().flatten(), rows.rows));
                     if specular {
                         self.draw_h2_passes(gl, frame, slot, &order, H2Layer::GelMask, Some(&light));
                         masked = true;
@@ -151,7 +151,7 @@ impl RenderCore {
                     for _ in 0..draws {
                         self.draw_h2_passes(gl, frame, slot, &order, layer, Some(&light));
                     }
-                    self.h2_gel = None;
+                    self.dx9.h2_gel = None;
                 }
                 if masked {
                     gl.color_mask(false, false, false, true);
