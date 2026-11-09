@@ -21,6 +21,13 @@ pub(in crate::app::model_preview) trait Dx9Game {
         unsafe { cx.core.draw_h2_passes(cx.gl, cx.frame, cx.slot, order, H2Layer::Transparent, None) }
     }
 
+    /// After the transparents: the game's shield layers, in `order`.
+    unsafe fn shields(&mut self, _cx: &mut FrameCx<'_>, _order: &[usize]) {}
+
+    /// Last, over the finished frame: the game's bloom of what `order`
+    /// draws, when the frame blooms.
+    unsafe fn bloom(&mut self, _cx: &mut FrameCx<'_>, _order: Vec<usize>) {}
+
     /// After the default lights, before the hologram layer: the game's own
     /// lights, in `order`.
     unsafe fn lights(&mut self, _cx: &mut FrameCx<'_>, _order: &[usize]) {}
@@ -105,18 +112,7 @@ impl RenderCore {
             }
             let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
             game.transparents(&mut FrameCx { gl, frame, core: self, slot }, &order);
-            // `sub_6C18F0`: `object_overshield_amount` is the vitality past 1.
-            let value = |name: &str| {
-                frame.function_values.as_ref().and_then(|values| values.get(name)).copied().unwrap_or(0.0)
-            };
-            for (layer, name) in [
-                (H2Layer::ShieldDamaged, "current_shield_damage"),
-                (H2Layer::Overshield, "object_overshield_amount"),
-            ] {
-                if value(name) > 0.0 {
-                    self.draw_h2_passes(gl, frame, slot, &order, layer, None);
-                }
-            }
+            game.shields(&mut FrameCx { gl, frame, core: self, slot }, &order);
             // `rasterizer_postprocess_scene` blooms the finished frame,
             // after every transparent and effect.
             if frame.game_shaders && frame.bloom {

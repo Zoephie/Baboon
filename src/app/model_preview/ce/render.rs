@@ -48,6 +48,9 @@ impl Dx9Game for CeGame {
         }
     }
 
+    /// Halo CE's renderer has no bloom: only the remaster's does.
+    unsafe fn bloom(&mut self, _cx: &mut FrameCx<'_>, _order: Vec<usize>) {}
+
     /// `render_transparent_geometry`'s sort, when the batches carry it;
     /// else the layer.
     unsafe fn transparents(&mut self, cx: &mut FrameCx<'_>, order: &[usize]) {

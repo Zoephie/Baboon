@@ -70,8 +70,7 @@ pub(in crate::app::model_preview) fn build_frame(
         game_shaders: state.game_shaders,
         default_lights: state.default_lights,
         active_camo: state.active_camo,
-        // Halo CE's renderer has no bloom: only the remaster's does.
-        bloom: state.bloom && data.preview.game != Some(GameId::HaloCe),
+        bloom: state.bloom,
         self_shadow: state.self_shadow,
         prt: state.prt,
         light_follows_camera: state.light_follows_camera,

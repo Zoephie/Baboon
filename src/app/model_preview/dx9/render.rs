@@ -46,8 +46,9 @@ impl GameRender for Dx9Render {
                 let game = self.game(cx.frame.preview.game);
                 cx.core.draw_dx9_sprites(game, cx.gl, cx.frame, cx.slot);
             }
-            let order = self.bloom_order.take();
-            cx.core.draw_dx9_bloom(cx.gl, cx.frame, cx.slot, order);
+            if let Some(order) = self.bloom_order.take() {
+                self.game(cx.frame.preview.game).bloom(cx, order);
+            }
         }
     }
 
