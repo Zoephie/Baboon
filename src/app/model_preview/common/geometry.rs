@@ -1,6 +1,7 @@
 //! Appending geometry to a preview: where an append's indices count from, and
 //! what each append does once the vertices no longer fit a 32-bit index.
 
+
 /// What an append does when the preview's vertices, with its own, outgrow a
 /// `u32` index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,5 +76,12 @@ mod tests {
         assert_eq!(base.checked_offset(1), Some(u32::MAX));
         assert_eq!(base.checked_offset(2), None);
         assert_eq!(base.offset(1), u32::MAX);
+    }
+}
+
+pub(in crate::app::model_preview) fn expand_preview_bounds_local(min: &mut [f32; 3], max: &mut [f32; 3], point: [f32; 3]) {
+    for axis in 0..3 {
+        min[axis] = min[axis].min(point[axis]);
+        max[axis] = max[axis].max(point[axis]);
     }
 }

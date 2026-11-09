@@ -1,6 +1,7 @@
 //! Physics models as preview geometry: each shape tessellated and placed by its parent bone.
 
 use super::*;
+use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
 
 /// A physics tag (`phmo`) tessellated shape by shape. The tag stores
 /// parametric primitives — spheres, boxes, pills, convex polyhedra — with no

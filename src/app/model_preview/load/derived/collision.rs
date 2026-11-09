@@ -1,6 +1,7 @@
 //! Collision models as preview geometry: the JMS scene, posed by the bind pose, and its error points.
 
 use super::*;
+use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
 
 /// Preserve a collision JMS's actual region/permutation cells and bone
 /// influences. The generic derived-mesh path intentionally flattens both,

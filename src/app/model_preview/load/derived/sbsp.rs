@@ -1,6 +1,7 @@
 //! Structure BSPs as preview geometry: the native decode or the JMS/ASS scene, its portals and collision.
 
 use super::*;
+use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
 
 /// A structure BSP's geometry, per engine: H3-family and H2 through the ASS
 /// scene builders, H1 through its JMS render/collision extractors.

@@ -1,6 +1,7 @@
 //! ASS scenes as preview geometry: one region per layer, instances placed.
 
 use super::*;
+use crate::app::model_preview::common::geometry::expand_preview_bounds_local;
 
 /// Which preview region an ASS object belongs to, read off its materials.
 /// The ASS builders name recompile-marker layers by convention: `+portal` for

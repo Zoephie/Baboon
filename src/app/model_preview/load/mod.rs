@@ -33,9 +33,9 @@ mod object;
 pub(in crate::app::model_preview) use object::*;
 mod model;
 use model::*;
+use super::common::geometry::expand_preview_bounds_local;
 mod cx;
 pub(in crate::app::model_preview) use cx::*;
-
 
 pub(super) fn load_model_preview(
     model_tag: &TagFile,
@@ -108,13 +108,6 @@ fn load_tag_preview(
         return result;
     }
     load_model(model_tag, entry, names, reader)
-}
-
-pub(super) fn expand_preview_bounds_local(min: &mut [f32; 3], max: &mut [f32; 3], point: [f32; 3]) {
-    for axis in 0..3 {
-        min[axis] = min[axis].min(point[axis]);
-        max[axis] = max[axis].max(point[axis]);
-    }
 }
 
 #[cfg(test)]
