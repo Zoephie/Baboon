@@ -13,7 +13,7 @@ use super::common::math::{cross, dot};
 use super::common::view::{ViewFrame, posed_on};
 use super::gen3::materials::{Gen3Bitmap, read_h3_bitmap};
 use super::materials::decode_image;
-use super::*;
+use super::{RenderModelPreviewMarker, TagReader};
 use crate::app::model_preview::common::attached::{Attached, attached};
 use crate::app::model_preview::common::fields::argb;
 use crate::app::model_preview::common::marker::MarkerFrame;
@@ -578,6 +578,7 @@ attached!(keeps function: Antenna);
 
 #[cfg(test)]
 mod tests {
+    use super::super::load_referenced_tag_from_source;
     use super::*;
     use crate::app::model_preview::common::math::length;
     use crate::app::model_preview::harness::kit::kit_source;

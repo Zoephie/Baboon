@@ -12,7 +12,7 @@ use super::super::common::math::dot;
 use super::super::common::sprites::AntennaQuad;
 use super::super::common::view::{ViewFrame, posed_on};
 use super::super::materials::decode_image;
-use super::super::*;
+use super::super::{RenderModelPreviewMarker, TagReader};
 use super::{ANTENNA_TRIM, AntennaSprite, antenna_sprite};
 use crate::app::model_preview::common::fields::argb;
 use crate::core::h2_pixel_shader::SamplerKind;
