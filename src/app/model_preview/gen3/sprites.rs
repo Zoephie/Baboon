@@ -553,7 +553,7 @@ impl SpritePass<'_> {
                     .collect();
                 // `cheap_particles_render.fx`: `lerp(ps_view_exposure.x,
                 // ps_view_self_illum_exposure.y, alpha)`.
-                let exposures = if first.library().halo4() {
+                let exposures = if first.library().turbulence_per_type() {
                     let channel = |name: &str, at: usize| match h4::lighting::h4_frame_value(name) {
                         Some(gen3::shaders::Gen3Value::Floats(value)) => value[at],
                         _ => 1.0,

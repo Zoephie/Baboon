@@ -156,7 +156,7 @@ pub(super) fn exposed(
     intensity: f32,
     stops: f32,
 ) -> [f32; 4] {
-    let light = particle_exposure(look.shader.blend, true, look.reach, stops);
+    let light = particle_exposure(look.shader.blend, true, look.own_terms, stops);
     let [red, green, blue] = color.map(|channel| channel.clamp(0.0, 1.0) * intensity * light);
     [red, green, blue, alpha.clamp(0.0, 1.0) * intensity]
 }

@@ -207,7 +207,7 @@ impl CheapField {
             let [_, size, stretch_factor, y_scale] = found.rows[RENDER];
             // Halo 4's lies between `size`'s bounds, by a cheap hash of the
             // slot (`frac(index · 0.863182394)`).
-            let size = if library.halo4 {
+            let size = if library.turbulence_per_type {
                 let [lower, upper, _, _] = found.rows[FADE];
                 lower + (upper - lower) * frac(index as f32 * 0.863_182_4)
             } else {
@@ -275,7 +275,7 @@ pub(super) fn update_particle(
 ) {
     let kind = usize::try_from(particle.parameters[0]).unwrap_or(usize::MAX);
     let [drag, gravity, strength, place] = library.row(kind, PHYSICS);
-    let (layer, transform) = if library.halo4 {
+    let (layer, transform) = if library.turbulence_per_type {
         turbulence_of(place)
     } else {
         (0, 0)

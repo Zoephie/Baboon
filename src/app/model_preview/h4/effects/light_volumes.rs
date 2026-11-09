@@ -83,7 +83,7 @@ impl Gen3LightVolumeAt {
         time: f32,
         onset: f32,
     ) -> Option<H4VolumeDraw> {
-        let (_, appearance) = self.definition.h4.as_ref()?;
+        let (_, appearance) = self.definition.effect_material.as_ref()?;
         self.h4_frame(*appearance, values, bones, view, time, onset)
     }
 

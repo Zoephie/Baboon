@@ -42,7 +42,7 @@ fn library(types: Vec<CheapType>, turbulence: [f32; 4]) -> CheapLibrary {
             centered: false,
         }],
         render: None,
-        halo4: false,
+        turbulence_per_type: false,
     }
 }
 
@@ -766,7 +766,7 @@ fn halo_4_pushes_by_its_types_turbulence_centered() {
         centered: true,
     };
     library.turbulence = vec![kind(0.5), kind(0.5), kind(1.0)];
-    library.halo4 = true;
+    library.turbulence_per_type = true;
     let still = CheapParticle {
         position: [0.0; 3],
         age: 0.5,
@@ -788,7 +788,7 @@ fn halo_4_pushes_by_its_types_turbulence_centered() {
         centered.position, [0.0; 3],
         "the map's middle pushes nothing"
     );
-    library.halo4 = false;
+    library.turbulence_per_type = false;
     library.turbulence = vec![CheapTurbulence {
         centered: false,
         ..kind(0.5)
@@ -815,7 +815,7 @@ fn halo_4_sizes_each_quad_between_its_bounds() {
         ..Default::default()
     };
     let mut library = library(vec![tag.compiled(0, 14, true)], [0.0; 4]);
-    library.halo4 = true;
+    library.turbulence_per_type = true;
     let mut field = CheapField::fresh(0);
     let particle = CheapParticle {
         position: [0.0; 3],
@@ -838,7 +838,7 @@ fn halo_4_sizes_each_quad_between_its_bounds() {
         (second - (1.0 + 2.0 * 0.863_182_4)).abs() < 1e-3,
         "{second}"
     );
-    library.halo4 = false;
+    library.turbulence_per_type = false;
     let reach = field.vertices(&library, &view());
     assert!((width(&reach[..6]) - 3.0).abs() < 1e-4);
 }
@@ -856,7 +856,7 @@ fn kit_halo_4s_type_table_matches_the_shipped_type_texture() {
         "fx\\cheap_particles\\global",
     )
     .expect("the library");
-    assert!(library.halo4());
+    assert!(library.turbulence_per_type());
     assert_eq!((library.types.len(), library.turbulence.len()), (152, 4));
     let tag = load_referenced_tag_from_source(
         &source,

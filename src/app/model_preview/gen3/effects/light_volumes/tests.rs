@@ -173,12 +173,12 @@ fn definition(reach: bool, alpha: Gen3VolumeProperty) -> Gen3VolumeDefinition {
         bitmap: None,
         sampler: None,
         sort_layer: 2,
-        reach,
+        own_terms: reach,
         circular: None,
         depth_fade: None,
         lod: None,
         precompiled: None,
-        h4: None,
+        effect_material: None,
     }
 }
 
@@ -440,7 +440,7 @@ fn kit_reach_volumes_read_circular_depth_fade_and_lod() {
         .expect(path)
     };
     let headlights = first("objects\\vehicles\\human\\civilian\\cargo_truck\\fx\\headlights");
-    assert!(headlights.reach);
+    assert!(headlights.own_terms);
     assert_eq!(headlights.circular, Some([1.1, 2.0]));
     assert!(headlights.bitmap.is_none(), "a disc samples no map");
     assert_eq!(headlights.depth_fade, Some(0.1));
@@ -471,7 +471,7 @@ fn kit_halo_3_volumes_keep_their_map() {
         elements(tag.root(), "light_volumes")[0],
     )
     .expect(path);
-    assert!(!volume.reach && volume.bitmap.is_some());
+    assert!(!volume.own_terms && volume.bitmap.is_some());
     assert!(volume.circular.is_none() && volume.depth_fade.is_none() && volume.lod.is_none());
     assert!(volume.precompiled.is_none());
 }
@@ -487,7 +487,7 @@ fn a_halo_4_frame_places_its_profiles_and_fills_its_inputs() {
         offset: fixed(0.5),
         density: fixed(2.0),
         color,
-        reach: true,
+        own_terms: true,
         ..definition(true, fixed(1.0))
     };
     assert!(
@@ -536,7 +536,7 @@ fn kit_halo_4_volumes_draw_through_their_material() {
         elements(tag.root(), "light_volumes")[0],
     )
     .expect(path);
-    let (material, _) = volume.h4.as_ref().expect("a material");
+    let (material, _) = volume.effect_material.as_ref().expect("a material");
     assert!(
         material
             .pass
@@ -576,7 +576,7 @@ fn kit_halo_4_volumes_draw_through_their_material() {
                     &crate::app::model_preview::load::TagReader::new(&source),
                     element,
                 ) {
-                    Some(volume) if volume.h4.is_some() => read += 1,
+                    Some(volume) if volume.effect_material.is_some() => read += 1,
                     _ => failures.push(relative.clone()),
                 }
             }

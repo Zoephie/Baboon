@@ -143,7 +143,7 @@ impl RunningContrail {
         }
         let mut remaining = total;
         let rate = contrail.emission_rate.scalar(state);
-        let rate = if look.reach {
+        let rate = if look.own_terms {
             rate.min(REACH_MOST_EMISSION_RATE)
         } else {
             rate

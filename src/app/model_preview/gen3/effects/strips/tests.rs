@@ -68,7 +68,7 @@ fn look(origin_fade: Option<[f32; 2]>) -> StripLook {
         edge_fade: None,
         angle_fade: None,
         sort_bias: 0.0,
-        reach: false,
+        own_terms: false,
         shader: Arc::new(SpriteShader::blank()),
     }
 }
@@ -272,7 +272,7 @@ fn a_carried_contrail_trails_its_particle_and_fades_after_it_dies() {
 
 fn reach_look(origin_fade: Option<[f32; 2]>) -> StripLook {
     StripLook {
-        reach: true,
+        own_terms: true,
         ..look(origin_fade)
     }
 }
@@ -347,7 +347,7 @@ fn a_reach_strip_is_exposed_by_its_blend_and_the_stops() {
         let mut shader = SpriteShader::blank();
         shader.blend = blend;
         StripLook {
-            reach,
+            own_terms: reach,
             shader: Arc::new(shader),
             ..look(None)
         }
@@ -469,7 +469,7 @@ fn kit_reach_focus_rifle_beams_take_one_texcoord_and_an_angle_fade() {
     assert_eq!(beams[2].shader.albedo, ParticleAlbedo::PalettePlasma);
     for plasma in &beams[1..3] {
         assert!(
-            plasma.reach
+            plasma.own_terms
                 && plasma.shader.unit_particle_alpha
                 && !plasma.shader.plasma_second_sprite
         );
@@ -524,7 +524,7 @@ fn kit_halo_3_beams_keep_their_own_look() {
     );
     assert!(!beams.is_empty());
     for beam in &beams {
-        assert!(!beam.reach && !beam.shader.unit_particle_alpha && beam.angle_fade.is_none());
+        assert!(!beam.own_terms && !beam.shader.unit_particle_alpha && beam.angle_fade.is_none());
         assert_eq!(beam.sort_bias, 0.0);
     }
 }

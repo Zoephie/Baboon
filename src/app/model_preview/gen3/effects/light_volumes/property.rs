@@ -328,12 +328,12 @@ impl VolumeProperties {
             bitmap: None,
             sampler: None,
             sort_layer: 2,
-            reach: false,
+            own_terms: false,
             circular: None,
             depth_fade: None,
             lod: None,
             precompiled: None,
-            h4: None,
+            effect_material: None,
         })
     }
 }

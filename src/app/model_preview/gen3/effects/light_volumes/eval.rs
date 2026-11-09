@@ -158,7 +158,7 @@ impl Gen3LightVolumeAt {
         let mut state = self.state(values, time, onset)?;
         let volume = &*self.definition;
         let (origin, turned) = posed_on(self.node, self.position, self.forward, bones);
-        if volume.reach {
+        if volume.own_terms {
             // `c_light_volume_gpu::render` (Reach: the 360's 0x826B80B8, MCC
             // sub_140887B70; Halo 4: MCC 0x1408ECFD0): by the eye's whole
             // distance from the location, nothing at no amount, and the
@@ -192,7 +192,10 @@ impl Gen3LightVolumeAt {
 
     /// Halo 4's material, when it is Halo 4's.
     pub(crate) fn h4_material(&self) -> Option<&H4EffectMaterial> {
-        self.definition.h4.as_ref().map(|(material, _)| material)
+        self.definition
+            .effect_material
+            .as_ref()
+            .map(|(material, _)| material)
     }
 
     /// Each profile's quad this frame, nearest the marker first, at the area

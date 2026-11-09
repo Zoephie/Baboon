@@ -264,7 +264,7 @@ pub(super) struct StripLook {
     /// `get_sort_bias`, in world units nearer the camera; Reach's.
     pub(super) sort_bias: f32,
     /// Reach's: its own exposure, scroll clocks, emission limit and fades.
-    pub(super) reach: bool,
+    pub(super) own_terms: bool,
     pub(super) shader: Arc<SpriteShader>,
 }
 
@@ -282,7 +282,7 @@ impl StripLook {
     /// A fade's `saturate`. Reach's step fades (a range of 0) meet a NaN at
     /// the cutoff, which comes out 0.
     pub(super) fn fade(&self, value: f32) -> f32 {
-        if self.reach {
+        if self.own_terms {
             saturate(value)
         } else {
             value.clamp(0.0, 1.0)
@@ -291,7 +291,7 @@ impl StripLook {
 
     /// The uv scroll's clock: Reach's wraps at `period`, Halo 3's runs on.
     pub(super) fn scroll_time(&self, period: f32, time: f32) -> f32 {
-        if self.reach {
+        if self.own_terms {
             time.rem_euclid(period)
         } else {
             time
@@ -356,7 +356,7 @@ pub(super) fn read_strip_look(
         } else {
             0.0
         },
-        reach,
+        own_terms: reach,
         shader: Arc::new(shader),
     })
 }

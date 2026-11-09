@@ -302,7 +302,7 @@ pub(crate) struct CheapLibrary {
     pub(super) turbulence: Vec<CheapTurbulence>,
     pub(super) render: Option<CheapRenderTexture>,
     /// Halo 4's: per-type turbulence, its own rows, sizes and exposure.
-    pub(super) halo4: bool,
+    pub(super) turbulence_per_type: bool,
 }
 
 impl CheapLibrary {
@@ -340,7 +340,7 @@ impl CheapLibrary {
             random: CheapTexels::read(reader, &map("random")?)?,
             turbulence,
             render: map("render_texture").and_then(|path| CheapRenderTexture::read(reader, &path)),
-            halo4,
+            turbulence_per_type: halo4,
         })
     }
 
@@ -357,7 +357,7 @@ impl CheapLibrary {
     }
 
     /// Whether it is Halo 4's, which lights by its own exposures.
-    pub(crate) fn halo4(&self) -> bool {
-        self.halo4
+    pub(crate) fn turbulence_per_type(&self) -> bool {
+        self.turbulence_per_type
     }
 }

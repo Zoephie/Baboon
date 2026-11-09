@@ -37,8 +37,8 @@ pub(crate) struct Gen3VolumeDefinition {
     pub(super) bitmap: Option<Gen3Bitmap>,
     pub(super) sampler: Option<Sampler>,
     pub(super) sort_layer: i32,
-    /// Reach's: its own colour, exposure and level of detail.
-    pub(super) reach: bool,
+    /// Reach's and Halo 4's: its own colour, exposure and level of detail.
+    pub(super) own_terms: bool,
     /// Reach's `albedo` `circular`: `center_offset` and `falloff`.
     pub(super) circular: Option<[f32; 2]>,
     /// Reach's `depth_fade` `on`: `depth_fade_range`.
@@ -50,7 +50,7 @@ pub(crate) struct Gen3VolumeDefinition {
     pub(super) precompiled: Option<Vec<([f32; 3], f32)>>,
     /// Halo 4's: the `actual material` it draws through, and its
     /// `appearance flags`.
-    pub(in crate::app::model_preview) h4: Option<(H4EffectMaterial, u32)>,
+    pub(in crate::app::model_preview) effect_material: Option<(H4EffectMaterial, u32)>,
 }
 
 impl Gen3VolumeDefinition {
@@ -87,7 +87,7 @@ impl Gen3VolumeDefinition {
         [ratio, overdraw]: [f32; 2],
         stops: f32,
     ) -> [f32; 4] {
-        if !self.reach {
+        if !self.own_terms {
             // `light_volume_fx.hlsl`'s `STATE.m_color * STATE.m_intensity` is a
             // float4, so intensity scales alpha too (Halo 3 and ODST alike).
             let color = self
@@ -224,12 +224,12 @@ pub(super) fn read_definition(
         sampler,
         bitmap,
         sort_layer: super::super::super::super::particles::gen3_sort_layer(shader),
-        reach,
+        own_terms: reach,
         circular,
         depth_fade,
         lod,
         precompiled: None,
-        h4: None,
+        effect_material: None,
         ..properties
     });
     if precompiled {
@@ -262,12 +262,12 @@ pub(in crate::app::model_preview) fn read_h4_definition(
             sampler: None,
             bitmap: None,
             sort_layer: i32::from(material.sort_layer).clamp(1, 3),
-            reach: true,
+            own_terms: true,
             circular: None,
             depth_fade: None,
             lod,
             precompiled: None,
-            h4: Some((resolved, appearance)),
+            effect_material: Some((resolved, appearance)),
             ..properties
         }),
     )
