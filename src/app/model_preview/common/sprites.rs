@@ -216,7 +216,7 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
                 .shown
                 .list(super::features::paths::GEN3_CHEAP_EMITTERS),
         );
-        simulations.reach_cheap.advance(
+        simulations.cheap.advance(
             emitters,
             shown,
             values,
@@ -237,7 +237,7 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
                     .map(|track| (track.id, track.place))
                     .collect()
             };
-        simulations.h3_strips.advance(
+        simulations.strips.advance(
             &frame.preview.gen3.strips,
             values,
             &mut simulations.effect_onsets,
@@ -254,7 +254,7 @@ pub(in crate::app::model_preview) fn advance_sprite_simulations(
 pub(in crate::app::model_preview) unsafe fn draw_antennas(
     gl: &glow::Context,
     flares: &SpriteGl,
-    springs: &mut antennas::spring::ReachAntennaField,
+    springs: &mut antennas::spring::AntennaSprings,
     textures: &[Option<glow::NativeTexture>],
     frame: &ModelGpuFrame,
     bones: Option<&[[f32; 4]]>,

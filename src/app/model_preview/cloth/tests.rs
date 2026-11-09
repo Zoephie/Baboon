@@ -124,7 +124,7 @@ fn cloth_steps_by_its_games_ticks_whatever_the_frame_rate() {
     let ticks_over_a_second = |game: ClothGame, frames: usize| {
         let (cloth, _, _) = hung();
         let cloths = [H3ClothAt { game, ..cloth }];
-        let mut field = H3ClothField::default();
+        let mut field = ClothField::default();
         field.advance(&cloths, None, 10.0);
         let settled = field.ticks;
         (1..=frames).for_each(|frame| {
@@ -564,7 +564,7 @@ fn a_reach_sheet_turns_its_binormal_with_its_normal() {
         game: ClothGame::Reach,
         ..cloth.clone()
     }];
-    let written = H3ClothField::default().advance(&reach, None, 10.0);
+    let written = ClothField::default().advance(&reach, None, 10.0);
     let (_, vertices) = &written[0];
     assert_eq!(vertices.len(), cloth.places.len() * 2);
     for (_, normal, binormal) in vertices {
@@ -575,7 +575,7 @@ fn a_reach_sheet_turns_its_binormal_with_its_normal() {
         [0.0, 0.0, -1.0],
         "from the rest normal"
     );
-    let written = H3ClothField::default().advance(&[cloth], None, 10.0);
+    let written = ClothField::default().advance(&[cloth], None, 10.0);
     assert!(
         written[0]
             .1

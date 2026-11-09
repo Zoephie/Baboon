@@ -133,7 +133,7 @@ fn kit_reach_warthog_hangs_its_antenna_straight() {
     assert!(spring.physics.is_some(), "warthog_antenna_steel");
     let (marker, forward) = antenna.marker(None);
     assert!(forward[2] > 0.99, "the marker faces up: {forward:?}");
-    let mut field = super::super::antennas::spring::ReachAntennaField::default();
+    let mut field = super::super::antennas::spring::AntennaSprings::default();
     field.advance(antennas, None, 0.0);
     let tip = field.advance(antennas, None, 20.0)[0].unwrap();
     let rest: [f32; 3] = std::array::from_fn(|axis| marker[axis] + forward[axis] * spring.length);

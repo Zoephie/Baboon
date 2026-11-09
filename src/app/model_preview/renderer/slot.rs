@@ -71,14 +71,14 @@ pub(in crate::app::model_preview) struct SlotSimulations {
     /// Halo 2's and the gen3 games' particle systems.
     pub(in crate::app::model_preview) particles: particles::ParticleField,
     /// Reach's cheap particles.
-    pub(in crate::app::model_preview) reach_cheap: particles::cheap::CheapField,
-    pub(in crate::app::model_preview) h3_strips: gen3::effects::strips::Gen3StripField,
+    pub(in crate::app::model_preview) cheap: particles::cheap::CheapField,
+    pub(in crate::app::model_preview) strips: gen3::effects::strips::Gen3StripField,
     /// When each effect began, for Halo 2's and the gen3 games' effect parts.
     pub(in crate::app::model_preview) effect_onsets: effects::EffectOnsets,
     /// Halo 2's and the gen3 games' cloth.
-    pub(in crate::app::model_preview) cloth: cloth::H3ClothField,
+    pub(in crate::app::model_preview) cloth: cloth::ClothField,
     /// Every antenna's spring.
-    pub(in crate::app::model_preview) antennas: antennas::spring::ReachAntennaField,
+    pub(in crate::app::model_preview) antennas: antennas::spring::AntennaSprings,
 }
 
 impl SlotSimulations {
@@ -88,15 +88,15 @@ impl SlotSimulations {
     pub(super) fn each(&self, mut visit: impl FnMut(&str, &dyn std::fmt::Debug)) {
         let Self {
             particles,
-            reach_cheap,
-            h3_strips,
+            cheap,
+            strips,
             effect_onsets,
             cloth,
             antennas,
         } = self;
         visit("particles", particles);
-        visit("reach_cheap", reach_cheap);
-        visit("h3_strips", h3_strips);
+        visit("cheap", cheap);
+        visit("strips", strips);
         visit("effect_onsets", effect_onsets);
         visit("cloth", cloth);
         visit("antennas", antennas);

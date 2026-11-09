@@ -491,7 +491,7 @@ impl SpritePass<'_> {
             frame.time,
         );
         let lighting = gen3_lighting_constants(frame);
-        let drawn = uploaded.simulations.h3_strips.vertices(
+        let drawn = uploaded.simulations.strips.vertices(
             index, strip, values, self.bones, &self.view, &lighting, frame.time, onset, stops,
         );
         if drawn.is_empty() {
@@ -535,7 +535,7 @@ impl SpritePass<'_> {
         };
         let drawn = uploaded
             .simulations
-            .reach_cheap
+            .cheap
             .vertices(first.library(), &self.view);
         unsafe {
             if !drawn.is_empty()

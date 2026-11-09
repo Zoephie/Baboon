@@ -232,7 +232,7 @@ impl RunningCloth {
 
 /// What a slot keeps of its cloth from frame to frame.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct H3ClothField {
+pub(crate) struct ClothField {
     wind: H3Wind,
     h2_wind: H2Wind,
     reach_wind: ReachWind,
@@ -248,7 +248,7 @@ pub(crate) struct H3ClothField {
 /// game derives one from the normal, its binormal.
 pub(crate) type MovedClothVertex = ([f32; 3], [f32; 3], Option<[f32; 3]>);
 
-impl H3ClothField {
+impl ClothField {
     /// A new sheet. Reach's `cloth_new_attachment` (the 360's 0x82C8E2F0)
     /// resets it, enforces its attachments, which carry it to the object's
     /// bounding sphere, and relaxes it five times.

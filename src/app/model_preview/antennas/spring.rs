@@ -99,7 +99,7 @@ impl RunningAntenna {
 
 /// What a slot keeps of its Reach antennas from frame to frame.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ReachAntennaField {
+pub(crate) struct AntennaSprings {
     /// When it began, and the last time it was run to.
     start: f32,
     time: Option<f32>,
@@ -108,7 +108,7 @@ pub(crate) struct ReachAntennaField {
     running: Vec<Option<RunningAntenna>>,
 }
 
-impl ReachAntennaField {
+impl AntennaSprings {
     /// Run the ticks up to `time`, and hand back where each antenna's far end
     /// is; none for one that is not Reach's.
     pub(crate) fn advance(
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn an_antenna_steps_by_the_tick_whatever_the_frame_rate() {
         let ticks_over_a_second = |frames: usize| {
-            let mut field = ReachAntennaField::default();
+            let mut field = AntennaSprings::default();
             field.advance(&[], None, 10.0);
             (1..=frames).for_each(|frame| {
                 _ = field.advance(&[], None, 10.0 + frame as f32 / frames as f32)
