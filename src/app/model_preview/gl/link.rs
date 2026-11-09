@@ -33,6 +33,8 @@ pub(in crate::app::model_preview) unsafe fn link(
                     return Err(error);
                 }
             };
+            #[cfg(test)]
+            super::glsl::record_source(source);
             gl.shader_source(shader, source);
             gl.compile_shader(shader);
             if !gl.get_shader_compile_status(shader) {

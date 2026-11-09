@@ -99,6 +99,7 @@ fn h3_sweep() {
                             unsafe {
                                 let shader = gl.create_shader(kind).unwrap();
                                 shaders.push(shader);
+                                super::super::gl::glsl::record_source(text);
                                 gl.shader_source(shader, text);
                                 gl.compile_shader(shader);
                                 if !gl.get_shader_compile_status(shader) {
@@ -197,6 +198,7 @@ fn h4_sweep() {
     let compile = |kind: u32, text: &str| -> Result<glow::NativeShader, String> {
         unsafe {
             let shader = gl.create_shader(kind).unwrap();
+            super::super::gl::glsl::record_source(text);
             gl.shader_source(shader, text);
             gl.compile_shader(shader);
             if gl.get_shader_compile_status(shader) {

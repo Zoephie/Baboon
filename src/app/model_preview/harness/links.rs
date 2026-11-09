@@ -162,6 +162,7 @@ fn h4_effect_passes_link() {
                 let mut ok = true;
                 for (kind, text) in [(glow::VERTEX_SHADER, &both.vertex), (glow::FRAGMENT_SHADER, &both.pixel)] {
                     let shader = gl.create_shader(kind).unwrap();
+                    super::super::gl::glsl::record_source(text);
                     gl.shader_source(shader, text);
                     gl.compile_shader(shader);
                     if !gl.get_shader_compile_status(shader) {

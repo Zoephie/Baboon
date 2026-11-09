@@ -9,6 +9,9 @@ pub(in crate::app::model_preview) fn assert_compiles_under_glslang(name: &str, s
         return;
     }
     let dir = crate::core::test_kits::unique_temp_dir(&format!("model_preview_{name}_glsl"));
+    for (_, source) in stages {
+        super::glsl::record_source(source);
+    }
     for (stage, source) in stages {
         let path = dir.join(format!("{name}.{stage}"));
         std::fs::write(&path, source).expect("write shader");
