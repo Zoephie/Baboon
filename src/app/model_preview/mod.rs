@@ -52,10 +52,6 @@ mod panel;
 pub(in crate::app) mod effects;
 pub(in crate::app) mod weapons;
 
-pub(in crate::app) use data::*;
-use animation::*;
-use load::*;
-use campaign_evolved::*;
 // Re-exported up to `crate::app` for the worker messages and the playback
 // state that lives on `ModelPreviewState`.
 pub(in crate::app) use animation::{
@@ -63,16 +59,12 @@ pub(in crate::app) use animation::{
 };
 // Re-exported up to `crate::app`: the preview state and the worker message
 // both name these, and neither lives under this module.
-pub(in crate::app) use materials::*;
 // Re-exported for the Model Library (`model_browser`), whose worker rasterizes
 // the same geometry with the same flat palette into grid thumbnails.
 pub(in crate::app) use load::build_render_preview;
 // Started by the source loader when a Campaign Evolved install mounts.
 pub(in crate::app) use campaign_evolved::prewarm_ce_mesh_sync_index;
 pub(in crate::app) use common::palette::material_color;
-use renderer::*;
-use viewport::*;
-use frame::*;
 use common::camera::{
     DEPTH_UNITS, MAX_PREVIEW_SCALE, ModelGpuCamera, PreviewCamera, ce_flare_clip, ce_flare_pixels,
     camera_light, eye_position, min_preview_scale, preview_center_radius, rotate_view_vector,
@@ -80,14 +72,55 @@ use common::camera::{
 };
 use common::clock::{frame_steps, resume_point};
 use dx9::passes::{ChangeColors, read_change_colors};
-use selection::*;
-#[cfg(test)]
-use panel::*;
 pub(in crate::app) use panel::{
     ModelPreviewSectionPart, draw_model_preview_panel,
     draw_model_preview_section_with_header_wrap, draw_model_viewport_size_input, draw_standalone_mesh_preview,
     preview_panel_title, standalone_mesh_preview,
 };
 
+pub(in crate::app) use data::{
+    ModelErrorPoint, ModelErrorPrimitive, ModelErrorShape, ModelPreviewData, ModelPreviewLayer,
+    ModelVariantPreview, RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMarker,
+    RenderModelPreviewMaterial, RenderModelPreviewNode, RenderModelPreviewRegion,
+    RenderModelPreviewVertex,
+};
+use data::{MODEL_ERROR_FALLBACK_COLOR, NEXT_MODEL_GEOMETRY_ID, model_preview_data};
+use animation::{ANIMATION_FRAME_RATE, animation_skinning_rows, armature_node_positions};
+#[cfg(test)]
+use animation::PreviewAnimationPose;
+use load::{
+    PHYSICS_REGION, PreviewLoadSettings, TagReader, bsp_display_name, loose_weapon_paths,
+    preview_mesh_order, preview_model_tag, read_model_variants, render_model_to_preview,
+};
+#[cfg(test)]
+use load::{
+    halo1_object_collision_overlay, load_model_preview, merge_preview_append, preview_skeleton_nodes,
+};
+use campaign_evolved::load_campaign_evolved_preview;
+pub(in crate::app) use materials::{
+    ALL_SLOTS, DetailComposition, DetailFunction, MaterialTextures, SLOT_COUNT, TextureImage,
+    TextureSlot, resolve_model_textures,
+};
+use materials::{ResolveCaches, Values, decode_image, parameter_named};
+use renderer::{
+    FrameCx, MAX_PREVIEW_BONES, ModelGpuSlot, RenderCore, link_h2_program, model_gl_failure,
+    paint_model_gl, preview_background,
+};
+#[cfg(test)]
+use renderer::ModelGlRenderer;
+use viewport::draw_model_viewport;
+use frame::{ModelGpuFrame, build_frame, model_layer_visible, preview_clock};
+#[cfg(test)]
+use frame::{object_states, visible_batch_indices};
+use selection::{
+    compute_variant_selection, default_permutation, default_variant_index, detect_active_variant,
+    is_model_physics_overlay_region, normalized_new_variant_name, reset_model_preview_selection,
+    selected_variant_regions,
+};
+#[cfg(test)]
+use panel::texture_resolve_note;
 pub(in crate::app) mod state;
-pub(in crate::app) use state::*;
+pub(in crate::app) use state::{
+    DEFAULT_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE, MIN_MODEL_PREVIEW_SIZE, ModelPreviewState,
+    ModelRegionSelection, ModelRenderMode, ModelTagPanelTab,
+};
