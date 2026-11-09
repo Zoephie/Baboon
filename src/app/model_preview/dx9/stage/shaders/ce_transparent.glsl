@@ -1,0 +1,7 @@
+v_tc0.xy = vec2(row(0, uv), row(1, uv));
+    v_tc1.xy = vec2(row(2, uv), row(3, uv));
+    v_tc2.xy = vec2(row(4, uv), row(5, uv));
+    v_tc3.xy = vec2(row(6, uv), row(7, uv));
+    float face = abs(dot(normal, u_view_back));
+    v_color0 = vec4(0.0, 0.0, 0.0, u_texture_rows[8].x);
+    v_color1 = vec4(vec3(face), 1.0 - face) * u_texture_rows[8].x;
